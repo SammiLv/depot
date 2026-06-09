@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
-import { archiveAnnualGoalPlan, createAnnualGoalMetric, createAnnualGoalMetricSource, createAnnualGoalPlan, deleteAnnualGoalMetric, deleteAnnualGoalMetricSource, deleteAnnualGoalQuarterTargets, restoreAnnualGoalPlan, saveAnnualGoalQuarterTargets, updateAnnualGoalMetric, updateAnnualGoalMetricSource, updateAnnualGoalPlan, updateAnnualGoalQuarterProgress, updateAnnualGoalWeeklyProgress } from "@/server/annual-goals/actions";
+import { archiveAnnualGoalPlan, createAnnualGoalMetric, createAnnualGoalMetricSource, createAnnualGoalPlan, deleteAnnualGoalMetric, deleteAnnualGoalMetricSource, deleteAnnualGoalPlan, deleteAnnualGoalQuarterTargets, restoreAnnualGoalPlan, saveAnnualGoalQuarterTargets, updateAnnualGoalMetric, updateAnnualGoalMetricSource, updateAnnualGoalPlan, updateAnnualGoalQuarterProgress, updateAnnualGoalWeeklyProgress } from "@/server/annual-goals/actions";
 import type { getAnnualGoalsData } from "@/server/annual-goals/annual-goals-query";
 import { Edit, Filter, GitBranch, History, Plus, Target, Trash2, TrendingUp, X } from "lucide-react";
 
@@ -157,45 +157,49 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
 }
 
 function PlanForm({ plan, data, onClose }: { plan?: Plan; data: Data; onClose: () => void }) {
-  const [ownerType, setOwnerType] = useState<"DEPARTMENT" | "TEAM">(plan?.ownerType ?? "DEPARTMENT");
   const action = plan ? updateAnnualGoalPlan : createAnnualGoalPlan;
   const departmentId = plan?.departmentId ?? data.currentDepartmentId ?? data.departments[0]?.id ?? "";
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }}>
       {plan && <input type="hidden" name="id" value={plan.id} />}
+      {!plan && <input type="hidden" name="ownerType" value="DEPARTMENT" />}
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className={`grid gap-4 ${plan ? "grid-cols-2" : "grid-cols-1"}`}>
           <div>
             <label className="block text-sm font-medium mb-1">年份 *</label>
             <input name="year" type="number" defaultValue={plan?.year ?? new Date().getFullYear()} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">方案归属 *</label>
-            <select name="ownerType" value={ownerType} onChange={(e) => setOwnerType(e.target.value as "DEPARTMENT" | "TEAM")} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
-              <option value="DEPARTMENT">部门方案</option>
-              <option value="TEAM">小组方案</option>
-            </select>
-          </div>
+          {plan && (
+            <div>
+              <label className="block text-sm font-medium mb-1">方案归属 *</label>
+              <select name="ownerType" defaultValue={plan.ownerType} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
+                <option value="DEPARTMENT">部门方案</option>
+                <option value="TEAM">小组方案</option>
+              </select>
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">方案名称 *</label>
           <input name="name" defaultValue={plan?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className={`grid gap-4 ${plan?.ownerType === "TEAM" ? "grid-cols-2" : "grid-cols-1"}`}>
           <div>
             <label className="block text-sm font-medium mb-1">所属部门 *</label>
             <select name="departmentId" defaultValue={departmentId} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
               {data.departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">所属小组{ownerType === "TEAM" ? " *" : ""}</label>
-            <select name="teamId" defaultValue={plan?.teamId ?? ""} required={ownerType === "TEAM"} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
-              <option value="">不指定</option>
-              {data.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
+          {plan?.ownerType === "TEAM" && (
+            <div>
+              <label className="block text-sm font-medium mb-1">所属小组 *</label>
+              <select name="teamId" defaultValue={plan.teamId ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
+                <option value="">请选择</option>
+                {data.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">说明</label>
@@ -722,6 +726,21 @@ function ArchivePlanConfirm({ plan, onClose }: { plan: Plan; onClose: () => void
   );
 }
 
+function DeletePlanConfirm({ plan, onClose }: { plan: Plan; onClose: () => void }) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">确认删除方案「{plan.name}」？删除后会同步删除该方案下的指标、元指标和季度指标，且不可恢复。</p>
+      <div className="flex justify-end gap-3">
+        <Button variant="outline" onClick={onClose}>取消</Button>
+        <form action={async (fd) => { await deleteAnnualGoalPlan(fd); onClose(); }}>
+          <input type="hidden" name="id" value={plan.id} />
+          <Button type="submit" className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function RestorePlanButton({ plan }: { plan: Plan }) {
   return (
     <form action={restoreAnnualGoalPlan}>
@@ -1052,6 +1071,7 @@ export function AnnualGoalsContent({ data }: Props) {
   const [deleteMetric, setDeleteMetric] = useState<Metric | null>(null);
   const [deleteSourceMetric, setDeleteSourceMetric] = useState<{ metric: Metric; sourceMetric: SourceMetric } | null>(null);
   const [deleteQuarterTargets, setDeleteQuarterTargets] = useState<{ metric: Metric; sourceMetric?: SourceMetric } | null>(null);
+  const [deletePlan, setDeletePlan] = useState<Plan | null>(null);
   const [archivePlan, setArchivePlan] = useState<Plan | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyDetail, setHistoryDetail] = useState<Plan | null>(null);
@@ -1181,7 +1201,12 @@ export function AnnualGoalsContent({ data }: Props) {
                     <button onClick={() => setPlanDialog(activePlan)} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
                       <Edit className="w-3 h-3" />编辑方案
                     </button>
-                    {activePlan.permissions.canArchivePlan && (
+                    {activePlan.permissions.canArchivePlan && activePlan.ownerType === "DEPARTMENT" && (
+                      <button onClick={() => setDeletePlan(activePlan)} className="inline-flex items-center gap-1 text-xs text-destructive hover:underline">
+                        <Trash2 className="w-3 h-3" />删除
+                      </button>
+                    )}
+                    {activePlan.permissions.canArchivePlan && activePlan.ownerType === "TEAM" && (
                       <button onClick={() => setArchivePlan(activePlan)} className="inline-flex items-center gap-1 text-xs text-destructive hover:underline">
                         <Trash2 className="w-3 h-3" />归档
                       </button>
@@ -1274,7 +1299,7 @@ export function AnnualGoalsContent({ data }: Props) {
               </button>
               <div className="flex items-center gap-3">
                 <button type="button" onClick={() => setHistoryDetail(p)} className="text-xs text-primary hover:underline">查看详情</button>
-                {data.permissions.canRestorePlan && <RestorePlanButton plan={p} />}
+                {data.permissions.canRestorePlan && !(p.ownerType === "DEPARTMENT" && p.metrics.length === 0) && <RestorePlanButton plan={p} />}
               </div>
             </div>
           ))}
@@ -1283,6 +1308,9 @@ export function AnnualGoalsContent({ data }: Props) {
       </Dialog>
       <Dialog open={!!archivePlan} onClose={() => setArchivePlan(null)} title="归档年度方案">
         {archivePlan && <ArchivePlanConfirm plan={archivePlan} onClose={() => setArchivePlan(null)} />}
+      </Dialog>
+      <Dialog open={!!deletePlan} onClose={() => setDeletePlan(null)} title="删除年度方案">
+        {deletePlan && <DeletePlanConfirm plan={deletePlan} onClose={() => setDeletePlan(null)} />}
       </Dialog>
       <Dialog open={!!historyDetail} onClose={() => setHistoryDetail(null)} title="历史方案详情">
         {historyDetail && <HistoryPlanDetail plan={historyDetail} />}

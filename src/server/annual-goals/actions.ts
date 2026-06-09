@@ -298,7 +298,11 @@ export async function createAnnualGoalPlan(formData: FormData) {
   const year = numberFromForm(formData.get("year"), "年份");
   const name = (formData.get("name") as string)?.trim();
   const description = optionalString(formData.get("description"));
-  const { ownerType, departmentId, teamId } = await resolveOwner(user, formData);
+  const ownerType = formData.get("ownerType") as AnnualGoalOwnerType;
+
+  if (ownerType !== "DEPARTMENT") throw new Error("新建年度方案仅支持部门方案");
+
+  const { departmentId, teamId } = await resolveOwner(user, formData);
 
   if (!year || year < 2000 || year > 2100) throw new Error("年份不正确");
   if (!name) throw new Error("方案名称为必填项");
@@ -346,6 +350,63 @@ export async function archiveAnnualGoalPlan(formData: FormData) {
   await prisma.annualGoalPlan.update({
     where: { id },
     data: { isActive: false, deletedAt: new Date() },
+  });
+
+  revalidateAnnualGoals();
+}
+
+export async function deleteAnnualGoalPlan(formData: FormData) {
+  const id = formData.get("id") as string;
+  if (!id) throw new Error("缺少方案 ID");
+
+  const { plan } = await assertPlanEditable(id);
+  if (plan.ownerType !== "DEPARTMENT") throw new Error("仅部门方案支持删除");
+
+  const deletedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.annualGoalPlan.update({
+      where: { id },
+      data: { isActive: false, deletedAt },
+    });
+
+    const metrics = await tx.annualGoalMetric.findMany({
+      where: { planId: id, deletedAt: null },
+      select: { id: true, metricCode: true },
+    });
+
+    if (metrics.length === 0) return;
+
+    const metricIds = metrics.map((metric) => metric.id);
+    const metricCodes = Array.from(new Set(metrics.map((metric) => metric.metricCode)));
+    const teamMetrics = await tx.annualGoalMetric.findMany({
+      where: {
+        deletedAt: null,
+        plan: {
+          ownerType: "TEAM",
+          departmentId: plan.departmentId,
+          year: plan.year,
+          deletedAt: null,
+        },
+        OR: [
+          { sourceMetric: { parentMetricId: { in: metricIds } } },
+          { sourceMetricId: null, metricCode: { in: metricCodes } },
+        ],
+      },
+      select: { id: true },
+    });
+    const teamMetricIds = teamMetrics.map((metric) => metric.id);
+
+    await tx.annualGoalMetric.updateMany({ where: { id: { in: metricIds }, deletedAt: null }, data: { deletedAt } });
+    if (teamMetricIds.length > 0) {
+      await tx.annualGoalMetric.updateMany({ where: { id: { in: teamMetricIds }, deletedAt: null }, data: { deletedAt } });
+    }
+
+    await tx.annualGoalMetricSource.updateMany({ where: { parentMetricId: { in: metricIds }, deletedAt: null }, data: { deletedAt } });
+    await tx.annualGoalQuarterTarget.updateMany({ where: { metricId: { in: metricIds }, deletedAt: null }, data: { deletedAt } });
+    await tx.annualGoalQuarterTarget.updateMany({ where: { sourceMetric: { parentMetricId: { in: metricIds } }, deletedAt: null }, data: { deletedAt } });
+    if (teamMetricIds.length > 0) {
+      await tx.annualGoalQuarterTarget.updateMany({ where: { metricId: { in: teamMetricIds }, deletedAt: null }, data: { deletedAt } });
+    }
   });
 
   revalidateAnnualGoals();
