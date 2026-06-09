@@ -352,6 +352,8 @@ model Project {
   title           String
   description     String?
   expectedOutcome String?
+  startQuarter    String?
+  endQuarter      String?
   ownerId         String
   teamId          String?
   departmentId    String?

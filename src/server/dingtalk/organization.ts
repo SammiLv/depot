@@ -63,6 +63,7 @@ type DepartmentRecord = {
   parentId: string | null;
   children: DepartmentRecord[];
   userInDept: unknown;
+  deptAdmin: unknown;
 };
 
 type SyncResult = {
@@ -107,6 +108,7 @@ function normalizeDepartment(node: DingTalkDepartmentNode): DepartmentRecord | n
     parentId: node.parentId == null ? null : String(node.parentId),
     children: (node.children ?? []).map(normalizeDepartment).filter((dept): dept is DepartmentRecord => Boolean(dept)),
     userInDept: node.userInDept,
+    deptAdmin: node.deptAdmin,
   };
 }
 
@@ -213,6 +215,13 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
     extractUserIds(department.userInDept).forEach((userId) => userIds.add(userId));
   }
 
+  const allSyncDepartments = [productDepartment, ...childDepartments];
+  const deptAdminUserIds = new Set<string>();
+  for (const dept of allSyncDepartments) {
+    extractUserIds(dept.deptAdmin).forEach((userId) => deptAdminUserIds.add(userId));
+  }
+  deptAdminUserIds.forEach((userId) => userIds.add(userId));
+
   if (currentDingTalkUserId) userIds.add(currentDingTalkUserId);
 
   const users = await Promise.all([...userIds].map(async (userId) => {
@@ -247,17 +256,23 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
       const teamId = userDeptIds.map((deptId) => teamByDingTalkDeptId.get(deptId)).find(Boolean) ?? null;
       const name = getUserName(user)!;
       const title = getUserTitle(user);
-      const inferredRoleType = inferRoleType(title);
-      let existing = await tx.user.findFirst({
-        where: {
-          deletedAt: null,
-          OR: [
-            { dingtalkUserId: user.userId },
-            ...(user.mobile ? [{ mobile: user.mobile }] : []),
-            ...(user.email ? [{ email: user.email }] : []),
-          ],
-        },
+      const isDeptAdmin = deptAdminUserIds.has(user.userId!);
+      const inferredRoleType = isDeptAdmin ? "DEPARTMENT_MANAGER" : inferRoleType(title);
+      let existing = await tx.user.findUnique({
+        where: { dingtalkUserId: user.userId },
       });
+
+      if (!existing) {
+        existing = await tx.user.findFirst({
+          where: {
+            deletedAt: null,
+            OR: [
+              ...(user.mobile ? [{ mobile: user.mobile }] : []),
+              ...(user.email ? [{ email: user.email }] : []),
+            ],
+          },
+        });
+      }
 
       if (!existing) {
         const nameMatchedUsers = await tx.user.findMany({

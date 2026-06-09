@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
-import { createQuarterlyWork, updateProjectStatus, updateQuarterlyWork } from "@/server/quarterly-work/actions";
+import { createProject, createQuarterlyWork, updateProject, updateProjectStatus, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { Plus, AlertTriangle, Pencil, X } from "lucide-react";
 
@@ -202,17 +202,102 @@ function QuarterlyWorkForm({
   );
 }
 
-function ProjectStatusForm({ item, onClose }: { item: ProjectBoardItem; onClose: () => void }) {
+function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: ProjectBoardItem; onClose: () => void }) {
+  const memberOptions = useMemo(
+    () => data.memberOptions.map((member) => ({
+      ...member,
+      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
+    })),
+    [data.memberOptions]
+  );
+
+  const quarterOptions = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const years = [currentYear, currentYear + 1];
+    const quarters: { value: string; label: string }[] = [];
+    for (const year of years) {
+      for (let q = 1; q <= 4; q++) {
+        quarters.push({ value: `${year}-Q${q}`, label: `${year} Q${q}` });
+      }
+    }
+    return quarters;
+  }, []);
+
   return (
     <form action={async (fd: FormData) => {
-      await updateProjectStatus(fd);
+      await updateProject(fd);
       onClose();
     }}>
       <input type="hidden" name="projectId" value={item.id} />
       <div className="space-y-4">
-        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-          <div className="text-sm font-medium">{item.title}</div>
-          <div className="mt-1 text-xs text-muted-foreground">负责人：{item.owner}</div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">项目名称 *</label>
+          <input
+            name="title"
+            required
+            defaultValue={item.title}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">负责人 *</label>
+          <select
+            name="ownerId"
+            required
+            defaultValue={item.ownerId}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            {memberOptions.map((member) => (
+              <option key={member.id} value={member.id}>{member.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">规划周期</label>
+          <div className="flex items-center gap-2">
+            <select
+              name="startQuarter"
+              defaultValue={item.startQuarter ?? ""}
+              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            >
+              <option value="">起始季度</option>
+              {quarterOptions.map((q) => (
+                <option key={q.value} value={q.value}>{q.label}</option>
+              ))}
+            </select>
+            <span className="text-muted-foreground">~</span>
+            <select
+              name="endQuarter"
+              defaultValue={item.endQuarter ?? ""}
+              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            >
+              <option value="">结束季度</option>
+              {quarterOptions.map((q) => (
+                <option key={q.value} value={q.value}>{q.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">项目描述</label>
+          <textarea
+            name="description"
+            rows={3}
+            defaultValue={item.description ?? ""}
+            placeholder="请输入项目描述"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">预期收益</label>
+          <textarea
+            name="expectedOutcome"
+            rows={3}
+            defaultValue={item.expectedOutcome ?? ""}
+            placeholder="请输入项目预期收益"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">项目状态 *</label>
@@ -242,12 +327,131 @@ function ProjectStatusForm({ item, onClose }: { item: ProjectBoardItem; onClose:
   );
 }
 
+function ProjectCreateForm({ data, onClose }: { data: Props["data"]; onClose: () => void }) {
+  const memberOptions = useMemo(
+    () => data.memberOptions.map((member) => ({
+      ...member,
+      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
+    })),
+    [data.memberOptions]
+  );
+
+  const quarterOptions = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const years = [currentYear, currentYear + 1];
+    const quarters: { value: string; label: string }[] = [];
+    for (const year of years) {
+      for (let q = 1; q <= 4; q++) {
+        quarters.push({ value: `${year}-Q${q}`, label: `${year} Q${q}` });
+      }
+    }
+    return quarters;
+  }, []);
+
+  return (
+    <form action={async (fd: FormData) => {
+      await createProject(fd);
+      onClose();
+    }}>
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium">项目名称 *</label>
+          <input
+            name="title"
+            required
+            placeholder="请输入项目名称"
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">负责人 *</label>
+          <select
+            name="ownerId"
+            required
+            defaultValue={memberOptions[0]?.id ?? ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            {memberOptions.map((member) => (
+              <option key={member.id} value={member.id}>{member.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">规划周期</label>
+          <div className="flex items-center gap-2">
+            <select
+              name="startQuarter"
+              defaultValue=""
+              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            >
+              <option value="">起始季度</option>
+              {quarterOptions.map((q) => (
+                <option key={q.value} value={q.value}>{q.label}</option>
+              ))}
+            </select>
+            <span className="text-muted-foreground">~</span>
+            <select
+              name="endQuarter"
+              defaultValue=""
+              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            >
+              <option value="">结束季度</option>
+              {quarterOptions.map((q) => (
+                <option key={q.value} value={q.value}>{q.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">项目描述</label>
+          <textarea
+            name="description"
+            rows={3}
+            placeholder="请输入项目描述"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">预期收益</label>
+          <textarea
+            name="expectedOutcome"
+            rows={3}
+            placeholder="请输入项目预期收益"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">项目状态</label>
+          <select
+            name="status"
+            defaultValue="NOT_STARTED"
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            {editableProjectStatuses.map((option) => (
+              <option key={option} value={option}>{projectTitleByStatus[option]}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="submit">
+          <Plus className="h-4 w-4" />
+          创建
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 export function QuarterlyWorkContent({ data }: Props) {
   const [tab, setTab] = useState<BoardTab>("project");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
   const [editDialog, setEditDialog] = useState<EditDialogState>(null);
   const [projectDialog, setProjectDialog] = useState<ProjectDialogState>(null);
+  const [createProjectDialog, setCreateProjectDialog] = useState(false);
   const allItems = useMemo(() => data.columns.flatMap((column) => column.items), [data.columns]);
   const handleFormSuccess = (ownerTeamId: Props["data"]["memberOptions"][number]["teamId"] | null) => {
     if (teamTab !== "all" && ownerTeamId !== teamTab) {
@@ -286,7 +490,12 @@ export function QuarterlyWorkContent({ data }: Props) {
         description="按小组规划季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值"
         action={
           data.canCreate
-            ? <Button onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="w-4 h-4" />新增季度工作</Button>
+            ? (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setCreateProjectDialog(true)}><Plus className="w-4 h-4" />新增项目</Button>
+                <Button onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="w-4 h-4" />新增季度工作</Button>
+              </div>
+            )
             : undefined
         }
       />
@@ -351,6 +560,12 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div>
                           <div className="text-sm font-medium leading-snug">{item.title}</div>
                           <div className="mt-1 text-xs text-muted-foreground">{item.owner}{item.teamName ? ` · ${item.teamName}` : ""}</div>
+                          {item.startQuarter && item.endQuarter && (
+                            <div className="mt-1 text-xs text-muted-foreground">规划周期：{item.startQuarter} ~ {item.endQuarter}</div>
+                          )}
+                          {item.startQuarter && !item.endQuarter && (
+                            <div className="mt-1 text-xs text-muted-foreground">规划周期：{item.startQuarter} 起</div>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -502,11 +717,19 @@ export function QuarterlyWorkContent({ data }: Props) {
 
       <Dialog open={!!projectDialog} onClose={() => setProjectDialog(null)} title={projectDialog ? `编辑${projectDialog.title}项目` : "编辑项目"}>
         {projectDialog && (
-          <ProjectStatusForm
+          <ProjectEditForm
+            data={data}
             item={projectDialog.item}
             onClose={() => setProjectDialog(null)}
           />
         )}
+      </Dialog>
+
+      <Dialog open={createProjectDialog} onClose={() => setCreateProjectDialog(false)} title="新增项目">
+        <ProjectCreateForm
+          data={data}
+          onClose={() => setCreateProjectDialog(false)}
+        />
       </Dialog>
     </>
   );

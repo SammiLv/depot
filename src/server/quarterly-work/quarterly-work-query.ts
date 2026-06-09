@@ -34,6 +34,8 @@ type ProjectBoardItem = {
   teamId: string | null;
   teamName: string | null;
   status: ProjectStatus;
+  startQuarter: string | null;
+  endQuarter: string | null;
   description: string | null;
   expectedOutcome: string | null;
   workCount: number;
@@ -213,6 +215,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
       teamId: project.teamId,
       teamName: project.teamId ? teamNameMap.get(project.teamId) ?? null : null,
       status: project.status,
+      startQuarter: project.startQuarter,
+      endQuarter: project.endQuarter,
       description: project.description,
       expectedOutcome: project.expectedOutcome,
       workCount: projectWorks.length,

@@ -276,3 +276,83 @@ export async function updateProjectStatus(formData: FormData) {
 
   revalidateQuarterlyWork();
 }
+
+export async function createProject(formData: FormData) {
+  const currentUser = await requireQuarterlyWorkEditor();
+  const title = requiredString(formData.get("title"), "项目名称");
+  const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const description = (formData.get("description") as string)?.trim() || null;
+  const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
+  const status = parseProjectStatus(formData.get("status") ?? "NOT_STARTED");
+  const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
+  const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
+  const owner = await findEditableOwner(currentUser, ownerId);
+
+  await prisma.project.create({
+    data: {
+      title,
+      description,
+      expectedOutcome,
+      startQuarter,
+      endQuarter,
+      ownerId: owner.id,
+      teamId: owner.teamId,
+      departmentId: owner.departmentId,
+      status,
+      createdById: currentUser.id,
+      completedAt: getProjectCompletedAtByStatus(status),
+    },
+  });
+
+  revalidateQuarterlyWork();
+}
+
+export async function updateProject(formData: FormData) {
+  const currentUser = await requireQuarterlyWorkEditor();
+  const projectId = requiredString(formData.get("projectId"), "项目");
+  const title = requiredString(formData.get("title"), "项目名称");
+  const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const status = parseProjectStatus(formData.get("status"));
+  const description = (formData.get("description") as string)?.trim() || null;
+  const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
+  const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
+  const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
+
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, ...getOwnerWhereByScope(currentUser) },
+    select: { id: true },
+  });
+  if (!project) throw new Error("项目不存在或无权限编辑");
+
+  const owner = await findEditableOwner(currentUser, ownerId);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.update({
+      where: { id: project.id },
+      data: {
+        title,
+        description,
+        expectedOutcome,
+        startQuarter,
+        endQuarter,
+        status,
+        ownerId: owner.id,
+        teamId: owner.teamId,
+        departmentId: owner.departmentId,
+        completedAt: getProjectCompletedAtByStatus(status),
+      },
+    });
+
+    if (status === "COMPLETED" || status === "CLOSED") {
+      await tx.quarterlyWork.updateMany({
+        where: { projectId: project.id, deletedAt: null },
+        data: {
+          status,
+          completedAt: status === "COMPLETED" ? new Date() : null,
+        },
+      });
+    }
+  });
+
+  revalidateQuarterlyWork();
+}

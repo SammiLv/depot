@@ -80,16 +80,21 @@ export async function getDingTalkUserInfo(token: string): Promise<DingTalkUserIn
 }
 
 export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
-  const existingUser = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { dingtalkUserId: info.userId },
-        ...(info.mobile ? [{ mobile: info.mobile }] : []),
-        ...(info.email ? [{ email: info.email }] : []),
-      ],
-      deletedAt: null,
-    },
+  let existingUser = await prisma.user.findUnique({
+    where: { dingtalkUserId: info.userId },
   });
+
+  if (!existingUser && (info.mobile || info.email)) {
+    existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(info.mobile ? [{ mobile: info.mobile }] : []),
+          ...(info.email ? [{ email: info.email }] : []),
+        ],
+        deletedAt: null,
+      },
+    });
+  }
 
   if (existingUser) {
     return prisma.user.update({
@@ -100,6 +105,7 @@ export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
         mobile: info.mobile,
         email: info.email,
         isActive: true,
+        deletedAt: null,
       },
     });
   }
