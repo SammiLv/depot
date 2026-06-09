@@ -6,6 +6,8 @@
     "dev": "next dev",
     "dev:office": "HOSTNAME=0.0.0.0 PORT=80 APP_URL=http://depot.rj-info.com DEV_ALLOWED_ORIGINS=depot.rj-info.com next dev -H 0.0.0.0 -p 80",
     "dev:home": "HOSTNAME=0.0.0.0 PORT=3000 APP_URL=http://localhost:3000 DEV_ALLOWED_ORIGINS=localhost:3000,127.0.0.1:3000 next dev -H 0.0.0.0 -p 3000",
+    "dev:quarterly": "HOSTNAME=0.0.0.0 PORT=3001 APP_URL=http://localhost:3001 DEV_ALLOWED_ORIGINS=localhost:3001,127.0.0.1:3001 next dev -H 0.0.0.0 -p 3001",
+    "dev:annual": "HOSTNAME=0.0.0.0 PORT=3002 APP_URL=http://localhost:3002 DEV_ALLOWED_ORIGINS=localhost:3002,127.0.0.1:3002 next dev -H 0.0.0.0 -p 3002",
     "build": "next build",
     "start": "next start",
     "start:office": "HOSTNAME=0.0.0.0 PORT=80 APP_URL=http://depot.rj-info.com next start -H 0.0.0.0 -p 80",
