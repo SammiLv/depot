@@ -99,6 +99,7 @@ type PlanData = {
   metrics: MetricData[];
   totalWeight: number;
   permissions: PlanPermissionFlags;
+  createdAt: Date;
 };
 
 type AnnualGoalsResult = {
@@ -601,6 +602,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       metrics: metricsData,
       totalWeight: roundPercent(totalWeight),
       permissions,
+      createdAt: plan.createdAt,
     };
   }
 

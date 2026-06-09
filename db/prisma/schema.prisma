@@ -38,6 +38,14 @@ enum WorkStatus {
   IN_PROGRESS
   COMPLETED
   DELAYED_COMPLETED
+  CLOSED
+}
+
+enum ProjectStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
 }
 
 enum RiskStatus {
@@ -339,8 +347,31 @@ model AnnualGoalRevisionLog {
   @@index([revisedById])
 }
 
+model Project {
+  id              String          @id @default(cuid())
+  title           String
+  description     String?
+  expectedOutcome String?
+  ownerId         String
+  teamId          String?
+  departmentId    String?
+  status          ProjectStatus   @default(NOT_STARTED)
+  createdById     String
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
+
+  quarterlyWorks  QuarterlyWork[]
+
+  @@index([ownerId])
+  @@index([departmentId, teamId])
+  @@index([status])
+}
+
 model QuarterlyWork {
   id              String         @id @default(cuid())
+  projectId       String
   year            Int
   quarter         Int
   title           String
@@ -355,13 +386,18 @@ model QuarterlyWork {
   startDate       DateTime?
   endDate         DateTime?
   createdById     String
+  completedAt     DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
 
+  project         Project        @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
   @@index([year, quarter])
   @@index([ownerId])
   @@index([departmentId, teamId])
+  @@unique([projectId, year, quarter])
 }
 
 model MonthlyWorkPlan {
