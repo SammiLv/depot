@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+prototyes/**/.DS_Store
 
 # debug
 npm-debug.log*
@@ -42,9 +43,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+prototyes/**/tsconfig.tsbuildinfo
 
 # sqlite
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# prototype workspace
+prototyes/**/.workspace
