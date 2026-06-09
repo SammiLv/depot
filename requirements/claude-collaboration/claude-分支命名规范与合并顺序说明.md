@@ -66,10 +66,10 @@ feat/menu-organization-role-panel
 ### 平台类改动
 
 ```text
-feat/platform-annual-goals-support
-feat/platform-kpi-menu-entry
-feat/platform-layout-adjust
+feat/platform-shared-support
 feat/platform-auth-shell
+feat/platform-db-coordination
+feat/platform-layout-adjust
 ```
 
 ### DB / Prisma 相关改动
@@ -82,20 +82,31 @@ feat/db-organization-role-refactor
 
 ---
 
-## 5. worktree 与分支的对应关系
+## 5. worktree 与分支的使用方式
 
-建议保持“一个 worktree 对应一个本轮菜单分支”。
+当前协作约定要求：**主仓库目录保留为干净基线，多个终端通过独立 worktree 在项目外层协作**。
+
+关键规则：
+
+- 分支是整个仓库级别的，不是某个子目录级别的。
+- 不要 `cd src/app/(authenticated)/annual-goals` 后在子目录里理解成“把分支建到这个目录里”。
+- 正确做法是先在仓库根目录执行 `git worktree add <路径> -b <分支名>`，再进入新目录开发。
+- 已创建过的分支，再挂载 worktree 时不要重复用 `-b`。
+- 主仓库目录尽量保持在 `main`，不要拿主仓库目录充当多个终端的并行开发现场。
+
+建议目录示例：
+
+- `../depot-coordination/depot-annual-goals`
+- `../depot-coordination/depot-quarterly-work`
+- `../depot-coordination/depot-platform`
 
 例如：
 
-- `../depot-annual-goals` -> `feat/menu-annual-goals-overview`
-- `../depot-kpi` -> `feat/menu-kpi-progress-panel`
-- `../depot-quarterly-work` -> `feat/menu-quarterly-work-list`
-- `../depot-notifications` -> `feat/menu-notifications-center`
-- `../depot-platform` -> `feat/platform-annual-goals-kpi-support`
-- `../depot-db` -> `feat/db-annual-goals-kpi-fields`
+- 年度指标：`../depot-coordination/depot-annual-goals` + `feat/menu-annual-goals-<topic>`
+- 季度工作：`../depot-coordination/depot-quarterly-work` + `feat/menu-quarterly-work-<topic>`
+- 平台收口：`../depot-coordination/depot-platform` + `feat/platform-<topic>`
 
-不要把多个无关菜单长期塞在同一个分支里。
+不要把多个无关菜单长期塞在同一个分支里，也不要让多个终端共享主仓库同一个 working tree。
 
 ---
 
@@ -120,7 +131,7 @@ feat/db-organization-role-refactor
 ### 标准顺序
 
 #### Phase 1：DB 分支先行
-DB worktree / DB owner 先完成：
+DB 分支 owner 先完成：
 
 - schema 变更
 - migration
@@ -210,12 +221,13 @@ git rebase main
 
 对你当前的使用习惯，最稳的方式是：
 
-- 默认 3 个 worktree：`menu-a / menu-b / platform`
-- 按需启用第 4 个：`db`
+- 主仓库目录保持在 `main`
+- 默认准备 3 个独立 worktree：`menu-a / menu-b / platform`
+- 按需启用第 4 个独立 worktree：`db`
 - 所有 DB 结构变更由 platform 或 DB owner 串行处理
 - 所有共享壳层改动由 platform owner 收口
 - 所有业务改动按本轮菜单动态推进
 
 一句话版：
 
-> 分支按菜单命名，worktree 按本轮菜单隔离，平台统一收口，DB 优先落地，菜单再并行合入。
+> 分支按菜单命名，终端在各自独立 worktree 中协作，平台统一收口，DB 优先落地，菜单再并行合入。

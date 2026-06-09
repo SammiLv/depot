@@ -79,10 +79,13 @@ git checkout main
 git pull
 ```
 
-### Step 3：确认 worktree 当前情况
+### Step 3：确认当前分支与工作区情况
+
+执行：
 
 ```bash
-git worktree list
+git status
+git branch --show-current
 ```
 
 ### Step 4：决定本轮要改哪 2 个菜单，以及是否涉及 DB
@@ -97,40 +100,53 @@ git worktree list
 
 ---
 
-## 5. 第一次创建 worktree 的命令
+## 5. 第一次创建 worktree 和分支
 
 ### 方案 A：本轮做“年度指标 + KPI 管理”
 
-```bash
-git worktree add ../depot-annual-goals -b feat/menu-annual-goals-overview
-git worktree add ../depot-kpi -b feat/menu-kpi-progress-panel
-git worktree add ../depot-platform -b feat/platform-annual-goals-kpi-support
-```
-
-如涉及 DB，再执行：
+先在主仓库根目录执行：
 
 ```bash
-git worktree add ../depot-db -b feat/db-annual-goals-kpi-fields
+git worktree add ../depot-coordination/depot-annual-goals -b feat/menu-annual-goals-overview
+git worktree add ../depot-coordination/depot-kpi -b feat/menu-kpi-progress-panel
+git worktree add ../depot-coordination/depot-platform -b feat/platform-db-coordination
 ```
 
 ### 方案 B：本轮做“季度工作 + 通知中心”
 
 ```bash
-git worktree add ../depot-quarterly-work -b feat/menu-quarterly-work-list
-git worktree add ../depot-notifications -b feat/menu-notifications-center
-git worktree add ../depot-platform -b feat/platform-quarterly-notifications-support
+git worktree add ../depot-coordination/depot-quarterly-work -b feat/menu-quarterly-work-list
+git worktree add ../depot-coordination/depot-notifications -b feat/menu-notifications-center
+git worktree add ../depot-coordination/depot-platform -b feat/platform-db-coordination
 ```
 
-第一次建议按“本轮菜单”单独起名。
+如果某个分支已经创建过，则不要重复用 `-b`，而是直接挂载已有分支：
+
+```bash
+git worktree add ../depot-coordination/depot-quarterly-work feat/menu-quarterly-work-list
+```
+
+第一次建议按“终端职责”命名目录和分支；主仓库目录尽量保持在 `main`，不要直接拿主仓库目录给多个终端并行开发。
 
 ---
 
 ## 6. 打开终端后的实际顺序
 
-### 第一步：先启动 Platform 终端
+### 第一步：先准备主仓库
+
+主仓库目录只保留为基线入口，先确认：
 
 ```bash
-cd ../depot-platform
+git checkout main
+git status
+```
+
+### 第二步：先启动 Platform 终端
+
+进入平台 worktree 目录：
+
+```bash
+cd ../depot-coordination/depot-platform
 ```
 
 先让平台终端明确：
@@ -139,18 +155,18 @@ cd ../depot-platform
 2. 是否涉及 DB
 3. 菜单终端需要哪些公共支持
 
-### 第二步：再启动两个菜单终端
-例如：
+### 第三步：再启动两个菜单终端
+例如分别进入各自 worktree 目录：
 
 ```bash
-cd ../depot-annual-goals
-cd ../depot-kpi
+cd ../depot-coordination/depot-annual-goals
+cd ../depot-coordination/depot-kpi
 ```
 
-### 第三步：如 DB 改动很重，再启动 DB 终端
+### 第四步：如 DB 改动很重，再启用 DB worktree 终端
 
 ```bash
-cd ../depot-db
+cd ../depot-coordination/depot-db
 ```
 
 ---
@@ -202,7 +218,7 @@ cd ../depot-db
 
 ## 8. 第一次不要做的事
 
-1. 不要多个终端直接共用同一个目录。
+1. 不要多个终端直接共用同一个分支。
 2. 不要多个终端同时改 `package.json`。
 3. 不要多个终端同时改 Prisma schema。
 4. 不要一开始就抽很多共享组件。
@@ -224,7 +240,8 @@ cd ../depot-db
 ## 10. 第一天的推荐执行方式
 
 ### 上午
-- 建好 3 个 worktree
+- 主仓库保持在 `main`
+- 创建好 3 个终端对应 worktree
 - 启动 platform 终端
 - 启动 2 个菜单终端
 - 各自完成阅读和边界确认
@@ -242,7 +259,7 @@ cd ../depot-db
 ### 收工前
 - 每个分支至少做一次小提交
 - 同步一次主干状态
-- 记录下轮还要继续的菜单 worktree
+- 记录下轮还要继续的菜单分支
 
 ---
 
@@ -250,7 +267,7 @@ cd ../depot-db
 
 只要达到下面几点，就算方案跑通：
 
-1. 多个终端能稳定在各自目录工作
+1. 多个终端能稳定在各自 worktree 目录内按各自分支工作
 2. 没有互相覆盖文件
 3. 共享层改动由平台终端统一处理
 4. DB 改动没有多分支乱改 schema
