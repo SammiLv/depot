@@ -1,5 +1,6 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
+import { getAnnualGoalPermissionMatrix } from "@/server/organization/annual-goal-permissions";
 import { getUserWhereByScope, getTeamWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
 
@@ -11,7 +12,7 @@ export default async function OrgPage() {
   const canManageTeams = canManageUsers;
   const canManageRolePermissions = currentUser.roleType === "ADMIN";
 
-  const [users, teams, department, menus, roleMenuPermissions] = await Promise.all([
+  const [users, teams, department, menus, roleMenuPermissions, annualGoalPermissionMatrix] = await Promise.all([
     prisma.user.findMany({
       where: { ...getUserWhereByScope(currentUser), isActive: true },
       orderBy: [{ roleType: "asc" }, { name: "asc" }],
@@ -28,6 +29,7 @@ export default async function OrgPage() {
     prisma.roleMenuPermission.findMany({
       where: { roleType: { in: [...roleTypes] } },
     }),
+    getAnnualGoalPermissionMatrix(),
   ]);
 
   const manager = department?.managerId
@@ -55,6 +57,8 @@ export default async function OrgPage() {
       department={department ? { id: department.id, name: department.name, managerId: department.managerId, managerName: manager?.name ?? null } : null}
       menus={menus.map((menu) => ({ id: menu.id, code: menu.code, name: menu.name, path: menu.path }))}
       roleMenuPermissions={roleMenuPermissions.map((permission) => ({ roleType: permission.roleType, menuPermissionId: permission.menuPermissionId }))}
+      annualGoalPermissions={annualGoalPermissionMatrix.permissions}
+      roleAnnualGoalPermissions={annualGoalPermissionMatrix.rolePermissions}
       canManageUsers={canManageUsers}
       canManageTeams={canManageTeams}
       canManageRolePermissions={canManageRolePermissions}

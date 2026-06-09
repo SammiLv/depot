@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualGoalOwnerType, AnnualMetricCalculationType, ApprovalStatus, PrismaClient, RoleType } from "@prisma/client";
+import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
 
 const databaseUrl = process.env.DATABASE_URL === "file:./dev.db" ? "file:./db/dev.db" : process.env.DATABASE_URL;
 const adapter = new PrismaBetterSqlite3({ url: databaseUrl ?? "file:./db/dev.db" });
@@ -147,6 +148,38 @@ async function main() {
           roleType,
           menuPermissionId: menu.id,
         },
+      });
+    }
+  }
+
+  for (const permission of annualGoalPermissionDefinitions) {
+    await prisma.annualGoalPermission.upsert({
+      where: { code: permission.code },
+      update: {
+        name: permission.name,
+        description: permission.description,
+        sortOrder: permission.sortOrder,
+      },
+      create: permission,
+    });
+  }
+
+  const annualGoalPermissions = await prisma.annualGoalPermission.findMany();
+  const annualGoalPermissionIdByCode = new Map(annualGoalPermissions.map((permission) => [permission.code, permission.id]));
+  const annualGoalRoleDefaults: Array<[RoleType, string[]]> = [
+    [RoleType.ADMIN, annualGoalPermissionDefinitions.map((permission) => permission.code)],
+    [RoleType.DEPARTMENT_MANAGER, annualGoalPermissionDefinitions.map((permission) => permission.code)],
+    [RoleType.TEAM_LEADER, ["annualGoal.viewDepartmentPlans", "annualGoal.editTeamPlans", "annualGoal.updateProgress"]],
+    [RoleType.MEMBER, ["annualGoal.viewDepartmentPlans", "annualGoal.updateProgress"]],
+  ];
+
+  await prisma.roleAnnualGoalPermission.deleteMany();
+  for (const [roleType, codes] of annualGoalRoleDefaults) {
+    for (const code of codes) {
+      const annualGoalPermissionId = annualGoalPermissionIdByCode.get(code);
+      if (!annualGoalPermissionId) continue;
+      await prisma.roleAnnualGoalPermission.create({
+        data: { roleType, annualGoalPermissionId },
       });
     }
   }

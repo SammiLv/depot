@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/prisma";
 import { getAnnualPlanWhereByScope, getTeamWhereByScope } from "@/server/permissions/data-scope";
+import { getAnnualGoalCapabilities, getAnnualGoalPermissionMap } from "@/server/organization/annual-goal-permissions";
 import type { AnnualGoalOwnerType, AnnualMetricCalculationType, ApprovalStatus, RiskStatus, RoleType } from "@prisma/client";
 
 type DataScopeInput = {
@@ -70,6 +71,16 @@ type MetricData = {
   sources: MetricSourceData[];
 };
 
+type PlanPermissionFlags = {
+  canEditPlan: boolean;
+  canArchivePlan: boolean;
+  canEditMetrics: boolean;
+  canManageSources: boolean;
+  canManageQuarterTargets: boolean;
+  canUpdateQuarterProgress: boolean;
+  canUpdateWeeklyProgress: boolean;
+};
+
 type PlanData = {
   id: string;
   year: number;
@@ -87,6 +98,7 @@ type PlanData = {
   weightedProgress: number;
   metrics: MetricData[];
   totalWeight: number;
+  permissions: PlanPermissionFlags;
 };
 
 type AnnualGoalsResult = {
@@ -99,6 +111,14 @@ type AnnualGoalsResult = {
   memberOptionsByDepartment: Record<string, MemberOption[]>;
   memberOptionsByTeam: Record<string, MemberOption[]>;
   canManage: boolean;
+  permissions: {
+    canCreatePlan: boolean;
+    canRestorePlan: boolean;
+    canViewDepartmentPlans: boolean;
+    canEditDepartmentPlans: boolean;
+    canEditTeamPlans: boolean;
+    canUpdateProgress: boolean;
+  };
   currentDepartmentId: string | null;
   summary: {
     planCount: number;
@@ -136,8 +156,156 @@ function mapMemberOption(user: { id: string; name: string; title: string | null;
   };
 }
 
+const chinesePinyinInitialBoundaries = [
+  ["A", "阿"],
+  ["B", "八"],
+  ["C", "嚓"],
+  ["D", "搭"],
+  ["E", "蛾"],
+  ["F", "发"],
+  ["G", "噶"],
+  ["H", "哈"],
+  ["J", "击"],
+  ["K", "喀"],
+  ["L", "垃"],
+  ["M", "妈"],
+  ["N", "拿"],
+  ["O", "哦"],
+  ["P", "啪"],
+  ["Q", "期"],
+  ["R", "然"],
+  ["S", "撒"],
+  ["T", "塌"],
+  ["W", "挖"],
+  ["X", "昔"],
+  ["Y", "压"],
+  ["Z", "匝"],
+] as const;
+
+const zhPinyinCollator = new Intl.Collator("zh-Hans-CN-u-co-pinyin");
+
+function getNameSortMeta(name: string) {
+  const trimmed = name.trim();
+  const firstChar = trimmed.charAt(0);
+
+  if (/^[A-Za-z]$/.test(firstChar)) {
+    return {
+      initial: firstChar.toUpperCase(),
+      isEnglish: true,
+      normalizedName: trimmed.toUpperCase(),
+    };
+  }
+
+  if (/^[\u4E00-\u9FFF]$/.test(firstChar)) {
+    let initial = "#";
+
+    for (let i = 0; i < chinesePinyinInitialBoundaries.length; i += 1) {
+      const [letter, boundary] = chinesePinyinInitialBoundaries[i];
+      const nextBoundary = chinesePinyinInitialBoundaries[i + 1]?.[1];
+      const isAfterCurrent = zhPinyinCollator.compare(firstChar, boundary) >= 0;
+      const isBeforeNext = !nextBoundary || zhPinyinCollator.compare(firstChar, nextBoundary) < 0;
+
+      if (isAfterCurrent && isBeforeNext) {
+        initial = letter;
+        break;
+      }
+    }
+
+    return {
+      initial,
+      isEnglish: false,
+      normalizedName: trimmed,
+    };
+  }
+
+  return {
+    initial: firstChar.toUpperCase() || "#",
+    isEnglish: false,
+    normalizedName: trimmed,
+  };
+}
+
+function compareTeamNames(a: string, b: string) {
+  const aMeta = getNameSortMeta(a);
+  const bMeta = getNameSortMeta(b);
+
+  if (aMeta.initial !== bMeta.initial) {
+    return aMeta.initial.localeCompare(bMeta.initial, "en");
+  }
+
+  if (aMeta.isEnglish !== bMeta.isEnglish) {
+    return aMeta.isEnglish ? -1 : 1;
+  }
+
+  if (aMeta.isEnglish) {
+    return aMeta.normalizedName.localeCompare(bMeta.normalizedName, "en");
+  }
+
+  return zhPinyinCollator.compare(aMeta.normalizedName, bMeta.normalizedName);
+}
+
+function comparePlans(a: { ownerType: AnnualGoalOwnerType; ownerName: string; year: number; createdAt: Date }, b: { ownerType: AnnualGoalOwnerType; ownerName: string; year: number; createdAt: Date }) {
+  if (a.ownerType !== b.ownerType) {
+    return a.ownerType === "DEPARTMENT" ? -1 : 1;
+  }
+
+  if (a.ownerType === "TEAM" && b.ownerType === "TEAM") {
+    const teamNameCompare = compareTeamNames(a.ownerName, b.ownerName);
+    if (teamNameCompare !== 0) return teamNameCompare;
+  }
+
+  if (a.year !== b.year) {
+    return b.year - a.year;
+  }
+
+  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+}
+
+function getPlanPermissions(
+  currentUser: DataScopeInput,
+  plan: { ownerType: AnnualGoalOwnerType; departmentId: string | null; teamId: string | null; deletedAt: Date | null },
+  capabilities: {
+    canEditDepartmentPlans: boolean;
+    canEditTeamPlans: boolean;
+    canUpdateProgress: boolean;
+  }
+): PlanPermissionFlags {
+  if (plan.deletedAt) {
+    return {
+      canEditPlan: false,
+      canArchivePlan: false,
+      canEditMetrics: false,
+      canManageSources: false,
+      canManageQuarterTargets: false,
+      canUpdateQuarterProgress: false,
+      canUpdateWeeklyProgress: false,
+    };
+  }
+
+  const isAdmin = currentUser.roleType === "ADMIN";
+  const isDepartmentManager = currentUser.roleType === "DEPARTMENT_MANAGER" && currentUser.departmentId === plan.departmentId;
+  const canEditDepartmentPlan = plan.ownerType === "DEPARTMENT" && (isAdmin || isDepartmentManager || capabilities.canEditDepartmentPlans && currentUser.departmentId === plan.departmentId);
+  const canEditTeamPlan = plan.ownerType === "TEAM" && (isAdmin || isDepartmentManager || capabilities.canEditTeamPlans && currentUser.teamId === plan.teamId);
+  const canUpdateProgress = capabilities.canUpdateProgress && (
+    (plan.ownerType === "DEPARTMENT" && currentUser.departmentId === plan.departmentId)
+    || (plan.ownerType === "TEAM" && currentUser.teamId === plan.teamId)
+  );
+
+  return {
+    canEditPlan: canEditDepartmentPlan || canEditTeamPlan,
+    canArchivePlan: canEditDepartmentPlan || canEditTeamPlan,
+    canEditMetrics: canEditDepartmentPlan || canEditTeamPlan,
+    canManageSources: canEditDepartmentPlan,
+    canManageQuarterTargets: canEditDepartmentPlan,
+    canUpdateQuarterProgress: isAdmin || isDepartmentManager || canUpdateProgress,
+    canUpdateWeeklyProgress: isAdmin || isDepartmentManager || canUpdateProgress,
+  };
+}
+
 export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<AnnualGoalsResult> {
-  const activeWhere = getAnnualPlanWhereByScope(currentUser);
+  const annualGoalPermissionMap = await getAnnualGoalPermissionMap();
+  const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
+  const activeWhere = getAnnualPlanWhereByScope(currentUser, annualGoalCapabilities);
   const archivedWhere = { ...activeWhere, deletedAt: { not: null } };
 
   const [plans, archivedPlans] = await Promise.all([
@@ -413,6 +581,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     const departmentName = departments.find((d) => d.id === plan.departmentId)?.name;
     const teamName = teams.find((t) => t.id === plan.teamId)?.name;
 
+    const permissions = getPlanPermissions(currentUser, plan, annualGoalCapabilities);
+
     return {
       id: plan.id,
       year: plan.year,
@@ -430,11 +600,12 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       weightedProgress: roundPercent(weightedProgress),
       metrics: metricsData,
       totalWeight: roundPercent(totalWeight),
+      permissions,
     };
   }
 
-  const plansWithProgress = plans.map(mapPlan);
-  const archivedPlansWithProgress = archivedPlans.map(mapPlan);
+  const plansWithProgress = plans.map(mapPlan).sort(comparePlans);
+  const archivedPlansWithProgress = archivedPlans.map(mapPlan).sort(comparePlans);
   const availableParentMetrics = plansWithProgress
     .filter((p) => p.ownerType === "DEPARTMENT")
     .flatMap((p) => p.metrics);
@@ -467,6 +638,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     );
   }
 
+  const canManage = currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER";
+
   return {
     plans: plansWithProgress,
     archivedPlans: archivedPlansWithProgress,
@@ -476,7 +649,15 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     teams,
     memberOptionsByDepartment,
     memberOptionsByTeam,
-    canManage: currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER",
+    canManage,
+    permissions: {
+      canCreatePlan: canManage,
+      canRestorePlan: canManage,
+      canViewDepartmentPlans: annualGoalCapabilities.canViewDepartmentPlans,
+      canEditDepartmentPlans: annualGoalCapabilities.canEditDepartmentPlans,
+      canEditTeamPlans: annualGoalCapabilities.canEditTeamPlans,
+      canUpdateProgress: annualGoalCapabilities.canUpdateProgress,
+    },
     currentDepartmentId: currentUser.departmentId,
     summary: {
       planCount: plans.length,

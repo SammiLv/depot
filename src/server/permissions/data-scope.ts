@@ -1,4 +1,5 @@
 import type { RoleType } from "@prisma/client";
+import type { AnnualGoalCapabilities } from "@/server/organization/annual-goal-permissions";
 
 type DataScopeInput = {
   id: string;
@@ -61,7 +62,10 @@ export function getTeamWhereByScope(user: DataScopeInput) {
   return { id: "__no_team__" };
 }
 
-export function getAnnualPlanWhereByScope(user: DataScopeInput) {
+export function getAnnualPlanWhereByScope(
+  user: DataScopeInput,
+  capabilities?: Pick<AnnualGoalCapabilities, "canViewDepartmentPlans">
+) {
   if (user.roleType === "ADMIN") {
     return { deletedAt: null };
   }
@@ -70,11 +74,16 @@ export function getAnnualPlanWhereByScope(user: DataScopeInput) {
     return { departmentId: user.departmentId, deletedAt: null };
   }
 
-  if (user.roleType === "TEAM_LEADER" && user.teamId) {
-    return { teamId: user.teamId, deletedAt: null };
-  }
-
   if (user.teamId) {
+    const canViewDepartmentPlans = capabilities?.canViewDepartmentPlans ?? false;
+
+    if (canViewDepartmentPlans && user.departmentId) {
+      return {
+        departmentId: user.departmentId,
+        deletedAt: null,
+      };
+    }
+
     return { teamId: user.teamId, deletedAt: null };
   }
 

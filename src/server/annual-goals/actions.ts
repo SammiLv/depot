@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
+import { getAnnualGoalCapabilities, getAnnualGoalPermissionMap } from "@/server/organization/annual-goal-permissions";
 import type { AnnualGoalOwnerType, AnnualMetricCalculationType, Prisma, RiskStatus } from "@prisma/client";
 
-const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER"] as const;
 const calculationTypes = ["RATIO", "BOOLEAN", "MANUAL_SCORE"] as const;
 const riskStatuses = ["NORMAL", "SLIGHT_DELAY", "RISK", "COMPLETED"] as const;
 
@@ -14,12 +14,26 @@ function revalidateAnnualGoals() {
   revalidatePath("/dashboard");
 }
 
-async function requireAnnualGoalEditor() {
+async function getAnnualGoalActionContext() {
   const user = await requireCurrentUser();
-  if (!editableRoles.includes(user.roleType as (typeof editableRoles)[number])) {
+  const permissionMap = await getAnnualGoalPermissionMap();
+  const capabilities = getAnnualGoalCapabilities(user.roleType, permissionMap);
+  const isAdmin = user.roleType === "ADMIN";
+
+  return {
+    user,
+    capabilities,
+    isAdmin,
+    isDepartmentManager: user.roleType === "DEPARTMENT_MANAGER",
+  };
+}
+
+async function requireAnnualGoalEditor() {
+  const context = await getAnnualGoalActionContext();
+  if (!context.isAdmin && !context.isDepartmentManager) {
     throw new Error("仅管理员或部门主管可维护年度指标");
   }
-  return user;
+  return context.user;
 }
 
 function numberFromForm(value: FormDataEntryValue | null, fieldName: string) {
@@ -86,17 +100,32 @@ async function resolveOwner(user: Awaited<ReturnType<typeof requireCurrentUser>>
 }
 
 async function assertPlanEditable(planId: string) {
-  const user = await requireAnnualGoalEditor();
+  const context = await getAnnualGoalActionContext();
   const plan = await prisma.annualGoalPlan.findUnique({ where: { id: planId } });
   if (!plan || plan.deletedAt) throw new Error("年度方案不存在");
-  if (user.roleType === "DEPARTMENT_MANAGER" && plan.departmentId !== user.departmentId) {
-    throw new Error("无权维护该年度方案");
+
+  if (context.isAdmin) return { user: context.user, plan };
+
+  if (context.isDepartmentManager) {
+    if (plan.departmentId !== context.user.departmentId) {
+      throw new Error("无权维护该年度方案");
+    }
+    return { user: context.user, plan };
   }
-  return { user, plan };
+
+  if (plan.ownerType === "TEAM" && context.capabilities.canEditTeamPlans && plan.teamId === context.user.teamId) {
+    return { user: context.user, plan };
+  }
+
+  if (plan.ownerType === "DEPARTMENT" && context.capabilities.canEditDepartmentPlans && plan.departmentId === context.user.departmentId) {
+    return { user: context.user, plan };
+  }
+
+  throw new Error("无权维护该年度方案");
 }
 
 async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: string | null) {
-  const user = await requireCurrentUser();
+  const context = await getAnnualGoalActionContext();
   const metric = await prisma.annualGoalMetric.findUnique({ where: { id: metricId }, include: { plan: true } });
   if (!metric || metric.deletedAt || metric.plan.deletedAt) throw new Error("指标项不存在");
 
@@ -116,14 +145,26 @@ async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: 
     if (!selectedTeamMetric) throw new Error("元指标不存在");
   }
 
-  const isManagerScope = user.roleType === "ADMIN" || (user.roleType === "DEPARTMENT_MANAGER" && departmentPlan.departmentId === user.departmentId);
+  const isManagerScope = context.isAdmin || (context.isDepartmentManager && departmentPlan.departmentId === context.user.departmentId);
   if (isManagerScope) return { metric, sourceMetric };
 
-  if (user.teamId) {
+  if (!context.capabilities.canUpdateProgress) {
+    throw new Error("无权更新该季度指标");
+  }
+
+  if (metric.plan.ownerType === "TEAM" && metric.plan.teamId === context.user.teamId) {
+    return { metric, sourceMetric };
+  }
+
+  if (metric.plan.ownerType === "DEPARTMENT" && departmentPlan.departmentId === context.user.departmentId) {
+    return { metric, sourceMetric };
+  }
+
+  if (context.user.teamId) {
     const teamPlan = await prisma.annualGoalPlan.findFirst({
       where: {
         ownerType: "TEAM",
-        teamId: user.teamId,
+        teamId: context.user.teamId,
         departmentId: departmentPlan.departmentId,
         year: departmentPlan.year,
         deletedAt: null,

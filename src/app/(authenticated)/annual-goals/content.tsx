@@ -766,7 +766,7 @@ function HistoryPlanDetail({ plan }: { plan: Plan }) {
   );
 }
 
-function PlanDetailTabs({ plan, canManage, onCreateMetric, onEditMetric, onSourceMetric, onCreateSourceMetric, onDeleteMetric, onDeleteSourceMetric, onQuarterTarget, onDeleteQuarterTargets, onQuarterProgress, onWeeklyProgress, onChooseQuarterTarget }: { plan: Plan; canManage: boolean; onCreateMetric: () => void; onEditMetric: (metric: Metric) => void; onSourceMetric: (parentMetric: Metric, sourceMetric?: SourceMetric) => void; onCreateSourceMetric: () => void; onDeleteMetric: (metric: Metric) => void; onDeleteSourceMetric: (parentMetric: Metric, sourceMetric: SourceMetric) => void; onQuarterTarget: (metric: Metric, sourceMetric?: SourceMetric) => void; onDeleteQuarterTargets: (metric: Metric, sourceMetric?: SourceMetric) => void; onQuarterProgress: (metric: Metric, sourceMetric?: SourceMetric) => void; onWeeklyProgress: () => void; onChooseQuarterTarget: () => void }) {
+function PlanDetailTabs({ plan, onCreateMetric, onEditMetric, onSourceMetric, onCreateSourceMetric, onDeleteMetric, onDeleteSourceMetric, onQuarterTarget, onDeleteQuarterTargets, onQuarterProgress, onWeeklyProgress, onChooseQuarterTarget }: { plan: Plan; onCreateMetric: () => void; onEditMetric: (metric: Metric) => void; onSourceMetric: (parentMetric: Metric, sourceMetric?: SourceMetric) => void; onCreateSourceMetric: () => void; onDeleteMetric: (metric: Metric) => void; onDeleteSourceMetric: (parentMetric: Metric, sourceMetric: SourceMetric) => void; onQuarterTarget: (metric: Metric, sourceMetric?: SourceMetric) => void; onDeleteQuarterTargets: (metric: Metric, sourceMetric?: SourceMetric) => void; onQuarterProgress: (metric: Metric, sourceMetric?: SourceMetric) => void; onWeeklyProgress: () => void; onChooseQuarterTarget: () => void }) {
   const [tab, setTab] = useState<PlanTab>("metrics");
   const tabs: { key: PlanTab; label: string }[] = plan.ownerType === "DEPARTMENT"
     ? [
@@ -826,7 +826,7 @@ function PlanDetailTabs({ plan, canManage, onCreateMetric, onEditMetric, onSourc
                     {metric.riskStatus === "RISK" && <Badge tone="warning">风险</Badge>}
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">单位 {metric.unit} · 负责人 {formatResponsibleUser(metric.responsibleUser)}</div>
-                  {canManage && (
+                  {plan.permissions.canEditMetrics && (
                     <div className="mt-2 flex items-center gap-3 text-xs">
                       <button onClick={() => onEditMetric(metric)} className="inline-flex items-center gap-1 text-primary hover:underline">
                         <Edit className="w-3 h-3" />调整
@@ -881,7 +881,7 @@ function PlanDetailTabs({ plan, canManage, onCreateMetric, onEditMetric, onSourc
                       <div className="font-medium">{source.name}</div>
                       {source.description && <div className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{source.description}</div>}
                       <div className="mt-1 text-xs text-muted-foreground">负责人：{formatResponsibleUser(source.responsibleUser)}</div>
-                      {canManage && (
+                      {plan.permissions.canManageSources && (
                         <div className="mt-1 flex items-center gap-3 text-xs">
                           <button onClick={() => onSourceMetric(metric, source)} className="inline-flex items-center gap-1 text-primary hover:underline">
                             <Edit className="w-3 h-3" />调整
@@ -943,7 +943,7 @@ function PlanDetailTabs({ plan, canManage, onCreateMetric, onEditMetric, onSourc
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">年度目标 {formatValue(row.subject.targetValue)}{row.subject.unit} · 当前 {formatValue(row.subject.currentValue)}{row.subject.unit}</div>
                       <div className="mt-1 flex items-center gap-3 text-xs">
-                        {canManage && plan.ownerType === "DEPARTMENT" && (
+                        {plan.permissions.canManageQuarterTargets && plan.ownerType === "DEPARTMENT" && (
                           <>
                             <button onClick={() => onQuarterTarget(row.metric, row.depth ? row.subject as SourceMetric : undefined)} className="text-primary hover:underline">调整</button>
                             <button onClick={() => onDeleteQuarterTargets(row.metric, row.depth ? row.subject as SourceMetric : undefined)} className="inline-flex items-center gap-1 text-destructive hover:underline">
@@ -951,7 +951,7 @@ function PlanDetailTabs({ plan, canManage, onCreateMetric, onEditMetric, onSourc
                             </button>
                           </>
                         )}
-                        <button type="button" onClick={() => onQuarterProgress(row.metric, row.depth ? row.subject as SourceMetric : undefined)} className="text-primary hover:underline">更新</button>
+                        {plan.permissions.canUpdateQuarterProgress && <button type="button" onClick={() => onQuarterProgress(row.metric, row.depth ? row.subject as SourceMetric : undefined)} className="text-primary hover:underline">更新</button>}
                       </div>
                     </div>
                     {[1, 2, 3, 4].map((quarter) => {
@@ -999,19 +999,19 @@ function PlanDetailTabs({ plan, canManage, onCreateMetric, onEditMetric, onSourc
           {tab === "metrics" && (
             <>
               <button className={footerSecondaryButtonClass}>创建调整版本</button>
-              {canManage && <button onClick={onCreateMetric} className={footerPrimaryButtonClass}>{plan.ownerType === "TEAM" ? "选择指标" : "新增部门指标"}</button>}
+              {plan.permissions.canEditMetrics && <button onClick={onCreateMetric} className={footerPrimaryButtonClass}>{plan.ownerType === "TEAM" ? "选择指标" : "新增部门指标"}</button>}
             </>
           )}
-          {tab === "sources" && plan.ownerType === "DEPARTMENT" && canManage && (
+          {tab === "sources" && plan.ownerType === "DEPARTMENT" && plan.permissions.canManageSources && (
             <button onClick={onCreateSourceMetric} className={footerPrimaryButtonClass}>拆解元指标</button>
           )}
           {tab === "quarters" && plan.ownerType === "DEPARTMENT" && (
             <>
-              <button onClick={onWeeklyProgress} className={footerSecondaryButtonClass}>周更新</button>
-              <button onClick={onChooseQuarterTarget} className={footerPrimaryButtonClass}>拆解季度指标</button>
+              {plan.permissions.canUpdateWeeklyProgress && <button onClick={onWeeklyProgress} className={footerSecondaryButtonClass}>周更新</button>}
+              {plan.permissions.canManageQuarterTargets && <button onClick={onChooseQuarterTarget} className={footerPrimaryButtonClass}>拆解季度指标</button>}
             </>
           )}
-          {tab === "quarters" && plan.ownerType === "TEAM" && (
+          {tab === "quarters" && plan.ownerType === "TEAM" && plan.permissions.canUpdateWeeklyProgress && (
             <button onClick={onWeeklyProgress} className={footerPrimaryButtonClass}>周更新</button>
           )}
         </div>
@@ -1047,7 +1047,7 @@ export function AnnualGoalsContent({ data }: Props) {
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setShowHistory(true)}><History className="w-4 h-4" />历史记录</Button>
             <Button variant="outline"><Filter className="w-4 h-4" />筛选</Button>
-            {data.canManage && <Button onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建方案</Button>}
+            {data.permissions.canCreatePlan && <Button onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建方案</Button>}
           </div>
         }
       />
@@ -1153,14 +1153,16 @@ export function AnnualGoalsContent({ data }: Props) {
               <div className="text-right shrink-0">
                 <div className="text-xs text-muted-foreground">完成度</div>
                 <div className="text-2xl font-bold tabular-nums text-primary">{formatPercent(activePlan.weightedProgress)}%</div>
-                {data.canManage && (
+                {activePlan.permissions.canEditPlan && (
                   <div className="mt-2 flex justify-end gap-3">
                     <button onClick={() => setPlanDialog(activePlan)} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
                       <Edit className="w-3 h-3" />编辑方案
                     </button>
-                    <button onClick={() => setArchivePlan(activePlan)} className="inline-flex items-center gap-1 text-xs text-destructive hover:underline">
-                      <Trash2 className="w-3 h-3" />归档
-                    </button>
+                    {activePlan.permissions.canArchivePlan && (
+                      <button onClick={() => setArchivePlan(activePlan)} className="inline-flex items-center gap-1 text-xs text-destructive hover:underline">
+                        <Trash2 className="w-3 h-3" />归档
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1168,7 +1170,6 @@ export function AnnualGoalsContent({ data }: Props) {
 
             <PlanDetailTabs
               plan={activePlan}
-              canManage={data.canManage}
               onCreateMetric={() => setMetricDialog({ plan: activePlan })}
               onEditMetric={(metric) => setMetricDialog({ plan: activePlan, metric })}
               onSourceMetric={(parentMetric, sourceMetric) => setSourceMetricDialog({ parentMetric, sourceMetric })}
@@ -1250,7 +1251,7 @@ export function AnnualGoalsContent({ data }: Props) {
               </button>
               <div className="flex items-center gap-3">
                 <button type="button" onClick={() => setHistoryDetail(p)} className="text-xs text-primary hover:underline">查看详情</button>
-                {data.canManage && <RestorePlanButton plan={p} />}
+                {data.permissions.canRestorePlan && <RestorePlanButton plan={p} />}
               </div>
             </div>
           ))}

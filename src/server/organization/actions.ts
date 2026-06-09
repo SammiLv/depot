@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
+import { annualGoalPermissionCodes, annualGoalPermissionDefinitions } from "@/server/organization/annual-goal-permissions";
 import type { RoleType } from "@prisma/client";
 
 const managerEditableRoles: RoleType[] = ["TEAM_LEADER", "MEMBER"];
@@ -289,6 +290,70 @@ export async function saveRoleMenuPermissions(formData: FormData) {
         data: [...nextKeys].map((key) => {
           const [roleType, menuPermissionId] = key.split(":");
           return { roleType: roleType as RoleType, menuPermissionId };
+        }),
+      });
+    }
+  });
+
+  revalidateOrganization();
+}
+
+export async function saveAnnualGoalRolePermissions(formData: FormData) {
+  await requireAdmin();
+  const permissionsValue = formData.get("permissions") as string;
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  let requestedKeys: unknown;
+  try {
+    requestedKeys = JSON.parse(permissionsValue || "[]");
+  } catch {
+    throw new Error("年度指标权限数据格式错误");
+  }
+
+  if (!Array.isArray(requestedKeys) || requestedKeys.some((key) => typeof key !== "string")) {
+    throw new Error("年度指标权限数据格式错误");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const definition of annualGoalPermissionDefinitions) {
+      await tx.annualGoalPermission.upsert({
+        where: { code: definition.code },
+        update: {
+          name: definition.name,
+          description: definition.description,
+          sortOrder: definition.sortOrder,
+        },
+        create: definition,
+      });
+    }
+
+    const permissionRows = await tx.annualGoalPermission.findMany({
+      where: { code: { in: [...annualGoalPermissionCodes] } },
+      select: { id: true },
+    });
+    const permissionIdSet = new Set(permissionRows.map((row) => row.id));
+    const nextKeys = new Set<string>();
+
+    for (const key of requestedKeys) {
+      const [roleType, annualGoalPermissionId, extra] = key.split(":");
+      if (extra || !validRoles.includes(roleType as RoleType) || !permissionIdSet.has(annualGoalPermissionId)) {
+        throw new Error("年度指标权限数据包含无效项");
+      }
+      nextKeys.add(`${roleType}:${annualGoalPermissionId}`);
+    }
+
+    await tx.roleAnnualGoalPermission.deleteMany({
+      where: {
+        roleType: { in: validRoles },
+        annualGoalPermissionId: { in: permissionRows.map((row) => row.id) },
+      },
+    });
+
+    if (nextKeys.size > 0) {
+      await tx.roleAnnualGoalPermission.createMany({
+        data: [...nextKeys].map((key) => {
+          const [roleType, annualGoalPermissionId] = key.split(":");
+          return { roleType: roleType as RoleType, annualGoalPermissionId };
         }),
       });
     }

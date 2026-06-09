@@ -135,6 +135,29 @@ model RoleMenuPermission {
   @@unique([roleType, menuPermissionId])
 }
 
+model AnnualGoalPermission {
+  id                     String                     @id @default(cuid())
+  code                   String                     @unique
+  name                   String
+  description            String
+  sortOrder              Int                        @default(0)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  roleAnnualPermissions  RoleAnnualGoalPermission[]
+}
+
+model RoleAnnualGoalPermission {
+  id                     String               @id @default(cuid())
+  roleType               RoleType
+  annualGoalPermissionId String
+  createdAt              DateTime             @default(now())
+
+  annualGoalPermission   AnnualGoalPermission @relation(fields: [annualGoalPermissionId], references: [id])
+
+  @@unique([roleType, annualGoalPermissionId])
+  @@index([annualGoalPermissionId])
+}
+
 model ApprovalInstance {
   id                String         @id @default(cuid())
   targetType        String
