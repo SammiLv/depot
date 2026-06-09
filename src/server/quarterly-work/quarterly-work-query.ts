@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/prisma";
 import { getOwnerWhereByScope, getTeamWhereByScope, getUserWhereByScope } from "@/server/permissions/data-scope";
-import type { RoleType, WorkStatus } from "@prisma/client";
+import type { ProjectStatus, RoleType, WorkStatus } from "@prisma/client";
 
 type DataScopeInput = {
   id: string;
@@ -11,6 +11,8 @@ type DataScopeInput = {
 
 type BoardItem = {
   id: string;
+  projectId: string;
+  projectTitle: string;
   title: string;
   ownerId: string;
   owner: string;
@@ -24,12 +26,36 @@ type BoardItem = {
   delay?: number;
 };
 
+type ProjectBoardItem = {
+  id: string;
+  title: string;
+  ownerId: string;
+  owner: string;
+  teamId: string | null;
+  teamName: string | null;
+  status: ProjectStatus;
+  description: string | null;
+  expectedOutcome: string | null;
+  workCount: number;
+  activeQuarterCount: number;
+  completedAt: Date | null;
+  updatedAt: Date;
+};
+
 type ColumnData = {
   key: string;
   title: string;
   tone: "default" | "primary" | "warning" | "success";
   status: WorkStatus;
   items: BoardItem[];
+};
+
+type ProjectColumnData = {
+  key: string;
+  title: string;
+  tone: "default" | "primary" | "warning" | "success";
+  status: ProjectStatus;
+  items: ProjectBoardItem[];
 };
 
 const asciiLetterPattern = /^[A-Za-z]$/;
@@ -78,7 +104,7 @@ function getSortToken(name: string) {
   return { initial: firstChar.toUpperCase(), typeOrder: 1 as const };
 }
 
-function compareTeamNames(left: { name: string }, right: { name: string }) {
+function compareNames(left: { name: string }, right: { name: string }) {
   const leftToken = getSortToken(left.name);
   const rightToken = getSortToken(right.name);
 
@@ -98,19 +124,9 @@ function compareTeamNames(left: { name: string }, right: { name: string }) {
 }
 
 export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
-  const where = getOwnerWhereByScope(currentUser);
+  const ownerWhere = getOwnerWhereByScope(currentUser);
 
-  const works = await prisma.quarterlyWork.findMany({
-    where,
-    orderBy: [{ year: "desc" }, { quarter: "desc" }, { createdAt: "desc" }],
-  });
-
-  const now = new Date();
-  const activeYear = works[0]?.year ?? now.getFullYear();
-  const activeQuarter = works[0]?.quarter ?? Math.floor(now.getMonth() / 3) + 1;
-  const activeWorks = works.filter((work) => work.year === activeYear && work.quarter === activeQuarter);
-
-  const [teams, users] = await Promise.all([
+  const [teams, users, projects, works] = await Promise.all([
     prisma.team.findMany({
       where: getTeamWhereByScope(currentUser),
       orderBy: { name: "asc" },
@@ -121,9 +137,22 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
       orderBy: [{ teamId: "asc" }, { name: "asc" }],
       select: { id: true, name: true, departmentId: true, teamId: true },
     }),
+    prisma.project.findMany({
+      where: ownerWhere,
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.quarterlyWork.findMany({
+      where: ownerWhere,
+      orderBy: [{ year: "desc" }, { quarter: "desc" }, { createdAt: "desc" }],
+    }),
   ]);
 
-  const workIds = activeWorks.map((w) => w.id);
+  const now = new Date();
+  const activeYear = works[0]?.year ?? now.getFullYear();
+  const activeQuarter = works[0]?.quarter ?? Math.floor(now.getMonth() / 3) + 1;
+  const activeWorks = works.filter((work) => work.year === activeYear && work.quarter === activeQuarter);
+
+  const workIds = activeWorks.map((work) => work.id);
   const allMonthlyPlans = workIds.length
     ? await prisma.monthlyWorkPlan.findMany({
         where: { quarterlyWorkId: { in: workIds } },
@@ -131,41 +160,72 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     : [];
 
   const plansByWork = new Map<string, typeof allMonthlyPlans>();
-  for (const mp of allMonthlyPlans) {
-    const list = plansByWork.get(mp.quarterlyWorkId) ?? [];
-    list.push(mp);
-    plansByWork.set(mp.quarterlyWorkId, list);
+  for (const plan of allMonthlyPlans) {
+    const list = plansByWork.get(plan.quarterlyWorkId) ?? [];
+    list.push(plan);
+    plansByWork.set(plan.quarterlyWorkId, list);
   }
 
-  const ownerMap = new Map(users.map((o) => [o.id, o.name]));
+  const worksByProject = new Map<string, typeof works>();
+  for (const work of works) {
+    const list = worksByProject.get(work.projectId) ?? [];
+    list.push(work);
+    worksByProject.set(work.projectId, list);
+  }
 
-  const toBoardItem = (w: (typeof activeWorks)[number]): BoardItem => {
-    const plans = plansByWork.get(w.id) ?? [];
+  const ownerMap = new Map(users.map((user) => [user.id, user.name]));
+  const teamNameMap = new Map(teams.map((team) => [team.id, team.name]));
+
+  const toBoardItem = (work: (typeof activeWorks)[number]): BoardItem => {
+    const plans = plansByWork.get(work.id) ?? [];
     const totalPlans = plans.length;
-    const completedPlans = plans.filter((p) => p.status === "COMPLETED").length;
-    const delayedPlans = plans.filter((p) => p.status === "DELAYED_COMPLETED").length;
+    const completedPlans = plans.filter((plan) => plan.status === "COMPLETED").length;
+    const delayedPlans = plans.filter((plan) => plan.status === "DELAYED_COMPLETED").length;
     const progress = totalPlans > 0 ? Math.round((completedPlans / totalPlans) * 100) : undefined;
 
     return {
-      id: w.id,
-      title: w.title,
-      ownerId: w.ownerId,
-      owner: ownerMap.get(w.ownerId) ?? "—",
-      teamId: w.teamId,
-      teamName: teams.find((team) => team.id === w.teamId)?.name ?? null,
-      status: w.status,
-      description: w.description,
-      expectedOutcome: w.expectedOutcome,
+      id: work.id,
+      projectId: work.projectId,
+      projectTitle: projects.find((project) => project.id === work.projectId)?.title ?? work.title,
+      title: work.title,
+      ownerId: work.ownerId,
+      owner: ownerMap.get(work.ownerId) ?? "—",
+      teamId: work.teamId,
+      teamName: work.teamId ? teamNameMap.get(work.teamId) ?? null : null,
+      status: work.status,
+      description: work.description,
+      expectedOutcome: work.expectedOutcome,
       weeks: totalPlans,
       progress,
       delay: delayedPlans > 0 ? delayedPlans : undefined,
     };
   };
 
-  const notStarted = activeWorks.filter((w) => w.status === "NOT_STARTED");
-  const inProgress = activeWorks.filter((w) => w.status === "IN_PROGRESS");
-  const delayed = activeWorks.filter((w) => w.status === "DELAYED_COMPLETED");
-  const completed = activeWorks.filter((w) => w.status === "COMPLETED");
+  const toProjectBoardItem = (project: (typeof projects)[number]): ProjectBoardItem => {
+    const projectWorks = worksByProject.get(project.id) ?? [];
+    const activeProjectWorks = projectWorks.filter((work) => work.status !== "COMPLETED" && work.status !== "CLOSED");
+
+    return {
+      id: project.id,
+      title: project.title,
+      ownerId: project.ownerId,
+      owner: ownerMap.get(project.ownerId) ?? "—",
+      teamId: project.teamId,
+      teamName: project.teamId ? teamNameMap.get(project.teamId) ?? null : null,
+      status: project.status,
+      description: project.description,
+      expectedOutcome: project.expectedOutcome,
+      workCount: projectWorks.length,
+      activeQuarterCount: activeProjectWorks.length,
+      completedAt: project.completedAt,
+      updatedAt: project.updatedAt,
+    };
+  };
+
+  const notStarted = activeWorks.filter((work) => work.status === "NOT_STARTED");
+  const inProgress = activeWorks.filter((work) => work.status === "IN_PROGRESS");
+  const delayed = activeWorks.filter((work) => work.status === "DELAYED_COMPLETED");
+  const completed = activeWorks.filter((work) => work.status === "COMPLETED");
 
   const columns: ColumnData[] = [
     { key: "not_started", title: "未启动", tone: "default", status: "NOT_STARTED", items: notStarted.map(toBoardItem) },
@@ -174,14 +234,21 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     { key: "completed", title: "已完成", tone: "success", status: "COMPLETED", items: completed.map(toBoardItem) },
   ];
 
+  const projectColumns: ProjectColumnData[] = [
+    { key: "project_not_started", title: "未启动", tone: "default", status: "NOT_STARTED", items: projects.filter((project) => project.status === "NOT_STARTED").map(toProjectBoardItem) },
+    { key: "project_in_progress", title: "进行中", tone: "primary", status: "IN_PROGRESS", items: projects.filter((project) => project.status === "IN_PROGRESS").map(toProjectBoardItem) },
+    { key: "project_completed", title: "已完成", tone: "success", status: "COMPLETED", items: projects.filter((project) => project.status === "COMPLETED").map(toProjectBoardItem) },
+    { key: "project_closed", title: "关闭", tone: "warning", status: "CLOSED", items: projects.filter((project) => project.status === "CLOSED").map(toProjectBoardItem) },
+  ];
+
   const needsUpdate = [...inProgress, ...delayed];
-  const updateReminders = needsUpdate.map((w) => {
-    const plans = plansByWork.get(w.id) ?? [];
-    const allUpdated = plans.every((p) => p.status !== "NOT_STARTED");
+  const updateReminders = needsUpdate.map((work) => {
+    const plans = plansByWork.get(work.id) ?? [];
+    const allUpdated = plans.every((plan) => plan.status !== "NOT_STARTED");
     return {
-      id: w.id,
-      task: w.title,
-      who: ownerMap.get(w.ownerId) ?? "—",
+      id: work.id,
+      task: work.title,
+      who: ownerMap.get(work.ownerId) ?? "—",
       status: allUpdated ? "已更新" as const : "待更新" as const,
       tone: allUpdated ? "success" as const : "warning" as const,
     };
@@ -190,11 +257,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
   return {
     year: activeYear,
     quarter: activeQuarter,
+    projectColumns,
     columns,
     totalCount: activeWorks.length,
+    projectTotalCount: projects.length,
     updateReminders,
     canCreate: users.length > 0,
-    teamOptions: [...teams].sort(compareTeamNames).map((team) => ({
+    teamOptions: [...teams].sort(compareNames).map((team) => ({
       id: team.id,
       name: team.name,
     })),
@@ -202,7 +271,16 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
       id: user.id,
       name: user.name,
       teamId: user.teamId,
-      teamName: teams.find((team) => team.id === user.teamId)?.name ?? null,
+      teamName: user.teamId ? teamNameMap.get(user.teamId) ?? null : null,
     })),
+    projectOptions: projects
+      .filter((project) => project.status !== "COMPLETED" && project.status !== "CLOSED")
+      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+      .map((project) => ({
+        id: project.id,
+        title: project.title,
+        ownerId: project.ownerId,
+        status: project.status,
+      })),
   };
 }

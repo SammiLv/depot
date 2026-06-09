@@ -3,13 +3,16 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
-import { createQuarterlyWork, updateQuarterlyWork } from "@/server/quarterly-work/actions";
+import { createQuarterlyWork, updateProjectStatus, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { Plus, AlertTriangle, Pencil, X } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
+type BoardTab = "project" | "board" | "value";
 type ColumnStatus = Props["data"]["columns"][number]["status"];
+type ProjectStatus = Props["data"]["projectColumns"][number]["status"];
 type BoardItem = Props["data"]["columns"][number]["items"][number];
+type ProjectBoardItem = Props["data"]["projectColumns"][number]["items"][number];
 type TeamTab = "all" | Props["data"]["teamOptions"][number]["id"];
 
 type CreateDialogState = {
@@ -22,14 +25,30 @@ type EditDialogState = {
   title: string;
 } | null;
 
+type ProjectDialogState = {
+  item: ProjectBoardItem;
+  title: string;
+} | null;
+
+type FormSuccessHandler = (ownerTeamId: Props["data"]["memberOptions"][number]["teamId"] | null) => void;
+
 const columnTitleByStatus: Record<ColumnStatus, string> = {
   NOT_STARTED: "未启动",
   IN_PROGRESS: "进行中",
   DELAYED_COMPLETED: "延期",
   COMPLETED: "已完成",
+  CLOSED: "关闭",
 };
 
-const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"];
+const projectTitleByStatus: Record<ProjectStatus, string> = {
+  NOT_STARTED: "未启动",
+  IN_PROGRESS: "进行中",
+  COMPLETED: "已完成",
+  CLOSED: "关闭",
+};
+
+const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
+const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 
 function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   if (!open) return null;
@@ -57,6 +76,7 @@ function QuarterlyWorkForm({
   title,
   item,
   onClose,
+  onSuccess,
 }: {
   data: Props["data"];
   mode: "create" | "edit";
@@ -64,6 +84,7 @@ function QuarterlyWorkForm({
   title: string;
   item?: BoardItem;
   onClose: () => void;
+  onSuccess: FormSuccessHandler;
 }) {
   const actionLabel = `${title}工作`;
   const memberOptions = useMemo(
@@ -74,13 +95,19 @@ function QuarterlyWorkForm({
     [data.memberOptions]
   );
   const statusOptions = useMemo(() => editableStatuses, []);
+  const ownerTeamIdByMemberId = useMemo(
+    () => new Map(data.memberOptions.map((member) => [member.id, member.teamId ?? null])),
+    [data.memberOptions]
+  );
 
   const submitAction = async (fd: FormData) => {
+    const nextOwnerId = String(fd.get("ownerId") ?? item?.ownerId ?? memberOptions[0]?.id ?? "");
     if (mode === "edit") {
       await updateQuarterlyWork(fd);
     } else {
       await createQuarterlyWork(fd);
     }
+    onSuccess(ownerTeamIdByMemberId.get(nextOwnerId) ?? null);
     onClose();
   };
 
@@ -89,6 +116,20 @@ function QuarterlyWorkForm({
       {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
       {mode === "create" ? <input type="hidden" name="status" value={status} /> : null}
       <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium">所属项目</label>
+          <select
+            name="projectId"
+            defaultValue={item?.projectId ?? ""}
+            disabled={mode === "edit"}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+          >
+            <option value="">新建项目并关联当前季度工作</option>
+            {data.projectOptions.map((project) => (
+              <option key={project.id} value={project.id}>{project.title}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="mb-1 block text-sm font-medium">项目名称 *</label>
           <input
@@ -161,11 +202,58 @@ function QuarterlyWorkForm({
   );
 }
 
+function ProjectStatusForm({ item, onClose }: { item: ProjectBoardItem; onClose: () => void }) {
+  return (
+    <form action={async (fd: FormData) => {
+      await updateProjectStatus(fd);
+      onClose();
+    }}>
+      <input type="hidden" name="projectId" value={item.id} />
+      <div className="space-y-4">
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+          <div className="text-sm font-medium">{item.title}</div>
+          <div className="mt-1 text-xs text-muted-foreground">负责人：{item.owner}</div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">项目状态 *</label>
+          <select
+            name="status"
+            required
+            defaultValue={item.status}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            {editableProjectStatuses.map((option) => (
+              <option key={option} value={option}>{projectTitleByStatus[option]}</option>
+            ))}
+          </select>
+        </div>
+        <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+          项目变更为已完成或关闭时，将同步更新其下所有季度工作状态。
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="submit">
+          <Pencil className="h-4 w-4" />
+          保存
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 export function QuarterlyWorkContent({ data }: Props) {
-  const [tab, setTab] = useState<"board" | "value">("board");
+  const [tab, setTab] = useState<BoardTab>("project");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
   const [editDialog, setEditDialog] = useState<EditDialogState>(null);
+  const [projectDialog, setProjectDialog] = useState<ProjectDialogState>(null);
+  const allItems = useMemo(() => data.columns.flatMap((column) => column.items), [data.columns]);
+  const handleFormSuccess = (ownerTeamId: Props["data"]["memberOptions"][number]["teamId"] | null) => {
+    if (teamTab !== "all" && ownerTeamId !== teamTab) {
+      setTeamTab("all");
+    }
+  };
   const visibleColumns = useMemo(
     () => data.columns.map((column) => ({
       ...column,
@@ -173,14 +261,18 @@ export function QuarterlyWorkContent({ data }: Props) {
     })),
     [data.columns, teamTab]
   );
+  const visibleProjectColumns = useMemo(
+    () => data.projectColumns.map((column) => ({
+      ...column,
+      items: teamTab === "all" ? column.items : column.items.filter((item) => item.teamId === teamTab),
+    })),
+    [data.projectColumns, teamTab]
+  );
   const visibleReminders = useMemo(
     () => teamTab === "all"
       ? data.updateReminders
-      : data.updateReminders.filter((reminder) => {
-          const work = data.columns.flatMap((column) => column.items).find((item) => item.id === reminder.id);
-          return work?.teamId === teamTab;
-        }),
-    [data.columns, data.updateReminders, teamTab]
+      : data.updateReminders.filter((reminder) => allItems.find((item) => item.id === reminder.id)?.teamId === teamTab),
+    [allItems, data.updateReminders, teamTab]
   );
   const teamTabs = useMemo(
     () => [{ id: "all" as const, name: "全部" }, ...data.teamOptions],
@@ -200,16 +292,17 @@ export function QuarterlyWorkContent({ data }: Props) {
       />
 
       <div className="mb-4 rounded-xl bg-card border border-border p-5 shadow-sm">
-        <div className="inline-flex p-1 rounded-lg bg-muted">
+        <div className="inline-flex rounded-lg bg-muted p-1">
           {[
-            { k: "board", label: "工作看板" },
-            { k: "value", label: "需求价值跟踪" },
+            { k: "project" as const, label: "项目看板" },
+            { k: "board" as const, label: "工作看板" },
+            { k: "value" as const, label: "需求价值跟踪" },
           ].map((t) => (
             <button
               key={t.k}
-              onClick={() => setTab(t.k as "board" | "value")}
-              className={`px-4 py-1.5 rounded-md text-sm transition ${
-                tab === t.k ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+              onClick={() => setTab(t.k)}
+              className={`rounded-md px-4 py-1.5 text-sm transition ${
+                tab === t.k ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {t.label}
@@ -217,33 +310,82 @@ export function QuarterlyWorkContent({ data }: Props) {
           ))}
         </div>
 
-        {tab === "board" ? (
-          <div className="mt-4 flex items-center gap-2 flex-wrap">
+        {tab !== "value" ? (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             {teamTabs.map((team) => (
               <button
                 key={team.id}
                 type="button"
                 onClick={() => setTeamTab(team.id)}
-                className={`px-3 py-1.5 rounded-lg text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card border border-border hover:bg-muted"}`}
+                className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "border border-border bg-card hover:bg-muted"}`}
               >
                 {team.name}
               </button>
             ))}
-            <div className="ml-auto text-xs text-muted-foreground">当前看板：{data.year} Q{data.quarter}</div>
+            <div className="ml-auto text-xs text-muted-foreground">
+              {tab === "project" ? `当前项目：${data.projectTotalCount} 个` : `当前看板：${data.year} Q${data.quarter}`}
+            </div>
           </div>
         ) : (
           <div className="mt-4 text-sm text-muted-foreground">
-            对季度工作中已上线需求的<span className="text-foreground font-medium"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
+            对季度工作中已上线需求的<span className="font-medium text-foreground"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
           </div>
         )}
       </div>
 
-      {tab === "board" ? (
+      {tab === "project" ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {visibleProjectColumns.map((column) => (
+            <div key={column.key} className="min-h-[320px] rounded-xl border border-border p-3 shadow-sm" style={{ background: "var(--card)" }}>
+              <div className="mb-3 flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <Badge tone={column.tone}>{column.title}</Badge>
+                  <span className="text-xs text-muted-foreground">{column.items.length}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {column.items.length ? (
+                  column.items.map((item) => (
+                    <div key={item.id} className="rounded-lg border border-border bg-muted/50 p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium leading-snug">{item.title}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{item.owner}{item.teamName ? ` · ${item.teamName}` : ""}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setProjectDialog({ item, title: column.title })}
+                          className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                          aria-label={`编辑${item.title}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                        <div className="rounded-md bg-background px-2 py-2">
+                          <div className="text-[11px]">季度工作数</div>
+                          <div className="mt-1 font-medium text-foreground">{item.workCount}</div>
+                        </div>
+                        <div className="rounded-md bg-background px-2 py-2">
+                          <div className="text-[11px]">未完结季度</div>
+                          <div className="mt-1 font-medium text-foreground">{item.activeQuarterCount}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : tab === "board" ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {visibleColumns.map((c) => (
-              <div key={c.key} className="rounded-xl border border-border p-3 min-h-[400px] shadow-sm" style={{ background: "var(--card)" }}>
-                <div className="flex items-center justify-between mb-3 px-1">
+              <div key={c.key} className="min-h-[400px] rounded-xl border border-border p-3 shadow-sm" style={{ background: "var(--card)" }}>
+                <div className="mb-3 flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
                     <Badge tone={c.tone}>{c.title}</Badge>
                     <span className="text-xs text-muted-foreground">{c.items.length}</span>
@@ -261,9 +403,12 @@ export function QuarterlyWorkContent({ data }: Props) {
                 <div className="space-y-2">
                   {c.items.length ? (
                     c.items.map((it) => (
-                      <div key={it.id} className="bg-muted/50 rounded-lg p-3 border border-border hover:border-primary/40 hover:shadow-md transition shadow-sm">
+                      <div key={it.id} className="rounded-lg border border-border bg-muted/50 p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="text-sm font-medium leading-snug">{it.title}</div>
+                          <div>
+                            <div className="text-sm font-medium leading-snug">{it.title}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
+                          </div>
                           <button
                             type="button"
                             onClick={() => setEditDialog({ item: it, title: c.title })}
@@ -284,13 +429,13 @@ export function QuarterlyWorkContent({ data }: Props) {
                         )}
                         {it.delay && (
                           <div className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
-                            <AlertTriangle className="w-3 h-3" />延期 {it.delay} 周
+                            <AlertTriangle className="h-3 w-3" />延期 {it.delay} 周
                           </div>
                         )}
                       </div>
                     ))
                   ) : (
-                    <div className="text-center text-xs text-muted-foreground py-8">暂无</div>
+                    <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
                   )}
                 </div>
               </div>
@@ -299,12 +444,12 @@ export function QuarterlyWorkContent({ data }: Props) {
 
           {visibleReminders.length > 0 && (
             <Card className="mt-6">
-              <h3 className="font-semibold mb-3">本周更新提醒</h3>
+              <h3 className="mb-3 font-semibold">本周更新提醒</h3>
               <div className="space-y-2">
                 {visibleReminders.map((r, i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                  <div key={i} className="flex items-center justify-between border-b border-border py-2 last:border-0">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium">{r.who[0]}</div>
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">{r.who[0]}</div>
                       <div>
                         <div className="text-sm font-medium">{r.task}</div>
                         <div className="text-xs text-muted-foreground">{r.who}</div>
@@ -319,9 +464,9 @@ export function QuarterlyWorkContent({ data }: Props) {
         </>
       ) : (
         <div className="text-sm text-muted-foreground">
-          对季度工作中已上线需求的<span className="text-foreground font-medium"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
+          对季度工作中已上线需求的<span className="font-medium text-foreground"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
           <div className="mt-4">
-            <Link href="/value-tracking" className="text-primary hover:underline font-medium">
+            <Link href="/value-tracking" className="font-medium text-primary hover:underline">
               前往需求价值跟踪页面 →
             </Link>
           </div>
@@ -336,6 +481,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             status={createDialog.status}
             title={createDialog.title}
             onClose={() => setCreateDialog(null)}
+            onSuccess={handleFormSuccess}
           />
         )}
       </Dialog>
@@ -349,6 +495,16 @@ export function QuarterlyWorkContent({ data }: Props) {
             title={editDialog.title}
             item={editDialog.item}
             onClose={() => setEditDialog(null)}
+            onSuccess={handleFormSuccess}
+          />
+        )}
+      </Dialog>
+
+      <Dialog open={!!projectDialog} onClose={() => setProjectDialog(null)} title={projectDialog ? `编辑${projectDialog.title}项目` : "编辑项目"}>
+        {projectDialog && (
+          <ProjectStatusForm
+            item={projectDialog.item}
+            onClose={() => setProjectDialog(null)}
           />
         )}
       </Dialog>
