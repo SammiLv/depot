@@ -1,0 +1,508 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum RoleType {
+  ADMIN
+  DEPARTMENT_MANAGER
+  TEAM_LEADER
+  MEMBER
+}
+
+enum AnnualGoalOwnerType {
+  DEPARTMENT
+  TEAM
+}
+
+enum AnnualMetricCalculationType {
+  RATIO
+  BOOLEAN
+  MANUAL_SCORE
+}
+
+enum ApprovalStatus {
+  DRAFT
+  PENDING_LEADER
+  PENDING_MANAGER
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum WorkStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  DELAYED_COMPLETED
+}
+
+enum RiskStatus {
+  NORMAL
+  SLIGHT_DELAY
+  RISK
+  COMPLETED
+}
+
+enum KpiStatus {
+  DRAFT
+  PENDING_LEADER
+  PENDING_MANAGER
+  PENDING_SELF_REVIEW
+  PENDING_LEADER_SCORE
+  PENDING_MANAGER_SCORE
+  COMPLETED
+  REJECTED
+}
+
+enum NotificationType {
+  APPROVAL_TODO
+  GOAL_UPDATE
+  KPI_TODO
+  WORK_DELAY
+  TALENT_WARNING
+  SYSTEM
+}
+
+model User {
+  id              String    @id @default(cuid())
+  dingtalkUserId  String?   @unique
+  name            String
+  email           String?
+  mobile          String?
+  avatarUrl       String?
+  departmentId    String?
+  teamId          String?
+  roleType        RoleType  @default(MEMBER)
+  title           String?
+  joinedAt        DateTime?
+  contractRenewAt DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([departmentId])
+  @@index([teamId])
+  @@index([roleType])
+}
+
+model Department {
+  id             String   @id @default(cuid())
+  dingtalkDeptId String?  @unique
+  name           String
+  managerId      String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Team {
+  id             String   @id @default(cuid())
+  dingtalkDeptId String?  @unique
+  departmentId   String
+  name           String
+  leaderId       String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([departmentId])
+  @@index([leaderId])
+}
+
+model MenuPermission {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  path      String
+  parentId  String?
+  sortOrder Int      @default(0)
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RoleMenuPermission {
+  id               String   @id @default(cuid())
+  roleType         RoleType
+  menuPermissionId String
+  createdAt        DateTime @default(now())
+
+  @@unique([roleType, menuPermissionId])
+}
+
+model ApprovalInstance {
+  id                String         @id @default(cuid())
+  targetType        String
+  targetId          String
+  title             String
+  submitterId       String
+  currentApproverId String?
+  status            ApprovalStatus @default(DRAFT)
+  submittedAt       DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([targetType, targetId])
+  @@index([currentApproverId])
+}
+
+model ApprovalTask {
+  id         String         @id @default(cuid())
+  instanceId String
+  approverId String
+  stepName   String
+  status     ApprovalStatus @default(DRAFT)
+  comment    String?
+  actedAt    DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([instanceId])
+  @@index([approverId])
+}
+
+model AnnualGoalPlan {
+  id                String              @id @default(cuid())
+  year              Int
+  name              String
+  description       String?
+  ownerType         AnnualGoalOwnerType
+  departmentId      String?
+  teamId            String?
+  parentPlanId      String?
+  version           Int                 @default(1)
+  isActive          Boolean             @default(true)
+  approvalStatus    ApprovalStatus      @default(DRAFT)
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  approvedAt        DateTime?
+  revisionReason    String?
+  revisedFromPlanId String?
+  createdById       String
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  deletedAt         DateTime?
+
+  metrics           AnnualGoalMetric[]
+
+  @@index([year])
+  @@index([ownerType])
+  @@index([departmentId, teamId])
+  @@index([parentPlanId])
+  @@index([isActive])
+}
+
+model AnnualGoalMetricSource {
+  id                String                      @id @default(cuid())
+  parentMetricId    String
+  metricCode        String                      @unique
+  name              String
+  description       String?
+  targetValue       Float
+  currentValue      Float                       @default(0)
+  unit              String
+  calculationType   AnnualMetricCalculationType @default(RATIO)
+  riskStatus        RiskStatus                  @default(NORMAL)
+  responsibleUserId String?
+  adjustedAt        DateTime?
+  progressUpdatedAt DateTime?
+  createdById       String
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  deletedAt         DateTime?
+
+  parentMetric AnnualGoalMetric   @relation("AnnualGoalMetricSources", fields: [parentMetricId], references: [id])
+  metrics      AnnualGoalMetric[]
+
+  @@index([parentMetricId])
+  @@index([riskStatus])
+  @@index([responsibleUserId])
+  @@index([deletedAt])
+}
+
+model AnnualGoalMetric {
+  id                String                      @id @default(cuid())
+  planId            String
+  sourceMetricId    String?
+  metricCode        String
+  name              String
+  description       String?
+  targetValue       Float
+  currentValue      Float                       @default(0)
+  unit              String
+  weight            Float
+  calculationType   AnnualMetricCalculationType @default(RATIO)
+  riskStatus        RiskStatus                  @default(NORMAL)
+  responsibleUserId String?
+  sortOrder         Int                         @default(0)
+  adjustedAt        DateTime?
+  progressUpdatedAt DateTime?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  deletedAt         DateTime?
+
+  plan          AnnualGoalPlan         @relation(fields: [planId], references: [id])
+  sourceMetric  AnnualGoalMetricSource? @relation(fields: [sourceMetricId], references: [id])
+  sourceMetrics AnnualGoalMetricSource[] @relation("AnnualGoalMetricSources")
+
+  @@index([planId])
+  @@index([sourceMetricId])
+  @@index([metricCode])
+  @@index([riskStatus])
+  @@index([responsibleUserId])
+  @@unique([planId, sourceMetricId])
+}
+
+model AnnualGoalQuarterTarget {
+  id             String     @id @default(cuid())
+  metricId       String
+  sourceMetricId String?
+  year           Int
+  quarter        Int
+  targetValue    Float
+  currentValue   Float      @default(0)
+  weeklyIncrement Float     @default(0)
+  startDate      DateTime?
+  endDate        DateTime?
+  riskStatus     RiskStatus @default(NORMAL)
+  adjustedAt     DateTime?
+  progressUpdatedAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
+
+  @@index([metricId])
+  @@index([sourceMetricId])
+  @@index([year, quarter])
+  @@index([riskStatus])
+}
+
+model AnnualGoalProgress {
+  id              String   @id @default(cuid())
+  metricId        String
+  sourceMetricId  String?
+  quarterTargetId String?
+  updaterId       String
+  progressDate    DateTime
+  completedValue  Float
+  cumulativeValue Float
+  summary         String?
+  riskNote        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([metricId])
+  @@index([sourceMetricId])
+  @@index([quarterTargetId])
+  @@index([updaterId])
+}
+
+model AnnualGoalRevisionLog {
+  id             String   @id @default(cuid())
+  oldPlanId      String
+  newPlanId      String
+  revisionReason String
+  revisedById    String
+  revisedAt      DateTime @default(now())
+
+  @@index([oldPlanId])
+  @@index([newPlanId])
+  @@index([revisedById])
+}
+
+model QuarterlyWork {
+  id              String         @id @default(cuid())
+  year            Int
+  quarter         Int
+  title           String
+  description     String?
+  workType        String?
+  ownerId         String
+  teamId          String?
+  departmentId    String?
+  status          WorkStatus     @default(NOT_STARTED)
+  approvalStatus  ApprovalStatus @default(DRAFT)
+  expectedOutcome String?
+  startDate       DateTime?
+  endDate         DateTime?
+  createdById     String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+
+  @@index([year, quarter])
+  @@index([ownerId])
+  @@index([departmentId, teamId])
+}
+
+model MonthlyWorkPlan {
+  id              String     @id @default(cuid())
+  quarterlyWorkId String
+  year            Int
+  month           Int
+  title           String
+  description     String?
+  status          WorkStatus @default(NOT_STARTED)
+  expectedOutcome String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([quarterlyWorkId])
+}
+
+model WeeklyWorkUpdate {
+  id                String     @id @default(cuid())
+  quarterlyWorkId   String
+  monthlyWorkPlanId String?
+  updaterId         String
+  updateDate        DateTime
+  status            WorkStatus
+  summary           String
+  nextStep          String?
+  riskNote          String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@index([quarterlyWorkId])
+  @@index([monthlyWorkPlanId])
+  @@index([updaterId])
+}
+
+model RequirementValueTrack {
+  id              String    @id @default(cuid())
+  projectName     String
+  requirementName String
+  ownerId         String
+  teamId          String?
+  background      String?
+  expectedValue   String
+  actualValue     String?
+  launchDate      DateTime?
+  isAchieved      Boolean?
+  reviewNote      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([ownerId])
+  @@index([teamId])
+}
+
+model KpiTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model KpiTemplateItem {
+  id              String   @id @default(cuid())
+  templateId      String
+  name            String
+  description     String?
+  weight          Float
+  scoringStandard String?
+  sortOrder       Int      @default(0)
+  isRequired      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([templateId])
+}
+
+model PersonalKpi {
+  id             String    @id @default(cuid())
+  year           Int
+  quarter        Int
+  userId         String
+  teamId         String?
+  templateId     String?
+  status         KpiStatus @default(DRAFT)
+  selfScore      Float?
+  leaderScore    Float?
+  managerScore   Float?
+  finalScore     Float?
+  selfComment    String?
+  leaderComment  String?
+  managerComment String?
+  submittedAt    DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  @@index([year, quarter])
+  @@index([userId])
+  @@index([teamId])
+}
+
+model PersonalKpiItem {
+  id                   String   @id @default(cuid())
+  personalKpiId        String
+  sourceTemplateItemId String?
+  relatedAnnualMetricId        String?
+  relatedQuarterTargetId       String?
+  relatedWorkId                String?
+  name                 String
+  description          String?
+  weight               Float
+  target               String?
+  scoringStandard      String?
+  selfScore            Float?
+  leaderScore          Float?
+  managerScore         Float?
+  finalScore           Float?
+  selfComment          String?
+  leaderComment        String?
+  managerComment       String?
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([personalKpiId])
+  @@index([relatedAnnualMetricId])
+  @@index([relatedQuarterTargetId])
+  @@index([relatedWorkId])
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  userId     String
+  type       NotificationType
+  title      String
+  content    String?
+  targetType String?
+  targetId   String?
+  isRead     Boolean          @default(false)
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  @@index([userId])
+  @@index([targetType, targetId])
+}
+
+model TodoItem {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  targetType  String
+  targetId    String
+  isDone      Boolean   @default(false)
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([targetType, targetId])
+}
