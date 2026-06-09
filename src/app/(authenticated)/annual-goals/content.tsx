@@ -79,6 +79,26 @@ function formatResponsibleUser(user: { name: string; title: string | null } | nu
   return user.title ? `${user.name} · ${user.title}` : user.name;
 }
 
+function getPlanSummary(plan?: Plan) {
+  if (!plan) {
+    return {
+      planCount: 0,
+      metricCount: 0,
+      riskCount: 0,
+      revisionCount: 0,
+      overallWeightedProgress: 0,
+    };
+  }
+
+  return {
+    planCount: 1,
+    metricCount: plan.metrics.length,
+    riskCount: plan.metrics.filter((metric) => metric.riskStatus === "RISK").length,
+    revisionCount: plan.revisionReason ? 1 : 0,
+    overallWeightedProgress: plan.weightedProgress,
+  };
+}
+
 function SearchableMemberField({
   name,
   label,
@@ -1037,6 +1057,7 @@ export function AnnualGoalsContent({ data }: Props) {
   const [historyDetail, setHistoryDetail] = useState<Plan | null>(null);
   const [activePlanId, setActivePlanId] = useState(data.plans[0]?.id ?? "");
   const activePlan = data.plans.find((plan) => plan.id === activePlanId) ?? data.plans[0];
+  const activeSummary = getPlanSummary(activePlan);
 
   return (
     <>
@@ -1052,21 +1073,42 @@ export function AnnualGoalsContent({ data }: Props) {
         }
       />
 
+      {data.plans.length > 0 && (
+        <Card className="mb-6 !p-0 overflow-hidden">
+          <div className="px-5 py-3 border-b border-border bg-muted/30 flex items-center gap-2 overflow-x-auto">
+            {data.plans.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setActivePlanId(p.id)}
+                className={`px-3 py-2 text-sm font-medium whitespace-nowrap rounded-lg transition ${
+                  activePlan?.id === p.id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {p.ownerType === "DEPARTMENT" ? "部门" : p.ownerName}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card className="mb-6">
         <div className="flex items-center justify-between gap-4">
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">年度业绩指标完成度</div>
             <div className="mt-2 flex items-baseline gap-3">
-              <span className="text-4xl font-bold tracking-tight tabular-nums">{formatPercent(data.summary.overallWeightedProgress)}%</span>
+              <span className="text-4xl font-bold tracking-tight tabular-nums">{formatPercent(activeSummary.overallWeightedProgress)}%</span>
               <span className="inline-flex items-center gap-1 text-sm text-success">
-                <TrendingUp className="w-4 h-4" />汇总加权
+                <TrendingUp className="w-4 h-4" />{activePlan?.ownerType === "DEPARTMENT" ? "部门加权" : "小组加权"}
               </span>
             </div>
             <div className="mt-3 max-w-xl">
-              <Progress value={data.summary.overallWeightedProgress} tone="primary" />
+              <Progress value={activeSummary.overallWeightedProgress} tone="primary" />
             </div>
             <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-              <span>{data.summary.planCount} 个方案 · {data.summary.metricCount} 项指标 · 部门业绩指标加权</span>
+              <span>{activePlan ? `${activePlan.ownerName} · ${activeSummary.planCount} 个方案 · ${activeSummary.metricCount} 项指标` : "0 个方案 · 0 项指标"}</span>
             </div>
           </div>
           <div className="w-14 h-14 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
@@ -1079,51 +1121,32 @@ export function AnnualGoalsContent({ data }: Props) {
         <Card>
           <div className="text-xs text-muted-foreground">方案总数</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-semibold tabular-nums">{data.summary.planCount}</span>
+            <span className="text-2xl font-semibold tabular-nums">{activeSummary.planCount}</span>
             <Badge tone="default">方案</Badge>
           </div>
         </Card>
         <Card>
           <div className="text-xs text-muted-foreground">指标项</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-semibold tabular-nums">{data.summary.metricCount}</span>
+            <span className="text-2xl font-semibold tabular-nums">{activeSummary.metricCount}</span>
             <Badge tone="primary">指标</Badge>
           </div>
         </Card>
         <Card>
           <div className="text-xs text-muted-foreground">落后预警</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-semibold tabular-nums">{data.summary.riskCount}</span>
+            <span className="text-2xl font-semibold tabular-nums">{activeSummary.riskCount}</span>
             <Badge tone="warning">预警</Badge>
           </div>
         </Card>
         <Card>
           <div className="text-xs text-muted-foreground">年中调整版本</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-2xl font-semibold tabular-nums">{data.summary.revisionCount}</span>
+            <span className="text-2xl font-semibold tabular-nums">{activeSummary.revisionCount}</span>
             <Badge tone="info">调整</Badge>
           </div>
         </Card>
       </div>
-
-      {data.plans.length > 0 && (
-        <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">
-          {data.plans.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setActivePlanId(p.id)}
-              className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition ${
-                activePlan?.id === p.id
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {p.ownerType === "DEPARTMENT" ? "部门" : p.ownerName}
-            </button>
-          ))}
-        </div>
-      )}
 
       <div>
         {activePlan ? (
