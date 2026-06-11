@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { loginAsUser } from "@/server/auth/actions";
 import { getCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
-import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/data-scope";
+import { getRoleLabel } from "@/server/permissions/role-labels";
 import { avatarColor } from "@/lib/avatar-color";
 import { Button } from "@/components/ui-kit";
 import { ChevronLeft } from "lucide-react";
@@ -70,7 +70,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <Avatar name={selectedUser.name} />
                 <div className="mt-5 text-xl font-semibold text-foreground">{selectedUser.name}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {getRoleLabel(selectedUser.roleType)} · {getDataScopeLabel(selectedUser)}
+                  {getRoleLabel(selectedUser.roleType)}
                 </div>
 
                 <div className="h-40" />

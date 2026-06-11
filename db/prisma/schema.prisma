@@ -75,6 +75,12 @@ enum NotificationType {
   SYSTEM
 }
 
+enum OrgNodeType {
+  ROOT
+  DEPARTMENT
+  TEAM
+}
+
 model User {
   id              String    @id @default(cuid())
   dingtalkUserId  String?   @unique
@@ -84,6 +90,7 @@ model User {
   avatarUrl       String?
   departmentId    String?
   teamId          String?
+  orgNodeId       String?
   roleType        RoleType  @default(MEMBER)
   title           String?
   joinedAt        DateTime?
@@ -95,31 +102,35 @@ model User {
 
   @@index([departmentId])
   @@index([teamId])
+  @@index([orgNodeId])
   @@index([roleType])
 }
 
-model Department {
-  id             String   @id @default(cuid())
-  dingtalkDeptId String?  @unique
+model OrgNode {
+  id             String      @id @default(cuid())
+  dingtalkDeptId String?     @unique
   name           String
-  managerId      String?
-  description    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  nodeType       OrgNodeType
+  parentId       String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([nodeType])
+  @@index([parentId])
 }
 
-model Team {
-  id             String   @id @default(cuid())
-  dingtalkDeptId String?  @unique
-  departmentId   String
-  name           String
-  leaderId       String?
-  description    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+model OrgClosure {
+  id           String   @id @default(cuid())
+  ancestorId   String
+  descendantId String
+  depth        Int
+  createdAt    DateTime @default(now())
 
-  @@index([departmentId])
-  @@index([leaderId])
+  @@unique([ancestorId, descendantId])
+  @@index([ancestorId])
+  @@index([descendantId])
+  @@index([ancestorId, depth])
+  @@index([descendantId, depth])
 }
 
 model MenuPermission {
@@ -144,23 +155,23 @@ model RoleMenuPermission {
 }
 
 model AnnualGoalPermission {
-  id                     String                     @id @default(cuid())
-  code                   String                     @unique
-  name                   String
-  description            String
-  sortOrder              Int                        @default(0)
-  createdAt              DateTime                   @default(now())
-  updatedAt              DateTime                   @updatedAt
-  roleAnnualPermissions  RoleAnnualGoalPermission[]
+  id                    String                     @id @default(cuid())
+  code                  String                     @unique
+  name                  String
+  description           String
+  sortOrder             Int                        @default(0)
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  roleAnnualPermissions RoleAnnualGoalPermission[]
 }
 
 model RoleAnnualGoalPermission {
-  id                     String               @id @default(cuid())
+  id                     String   @id @default(cuid())
   roleType               RoleType
   annualGoalPermissionId String
-  createdAt              DateTime             @default(now())
+  createdAt              DateTime @default(now())
 
-  annualGoalPermission   AnnualGoalPermission @relation(fields: [annualGoalPermissionId], references: [id])
+  annualGoalPermission AnnualGoalPermission @relation(fields: [annualGoalPermissionId], references: [id])
 
   @@unique([roleType, annualGoalPermissionId])
   @@index([annualGoalPermissionId])
@@ -206,6 +217,7 @@ model AnnualGoalPlan {
   ownerType         AnnualGoalOwnerType
   departmentId      String?
   teamId            String?
+  ownerOrgNodeId    String?
   parentPlanId      String?
   version           Int                 @default(1)
   isActive          Boolean             @default(true)
@@ -220,11 +232,12 @@ model AnnualGoalPlan {
   updatedAt         DateTime            @updatedAt
   deletedAt         DateTime?
 
-  metrics           AnnualGoalMetric[]
+  metrics AnnualGoalMetric[]
 
   @@index([year])
   @@index([ownerType])
   @@index([departmentId, teamId])
+  @@index([ownerOrgNodeId])
   @@index([parentPlanId])
   @@index([isActive])
 }
@@ -278,35 +291,35 @@ model AnnualGoalMetric {
   updatedAt         DateTime                    @updatedAt
   deletedAt         DateTime?
 
-  plan          AnnualGoalPlan         @relation(fields: [planId], references: [id])
-  sourceMetric  AnnualGoalMetricSource? @relation(fields: [sourceMetricId], references: [id])
+  plan          AnnualGoalPlan           @relation(fields: [planId], references: [id])
+  sourceMetric  AnnualGoalMetricSource?  @relation(fields: [sourceMetricId], references: [id])
   sourceMetrics AnnualGoalMetricSource[] @relation("AnnualGoalMetricSources")
 
+  @@unique([planId, sourceMetricId])
   @@index([planId])
   @@index([sourceMetricId])
   @@index([metricCode])
   @@index([riskStatus])
   @@index([responsibleUserId])
-  @@unique([planId, sourceMetricId])
 }
 
 model AnnualGoalQuarterTarget {
-  id             String     @id @default(cuid())
-  metricId       String
-  sourceMetricId String?
-  year           Int
-  quarter        Int
-  targetValue    Float
-  currentValue   Float      @default(0)
-  weeklyIncrement Float     @default(0)
-  startDate      DateTime?
-  endDate        DateTime?
-  riskStatus     RiskStatus @default(NORMAL)
-  adjustedAt     DateTime?
+  id                String     @id @default(cuid())
+  metricId          String
+  sourceMetricId    String?
+  year              Int
+  quarter           Int
+  targetValue       Float
+  currentValue      Float      @default(0)
+  weeklyIncrement   Float      @default(0)
+  startDate         DateTime?
+  endDate           DateTime?
+  riskStatus        RiskStatus @default(NORMAL)
+  adjustedAt        DateTime?
   progressUpdatedAt DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  deletedAt      DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  deletedAt         DateTime?
 
   @@index([metricId])
   @@index([sourceMetricId])
@@ -348,7 +361,7 @@ model AnnualGoalRevisionLog {
 }
 
 model Project {
-  id              String          @id @default(cuid())
+  id              String        @id @default(cuid())
   title           String
   description     String?
   expectedOutcome String?
@@ -357,17 +370,19 @@ model Project {
   ownerId         String
   teamId          String?
   departmentId    String?
-  status          ProjectStatus   @default(NOT_STARTED)
+  orgNodeId       String?
+  status          ProjectStatus @default(NOT_STARTED)
   createdById     String
   completedAt     DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
 
-  quarterlyWorks  QuarterlyWork[]
+  quarterlyWorks QuarterlyWork[]
 
   @@index([ownerId])
   @@index([departmentId, teamId])
+  @@index([orgNodeId])
   @@index([status])
 }
 
@@ -382,6 +397,7 @@ model QuarterlyWork {
   ownerId         String
   teamId          String?
   departmentId    String?
+  orgNodeId       String?
   status          WorkStatus     @default(NOT_STARTED)
   approvalStatus  ApprovalStatus @default(DRAFT)
   expectedOutcome String?
@@ -393,13 +409,14 @@ model QuarterlyWork {
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
 
-  project         Project        @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
 
+  @@unique([projectId, year, quarter])
   @@index([projectId])
   @@index([year, quarter])
   @@index([ownerId])
   @@index([departmentId, teamId])
-  @@unique([projectId, year, quarter])
+  @@index([orgNodeId])
 }
 
 model MonthlyWorkPlan {
@@ -486,6 +503,7 @@ model PersonalKpi {
   quarter        Int
   userId         String
   teamId         String?
+  orgNodeId      String?
   templateId     String?
   status         KpiStatus @default(DRAFT)
   selfScore      Float?
@@ -504,30 +522,31 @@ model PersonalKpi {
   @@index([year, quarter])
   @@index([userId])
   @@index([teamId])
+  @@index([orgNodeId])
 }
 
 model PersonalKpiItem {
-  id                   String   @id @default(cuid())
-  personalKpiId        String
-  sourceTemplateItemId String?
-  relatedAnnualMetricId        String?
-  relatedQuarterTargetId       String?
-  relatedWorkId                String?
-  name                 String
-  description          String?
-  weight               Float
-  target               String?
-  scoringStandard      String?
-  selfScore            Float?
-  leaderScore          Float?
-  managerScore         Float?
-  finalScore           Float?
-  selfComment          String?
-  leaderComment        String?
-  managerComment       String?
-  sortOrder            Int      @default(0)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  personalKpiId          String
+  sourceTemplateItemId   String?
+  relatedAnnualMetricId  String?
+  relatedQuarterTargetId String?
+  relatedWorkId          String?
+  name                   String
+  description            String?
+  weight                 Float
+  target                 String?
+  scoringStandard        String?
+  selfScore              Float?
+  leaderScore            Float?
+  managerScore           Float?
+  finalScore             Float?
+  selfComment            String?
+  leaderComment          String?
+  managerComment         String?
+  sortOrder              Int      @default(0)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   @@index([personalKpiId])
   @@index([relatedAnnualMetricId])

@@ -1,20 +1,52 @@
-import type { RoleType } from "@prisma/client";
+import type { RoleType, AnnualGoalOwnerType, OrgNodeType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { getDataScopeLabel, getRoleLabel, getAnnualPlanWhereByScope, getOwnerWhereByScope, getKpiWhereByScope } from "@/server/permissions/data-scope";
+import { getOwnerWhereByScope, getKpiWhereByScope } from "@/server/permissions/data-scope";
+import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/role-labels";
+import {
+  buildOrgScopeContext,
+  getAnnualGoalCapabilities,
+  getAnnualGoalPermissionMap,
+  getAnnualGoalPlanPermissions,
+  getAnnualGoalPlanWhere,
+} from "@/server/organization/annual-goal-permissions";
 
 type CurrentUser = {
   id: string;
   name: string;
   roleType: RoleType;
-  departmentId: string | null;
-  teamId: string | null;
+  orgNodeId?: string | null;
   title: string | null;
 };
 
+type OrgNodeSummary = {
+  id: string;
+  name: string;
+  nodeType: OrgNodeType;
+  parentId: string | null;
+};
+
+function getPlanOwnerName(
+  plan: { ownerType: AnnualGoalOwnerType; ownerOrgNodeId: string | null },
+  orgNodeById: Map<string, OrgNodeSummary>
+) {
+  if (!plan.ownerOrgNodeId) {
+    return plan.ownerType === "DEPARTMENT" ? "部门" : "小组";
+  }
+
+  return orgNodeById.get(plan.ownerOrgNodeId)?.name ?? (plan.ownerType === "DEPARTMENT" ? "部门" : "小组");
+}
+
 export async function getDashboardData(currentUser: CurrentUser) {
-  const [department, team, todoCount, latestTodos, latestNotifications, activePlans, quarterlyWorks, kpis] = await Promise.all([
-    currentUser.departmentId ? prisma.department.findUnique({ where: { id: currentUser.departmentId } }) : null,
-    currentUser.teamId ? prisma.team.findUnique({ where: { id: currentUser.teamId } }) : null,
+  const annualGoalPermissionMap = await getAnnualGoalPermissionMap();
+  const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
+
+  const [currentOrgNode, todoCount, latestTodos, latestNotifications, activePlans, quarterlyWorks, kpis] = await Promise.all([
+    currentUser.orgNodeId
+      ? prisma.orgNode.findUnique({
+          where: { id: currentUser.orgNodeId },
+          select: { id: true, name: true, nodeType: true, parentId: true },
+        })
+      : null,
     prisma.todoItem.count({ where: { userId: currentUser.id, isDone: false } }),
     prisma.todoItem.findMany({
       where: { userId: currentUser.id, isDone: false },
@@ -27,15 +59,33 @@ export async function getDashboardData(currentUser: CurrentUser) {
       take: 5,
     }),
     prisma.annualGoalPlan.findMany({
-      where: getAnnualPlanWhereByScope(currentUser),
+      where: await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities),
       include: { metrics: { where: { deletedAt: null } } },
-      take: 4,
+      orderBy: [{ ownerType: "asc" }, { year: "desc" }, { createdAt: "desc" }],
     }),
-    prisma.quarterlyWork.findMany({ where: getOwnerWhereByScope(currentUser) }),
-    prisma.personalKpi.findMany({ where: getKpiWhereByScope(currentUser) }),
+    prisma.quarterlyWork.findMany({ where: await getOwnerWhereByScope(currentUser) }),
+    prisma.personalKpi.findMany({ where: await getKpiWhereByScope(currentUser) }),
   ]);
 
-  // === Summary cards ===
+  const relatedOrgNodeIds = Array.from(new Set([
+    ...(currentOrgNode ? [currentOrgNode.id] : []),
+    ...(currentOrgNode?.parentId ? [currentOrgNode.parentId] : []),
+    ...activePlans.map((plan) => plan.ownerOrgNodeId).filter((id): id is string => Boolean(id)),
+  ]));
+  const relatedOrgNodes = relatedOrgNodeIds.length
+    ? await prisma.orgNode.findMany({
+        where: { id: { in: relatedOrgNodeIds } },
+        select: { id: true, name: true, nodeType: true, parentId: true },
+      })
+    : [];
+  const orgNodeById = new Map(relatedOrgNodes.map((node) => [node.id, node]));
+  const currentParentNode = currentOrgNode?.parentId ? orgNodeById.get(currentOrgNode.parentId) ?? null : null;
+
+  const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
+  const visibleAnnualPlans = activePlans.filter((plan) =>
+    getAnnualGoalPlanPermissions(currentUser, annualGoalCapabilities, plan, scopeContext).canViewPlan
+  );
+
   const kpiStatusCounts = kpis.reduce((acc, k) => {
     const s = k.status;
     acc[s] = (acc[s] ?? 0) + 1;
@@ -45,7 +95,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
   const pendingApprovals =
     (kpiStatusCounts.PENDING_LEADER ?? 0) + (kpiStatusCounts.PENDING_MANAGER ?? 0);
 
-  const riskCount = activePlans.reduce(
+  const riskCount = visibleAnnualPlans.reduce(
     (s, p) => s + p.metrics.filter((m) => m.riskStatus === "RISK").length,
     0
   );
@@ -61,27 +111,27 @@ export async function getDashboardData(currentUser: CurrentUser) {
     { title: "风险预警", value: riskCount, tone: "brand" as const, description: riskCount > 0 ? `${riskCount} 项指标有风险` : "全部正常" },
   ];
 
-  // === Annual goals progress ===
-  const annualGoals = activePlans.map((plan) => {
-    const totalWeight = plan.metrics.reduce((s, m) => s + m.weight, 0);
-    const weightedProgress = totalWeight > 0
-      ? Math.round(plan.metrics.reduce((s, m) => {
-          const p = m.targetValue > 0 ? (m.currentValue / m.targetValue) * m.weight : 0;
-          return s + p;
-        }, 0) / totalWeight * 100)
-      : 0;
-    return {
-      id: plan.id,
-      name: plan.name,
-      progress: weightedProgress,
-      owner: plan.ownerType === "DEPARTMENT" ? "产品部" : "小组",
-      tone: (weightedProgress >= 80 ? "success" : weightedProgress >= 60 ? "primary" : weightedProgress >= 30 ? "yellow" : "orange") as "success" | "primary" | "yellow" | "orange",
-      metricCount: plan.metrics.length,
-    };
-  });
+  const annualGoals = visibleAnnualPlans
+    .slice(0, 4)
+    .map((plan) => {
+      const totalWeight = plan.metrics.reduce((s, m) => s + m.weight, 0);
+      const weightedProgress = totalWeight > 0
+        ? Math.round(plan.metrics.reduce((s, m) => {
+            const p = m.targetValue > 0 ? (m.currentValue / m.targetValue) * m.weight : 0;
+            return s + p;
+          }, 0) / totalWeight * 100)
+        : 0;
+      return {
+        id: plan.id,
+        name: plan.name,
+        progress: weightedProgress,
+        owner: getPlanOwnerName(plan, orgNodeById),
+        tone: (weightedProgress >= 80 ? "success" : weightedProgress >= 60 ? "primary" : weightedProgress >= 30 ? "yellow" : "orange") as "success" | "primary" | "yellow" | "orange",
+        metricCount: plan.metrics.length,
+      };
+    });
 
-  // Overall annual goal progress
-  const allMetrics = activePlans.flatMap((p) => p.metrics);
+  const allMetrics = visibleAnnualPlans.flatMap((p) => p.metrics);
   const totalWeight = allMetrics.reduce((s, m) => s + m.weight, 0);
   const overallAnnualProgress = totalWeight > 0
     ? Math.round(allMetrics.reduce((s, m) => {
@@ -97,7 +147,6 @@ export async function getDashboardData(currentUser: CurrentUser) {
     description: `${activePlans.length} 个计划 · ${allMetrics.length} 项指标`,
   };
 
-  // === KPI stage distribution ===
   const kpiStages = [
     { label: "待制定", key: "DRAFT", tone: "default" as const },
     { label: "待审批", key: "PENDING", tone: "warning" as const },
@@ -118,7 +167,6 @@ export async function getDashboardData(currentUser: CurrentUser) {
     return { ...s, count };
   });
 
-  // === Quarterly work stats ===
   const qwCompleted = quarterlyWorks.filter((w) => w.status === "COMPLETED").length;
   const qwInProgress = quarterlyWorks.filter((w) => w.status === "IN_PROGRESS").length;
   const qwDelayed = quarterlyWorks.filter((w) => w.status === "DELAYED_COMPLETED").length;
@@ -127,7 +175,6 @@ export async function getDashboardData(currentUser: CurrentUser) {
     ? Math.round((qwCompleted / quarterlyWorks.length) * 100)
     : 0;
 
-  // === Recent activity ===
   const recentNotifications = await prisma.notification.findMany({
     where: { userId: currentUser.id },
     orderBy: { createdAt: "desc" },
@@ -148,10 +195,14 @@ export async function getDashboardData(currentUser: CurrentUser) {
       id: currentUser.id,
       name: currentUser.name,
       roleLabel: getRoleLabel(currentUser.roleType),
-      dataScopeLabel: getDataScopeLabel(currentUser),
+      dataScopeLabel: getDataScopeLabel(currentUser.roleType),
       title: currentUser.title,
-      departmentName: department?.name ?? "未设置部门",
-      teamName: team?.name ?? "未设置小组",
+      departmentName: currentOrgNode?.nodeType === "TEAM"
+        ? currentParentNode?.name ?? "未设置部门"
+        : currentOrgNode?.name ?? "未设置部门",
+      teamName: currentOrgNode?.nodeType === "TEAM"
+        ? currentOrgNode.name
+        : "未设置小组",
     },
     summaryCards,
     annualGoals,

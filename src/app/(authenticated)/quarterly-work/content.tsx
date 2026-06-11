@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
-import { createProject, createQuarterlyWork, updateProject, updateProjectStatus, updateQuarterlyWork } from "@/server/quarterly-work/actions";
+import { createProject, createQuarterlyWork, updateProject, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { Plus, AlertTriangle, Pencil, X } from "lucide-react";
 
@@ -14,6 +14,7 @@ type ProjectStatus = Props["data"]["projectColumns"][number]["status"];
 type BoardItem = Props["data"]["columns"][number]["items"][number];
 type ProjectBoardItem = Props["data"]["projectColumns"][number]["items"][number];
 type TeamTab = "all" | Props["data"]["teamOptions"][number]["id"];
+type DepartmentTab = Props["data"]["departments"][number]["id"];
 
 type CreateDialogState = {
   status: ColumnStatus;
@@ -73,7 +74,6 @@ function QuarterlyWorkForm({
   data,
   mode,
   status,
-  title,
   item,
   onClose,
   onSuccess,
@@ -81,12 +81,10 @@ function QuarterlyWorkForm({
   data: Props["data"];
   mode: "create" | "edit";
   status: ColumnStatus;
-  title: string;
   item?: BoardItem;
   onClose: () => void;
   onSuccess: FormSuccessHandler;
 }) {
-  const actionLabel = `${title}工作`;
   const memberOptions = useMemo(
     () => data.memberOptions.map((member) => ({
       ...member,
@@ -114,7 +112,6 @@ function QuarterlyWorkForm({
   return (
     <form action={submitAction}>
       {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
-      {mode === "create" ? <input type="hidden" name="status" value={status} /> : null}
       <div className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium">所属项目</label>
@@ -131,12 +128,12 @@ function QuarterlyWorkForm({
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">项目名称 *</label>
+          <label className="mb-1 block text-sm font-medium">季度工作名称 *</label>
           <input
             name="title"
             required
             defaultValue={item?.title ?? ""}
-            placeholder={`请输入${actionLabel}名称`}
+            placeholder="请输入季度工作名称"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </div>
@@ -153,21 +150,6 @@ function QuarterlyWorkForm({
             ))}
           </select>
         </div>
-        {mode === "edit" && (
-          <div>
-            <label className="mb-1 block text-sm font-medium">工作状态 *</label>
-            <select
-              name="status"
-              required
-              defaultValue={item?.status ?? status}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              {statusOptions.map((option) => (
-                <option key={option} value={option}>{columnTitleByStatus[option]}</option>
-              ))}
-            </select>
-          </div>
-        )}
         <div>
           <label className="mb-1 block text-sm font-medium">本季度工作目标 *</label>
           <textarea
@@ -189,6 +171,18 @@ function QuarterlyWorkForm({
             placeholder="请输入项目预期收益"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">季度工作状态</label>
+          <select
+            name="status"
+            defaultValue={item?.status ?? status}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            {statusOptions.map((option) => (
+              <option key={option} value={option}>{columnTitleByStatus[option]}</option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
@@ -327,7 +321,7 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
   );
 }
 
-function ProjectCreateForm({ data, onClose }: { data: Props["data"]; onClose: () => void }) {
+function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data"]; defaultStatus?: ProjectStatus; onClose: () => void }) {
   const memberOptions = useMemo(
     () => data.memberOptions.map((member) => ({
       ...member,
@@ -425,7 +419,7 @@ function ProjectCreateForm({ data, onClose }: { data: Props["data"]; onClose: ()
           <label className="mb-1 block text-sm font-medium">项目状态</label>
           <select
             name="status"
-            defaultValue="NOT_STARTED"
+            defaultValue={defaultStatus ?? "NOT_STARTED"}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {editableProjectStatuses.map((option) => (
@@ -447,12 +441,29 @@ function ProjectCreateForm({ data, onClose }: { data: Props["data"]; onClose: ()
 
 export function QuarterlyWorkContent({ data }: Props) {
   const [tab, setTab] = useState<BoardTab>("project");
+  const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
   const [editDialog, setEditDialog] = useState<EditDialogState>(null);
   const [projectDialog, setProjectDialog] = useState<ProjectDialogState>(null);
-  const [createProjectDialog, setCreateProjectDialog] = useState(false);
+  const [createProjectDialog, setCreateProjectDialog] = useState<ProjectStatus | null>(null);
   const allItems = useMemo(() => data.columns.flatMap((column) => column.items), [data.columns]);
+  const teamDepartmentMap = useMemo(
+    () => new Map(data.teamOptions.map((team) => [team.id, team.departmentId])),
+    [data.teamOptions]
+  );
+  const filteredTeamOptions = useMemo(
+    () => data.teamOptions.filter((team) => team.departmentId === departmentTab),
+    [data.teamOptions, departmentTab]
+  );
+  const teamTabs = useMemo(
+    () => [{ id: "all" as const, name: "全部" }, ...filteredTeamOptions],
+    [filteredTeamOptions]
+  );
+  const belongsToSelectedDepartment = useMemo(
+    () => (teamId: string | null) => Boolean(teamId && teamDepartmentMap.get(teamId) === departmentTab),
+    [departmentTab, teamDepartmentMap]
+  );
   const handleFormSuccess = (ownerTeamId: Props["data"]["memberOptions"][number]["teamId"] | null) => {
     if (teamTab !== "all" && ownerTeamId !== teamTab) {
       setTeamTab("all");
@@ -461,26 +472,30 @@ export function QuarterlyWorkContent({ data }: Props) {
   const visibleColumns = useMemo(
     () => data.columns.map((column) => ({
       ...column,
-      items: teamTab === "all" ? column.items : column.items.filter((item) => item.teamId === teamTab),
+      items: column.items.filter((item) => {
+        if (!belongsToSelectedDepartment(item.teamId)) return false;
+        return teamTab === "all" ? true : item.teamId === teamTab;
+      }),
     })),
-    [data.columns, teamTab]
+    [data.columns, belongsToSelectedDepartment, teamTab]
   );
   const visibleProjectColumns = useMemo(
     () => data.projectColumns.map((column) => ({
       ...column,
-      items: teamTab === "all" ? column.items : column.items.filter((item) => item.teamId === teamTab),
+      items: column.items.filter((item) => {
+        if (!belongsToSelectedDepartment(item.teamId)) return false;
+        return teamTab === "all" ? true : item.teamId === teamTab;
+      }),
     })),
-    [data.projectColumns, teamTab]
+    [data.projectColumns, belongsToSelectedDepartment, teamTab]
   );
   const visibleReminders = useMemo(
-    () => teamTab === "all"
-      ? data.updateReminders
-      : data.updateReminders.filter((reminder) => allItems.find((item) => item.id === reminder.id)?.teamId === teamTab),
-    [allItems, data.updateReminders, teamTab]
-  );
-  const teamTabs = useMemo(
-    () => [{ id: "all" as const, name: "全部" }, ...data.teamOptions],
-    [data.teamOptions]
+    () => data.updateReminders.filter((reminder) => {
+      const teamId = allItems.find((item) => item.id === reminder.id)?.teamId ?? null;
+      if (!belongsToSelectedDepartment(teamId)) return false;
+      return teamTab === "all" ? true : teamId === teamTab;
+    }),
+    [allItems, data.updateReminders, belongsToSelectedDepartment, teamTab]
   );
 
   return (
@@ -492,7 +507,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           data.canCreate
             ? (
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setCreateProjectDialog(true)}><Plus className="w-4 h-4" />新增项目</Button>
+                <Button variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="w-4 h-4" />新增项目</Button>
                 <Button onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="w-4 h-4" />新增季度工作</Button>
               </div>
             )
@@ -500,7 +515,23 @@ export function QuarterlyWorkContent({ data }: Props) {
         }
       />
 
-      <div className="mb-4 rounded-xl bg-card border border-border p-5 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {data.departments.map((department) => (
+          <button
+            key={department.id}
+            type="button"
+            onClick={() => {
+              setDepartmentTab(department.id);
+              setTeamTab("all");
+            }}
+            className={`rounded-lg px-4 py-2 text-sm transition ${departmentTab === department.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+          >
+            {department.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-4 rounded-xl bg-card p-5 shadow-sm">
         <div className="inline-flex rounded-lg bg-muted p-1">
           {[
             { k: "project" as const, label: "项目看板" },
@@ -526,7 +557,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                 key={team.id}
                 type="button"
                 onClick={() => setTeamTab(team.id)}
-                className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "border border-border bg-card hover:bg-muted"}`}
+                className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
               >
                 {team.name}
               </button>
@@ -551,6 +582,15 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <Badge tone={column.tone}>{column.title}</Badge>
                   <span className="text-xs text-muted-foreground">{column.items.length}</span>
                 </div>
+                {data.canCreate && (
+                  <button
+                    type="button"
+                    onClick={() => setCreateProjectDialog(column.status)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    + 添加
+                  </button>
+                )}
               </div>
               <div className="space-y-2">
                 {column.items.length ? (
@@ -688,13 +728,12 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
       )}
 
-      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title={createDialog ? `新增${createDialog.title}工作` : "新增季度工作"}>
+      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增季度工作">
         {createDialog && (
           <QuarterlyWorkForm
             data={data}
             mode="create"
             status={createDialog.status}
-            title={createDialog.title}
             onClose={() => setCreateDialog(null)}
             onSuccess={handleFormSuccess}
           />
@@ -707,7 +746,6 @@ export function QuarterlyWorkContent({ data }: Props) {
             data={data}
             mode="edit"
             status={editDialog.item.status}
-            title={editDialog.title}
             item={editDialog.item}
             onClose={() => setEditDialog(null)}
             onSuccess={handleFormSuccess}
@@ -725,11 +763,14 @@ export function QuarterlyWorkContent({ data }: Props) {
         )}
       </Dialog>
 
-      <Dialog open={createProjectDialog} onClose={() => setCreateProjectDialog(false)} title="新增项目">
-        <ProjectCreateForm
-          data={data}
-          onClose={() => setCreateProjectDialog(false)}
-        />
+      <Dialog open={!!createProjectDialog} onClose={() => setCreateProjectDialog(null)} title="新增项目">
+        {createProjectDialog && (
+          <ProjectCreateForm
+            data={data}
+            defaultStatus={createProjectDialog}
+            onClose={() => setCreateProjectDialog(null)}
+          />
+        )}
       </Dialog>
     </>
   );

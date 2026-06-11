@@ -42,6 +42,7 @@ export function AppShell({ children, user, allowedMenus }: { children: ReactNode
   const allowedPaths = allowedMenus ? new Set(allowedMenus.map((m) => m.path)) : null;
   const visibleMenu = allowedPaths ? menu.filter((m) => allowedPaths.has(m.to)) : menu;
   const current = visibleMenu.find((m) => pathname.startsWith(m.to));
+  const title = current?.label ?? visibleMenu[0]?.label ?? "工作台";
 
   return (
     <div className="h-screen overflow-hidden bg-background">
@@ -81,7 +82,7 @@ export function AppShell({ children, user, allowedMenus }: { children: ReactNode
       {/* Main */}
       <div className="flex h-full min-w-0 flex-col md:pl-60">
         <header className="fixed left-0 right-0 top-0 z-30 h-16 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 flex items-center px-6 gap-4 md:left-60 shadow-sm">
-          <h1 className="text-base font-semibold text-foreground">{current?.label ?? "工作台"}</h1>
+          <h1 className="text-base font-semibold text-foreground">{title}</h1>
           <div className="ml-6 max-w-md">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

@@ -25,7 +25,7 @@ export default async function ValueTrackingPage() {
   const currentUser = await requireCurrentUser();
 
   const tracks = await prisma.requirementValueTrack.findMany({
-    where: getOwnerWhereByScope(currentUser),
+    where: await getOwnerWhereByScope(currentUser),
     orderBy: { createdAt: "desc" },
   });
 

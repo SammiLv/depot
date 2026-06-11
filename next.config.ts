@@ -6,7 +6,7 @@ const devAllowedOrigins = process.env.DEV_ALLOWED_ORIGINS
   .filter(Boolean) ?? [];
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["*.trycloudflare.com", ...devAllowedOrigins],
+  allowedDevOrigins: ["depot.rj-info.com", "*.trycloudflare.com", ...devAllowedOrigins],
   async redirects() {
     return [
       { source: "/settings/users", destination: "/organization", permanent: true },

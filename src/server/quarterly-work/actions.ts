@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { getOwnerWhereByScope } from "@/server/permissions/data-scope";
+import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { ProjectStatus, WorkStatus } from "@prisma/client";
 
 const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
@@ -70,20 +71,24 @@ function getProjectCompletedAtByStatus(status: ProjectStatus) {
 }
 
 async function findEditableOwner(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, ownerId: string) {
+  const ownerOrgScopeIds = currentUser.roleType === "ADMIN"
+    ? null
+    : currentUser.orgNodeId
+      ? await getDescendantOrgNodeIds(currentUser.orgNodeId)
+      : [];
+
   const owner = await prisma.user.findFirst({
     where: {
       id: ownerId,
       isActive: true,
       deletedAt: null,
-      ...(currentUser.roleType === "ADMIN"
+      ...(ownerOrgScopeIds === null
         ? {}
-        : currentUser.roleType === "DEPARTMENT_MANAGER"
-          ? { departmentId: currentUser.departmentId }
-          : currentUser.teamId
-            ? { teamId: currentUser.teamId }
-            : { id: currentUser.id }),
+        : ownerOrgScopeIds.length > 0
+          ? { orgNodeId: { in: ownerOrgScopeIds } }
+          : { id: currentUser.id }),
     },
-    select: { id: true, departmentId: true, teamId: true },
+    select: { id: true, orgNodeId: true },
   });
 
   if (!owner) throw new Error("负责人不在当前可维护范围内");
@@ -94,7 +99,7 @@ async function findEditableProject(currentUser: Awaited<ReturnType<typeof requir
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      ...getOwnerWhereByScope(currentUser),
+      ...(await getOwnerWhereByScope(currentUser)),
     },
     select: {
       id: true,
@@ -130,8 +135,7 @@ async function ensureProjectForWork(params: {
       description: params.description,
       expectedOutcome: params.expectedOutcome,
       ownerId: params.owner.id,
-      teamId: params.owner.teamId,
-      departmentId: params.owner.departmentId,
+      orgNodeId: params.owner.orgNodeId,
       status: projectStatus,
       createdById: params.currentUser.id,
       completedAt: getProjectCompletedAtByStatus(projectStatus),
@@ -184,8 +188,7 @@ export async function createQuarterlyWork(formData: FormData) {
       expectedOutcome,
       status,
       ownerId: owner.id,
-      departmentId: owner.departmentId,
-      teamId: owner.teamId,
+      orgNodeId: owner.orgNodeId,
       createdById: currentUser.id,
       completedAt: getCompletedAtByStatus(status),
     },
@@ -208,7 +211,7 @@ export async function updateQuarterlyWork(formData: FormData) {
   const existingWork = await prisma.quarterlyWork.findFirst({
     where: {
       id: workId,
-      ...getOwnerWhereByScope(currentUser),
+      ...(await getOwnerWhereByScope(currentUser)),
     },
     select: { id: true, status: true, projectId: true },
   });
@@ -228,8 +231,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       expectedOutcome,
       status,
       ownerId: owner.id,
-      departmentId: owner.departmentId,
-      teamId: owner.teamId,
+      orgNodeId: owner.orgNodeId,
       completedAt: getCompletedAtByStatus(status),
     },
   });
@@ -247,7 +249,7 @@ export async function updateProjectStatus(formData: FormData) {
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      ...getOwnerWhereByScope(currentUser),
+      ...(await getOwnerWhereByScope(currentUser)),
     },
     select: { id: true },
   });
@@ -296,8 +298,7 @@ export async function createProject(formData: FormData) {
       startQuarter,
       endQuarter,
       ownerId: owner.id,
-      teamId: owner.teamId,
-      departmentId: owner.departmentId,
+      orgNodeId: owner.orgNodeId,
       status,
       createdById: currentUser.id,
       completedAt: getProjectCompletedAtByStatus(status),
@@ -319,7 +320,7 @@ export async function updateProject(formData: FormData) {
   const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
 
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...getOwnerWhereByScope(currentUser) },
+    where: { id: projectId, ...(await getOwnerWhereByScope(currentUser)) },
     select: { id: true },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
@@ -337,8 +338,7 @@ export async function updateProject(formData: FormData) {
         endQuarter,
         status,
         ownerId: owner.id,
-        teamId: owner.teamId,
-        departmentId: owner.departmentId,
+        orgNodeId: owner.orgNodeId,
         completedAt: getProjectCompletedAtByStatus(status),
       },
     });

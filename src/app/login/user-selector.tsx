@@ -5,7 +5,7 @@ import { Check } from "lucide-react";
 import { avatarColor } from "@/lib/avatar-color";
 import { Button } from "@/components/ui-kit";
 import { selectLoginUser } from "@/server/auth/actions";
-import { getRoleLabel, getDataScopeLabel } from "@/server/permissions/data-scope";
+import { getRoleLabel } from "@/server/permissions/role-labels";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -14,8 +14,6 @@ type LoginUser = {
   name: string;
   roleType: RoleType;
   title: string | null;
-  departmentId: string | null;
-  teamId: string | null;
 };
 
 function Avatar({ name, size = "small" }: { name: string; size?: "small" | "large" }) {
@@ -27,51 +25,50 @@ function Avatar({ name, size = "small" }: { name: string; size?: "small" | "larg
 }
 
 export function UserSelector({ users }: { users: LoginUser[] }) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedUserId, setSelectedUserId] = useState(users[0]?.id ?? "");
 
   return (
     <div className="pt-6">
       <div className="text-center text-base font-semibold mb-1">选择身份</div>
       <div className="text-center text-xs text-muted-foreground mb-5">
-        MVP 演示用，按角色自动应用数据范围
+        MVP 演示用，请选择登录身份
       </div>
 
       <form action={selectLoginUser}>
+        <input type="hidden" name="userId" value={selectedUserId} />
         <div className="grid gap-2 max-h-[420px] overflow-y-auto pr-1">
-          {users.map((user, index) => (
-            <label
-              key={user.id}
-              onClick={() => setSelectedIndex(index)}
-              className={`flex cursor-pointer items-center gap-3 p-3 rounded-xl border transition-all text-left ${
-                index === selectedIndex
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/40"
-              }`}
-            >
-              <input
-                className="sr-only"
-                type="radio"
-                name="userId"
-                value={user.id}
-                defaultChecked={index === 0}
-              />
-              <Avatar name={user.name} size="small" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">
-                  {user.name}{" "}
-                  <span className="text-xs text-muted-foreground font-normal">· {user.title}</span>
+          {users.map((user) => {
+            const selected = user.id === selectedUserId;
+            return (
+              <button
+                key={user.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setSelectedUserId(user.id)}
+                className={`flex w-full cursor-pointer items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+                  selected
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/40"
+                }`}
+              >
+                <Avatar name={user.name} size="small" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">
+                    {user.name}{" "}
+                    <span className="text-xs text-muted-foreground font-normal">· {user.title}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {getRoleLabel(user.roleType)}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  {getRoleLabel(user.roleType)} · {getDataScopeLabel(user)}
-                </div>
-              </div>
-              {index === selectedIndex && <Check className="w-4 h-4 text-primary" />}
-            </label>
-          ))}
+                {selected && <Check className="w-4 h-4 text-primary" />}
+              </button>
+            );
+          })}
         </div>
 
         <div className="mt-8">
-          <Button type="submit" variant="primary" size="lg" className="w-full">
+          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!selectedUserId}>
             下一步
           </Button>
         </div>

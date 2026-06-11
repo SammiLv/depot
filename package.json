@@ -13,9 +13,9 @@
     "start:office": "HOSTNAME=0.0.0.0 PORT=80 APP_URL=http://depot.rj-info.com next start -H 0.0.0.0 -p 80",
     "start:home": "HOSTNAME=0.0.0.0 PORT=3000 APP_URL=http://localhost:3000 next start -H 0.0.0.0 -p 3000",
     "lint": "eslint",
-    "prisma:generate": "prisma generate --config db/prisma.config.ts",
-    "prisma:migrate": "prisma migrate dev --config db/prisma.config.ts",
-    "prisma:studio": "prisma studio --config db/prisma.config.ts",
+    "prisma:generate": "prisma generate --schema db/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema db/prisma/schema.prisma",
+    "prisma:studio": "prisma studio --schema db/prisma/schema.prisma",
     "seed": "tsx db/prisma/seed.ts"
   },
   "dependencies": {

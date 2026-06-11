@@ -1,126 +1,135 @@
 import type { RoleType } from "@prisma/client";
 import type { AnnualGoalCapabilities } from "@/server/organization/annual-goal-permissions";
+import { prisma } from "@/server/db/prisma";
+import { getDescendantOrgNodeIds, getDescendantTeamIds } from "@/server/organization/org-tree-utils";
 
 type DataScopeInput = {
   id: string;
   roleType: RoleType;
-  departmentId: string | null;
-  teamId: string | null;
+  orgNodeId?: string | null;
 };
 
-export function getRoleLabel(roleType: RoleType) {
-  const labels: Record<RoleType, string> = {
-    ADMIN: "初始管理员",
-    DEPARTMENT_MANAGER: "部门主管",
-    TEAM_LEADER: "组长",
-    MEMBER: "普通成员",
-  };
+// ---- Where builders ----
 
-  return labels[roleType];
-}
-
-export function getDataScopeLabel(user: DataScopeInput) {
-  const labels: Record<RoleType, string> = {
-    ADMIN: "全部数据",
-    DEPARTMENT_MANAGER: "产品部全部数据",
-    TEAM_LEADER: "本组数据",
-    MEMBER: "本人数据",
-  };
-
-  return labels[user.roleType];
-}
-
-export function getUserWhereByScope(user: DataScopeInput) {
+export async function getUserWhereByScope(user: DataScopeInput) {
   if (user.roleType === "ADMIN") {
     return { deletedAt: null };
   }
 
-  if (user.roleType === "DEPARTMENT_MANAGER" && user.departmentId) {
-    return { departmentId: user.departmentId, deletedAt: null };
-  }
-
-  if (user.roleType === "TEAM_LEADER" && user.teamId) {
-    return { teamId: user.teamId, deletedAt: null };
+  if (user.roleType === "DEPARTMENT_MANAGER" || user.roleType === "TEAM_LEADER") {
+    if (!user.orgNodeId) {
+      return { id: "__no_user__", deletedAt: null };
+    }
+    const ids = await getDescendantOrgNodeIds(user.orgNodeId);
+    if (ids.length === 0) return { id: "__no_user__", deletedAt: null };
+    return { orgNodeId: { in: ids }, deletedAt: null };
   }
 
   return { id: user.id, deletedAt: null };
 }
 
-export function getTeamWhereByScope(user: DataScopeInput) {
+export async function getTeamWhereByScope(user: DataScopeInput) {
   if (user.roleType === "ADMIN") {
     return {};
   }
 
-  if (user.roleType === "DEPARTMENT_MANAGER" && user.departmentId) {
-    return { departmentId: user.departmentId };
+  if (!user.orgNodeId || (user.roleType !== "DEPARTMENT_MANAGER" && user.roleType !== "TEAM_LEADER")) {
+    return { id: "__no_team__" };
   }
 
-  if (user.teamId) {
-    return { id: user.teamId };
+  const teamIds = await getDescendantTeamIds(user.orgNodeId);
+  if (teamIds.length === 0) {
+    return { id: "__no_team__" };
   }
 
-  return { id: "__no_team__" };
+  return {
+    id: { in: teamIds },
+  };
 }
 
-export function getAnnualPlanWhereByScope(
+export async function getAnnualPlanWhereByScope(
   user: DataScopeInput,
-  capabilities?: Pick<AnnualGoalCapabilities, "canViewDepartmentPlans">
+  capabilities?: Pick<AnnualGoalCapabilities, "canViewDepartmentPlans">,
 ) {
   if (user.roleType === "ADMIN") {
     return { deletedAt: null };
   }
 
-  if (user.roleType === "DEPARTMENT_MANAGER" && user.departmentId) {
-    return { departmentId: user.departmentId, deletedAt: null };
+  if (!user.orgNodeId) {
+    return { id: "__no_annual_plan__", deletedAt: null };
   }
 
-  if (user.teamId) {
-    const canViewDepartmentPlans = capabilities?.canViewDepartmentPlans ?? false;
+  if (user.roleType === "DEPARTMENT_MANAGER") {
+    const ids = await getDescendantOrgNodeIds(user.orgNodeId);
+    return ids.length > 0
+      ? { ownerOrgNodeId: { in: ids }, deletedAt: null }
+      : { id: "__no_annual_plan__", deletedAt: null };
+  }
 
-    if (canViewDepartmentPlans && user.departmentId) {
-      return {
-        departmentId: user.departmentId,
-        deletedAt: null,
-      };
+  const canViewDepartmentPlans = capabilities?.canViewDepartmentPlans ?? false;
+
+  if (canViewDepartmentPlans) {
+    const ancestorRows = await prisma.orgClosure.findMany({
+      where: { descendantId: user.orgNodeId },
+      orderBy: { depth: "desc" },
+      select: { ancestorId: true },
+    });
+    const ancestorIds = ancestorRows.map((r) => r.ancestorId);
+    let scopeId = user.orgNodeId;
+    if (ancestorIds.length > 0) {
+      const deptNodes = await prisma.orgNode.findMany({
+        where: { id: { in: ancestorIds }, nodeType: "DEPARTMENT" },
+        select: { id: true },
+      });
+      const deptIdSet = new Set(deptNodes.map((n) => n.id));
+      const nearestDept = ancestorRows.find((r) => deptIdSet.has(r.ancestorId));
+      if (nearestDept) scopeId = nearestDept.ancestorId;
     }
-
-    return { teamId: user.teamId, deletedAt: null };
+    const ids = await getDescendantOrgNodeIds(scopeId);
+    return ids.length > 0
+      ? { ownerOrgNodeId: { in: ids }, deletedAt: null }
+      : { id: "__no_annual_plan__", deletedAt: null };
   }
 
-  return { id: "__no_annual_plan__", deletedAt: null };
+  const ids = await getDescendantOrgNodeIds(user.orgNodeId);
+  return ids.length > 0
+    ? { ownerOrgNodeId: { in: ids }, deletedAt: null }
+    : { id: "__no_annual_plan__", deletedAt: null };
 }
 
-export function getOwnerWhereByScope(user: DataScopeInput) {
+export async function getOwnerWhereByScope(user: DataScopeInput) {
   if (user.roleType === "ADMIN") {
     return { deletedAt: null };
   }
 
-  if (user.roleType === "DEPARTMENT_MANAGER" && user.departmentId) {
-    return { departmentId: user.departmentId, deletedAt: null };
-  }
-
-  if (user.roleType === "TEAM_LEADER" && user.teamId) {
-    return { teamId: user.teamId, deletedAt: null };
-  }
-
-  if (user.teamId) {
-    return { teamId: user.teamId, deletedAt: null };
+  if (user.roleType === "DEPARTMENT_MANAGER" || user.roleType === "TEAM_LEADER") {
+    if (!user.orgNodeId) {
+      return { ownerId: "__no_owner__", deletedAt: null };
+    }
+    const ids = await getDescendantOrgNodeIds(user.orgNodeId);
+    if (ids.length === 0) return { ownerId: "__no_owner__", deletedAt: null };
+    return { orgNodeId: { in: ids }, deletedAt: null };
   }
 
   return { ownerId: user.id, deletedAt: null };
 }
 
-export function getKpiWhereByScope(user: DataScopeInput) {
+export async function getKpiWhereByScope(user: DataScopeInput) {
   if (user.roleType === "ADMIN") {
     return { deletedAt: null };
   }
 
   if (user.roleType === "DEPARTMENT_MANAGER") {
-    return { deletedAt: null };
+    if (!user.orgNodeId) return { id: "__no_kpi__", deletedAt: null };
+    const ids = await getDescendantOrgNodeIds(user.orgNodeId);
+    return ids.length > 0
+      ? { orgNodeId: { in: ids }, deletedAt: null }
+      : { id: "__no_kpi__", deletedAt: null };
   }
 
-  if (user.roleType === "TEAM_LEADER" && user.teamId) {
-    return { teamId: user.teamId, deletedAt: null };
+  if (user.roleType === "TEAM_LEADER") {
+    if (!user.orgNodeId) return { id: "__no_kpi__", deletedAt: null };
+    return { orgNodeId: user.orgNodeId, deletedAt: null };
   }
 
   return { userId: user.id, deletedAt: null };

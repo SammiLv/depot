@@ -14,6 +14,7 @@ type OrgUser = {
   email: string | null;
   mobile: string | null;
   roleType: RoleType;
+  departmentId: string | null;
   teamId: string | null;
   title: string | null;
   isActive: boolean;
@@ -21,6 +22,7 @@ type OrgUser = {
 
 type OrgTeam = {
   id: string;
+  departmentId: string;
   name: string;
   leaderId: string | null;
   description: string | null;
@@ -52,6 +54,7 @@ type Props = {
   users: OrgUser[];
   teams: OrgTeam[];
   teamData: { teamId: string; count: number; leaderName?: string }[];
+  departments: OrgDepartment[];
   department: OrgDepartment | null;
   menus: OrgMenu[];
   roleMenuPermissions: { roleType: RoleType; menuPermissionId: string }[];
@@ -207,6 +210,7 @@ export function OrgContent({
   users,
   teams,
   teamData,
+  departments,
   department,
   menus,
   roleMenuPermissions,
@@ -228,10 +232,14 @@ export function OrgContent({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">("organization");
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState(departments[0]?.id ?? department?.id ?? "");
   const draftRoleMenuKeyString = [...draftRoleMenuKeys].sort().join("|");
   const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
   const draftAnnualGoalPermissionKeyString = [...draftAnnualGoalPermissionKeys].sort().join("|");
   const hasAnnualGoalPermissionChanges = draftAnnualGoalPermissionKeyString !== initialAnnualGoalPermissionKeyString;
+  const visibleTeams = teams.filter((team) => team.departmentId === selectedDepartmentId);
+  const visibleUsers = users.filter((user) => user.departmentId === selectedDepartmentId);
+  const selectedDepartment = departments.find((item) => item.id === selectedDepartmentId) ?? department;
 
   function toggleDraftPermission(roleType: RoleType, menu: OrgMenu) {
     if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) return;
@@ -288,7 +296,7 @@ export function OrgContent({
     <>
       <PageHeader
         title="组织与权限"
-        description="部门、小组、成员、角色与菜单/数据权限"
+        description="部门、小组、成员、角色与页面权限管理"
         action={
           canManageUsers && tab === "organization" && (
             <div className="flex gap-2">
@@ -328,8 +336,27 @@ export function OrgContent({
 
       {tab === "organization" ? (
         <>
+          <div className="mb-4 rounded-xl bg-card border border-border p-4 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              {departments.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setSelectedDepartmentId(item.id)}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    selectedDepartmentId === item.id
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border bg-background text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {item.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-            {teams.map((team, i) => {
+            {visibleTeams.map((team, i) => {
               const info = countMap.get(team.id);
               const tone = toneCycle[i % toneCycle.length];
               return (
@@ -361,7 +388,7 @@ export function OrgContent({
           <Card className="!p-0 overflow-hidden">
             <div className="px-5 py-3 border-b border-border flex items-center justify-between">
               <h3 className="font-semibold flex items-center gap-2"><Users className="w-4 h-4" />成员列表</h3>
-              <span className="text-xs text-muted-foreground">共 {users.length} 人</span>
+              <span className="text-xs text-muted-foreground">共 {visibleUsers.length} 人</span>
             </div>
             <table className="w-full">
               <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
@@ -374,7 +401,7 @@ export function OrgContent({
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => {
+                {visibleUsers.map((u) => {
                   const teamName = u.teamId ? teams.find((t) => t.id === u.teamId)?.name : null;
                   return (
                     <tr key={u.id} className="border-t border-border hover:bg-muted/30 transition">
@@ -406,13 +433,13 @@ export function OrgContent({
         <Card>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 flex-1">
-              <h3 className="font-semibold mb-3">数据权限与部门主管</h3>
+              <h3 className="font-semibold mb-3">角色说明</h3>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 {[
-                  { r: "初始管理员", d: "全部数据，不受范围限制", tone: "brand" as const },
-                  { r: "部门主管", d: `${department?.name ?? "本部门"}全量数据`, tone: "primary" as const },
-                  { r: "组长", d: "本组成员及汇总数据", tone: "info" as const },
-                  { r: "普通成员", d: "仅本人数据", tone: "default" as const },
+                  { r: "初始管理员", d: "可配置组织、菜单与页面权限", tone: "brand" as const },
+                  { r: "部门主管", d: `${department?.name ?? "本部门"}负责人角色，可按页面单独授权`, tone: "primary" as const },
+                  { r: "组长", d: "小组负责人角色，可按页面单独授权", tone: "info" as const },
+                  { r: "普通成员", d: "普通成员角色，可按页面单独授权", tone: "default" as const },
                 ].map((r) => (
                   <div key={r.r} className="inline-flex items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5">
                     <Badge tone={r.tone}>{r.r}</Badge>
@@ -555,11 +582,11 @@ export function OrgContent({
 
       {/* ── Dialogs ── */}
       <Dialog open={dialog?.type === "user"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑成员" : "新增成员"}>
-        <UserForm user={dialog?.data as OrgUser | undefined} teams={teams} departmentId={department?.id ?? ""} roleOptionsForForm={manageableRoleOptions} onClose={() => setDialog(null)} />
+        <UserForm user={dialog?.data as OrgUser | undefined} teams={visibleTeams} departmentId={selectedDepartmentId} roleOptionsForForm={manageableRoleOptions} onClose={() => setDialog(null)} />
       </Dialog>
 
       <Dialog open={dialog?.type === "team"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑小组" : "新增小组"}>
-        <TeamForm team={dialog?.data as OrgTeam | undefined} users={users} departmentId={department?.id ?? ""} onClose={() => setDialog(null)} />
+        <TeamForm team={dialog?.data as OrgTeam | undefined} users={visibleUsers} departmentId={selectedDepartmentId} onClose={() => setDialog(null)} />
       </Dialog>
 
       <Dialog open={dialog?.type === "deleteUser"} onClose={() => setDialog(null)} title="删除成员">

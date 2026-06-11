@@ -5,9 +5,10 @@ import type { RoleType } from "@prisma/client";
 type DataScopeInput = {
   id: string;
   roleType: RoleType;
-  departmentId: string | null;
-  teamId: string | null;
+  orgNodeId?: string | null;
 };
+
+
 
 const stageLabels: Record<string, string> = {
   DRAFT: "待制定",
@@ -31,7 +32,7 @@ const stageOrder = [
 ];
 
 export async function getKpiData(currentUser: DataScopeInput) {
-  const where = getKpiWhereByScope(currentUser);
+  const where = await getKpiWhereByScope(currentUser);
 
   const kpis = await prisma.personalKpi.findMany({
     where,
@@ -54,14 +55,14 @@ export async function getKpiData(currentUser: DataScopeInput) {
   const userIds = [...new Set(kpis.map((k) => k.userId))];
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: { id: true, name: true, teamId: true },
+    select: { id: true, name: true, orgNodeId: true },
   });
   const userMap = new Map(users.map((u) => [u.id, u]));
-  const teamIds = [...new Set(kpis.map((k) => k.teamId).filter(Boolean))];
-  const teams = teamIds.length
-    ? await prisma.team.findMany({ where: { id: { in: teamIds as string[] } }, select: { id: true, name: true } })
+  const teamOrgNodeIds = [...new Set(users.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId?.startsWith("org_team_"))))];
+  const teamNodes = teamOrgNodeIds.length
+    ? await prisma.orgNode.findMany({ where: { id: { in: teamOrgNodeIds } }, select: { id: true, name: true } })
     : [];
-  const teamMap = new Map(teams.map((t) => [t.id, t.name]));
+  const teamMap = new Map(teamNodes.map((team) => [team.id, team.name]));
 
   // Stage counts
   const stageCounts: Record<string, number> = {};
@@ -86,7 +87,7 @@ export async function getKpiData(currentUser: DataScopeInput) {
     return {
       id: k.id,
       userName: user?.name ?? "—",
-      teamName: user?.teamId ? teamMap.get(user.teamId) : "—",
+      teamName: user?.orgNodeId?.startsWith("org_team_") ? teamMap.get(user.orgNodeId) ?? "—" : "—",
       status: stageLabels[k.status] ?? k.status,
       tone,
       score: k.finalScore?.toString() ?? "—",

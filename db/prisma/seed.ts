@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualGoalOwnerType, AnnualMetricCalculationType, ApprovalStatus, PrismaClient, RoleType } from "@prisma/client";
 import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
@@ -7,46 +8,188 @@ const databaseUrl = process.env.DATABASE_URL === "file:./dev.db" ? "file:./db/de
 const adapter = new PrismaBetterSqlite3({ url: databaseUrl ?? "file:./db/dev.db" });
 const prisma = new PrismaClient({ adapter });
 
-async function main() {
-  const department = await prisma.department.upsert({
-    where: { dingtalkDeptId: "product-dept" },
-    update: {},
-    create: {
-      dingtalkDeptId: "product-dept",
-      name: "产品部",
-      description: "部门内部管理网站 MVP 试点部门",
-    },
+type OrgNodeSeed = {
+  id: string;
+  name: string;
+  nodeType: "ROOT" | "DEPARTMENT" | "TEAM";
+  parentId: string | null;
+  dingtalkDeptId?: string | null;
+};
+
+async function rebuildOrgTree(nodes: OrgNodeSeed[]) {
+  await prisma.orgClosure.deleteMany();
+  await prisma.orgNode.deleteMany();
+
+  for (const node of nodes) {
+    await prisma.orgNode.create({
+      data: {
+        id: node.id,
+        name: node.name,
+        nodeType: node.nodeType,
+        parentId: node.parentId,
+        dingtalkDeptId: node.dingtalkDeptId ?? null,
+      },
+    });
+  }
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+  for (const node of nodes) {
+    const ancestors: string[] = [];
+    let currentId: string | null = node.id;
+    let depth = 0;
+
+    while (currentId) {
+      ancestors.push(currentId);
+      currentId = nodeById.get(currentId)?.parentId ?? null;
+    }
+
+    for (let i = 0; i < ancestors.length; i += 1) {
+      await prisma.orgClosure.create({
+        data: {
+          id: randomUUID(),
+          ancestorId: ancestors[i],
+          descendantId: node.id,
+          depth: ancestors.length - i - 1,
+        },
+      });
+    }
+  }
+}
+
+async function syncLegacyOrgReferences(rootNodeId: string) {
+  await prisma.user.updateMany({
+    where: { roleType: RoleType.ADMIN },
+    data: { orgNodeId: rootNodeId },
   });
 
-  const teamNames = ["采购组", "B端组", "C端组", "设计组"];
+  await prisma.user.updateMany({
+    where: { roleType: { not: RoleType.ADMIN }, teamId: { not: null } },
+    data: {},
+  });
+
+  const teamUsers = await prisma.user.findMany({
+    where: { roleType: { not: RoleType.ADMIN }, teamId: { not: null } },
+    select: { id: true, teamId: true },
+  });
+  for (const user of teamUsers) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orgNodeId: `org_team_${user.teamId}` },
+    });
+  }
+
+  const departmentUsers = await prisma.user.findMany({
+    where: { roleType: { not: RoleType.ADMIN }, teamId: null, departmentId: { not: null } },
+    select: { id: true, departmentId: true },
+  });
+  for (const user of departmentUsers) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { orgNodeId: `org_dept_${user.departmentId}` },
+    });
+  }
+
+  const annualGoalPlans = await prisma.annualGoalPlan.findMany({
+    select: { id: true, ownerType: true, departmentId: true, teamId: true },
+  });
+  for (const plan of annualGoalPlans) {
+    await prisma.annualGoalPlan.update({
+      where: { id: plan.id },
+      data: {
+        ownerOrgNodeId: plan.ownerType === AnnualGoalOwnerType.TEAM && plan.teamId
+          ? `org_team_${plan.teamId}`
+          : plan.departmentId
+            ? `org_dept_${plan.departmentId}`
+            : null,
+      },
+    });
+  }
+
+  const projects = await prisma.project.findMany({
+    select: { id: true, departmentId: true, teamId: true },
+  });
+  for (const project of projects) {
+    await prisma.project.update({
+      where: { id: project.id },
+      data: {
+        orgNodeId: project.teamId
+          ? `org_team_${project.teamId}`
+          : project.departmentId
+            ? `org_dept_${project.departmentId}`
+            : null,
+      },
+    });
+  }
+
+  const quarterlyWorks = await prisma.quarterlyWork.findMany({
+    select: { id: true, departmentId: true, teamId: true },
+  });
+  for (const work of quarterlyWorks) {
+    await prisma.quarterlyWork.update({
+      where: { id: work.id },
+      data: {
+        orgNodeId: work.teamId
+          ? `org_team_${work.teamId}`
+          : work.departmentId
+            ? `org_dept_${work.departmentId}`
+            : null,
+      },
+    });
+  }
+
+  const personalKpis = await prisma.personalKpi.findMany({
+    select: { id: true, teamId: true, userId: true },
+  });
+  for (const kpi of personalKpis) {
+    const owner = await prisma.user.findUnique({ where: { id: kpi.userId }, select: { orgNodeId: true } });
+    await prisma.personalKpi.update({
+      where: { id: kpi.id },
+      data: { orgNodeId: kpi.teamId ? `org_team_${kpi.teamId}` : owner?.orgNodeId ?? null },
+    });
+  }
+}
+
+async function main() {
+  const department = {
+    id: "seed_dept_product",
+    name: "产品部",
+    dingtalkDeptId: "product-dept",
+  };
+
+  const rootOrgNodeId = "org_root_seed";
+  const departmentOrgNodeId = `org_dept_${department.id}`;
+
+  const teamDefinitions = [
+    { id: "seed_team_procurement", name: "采购组" },
+    { id: "seed_team_b_end", name: "B端组" },
+    { id: "seed_team_c_end", name: "C端组" },
+    { id: "seed_team_design", name: "设计组" },
+  ] as const;
+  const teamNames = teamDefinitions.map((team) => team.name);
   const sampleUserNames = [
     "系统管理员",
     "产品部主管",
     ...teamNames.flatMap((teamName) => [`${teamName}组长`, `${teamName}成员A`]),
   ];
 
-  await prisma.department.update({
-    where: { id: department.id },
-    data: { managerId: null },
-  });
-
   await prisma.todoItem.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.annualGoalProgress.deleteMany();
   await prisma.annualGoalRevisionLog.deleteMany();
   await prisma.annualGoalQuarterTarget.deleteMany();
-  await prisma.annualGoalMetric.deleteMany();
   await prisma.annualGoalMetricSource.deleteMany();
+  await prisma.annualGoalMetric.deleteMany();
   await prisma.annualGoalPlan.deleteMany();
   await prisma.kpiTemplate.deleteMany({ where: { name: "季度 KPI 默认模板" } });
-  await prisma.team.deleteMany({ where: { departmentId: department.id, name: { in: teamNames } } });
-  await prisma.user.deleteMany({ where: { departmentId: department.id, name: { in: sampleUserNames } } });
+  await prisma.user.deleteMany({ where: { name: { in: sampleUserNames } } });
 
   const admin = await prisma.user.create({
     data: {
       name: "系统管理员",
       roleType: RoleType.ADMIN,
       departmentId: department.id,
+      orgNodeId: rootOrgNodeId,
       title: "管理员",
     },
   });
@@ -56,59 +199,67 @@ async function main() {
       name: "产品部主管",
       roleType: RoleType.DEPARTMENT_MANAGER,
       departmentId: department.id,
+      orgNodeId: departmentOrgNodeId,
       title: "部门主管",
     },
   });
 
-  await prisma.department.update({
-    where: { id: department.id },
-    data: { managerId: manager.id },
-  });
-
-  const teams: Record<string, { id: string }> = {};
+  const teams = Object.fromEntries(teamDefinitions.map((team) => [team.name, team])) as Record<string, { id: string; name: string }>;
   let sampleLeaderId = "";
   let sampleMemberId = "";
 
-  for (const teamName of teamNames) {
+  for (const team of teamDefinitions) {
     const leader = await prisma.user.create({
       data: {
-        name: `${teamName}组长`,
+        name: `${team.name}组长`,
         roleType: RoleType.TEAM_LEADER,
         departmentId: department.id,
+        teamId: team.id,
+        orgNodeId: `org_team_${team.id}`,
         title: "组长",
       },
     });
 
-    const team = await prisma.team.create({
-      data: {
-        departmentId: department.id,
-        name: teamName,
-        leaderId: leader.id,
-      },
-    });
-
-    teams[teamName] = team;
-
-    await prisma.user.update({
-      where: { id: leader.id },
-      data: { teamId: team.id },
-    });
-
     const member = await prisma.user.create({
       data: {
-        name: `${teamName}成员A`,
+        name: `${team.name}成员A`,
         roleType: RoleType.MEMBER,
         departmentId: department.id,
         teamId: team.id,
+        orgNodeId: `org_team_${team.id}`,
         title: "产品经理",
       },
     });
 
-    if (teamName === "C端组") {
+    if (team.name === "C端组") {
       sampleLeaderId = leader.id;
       sampleMemberId = member.id;
     }
   }
+
+  await rebuildOrgTree([
+    {
+      id: rootOrgNodeId,
+      name: "组织根节点",
+      nodeType: "ROOT",
+      parentId: null,
+      dingtalkDeptId: "__root__",
+    },
+    {
+      id: departmentOrgNodeId,
+      name: department.name,
+      nodeType: "DEPARTMENT",
+      parentId: rootOrgNodeId,
+      dingtalkDeptId: department.dingtalkDeptId,
+    },
+    ...teamDefinitions.map((team) => ({
+      id: `org_team_${team.id}`,
+      name: team.name,
+      nodeType: "TEAM" as const,
+      parentId: departmentOrgNodeId,
+      dingtalkDeptId: null,
+    })),
+  ]);
 
   const menus = [
     ["dashboard", "首页工作台", "/dashboard", 10, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
@@ -253,6 +404,7 @@ async function main() {
       description: "产品部承接公司下达年度业绩指标，并拆解最细指标元数据分配到小组",
       ownerType: AnnualGoalOwnerType.DEPARTMENT,
       departmentId: department.id,
+      ownerOrgNodeId: departmentOrgNodeId,
       version: 1,
       isActive: true,
       approvalStatus: ApprovalStatus.APPROVED,
@@ -409,6 +561,7 @@ async function main() {
         ownerType: AnnualGoalOwnerType.TEAM,
         departmentId: department.id,
         teamId: team.id,
+        ownerOrgNodeId: `org_team_${team.id}`,
         parentPlanId: productAnnualPlan.id,
         version: 1,
         isActive: true,
@@ -445,6 +598,8 @@ async function main() {
       createdById: admin.id,
     },
   });
+
+  await syncLegacyOrgReferences(rootOrgNodeId);
 }
 
 main()
