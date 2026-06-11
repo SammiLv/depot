@@ -4,39 +4,23 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { getAnnualGoalCapabilities, getAnnualGoalPermissionMap, getAnnualGoalPlanPermissions, buildOrgScopeContext } from "@/server/organization/annual-goal-permissions";
-import { getDescendantOrgNodeIds, getDescendantTeamIds, resolveOrgNodeId } from "@/server/organization/org-tree-utils";
+import {
+  findNearestDepartmentOrgNodeId,
+  getDepartmentIdFromOrgNodeId,
+  getDepartmentOrgNodeId,
+  getDescendantOrgNodeIds,
+  getDescendantTeamIds,
+  getTeamIdFromOrgNodeId,
+  getTeamOrgNodeId,
+} from "@/server/organization/org-tree-utils";
 import type { AnnualGoalOwnerType, AnnualMetricCalculationType, Prisma, RiskStatus } from "@prisma/client";
 
 const calculationTypes = ["RATIO", "BOOLEAN", "MANUAL_SCORE"] as const;
 const riskStatuses = ["NORMAL", "SLIGHT_DELAY", "RISK", "COMPLETED"] as const;
 
-function getDepartmentIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_dept_") ? orgNodeId.slice("org_dept_".length) : null;
-}
-
-function getTeamIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
-}
-
-function getTeamOrgNodeId(teamId: string) {
-  return `org_team_${teamId}`;
-}
-
 async function findDepartmentIdForOrgNodeId(orgNodeId: string | null | undefined): Promise<string | null> {
-  if (!orgNodeId) return null;
-  const directDepartmentId = getDepartmentIdFromOrgNodeId(orgNodeId);
-  if (directDepartmentId) return directDepartmentId;
-
-  const node = await prisma.orgNode.findUnique({
-    where: { id: orgNodeId },
-    select: { nodeType: true, parentId: true },
-  });
-
-  if (!node) return null;
-  if (node.nodeType === "DEPARTMENT") {
-    return getDepartmentIdFromOrgNodeId(orgNodeId);
-  }
-  return getDepartmentIdFromOrgNodeId(node.parentId);
+  const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(orgNodeId);
+  return getDepartmentIdFromOrgNodeId(departmentOrgNodeId);
 }
 
 async function findTeamRecordById(teamId: string) {
@@ -48,8 +32,10 @@ async function findTeamRecordById(teamId: string) {
   if (!teamNode) return null;
   return {
     id: teamId,
+    orgNodeId: teamNode.id,
     name: teamNode.name,
     departmentId: getDepartmentIdFromOrgNodeId(teamNode.parentId),
+    departmentOrgNodeId: teamNode.parentId,
   };
 }
 
@@ -129,7 +115,8 @@ function canUpdateTeamProgressScope(
 async function requireAnnualGoalDepartmentEditor() {
   const context = await getAnnualGoalActionContext();
   const departmentId = await findDepartmentIdForOrgNodeId(context.user.orgNodeId);
-  if (!canEditDepartmentScope(context, { departmentId, ownerOrgNodeId: context.user.orgNodeId })) {
+  const departmentOrgNodeId = departmentId ? getDepartmentOrgNodeId(departmentId) : null;
+  if (!canEditDepartmentScope(context, { departmentId, ownerOrgNodeId: departmentOrgNodeId })) {
     throw new Error("无权维护部门年度指标");
   }
   return context;
@@ -249,7 +236,7 @@ async function resolveOwner(
   if (ownerType === "DEPARTMENT") {
     const departmentId = requestedDepartmentId || await findDepartmentIdForOrgNodeId(context.user.orgNodeId);
     if (!departmentId) throw new Error("请选择所属部门");
-    const ownerOrgNodeId = await resolveOrgNodeId(null, departmentId);
+    const ownerOrgNodeId = getDepartmentOrgNodeId(departmentId);
     if (!canEditDepartmentScope(context, { departmentId, ownerOrgNodeId })) throw new Error("无权维护该部门方案");
     return { ownerType, departmentId, teamId: null, ownerOrgNodeId };
   }
@@ -258,7 +245,7 @@ async function resolveOwner(
   if (!teamId) throw new Error("请选择所属小组");
   const team = await findTeamRecordById(teamId);
   if (!team || !team.departmentId) throw new Error("小组不存在");
-  const ownerOrgNodeId = await resolveOrgNodeId(teamId, team.departmentId);
+  const ownerOrgNodeId = team.orgNodeId;
   if (!canEditTeamScope(context, { teamId, departmentId: team.departmentId, ownerOrgNodeId })) throw new Error("无权维护该部门小组方案");
   return { ownerType, departmentId: team.departmentId, teamId, ownerOrgNodeId };
 }
@@ -495,12 +482,10 @@ export async function createAnnualGoalPlan(formData: FormData) {
       const teams = await resolveScopedTeams(departmentId, ownerOrgNodeId, teamIds);
 
       if (teams.length > 0) {
-        const teamPlans = await Promise.all(
-          teams.map(async (team) => ({
-            team,
-            orgNodeId: await resolveOrgNodeId(team.id, team.departmentId),
-          }))
-        );
+        const teamPlans = teams.map((team) => ({
+          team,
+          orgNodeId: team.orgNodeId,
+        }));
         await prisma.$transaction(
           teamPlans.map(({ team, orgNodeId }) =>
             prisma.annualGoalPlan.create({
@@ -563,12 +548,10 @@ export async function updateAnnualGoalPlan(formData: FormData) {
     if (toAdd.length > 0) {
       const teams = await resolveScopedTeams(departmentId, ownerOrgNodeId, toAdd);
       if (teams.length > 0) {
-        const teamPlans = await Promise.all(
-          teams.map(async (team) => ({
-            team,
-            orgNodeId: await resolveOrgNodeId(team.id, team.departmentId),
-          }))
-        );
+        const teamPlans = teams.map((team) => ({
+          team,
+          orgNodeId: team.orgNodeId,
+        }));
         await prisma.$transaction(
           teamPlans.map(({ team, orgNodeId }) =>
             prisma.annualGoalPlan.create({

@@ -6,7 +6,7 @@ import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
 import { annualGoalPermissionCodes, annualGoalPermissionDefinitions } from "@/server/organization/annual-goal-permissions";
-import { resolveOrgNodeId } from "@/server/organization/org-tree-utils";
+import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
 import type { RoleType } from "@prisma/client";
 
 const managerEditableRoles: RoleType[] = ["TEAM_LEADER", "MEMBER"];
@@ -25,75 +25,42 @@ async function requireAdmin() {
   return user;
 }
 
-function getDepartmentIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_dept_") ? orgNodeId.slice("org_dept_".length) : null;
-}
-
-function getTeamIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
-}
-
-function getTeamOrgNodeId(teamId: string) {
-  return `org_team_${teamId}`;
-}
-
-function getDepartmentOrgNodeId(departmentId: string) {
-  return `org_dept_${departmentId}`;
-}
-
 function assertManagerRole(roleType: RoleType) {
   if (!managerEditableRoles.includes(roleType)) {
     throw new Error("部门主管只能设置组长或普通成员角色");
   }
 }
 
-async function findDepartmentIdForOrgNodeId(orgNodeId: string | null | undefined): Promise<string | null> {
-  if (!orgNodeId) return null;
-  const directDepartmentId = getDepartmentIdFromOrgNodeId(orgNodeId);
-  if (directDepartmentId) return directDepartmentId;
-
-  const node = await prisma.orgNode.findUnique({
-    where: { id: orgNodeId },
-    select: { nodeType: true, parentId: true },
-  });
-
-  if (!node) return null;
-  if (node.nodeType === "DEPARTMENT") {
-    return getDepartmentIdFromOrgNodeId(orgNodeId);
-  }
-  return getDepartmentIdFromOrgNodeId(node.parentId);
-}
-
-async function findDepartmentNode(departmentId: string) {
+async function findDepartmentNode(orgNodeId: string) {
   return prisma.orgNode.findFirst({
     where: {
-      id: getDepartmentOrgNodeId(departmentId),
+      id: orgNodeId,
       nodeType: "DEPARTMENT",
     },
     select: { id: true, name: true },
   });
 }
 
-async function findTeamNode(teamId: string) {
+async function findTeamNode(orgNodeId: string) {
   return prisma.orgNode.findFirst({
     where: {
-      id: getTeamOrgNodeId(teamId),
+      id: orgNodeId,
       nodeType: "TEAM",
     },
     select: { id: true, parentId: true, name: true },
   });
 }
 
-async function assertDepartmentExists(departmentId: string) {
-  const departmentNode = await findDepartmentNode(departmentId);
+async function assertDepartmentExists(orgNodeId: string) {
+  const departmentNode = await findDepartmentNode(orgNodeId);
   if (!departmentNode) throw new Error("部门不存在");
   return departmentNode;
 }
 
-async function assertTeamInDepartment(teamId: string | null, departmentId: string) {
-  if (!teamId) return null;
-  const teamNode = await findTeamNode(teamId);
-  if (!teamNode || teamNode.parentId !== getDepartmentOrgNodeId(departmentId)) {
+async function assertTeamInDepartment(teamOrgNodeId: string | null, departmentOrgNodeId: string) {
+  if (!teamOrgNodeId) return null;
+  const teamNode = await findTeamNode(teamOrgNodeId);
+  if (!teamNode || teamNode.parentId !== departmentOrgNodeId) {
     throw new Error("小组不属于当前部门");
   }
   return teamNode;
@@ -101,24 +68,22 @@ async function assertTeamInDepartment(teamId: string | null, departmentId: strin
 
 async function assertDepartmentManagerScope(currentUser: Awaited<ReturnType<typeof requireOrgManager>>, targetOrgNodeId: string | null | undefined) {
   if (currentUser.roleType !== "DEPARTMENT_MANAGER") return;
-  const currentDepartmentId = await findDepartmentIdForOrgNodeId(currentUser.orgNodeId);
-  const targetDepartmentId = await findDepartmentIdForOrgNodeId(targetOrgNodeId);
-  if (!currentDepartmentId || !targetDepartmentId || targetDepartmentId !== currentDepartmentId) {
+  const currentDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
+  if (!currentDepartmentOrgNodeId || !(await isOrgNodeInSubtree(targetOrgNodeId, currentDepartmentOrgNodeId))) {
     throw new Error("无权管理该对象");
   }
 }
 
-async function syncTeamLeader(teamId: string, leaderId: string | null, departmentId: string) {
+async function syncTeamLeader(teamOrgNodeId: string, leaderId: string | null, departmentOrgNodeId: string) {
   if (!leaderId) return;
   const leader = await prisma.user.findUnique({ where: { id: leaderId } });
-  const targetOrgNodeId = await resolveOrgNodeId(teamId, departmentId);
-  const leaderDepartmentId = await findDepartmentIdForOrgNodeId(leader?.orgNodeId);
-  if (!leader || !leader.isActive || leader.roleType === "ADMIN" || !targetOrgNodeId || leaderDepartmentId !== departmentId) {
+  const leaderDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(leader?.orgNodeId);
+  if (!leader || !leader.isActive || leader.roleType === "ADMIN" || leaderDepartmentOrgNodeId !== departmentOrgNodeId) {
     throw new Error("组长必须是当前部门有效非管理员成员");
   }
   await prisma.user.update({
     where: { id: leaderId },
-    data: { orgNodeId: targetOrgNodeId, roleType: "TEAM_LEADER" },
+    data: { orgNodeId: teamOrgNodeId, roleType: "TEAM_LEADER" },
   });
 }
 
@@ -144,18 +109,16 @@ export async function createUser(formData: FormData) {
   const email = formData.get("email") as string;
   const mobile = formData.get("mobile") as string;
   const requestedRole = formData.get("roleType") as RoleType;
-  const teamId = (formData.get("teamId") as string) || null;
+  const teamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
   const title = (formData.get("title") as string) || null;
-  const departmentId = currentUser.roleType === "ADMIN"
-    ? ((formData.get("departmentId") as string) || getDepartmentIdFromOrgNodeId(currentUser.orgNodeId))
-    : getDepartmentIdFromOrgNodeId(currentUser.orgNodeId);
+  const departmentOrgNodeId = currentUser.roleType === "ADMIN"
+    ? ((formData.get("departmentOrgNodeId") as string) || await findNearestDepartmentOrgNodeId(currentUser.orgNodeId))
+    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
 
-  if (!name || !requestedRole || !departmentId) throw new Error("姓名、角色和部门为必填项");
+  if (!name || !requestedRole || !departmentOrgNodeId) throw new Error("姓名、角色和部门为必填项");
   if (currentUser.roleType === "DEPARTMENT_MANAGER") assertManagerRole(requestedRole);
-  await assertDepartmentExists(departmentId);
-  await assertTeamInDepartment(teamId, departmentId);
-
-  const orgNodeId = await resolveOrgNodeId(teamId, departmentId);
+  await assertDepartmentExists(departmentOrgNodeId);
+  await assertTeamInDepartment(teamOrgNodeId, departmentOrgNodeId);
 
   await prisma.user.create({
     data: {
@@ -164,7 +127,7 @@ export async function createUser(formData: FormData) {
       mobile: mobile?.trim() || null,
       roleType: requestedRole,
       title: title?.trim() || null,
-      orgNodeId,
+      orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
     },
   });
 
@@ -178,7 +141,7 @@ export async function updateUser(formData: FormData) {
   const email = formData.get("email") as string;
   const mobile = formData.get("mobile") as string;
   const requestedRole = formData.get("roleType") as RoleType;
-  const teamId = (formData.get("teamId") as string) || null;
+  const teamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
   const title = (formData.get("title") as string) || null;
 
   if (!id || !name || !requestedRole) throw new Error("缺少必要参数");
@@ -194,14 +157,12 @@ export async function updateUser(formData: FormData) {
     assertManagerRole(requestedRole);
   }
 
-  const departmentId = currentUser.roleType === "ADMIN"
-    ? getDepartmentIdFromOrgNodeId(target.orgNodeId)
-    : getDepartmentIdFromOrgNodeId(currentUser.orgNodeId);
-  if (!departmentId) throw new Error("用户缺少部门信息");
-  await assertDepartmentExists(departmentId);
-  await assertTeamInDepartment(teamId, departmentId);
-
-  const orgNodeId = await resolveOrgNodeId(teamId, departmentId);
+  const departmentOrgNodeId = currentUser.roleType === "ADMIN"
+    ? await findNearestDepartmentOrgNodeId(target.orgNodeId)
+    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
+  if (!departmentOrgNodeId) throw new Error("用户缺少部门信息");
+  await assertDepartmentExists(departmentOrgNodeId);
+  await assertTeamInDepartment(teamOrgNodeId, departmentOrgNodeId);
 
   await prisma.user.update({
     where: { id },
@@ -211,7 +172,7 @@ export async function updateUser(formData: FormData) {
       mobile: mobile?.trim() || null,
       roleType: requestedRole,
       title: title?.trim() || null,
-      orgNodeId,
+      orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
     },
   });
 
@@ -241,25 +202,24 @@ export async function deleteUser(formData: FormData) {
 export async function createTeam(formData: FormData) {
   const currentUser = await requireOrgManager();
   const name = formData.get("name") as string;
-  const requestedDepartmentId = (formData.get("departmentId") as string) || null;
+  const requestedDepartmentOrgNodeId = (formData.get("departmentOrgNodeId") as string) || null;
   const leaderId = (formData.get("leaderId") as string) || null;
   const description = (formData.get("description") as string) || null;
-  const departmentId = currentUser.roleType === "ADMIN"
-    ? requestedDepartmentId
-    : getDepartmentIdFromOrgNodeId(currentUser.orgNodeId);
+  const departmentOrgNodeId = currentUser.roleType === "ADMIN"
+    ? requestedDepartmentOrgNodeId
+    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
 
   if (!name) throw new Error("小组名称为必填项");
-  if (!departmentId) throw new Error("请选择所属部门");
+  if (!departmentOrgNodeId) throw new Error("请选择所属部门");
 
-  const departmentNode = await assertDepartmentExists(departmentId);
-  const teamId = randomUUID();
-  const teamOrgNodeId = getTeamOrgNodeId(teamId);
+  const departmentNode = await assertDepartmentExists(departmentOrgNodeId);
+  const teamOrgNodeId = `org_team_${randomUUID()}`;
 
   await prisma.$transaction(async (tx) => {
     await tx.orgNode.create({
       data: {
         id: teamOrgNodeId,
-        dingtalkDeptId: `__manual_team__${teamId}`,
+        dingtalkDeptId: `__manual_team__${teamOrgNodeId.slice("org_team_".length)}`,
         name: name.trim(),
         nodeType: "TEAM",
         parentId: departmentNode.id,
@@ -283,7 +243,7 @@ export async function createTeam(formData: FormData) {
     });
   });
 
-  await syncTeamLeader(teamId, leaderId, departmentId);
+  await syncTeamLeader(teamOrgNodeId, leaderId, departmentOrgNodeId);
 
   revalidateOrganization();
 }
@@ -304,9 +264,7 @@ export async function updateTeam(formData: FormData) {
     where: { id: teamNode.id },
     data: { name: name.trim() },
   });
-  const departmentId = getDepartmentIdFromOrgNodeId(teamNode.parentId);
-  if (!departmentId) throw new Error("小组缺少所属部门");
-  await syncTeamLeader(id, leaderId, departmentId);
+  await syncTeamLeader(id, leaderId, teamNode.parentId);
 
   revalidateOrganization();
 }
@@ -320,14 +278,10 @@ export async function deleteTeam(formData: FormData) {
   if (!teamNode) throw new Error("小组不存在");
   await assertDepartmentManagerScope(currentUser, teamNode.parentId);
 
-  const departmentId = getDepartmentIdFromOrgNodeId(teamNode.parentId);
-  if (!departmentId) throw new Error("小组缺少所属部门");
-  const departmentOrgNodeId = getDepartmentOrgNodeId(departmentId);
-
   await prisma.$transaction(async (tx) => {
     await tx.user.updateMany({
       where: { orgNodeId: teamNode.id },
-      data: { orgNodeId: departmentOrgNodeId },
+      data: { orgNodeId: teamNode.parentId },
     });
     await tx.orgClosure.deleteMany({ where: { OR: [{ ancestorId: teamNode.id }, { descendantId: teamNode.id }] } });
     await tx.orgNode.delete({ where: { id: teamNode.id } });
@@ -340,12 +294,12 @@ export async function deleteTeam(formData: FormData) {
 
 export async function setDepartmentManager(formData: FormData) {
   await requireAdmin();
-  const departmentId = formData.get("departmentId") as string;
+  const departmentOrgNodeId = formData.get("departmentOrgNodeId") as string;
   const managerId = formData.get("managerId") as string;
 
-  if (!departmentId || !managerId) throw new Error("缺少部门或主管参数");
+  if (!departmentOrgNodeId || !managerId) throw new Error("缺少部门或主管参数");
 
-  const departmentNode = await assertDepartmentExists(departmentId);
+  const departmentNode = await assertDepartmentExists(departmentOrgNodeId);
   const manager = await prisma.user.findUnique({ where: { id: managerId } });
   if (!manager || !manager.isActive || manager.roleType === "ADMIN" || manager.orgNodeId !== departmentNode.id) {
     throw new Error("主管必须是当前部门有效非管理员成员");

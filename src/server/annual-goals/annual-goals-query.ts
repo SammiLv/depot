@@ -1,5 +1,9 @@
 import { prisma } from "@/server/db/prisma";
-import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import {
+  getDepartmentIdFromOrgNodeId,
+  getDescendantOrgNodeIds,
+  getTeamIdFromOrgNodeId,
+} from "@/server/organization/org-tree-utils";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilities,
@@ -27,8 +31,8 @@ type MemberOption = {
   id: string;
   name: string;
   title: string | null;
-  departmentId: string | null;
-  teamId: string | null;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
 };
 
 type ResponsibleUserSummary = {
@@ -64,8 +68,8 @@ type MetricData = {
   metricCode: string;
   name: string;
   description: string | null;
-  departmentId: string | null;
-  scopeDepartmentId: string | null;
+  departmentOrgNodeId: string | null;
+  scopeDepartmentOrgNodeId: string | null;
   responsibleUserId: string | null;
   responsibleUser: ResponsibleUserSummary | null;
   rawTargetValue: number;
@@ -102,9 +106,9 @@ type PlanData = {
   description: string | null;
   ownerType: AnnualGoalOwnerType;
   ownerName: string;
-  departmentId: string | null;
-  scopeDepartmentId: string | null;
-  teamId: string | null;
+  departmentOrgNodeId: string | null;
+  scopeDepartmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
   ownerOrgNodeId: string | null;
   version: string;
   isActive: boolean;
@@ -115,23 +119,21 @@ type PlanData = {
   metrics: MetricData[];
   totalWeight: number;
   permissions: PlanPermissionFlags;
-  linkedTeamIds: string[];
+  linkedTeamOrgNodeIds: string[];
   createdAt: Date;
 };
 
 type ScopeDepartment = {
-  id: string;
+  orgNodeId: string;
   name: string;
-  departmentId: string | null;
 };
 
 type ScopeItem = {
   type: "DEPARTMENT" | "TEAM";
-  id: string;
+  orgNodeId: string;
   name: string;
-  scopeDepartmentId: string;
-  departmentId: string | null;
-  teamId: string | null;
+  scopeDepartmentOrgNodeId: string;
+  teamOrgNodeId: string | null;
   ownerOrgNodeId: string | null;
   plan: PlanData | null;
 };
@@ -143,7 +145,7 @@ type AnnualGoalsResult = {
   archivedPlans: PlanData[];
   availableSourceMetrics: MetricSourceData[];
   availableParentMetrics: MetricData[];
-  teams: { id: string; name: string; departmentId: string }[];
+  teams: { orgNodeId: string; name: string; departmentOrgNodeId: string }[];
   memberOptionsByDepartment: Record<string, MemberOption[]>;
   memberOptionsByTeam: Record<string, MemberOption[]>;
   canManage: boolean;
@@ -156,7 +158,7 @@ type AnnualGoalsResult = {
     canEditTeamPlans: boolean;
     canUpdateProgress: boolean;
   };
-  defaultDepartmentId: string | null;
+  defaultDepartmentOrgNodeId: string | null;
   summary: {
     planCount: number;
     metricCount: number;
@@ -183,26 +185,15 @@ function mapResponsibleUser(user: { id: string; name: string; title: string | nu
   return { id: user.id, name: user.name, title: user.title };
 }
 
-function getDepartmentIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_dept_") ? orgNodeId.slice("org_dept_".length) : null;
-}
-
-function getTeamIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
-}
-
 function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
-  const departmentByTeamId = new Map<string, string>();
-  const departmentNameById = new Map<string, string>();
-  const teamNameById = new Map<string, string>();
+  const departmentOrgNodeIdByTeamOrgNodeId = new Map<string, string>();
+  const departmentNameByOrgNodeId = new Map<string, string>();
+  const teamNameByOrgNodeId = new Map<string, string>();
 
   for (const node of orgNodes) {
     if (node.nodeType === "DEPARTMENT") {
-      const departmentId = getDepartmentIdFromOrgNodeId(node.id);
-      if (departmentId) {
-        departmentNameById.set(departmentId, node.name);
-      }
+      departmentNameByOrgNodeId.set(node.id, node.name);
       continue;
     }
 
@@ -210,54 +201,47 @@ function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
       continue;
     }
 
-    const teamId = getTeamIdFromOrgNodeId(node.id);
-    if (!teamId) {
-      continue;
-    }
-
-    teamNameById.set(teamId, node.name);
+    teamNameByOrgNodeId.set(node.id, node.name);
 
     const parentNode = node.parentId ? orgNodeById.get(node.parentId) ?? null : null;
-    const departmentId = parentNode?.nodeType === "DEPARTMENT"
-      ? getDepartmentIdFromOrgNodeId(parentNode.id)
-      : null;
-
-    if (departmentId) {
-      departmentByTeamId.set(teamId, departmentId);
+    if (parentNode?.nodeType === "DEPARTMENT") {
+      departmentOrgNodeIdByTeamOrgNodeId.set(node.id, parentNode.id);
     }
   }
 
-  return { departmentByTeamId, departmentNameById, teamNameById };
+  return { departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId };
 }
 
-function getDepartmentIdForRecord(
+function getDepartmentOrgNodeIdForRecord(
   orgNodeId: string | null | undefined,
-  departmentByTeamId: Map<string, string>,
+  departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>,
 ) {
-  const departmentId = getDepartmentIdFromOrgNodeId(orgNodeId);
-  if (departmentId) {
-    return departmentId;
+  if (!orgNodeId) {
+    return null;
   }
 
-  const teamId = getTeamIdFromOrgNodeId(orgNodeId);
-  if (teamId) {
-    return departmentByTeamId.get(teamId) ?? null;
+  if (orgNodeId.startsWith("org_dept_")) {
+    return orgNodeId;
+  }
+
+  if (orgNodeId.startsWith("org_team_")) {
+    return departmentOrgNodeIdByTeamOrgNodeId.get(orgNodeId) ?? null;
   }
 
   return null;
 }
 
-function getTeamIdForRecord(orgNodeId: string | null | undefined) {
-  return getTeamIdFromOrgNodeId(orgNodeId) ?? null;
+function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined) {
+  return orgNodeId?.startsWith("org_team_") ? orgNodeId : null;
 }
 
-function mapMemberOption(user: { id: string; name: string; title: string | null; orgNodeId: string | null | undefined }, departmentByTeamId: Map<string, string>) {
+function mapMemberOption(user: { id: string; name: string; title: string | null; orgNodeId: string | null | undefined }, departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>) {
   return {
     id: user.id,
     name: user.name,
     title: user.title,
-    departmentId: getDepartmentIdForRecord(user.orgNodeId, departmentByTeamId),
-    teamId: getTeamIdForRecord(user.orgNodeId),
+    departmentOrgNodeId: getDepartmentOrgNodeIdForRecord(user.orgNodeId, departmentOrgNodeIdByTeamOrgNodeId),
+    teamOrgNodeId: getTeamOrgNodeIdForRecord(user.orgNodeId),
   };
 }
 
@@ -426,38 +410,35 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     orderBy: [{ nodeType: "asc" }, { name: "asc" }],
     select: { id: true, name: true, nodeType: true, parentId: true },
   });
-  const { departmentByTeamId, departmentNameById, teamNameById } = buildDepartmentAndTeamMaps(orgNodes);
+  const { departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
   const teams = orgNodes
-    .filter((node) => node.nodeType === "TEAM")
+    .filter((node) => node.nodeType === "TEAM" && Boolean(node.parentId))
     .map((node) => ({
-      id: getTeamIdFromOrgNodeId(node.id) ?? node.id,
+      orgNodeId: node.id,
       name: node.name,
-      departmentId: node.parentId ? getDepartmentIdFromOrgNodeId(node.parentId) : null,
-    }))
-    .filter((team): team is { id: string; name: string; departmentId: string } => Boolean(team.departmentId));
-  const teamDepartmentById = new Map(teams.map((team) => [team.id, team.departmentId]));
-  const scopedDepartmentIds = Array.from(new Set([
-    ...teams.map((team) => team.departmentId),
-    ...plans.map((plan) => getPlanScopeDepartmentId(plan)).filter((departmentId): departmentId is string => Boolean(departmentId)),
-    ...archivedPlans.map((plan) => getPlanScopeDepartmentId(plan)).filter((departmentId): departmentId is string => Boolean(departmentId)),
+      departmentOrgNodeId: node.parentId!,
+    }));
+  const scopedDepartmentOrgNodeIds = Array.from(new Set([
+    ...teams.map((team) => team.departmentOrgNodeId),
+    ...plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
+    ...archivedPlans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
   ]));
-  const scopeDepartments: ScopeDepartment[] = scopedDepartmentIds.map((departmentId) => ({
-    id: departmentId,
-    name: departmentNameById.get(departmentId) ?? "部门",
-    departmentId,
+  const scopeDepartments: ScopeDepartment[] = scopedDepartmentOrgNodeIds.map((orgNodeId) => ({
+    orgNodeId,
+    name: departmentNameByOrgNodeId.get(orgNodeId) ?? "部门",
   }));
-  const defaultDepartmentId = plans.map((plan) => getPlanScopeDepartmentId(plan)).find((departmentId): departmentId is string => Boolean(departmentId))
-    ?? teams[0]?.departmentId
-    ?? scopeDepartments[0]?.id
+  const defaultDepartmentOrgNodeId = plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).find((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
+    ?? teams[0]?.departmentOrgNodeId
+    ?? scopeDepartments[0]?.orgNodeId
     ?? null;
-  const scopedTeamIds = Array.from(new Set([
-    ...teams.map((team) => team.id),
-    ...plans.map((plan) => getTeamIdForRecord(plan.ownerOrgNodeId)).filter((teamId): teamId is string => Boolean(teamId)),
-    ...archivedPlans.map((plan) => getTeamIdForRecord(plan.ownerOrgNodeId)).filter((teamId): teamId is string => Boolean(teamId)),
+  const scopedTeamOrgNodeIds = Array.from(new Set([
+    ...teams.map((team) => team.orgNodeId),
+    ...plans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
+    ...archivedPlans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
   ]));
   const scopedUsersOrgNodeIds = Array.from(new Set([
-    ...scopedDepartmentIds.map((departmentId) => `org_dept_${departmentId}`),
-    ...scopedTeamIds.map((teamId) => `org_team_${teamId}`),
+    ...scopedDepartmentOrgNodeIds,
+    ...scopedTeamOrgNodeIds,
   ]));
 
   // Get quarter targets and source metadata for all metrics.
@@ -527,26 +508,26 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   const sourceById = new Map(metricSources.map((source) => [source.id, source]));
   const userById = new Map(scopedUsers.map((user) => [user.id, user]));
   const memberOptionsByDepartment = Object.fromEntries(
-    scopedDepartmentIds.map((departmentId) => [
-      departmentId,
+    scopedDepartmentOrgNodeIds.map((departmentOrgNodeId) => [
+      departmentOrgNodeId,
       scopedUsers
-        .filter((user) => getDepartmentIdForRecord(user.orgNodeId, departmentByTeamId) === departmentId)
-        .map((user) => mapMemberOption(user, departmentByTeamId)),
+        .filter((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, departmentOrgNodeIdByTeamOrgNodeId) === departmentOrgNodeId)
+        .map((user) => mapMemberOption(user, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );
   const memberOptionsByTeam = Object.fromEntries(
-    scopedTeamIds.map((teamId) => [
-      teamId,
+    scopedTeamOrgNodeIds.map((teamOrgNodeId) => [
+      teamOrgNodeId,
       scopedUsers
-        .filter((user) => getTeamIdForRecord(user.orgNodeId) === teamId)
-        .map((user) => mapMemberOption(user, departmentByTeamId)),
+        .filter((user) => getTeamOrgNodeIdForRecord(user.orgNodeId) === teamOrgNodeId)
+        .map((user) => mapMemberOption(user, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );
-  function getPlanScopeDepartmentId(plan: { ownerOrgNodeId?: string | null }) {
-    return getDepartmentIdForRecord(plan.ownerOrgNodeId, departmentByTeamId);
+  function getPlanScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
+    return getDepartmentOrgNodeIdForRecord(plan.ownerOrgNodeId, departmentOrgNodeIdByTeamOrgNodeId);
   }
 
-  const departmentMetricByPlan = new Map(selectedDepartmentMetrics.map((metric) => [`${getPlanScopeDepartmentId(metric.plan)}:${metric.plan.year}:${metric.metricCode}`, metric]));
+  const departmentMetricByPlan = new Map(selectedDepartmentMetrics.map((metric) => [`${getPlanScopeDepartmentOrgNodeId(metric.plan)}:${metric.plan.year}:${metric.metricCode}`, metric]));
 
   const targetsByMetric = new Map<string, typeof quarterTargets>();
   const targetsBySourceMetric = new Map<string, typeof quarterTargets>();
@@ -572,7 +553,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
 
   function getMetricQuarterTargets(plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number]) {
     const sourceMetricForInheritance = plan.ownerType === "TEAM" && metric.sourceMetricId ? sourceById.get(metric.sourceMetricId) : null;
-    const parentMetricForInheritance = plan.ownerType === "TEAM" && !metric.sourceMetricId ? departmentMetricByPlan.get(`${getPlanScopeDepartmentId(plan)}:${plan.year}:${metric.metricCode}`) : null;
+    const parentMetricForInheritance = plan.ownerType === "TEAM" && !metric.sourceMetricId ? departmentMetricByPlan.get(`${getPlanScopeDepartmentOrgNodeId(plan)}:${plan.year}:${metric.metricCode}`) : null;
     return sourceMetricForInheritance
       ? targetsBySourceMetric.get(`${sourceMetricForInheritance.parentMetricId}:${sourceMetricForInheritance.id}`) ?? []
       : parentMetricForInheritance
@@ -580,8 +561,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
         : targetsByMetric.get(metric.id) ?? [];
   }
 
-  function getMetricScopeDepartmentId(plan: { ownerOrgNodeId?: string | null }) {
-    return getPlanScopeDepartmentId(plan);
+  function getMetricScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
+    return getPlanScopeDepartmentOrgNodeId(plan);
   }
 
   function getSourceCurrentValue(parentMetricId: string, source: (typeof metricSources)[number]) {

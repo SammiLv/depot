@@ -14,22 +14,22 @@ type OrgUser = {
   email: string | null;
   mobile: string | null;
   roleType: RoleType;
-  departmentId: string | null;
-  teamId: string | null;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
   title: string | null;
   isActive: boolean;
 };
 
 type OrgTeam = {
-  id: string;
-  departmentId: string;
+  orgNodeId: string;
+  departmentOrgNodeId: string;
   name: string;
   leaderId: string | null;
   description: string | null;
 };
 
 type OrgDepartment = {
-  id: string;
+  orgNodeId: string;
   name: string;
   managerId: string | null;
   managerName: string | null;
@@ -53,7 +53,7 @@ type Props = {
   currentUser: { id: string; roleType: RoleType };
   users: OrgUser[];
   teams: OrgTeam[];
-  teamData: { teamId: string; count: number; leaderName?: string }[];
+  teamData: { teamOrgNodeId: string; count: number; leaderName?: string }[];
   departments: OrgDepartment[];
   department: OrgDepartment | null;
   menus: OrgMenu[];
@@ -106,14 +106,14 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
 }
 
 // ── User form ──
-function UserForm({ user, teams, departmentId, roleOptionsForForm, onClose }: { user?: OrgUser; teams: OrgTeam[]; departmentId: string; roleOptionsForForm: RoleType[]; onClose: () => void }) {
+function UserForm({ user, teams, departmentOrgNodeId, roleOptionsForForm, onClose }: { user?: OrgUser; teams: OrgTeam[]; departmentOrgNodeId: string; roleOptionsForForm: RoleType[]; onClose: () => void }) {
   const isEdit = !!user;
   const action = isEdit ? updateUser : createUser;
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }}>
       {isEdit && <input type="hidden" name="id" value={user.id} />}
-      <input type="hidden" name="departmentId" value={departmentId} />
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">姓名 *</label>
@@ -138,9 +138,9 @@ function UserForm({ user, teams, departmentId, roleOptionsForForm, onClose }: { 
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">小组</label>
-            <select name="teamId" defaultValue={user?.teamId ?? ""} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
+            <select name="teamOrgNodeId" defaultValue={user?.teamOrgNodeId ?? ""} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
               <option value="">不分配</option>
-              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {teams.map((t) => <option key={t.orgNodeId} value={t.orgNodeId}>{t.name}</option>)}
             </select>
           </div>
         </div>
@@ -158,14 +158,14 @@ function UserForm({ user, teams, departmentId, roleOptionsForForm, onClose }: { 
 }
 
 // ── Team form ──
-function TeamForm({ team, users, departmentId, onClose }: { team?: OrgTeam; users: OrgUser[]; departmentId: string; onClose: () => void }) {
+function TeamForm({ team, users, departmentOrgNodeId, onClose }: { team?: OrgTeam; users: OrgUser[]; departmentOrgNodeId: string; onClose: () => void }) {
   const isEdit = !!team;
   const action = isEdit ? updateTeam : createTeam;
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }}>
-      {isEdit && <input type="hidden" name="id" value={team.id} />}
-      <input type="hidden" name="departmentId" value={departmentId} />
+      {isEdit && <input type="hidden" name="id" value={team.orgNodeId} />}
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">小组名称 *</label>
@@ -222,7 +222,7 @@ export function OrgContent({
   manageableRoleOptions,
 }: Props) {
   const isAdmin = currentUser.roleType === "ADMIN";
-  const countMap = new Map(teamData.map((t) => [t.teamId, t]));
+  const countMap = new Map(teamData.map((t) => [t.teamOrgNodeId, t]));
   const initialRoleMenuKeys = roleMenuPermissions.map((p) => `${p.roleType}:${p.menuPermissionId}`).sort();
   const initialRoleMenuKeyString = initialRoleMenuKeys.join("|");
   const [draftRoleMenuKeys, setDraftRoleMenuKeys] = useState(() => new Set(initialRoleMenuKeys));
@@ -232,14 +232,14 @@ export function OrgContent({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">("organization");
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState(departments[0]?.id ?? department?.id ?? "");
+  const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(departments[0]?.orgNodeId ?? department?.orgNodeId ?? "");
   const draftRoleMenuKeyString = [...draftRoleMenuKeys].sort().join("|");
   const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
   const draftAnnualGoalPermissionKeyString = [...draftAnnualGoalPermissionKeys].sort().join("|");
   const hasAnnualGoalPermissionChanges = draftAnnualGoalPermissionKeyString !== initialAnnualGoalPermissionKeyString;
-  const visibleTeams = teams.filter((team) => team.departmentId === selectedDepartmentId);
-  const visibleUsers = users.filter((user) => user.departmentId === selectedDepartmentId);
-  const selectedDepartment = departments.find((item) => item.id === selectedDepartmentId) ?? department;
+  const visibleTeams = teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+  const visibleUsers = users.filter((user) => user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+  const selectedDepartment = departments.find((item) => item.orgNodeId === selectedDepartmentOrgNodeId) ?? department;
 
   function toggleDraftPermission(roleType: RoleType, menu: OrgMenu) {
     if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) return;
@@ -340,11 +340,11 @@ export function OrgContent({
             <div className="flex flex-wrap gap-2">
               {departments.map((item) => (
                 <button
-                  key={item.id}
+                  key={item.orgNodeId}
                   type="button"
-                  onClick={() => setSelectedDepartmentId(item.id)}
+                  onClick={() => setSelectedDepartmentOrgNodeId(item.orgNodeId)}
                   className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
-                    selectedDepartmentId === item.id
+                    selectedDepartmentOrgNodeId === item.orgNodeId
                       ? "border-primary bg-primary/5 text-primary"
                       : "border-border bg-background text-muted-foreground hover:text-foreground"
                   }`}
@@ -357,10 +357,10 @@ export function OrgContent({
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
             {visibleTeams.map((team, i) => {
-              const info = countMap.get(team.id);
+              const info = countMap.get(team.orgNodeId);
               const tone = toneCycle[i % toneCycle.length];
               return (
-                <Card key={team.id}>
+                <Card key={team.orgNodeId}>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-semibold">{team.name}</h3>
                     <Badge tone={tone}>{info?.count ?? 0} 人</Badge>
@@ -402,7 +402,7 @@ export function OrgContent({
               </thead>
               <tbody>
                 {visibleUsers.map((u) => {
-                  const teamName = u.teamId ? teams.find((t) => t.id === u.teamId)?.name : null;
+                  const teamName = u.teamOrgNodeId ? teams.find((t) => t.orgNodeId === u.teamOrgNodeId)?.name : null;
                   return (
                     <tr key={u.id} className="border-t border-border hover:bg-muted/30 transition">
                       <td className="px-5 py-3">
@@ -454,7 +454,7 @@ export function OrgContent({
               <div className="font-medium mt-1">当前主管：{department?.managerName ?? "未设置"}</div>
               {isAdmin && department && (
                 <form action={setDepartmentManager} className="mt-3 flex gap-2">
-                  <input type="hidden" name="departmentId" value={department.id} />
+                  <input type="hidden" name="departmentOrgNodeId" value={department.orgNodeId} />
                   <select name="managerId" defaultValue={department.managerId ?? ""} className="min-w-0 flex-1 h-9 px-2 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-ring">
                     <option value="">选择主管</option>
                     {users.filter((u) => u.roleType !== "ADMIN").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -582,11 +582,11 @@ export function OrgContent({
 
       {/* ── Dialogs ── */}
       <Dialog open={dialog?.type === "user"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑成员" : "新增成员"}>
-        <UserForm user={dialog?.data as OrgUser | undefined} teams={visibleTeams} departmentId={selectedDepartmentId} roleOptionsForForm={manageableRoleOptions} onClose={() => setDialog(null)} />
+        <UserForm user={dialog?.data as OrgUser | undefined} teams={visibleTeams} departmentOrgNodeId={selectedDepartmentOrgNodeId} roleOptionsForForm={manageableRoleOptions} onClose={() => setDialog(null)} />
       </Dialog>
 
       <Dialog open={dialog?.type === "team"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑小组" : "新增小组"}>
-        <TeamForm team={dialog?.data as OrgTeam | undefined} users={visibleUsers} departmentId={selectedDepartmentId} onClose={() => setDialog(null)} />
+        <TeamForm team={dialog?.data as OrgTeam | undefined} users={visibleUsers} departmentOrgNodeId={selectedDepartmentOrgNodeId} onClose={() => setDialog(null)} />
       </Dialog>
 
       <Dialog open={dialog?.type === "deleteUser"} onClose={() => setDialog(null)} title="删除成员">
@@ -606,7 +606,7 @@ export function OrgContent({
           message={`确定要删除小组 "${(dialog?.data as OrgTeam)?.name}" 吗？该组成员将被取消分配。`}
           action={async () => {
             const fd = new FormData();
-            fd.set("id", (dialog?.data as OrgTeam).id);
+            fd.set("id", (dialog?.data as OrgTeam).orgNodeId);
             await deleteTeam(fd);
           }}
           onClose={() => setDialog(null)}
