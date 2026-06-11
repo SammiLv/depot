@@ -23,8 +23,8 @@ type BoardItem = {
   title: string;
   ownerId: string;
   owner: string;
-  departmentId: string | null;
-  teamId: string | null;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
   teamName: string | null;
   status: WorkStatus;
   description: string | null;
@@ -39,8 +39,8 @@ type ProjectBoardItem = {
   title: string;
   ownerId: string;
   owner: string;
-  departmentId: string | null;
-  teamId: string | null;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
   teamName: string | null;
   status: ProjectStatus;
   startQuarter: string | null;
@@ -134,60 +134,54 @@ function compareNames(left: { name: string }, right: { name: string }) {
   return pinyinCollator.compare(left.name, right.name);
 }
 
-function getDepartmentIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_dept_") ? orgNodeId.slice("org_dept_".length) : null;
-}
-
-function getTeamIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
-}
-
 function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
-  const departmentByTeamId = new Map<string, string>();
-  const teamNameById = new Map<string, string>();
+  const departmentOrgNodeIdByTeamOrgNodeId = new Map<string, string>();
+  const teamNameByOrgNodeId = new Map<string, string>();
 
   for (const node of orgNodes) {
     if (node.nodeType !== "TEAM") {
       continue;
     }
 
-    const teamId = getTeamIdFromOrgNodeId(node.id);
-    if (!teamId) {
-      continue;
-    }
-
-    teamNameById.set(teamId, node.name);
+    teamNameByOrgNodeId.set(node.id, node.name);
 
     const parentNode = node.parentId ? orgNodeById.get(node.parentId) ?? null : null;
-    const departmentId = parentNode?.nodeType === "DEPARTMENT"
-      ? getDepartmentIdFromOrgNodeId(parentNode.id)
-      : null;
-
-    if (departmentId) {
-      departmentByTeamId.set(teamId, departmentId);
+    if (parentNode?.nodeType === "DEPARTMENT") {
+      departmentOrgNodeIdByTeamOrgNodeId.set(node.id, parentNode.id);
     }
   }
 
-  return { departmentByTeamId, teamNameById };
+  return { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, teamNameByOrgNodeId };
 }
 
-function getDepartmentIdForRecord(orgNodeId: string | null | undefined, departmentByTeamId: Map<string, string>) {
-  const directDepartmentId = getDepartmentIdFromOrgNodeId(orgNodeId);
-  if (directDepartmentId) {
-    return directDepartmentId;
+function getDepartmentOrgNodeIdForRecord(
+  orgNodeId: string | null | undefined,
+  orgNodeById: Map<string, OrgNodeSummary>,
+  departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>,
+) {
+  if (!orgNodeId) {
+    return null;
   }
-
-  const directTeamId = getTeamIdFromOrgNodeId(orgNodeId);
-  if (directTeamId) {
-    return departmentByTeamId.get(directTeamId) ?? null;
+  const node = orgNodeById.get(orgNodeId) ?? null;
+  if (!node) {
+    return null;
   }
-
+  if (node.nodeType === "DEPARTMENT") {
+    return node.id;
+  }
+  if (node.nodeType === "TEAM") {
+    return departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null;
+  }
   return null;
 }
 
-function getTeamIdForRecord(orgNodeId: string | null | undefined) {
-  return getTeamIdFromOrgNodeId(orgNodeId) ?? null;
+function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined, orgNodeById: Map<string, OrgNodeSummary>) {
+  if (!orgNodeId) {
+    return null;
+  }
+  const node = orgNodeById.get(orgNodeId) ?? null;
+  return node?.nodeType === "TEAM" ? node.id : null;
 }
 
 export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
@@ -219,19 +213,19 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     }),
   ]);
 
-  const { departmentByTeamId, teamNameById } = buildDepartmentAndTeamMaps(orgNodes);
+  const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
   const departments = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
     .map((node) => ({
-      id: getDepartmentIdFromOrgNodeId(node.id) ?? node.id,
+      orgNodeId: node.id,
       name: node.name,
     }));
   const teams = orgNodes
     .filter((node) => node.nodeType === "TEAM")
     .map((node) => ({
-      id: getTeamIdFromOrgNodeId(node.id) ?? node.id,
+      orgNodeId: node.id,
       name: node.name,
-      departmentId: node.parentId ? getDepartmentIdFromOrgNodeId(node.parentId) : null,
+      departmentOrgNodeId: node.parentId,
     }));
 
   const now = new Date();
@@ -261,17 +255,17 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
   }
 
   const ownerMap = new Map(users.map((user) => [user.id, user.name]));
-  const teamNameMap = new Map(teams.map((team) => [team.id, team.name]));
+  const teamNameMap = new Map(teams.map((team) => [team.orgNodeId, team.name]));
   const scopedDepartments = departments.filter((department) =>
-    teams.some((team) => team.departmentId === department.id)
-    || users.some((user) => getDepartmentIdForRecord(user.orgNodeId, departmentByTeamId) === department.id)
+    teams.some((team) => team.departmentOrgNodeId === department.orgNodeId)
+    || users.some((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId) === department.orgNodeId)
   );
-  const defaultDepartmentId = activeWorks.map((work) => getDepartmentIdForRecord(work.orgNodeId, departmentByTeamId))
-    .find((departmentId): departmentId is string => Boolean(departmentId))
-    ?? projects.map((project) => getDepartmentIdForRecord(project.orgNodeId, departmentByTeamId))
-      .find((departmentId): departmentId is string => Boolean(departmentId))
-    ?? teams[0]?.departmentId
-    ?? departments[0]?.id
+  const defaultDepartmentOrgNodeId = activeWorks.map((work) => getDepartmentOrgNodeIdForRecord(work.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId))
+    .find((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId))
+    ?? projects.map((project) => getDepartmentOrgNodeIdForRecord(project.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId))
+      .find((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId))
+    ?? teams[0]?.departmentOrgNodeId
+    ?? departments[0]?.orgNodeId
     ?? null;
 
   const toBoardItem = (work: (typeof activeWorks)[number]): BoardItem => {
@@ -280,8 +274,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     const completedPlans = plans.filter((plan) => plan.status === "COMPLETED").length;
     const delayedPlans = plans.filter((plan) => plan.status === "DELAYED_COMPLETED").length;
     const progress = totalPlans > 0 ? Math.round((completedPlans / totalPlans) * 100) : undefined;
-    const teamId = getTeamIdForRecord(work.orgNodeId);
-    const departmentId = getDepartmentIdForRecord(work.orgNodeId, departmentByTeamId);
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(work.orgNodeId, orgNodeById);
+    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(work.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
 
     return {
       id: work.id,
@@ -290,9 +284,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
       title: work.title,
       ownerId: work.ownerId,
       owner: ownerMap.get(work.ownerId) ?? "—",
-      departmentId,
-      teamId,
-      teamName: teamId ? teamNameMap.get(teamId) ?? null : null,
+      departmentOrgNodeId,
+      teamOrgNodeId,
+      teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
       status: work.status,
       description: work.description,
       expectedOutcome: work.expectedOutcome,
@@ -305,17 +299,17 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
   const toProjectBoardItem = (project: (typeof projects)[number]): ProjectBoardItem => {
     const projectWorks = worksByProject.get(project.id) ?? [];
     const activeProjectWorks = projectWorks.filter((work) => work.status !== "COMPLETED" && work.status !== "CLOSED");
-    const teamId = getTeamIdForRecord(project.orgNodeId);
-    const departmentId = getDepartmentIdForRecord(project.orgNodeId, departmentByTeamId);
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(project.orgNodeId, orgNodeById);
+    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(project.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
 
     return {
       id: project.id,
       title: project.title,
       ownerId: project.ownerId,
       owner: ownerMap.get(project.ownerId) ?? "—",
-      departmentId,
-      teamId,
-      teamName: teamId ? teamNameMap.get(teamId) ?? null : null,
+      departmentOrgNodeId,
+      teamOrgNodeId,
+      teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
       status: project.status,
       startQuarter: project.startQuarter,
       endQuarter: project.endQuarter,
@@ -370,22 +364,22 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     updateReminders,
     canCreate: users.length > 0,
     departments: scopedDepartments.sort(compareNames).map((department) => ({
-      id: department.id,
+      id: department.orgNodeId,
       name: department.name,
     })),
-    defaultDepartmentId,
+    defaultDepartmentOrgNodeId,
     teamOptions: [...teams].sort(compareNames).map((team) => ({
-      id: team.id,
+      id: team.orgNodeId,
       name: team.name,
-      departmentId: team.departmentId,
+      departmentOrgNodeId: team.departmentOrgNodeId,
     })),
     memberOptions: users.map((user) => {
-      const teamId = getTeamIdForRecord(user.orgNodeId);
+      const teamOrgNodeId = getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById);
       return {
         id: user.id,
         name: user.name,
-        teamId,
-        teamName: teamId ? teamNameMap.get(teamId) ?? null : null,
+        teamOrgNodeId,
+        teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
       };
     }),
     projectOptions: projects

@@ -88,6 +88,11 @@ type SyncResult = {
   users: number;
 };
 
+type OrgAssignmentMaps = {
+  departmentNodeIdByBusinessId: Map<string, string>;
+  teamNodeIdByBusinessId: Map<string, string>;
+};
+
 function getDepartmentOrgNodeId(departmentId: string) {
   return `org_dept_${departmentId}`;
 }
@@ -226,6 +231,82 @@ function extractDepartmentIdFromOrgNodeId(orgNodeId: string) {
 
 function extractTeamIdFromOrgNodeId(orgNodeId: string) {
   return orgNodeId.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
+}
+
+async function backfillOrgAssignments(
+  tx: Prisma.TransactionClient,
+  maps: OrgAssignmentMaps,
+  canonicalDepartmentId?: string,
+) {
+  for (const [teamId, orgNodeId] of maps.teamNodeIdByBusinessId) {
+    await tx.user.updateMany({
+      where: { teamId },
+      data: { orgNodeId },
+    });
+    await tx.annualGoalPlan.updateMany({
+      where: canonicalDepartmentId ? { teamId, departmentId: canonicalDepartmentId } : { teamId },
+      data: { ownerOrgNodeId: orgNodeId },
+    });
+    await tx.project.updateMany({
+      where: { teamId },
+      data: { orgNodeId },
+    });
+    await tx.quarterlyWork.updateMany({
+      where: { teamId },
+      data: { orgNodeId },
+    });
+    await tx.personalKpi.updateMany({
+      where: { teamId },
+      data: { orgNodeId },
+    });
+  }
+
+  for (const [departmentId, orgNodeId] of maps.departmentNodeIdByBusinessId) {
+    await tx.user.updateMany({
+      where: {
+        departmentId,
+        OR: [
+          { teamId: null },
+          { orgNodeId: null },
+        ],
+      },
+      data: { orgNodeId },
+    });
+    await tx.annualGoalPlan.updateMany({
+      where: { departmentId, teamId: null },
+      data: { ownerOrgNodeId: orgNodeId },
+    });
+    await tx.project.updateMany({
+      where: { departmentId, teamId: null },
+      data: { orgNodeId },
+    });
+    await tx.quarterlyWork.updateMany({
+      where: { departmentId, teamId: null },
+      data: { orgNodeId },
+    });
+  }
+}
+
+async function rebuildOrgClosures(tx: Prisma.TransactionClient) {
+  const allOrgNodes = await tx.orgNode.findMany({ select: { id: true, parentId: true } });
+  const nodeMap = new Map(allOrgNodes.map((n) => [n.id, n]));
+
+  await tx.orgClosure.deleteMany();
+
+  const closureRows: Array<{ ancestorId: string; descendantId: string; depth: number }> = [];
+  for (const node of allOrgNodes) {
+    closureRows.push({ ancestorId: node.id, descendantId: node.id, depth: 0 });
+    let ancestor = node.parentId ? nodeMap.get(node.parentId) ?? null : null;
+    let depth = 1;
+    while (ancestor) {
+      closureRows.push({ ancestorId: ancestor.id, descendantId: node.id, depth });
+      ancestor = ancestor.parentId ? nodeMap.get(ancestor.parentId) ?? null : null;
+      depth++;
+    }
+  }
+  for (const row of closureRows) {
+    await tx.orgClosure.create({ data: row });
+  }
 }
 
 async function mergeDepartmentBusinessIds(
@@ -453,16 +534,24 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
     await mergeDepartmentBusinessIds(tx, departmentId, productDepartment);
 
     const teamIdByDingTalkDeptId = new Map<string, string>();
-    const teamNodeIdById = new Map<string, string>();
+    const departmentNodeIdByBusinessId = new Map<string, string>([[departmentId, deptOrgNode.id]]);
+    const teamNodeIdByBusinessId = new Map<string, string>();
     for (const child of childDepartments) {
       const teamNode = await upsertTeamNode(tx, deptOrgNode.id, child);
       const teamId = extractTeamIdFromOrgNodeId(teamNode.id);
       if (!teamId) throw new Error("小组组织节点缺少业务 ID");
       teamIdByDingTalkDeptId.set(child.deptId, teamId);
-      teamNodeIdById.set(teamId, teamNode.id);
+      teamNodeIdByBusinessId.set(teamId, teamNode.id);
     }
 
-    const canonicalTeamIds = Array.from(teamNodeIdById.keys());
+    const assignmentMaps = {
+      departmentNodeIdByBusinessId,
+      teamNodeIdByBusinessId,
+    } satisfies OrgAssignmentMaps;
+
+    await backfillOrgAssignments(tx, assignmentMaps, departmentId);
+
+    const canonicalTeamIds = Array.from(teamNodeIdByBusinessId.keys());
     if (canonicalTeamIds.length > 0) {
       await tx.user.updateMany({
         where: {
@@ -482,7 +571,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
       const title = getUserTitle(user);
       const isDeptAdmin = deptAdminUserIds.has(user.userId!);
       const inferredRoleType = isDeptAdmin ? "DEPARTMENT_MANAGER" : inferRoleType(title);
-      const orgNodeId = teamId ? (teamNodeIdById.get(teamId) ?? deptOrgNode.id) : deptOrgNode.id;
+      const orgNodeId = teamId ? (teamNodeIdByBusinessId.get(teamId) ?? deptOrgNode.id) : deptOrgNode.id;
       let existing = await tx.user.findUnique({
         where: { dingtalkUserId: user.userId },
       });
@@ -531,57 +620,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
       syncedUserIds.push(savedUser.id);
     }
 
-    const allOrgNodes = await tx.orgNode.findMany({ select: { id: true, parentId: true } });
-    const nodeMap = new Map(allOrgNodes.map((n) => [n.id, n]));
-
-    await tx.orgClosure.deleteMany();
-
-    const closureRows: Array<{ ancestorId: string; descendantId: string; depth: number }> = [];
-    for (const node of allOrgNodes) {
-      closureRows.push({ ancestorId: node.id, descendantId: node.id, depth: 0 });
-      let ancestor = node.parentId ? nodeMap.get(node.parentId) ?? null : null;
-      let depth = 1;
-      while (ancestor) {
-        closureRows.push({ ancestorId: ancestor.id, descendantId: node.id, depth });
-        ancestor = ancestor.parentId ? nodeMap.get(ancestor.parentId) ?? null : null;
-        depth++;
-      }
-    }
-    for (const row of closureRows) {
-      await tx.orgClosure.create({ data: row });
-    }
-
-    for (const [teamId, orgNodeId] of teamNodeIdById) {
-      await tx.annualGoalPlan.updateMany({
-        where: { teamId, departmentId },
-        data: { ownerOrgNodeId: orgNodeId },
-      });
-      await tx.project.updateMany({
-        where: { teamId },
-        data: { orgNodeId },
-      });
-      await tx.quarterlyWork.updateMany({
-        where: { teamId },
-        data: { orgNodeId },
-      });
-      await tx.personalKpi.updateMany({
-        where: { teamId },
-        data: { orgNodeId },
-      });
-    }
-
-    await tx.annualGoalPlan.updateMany({
-      where: { departmentId, teamId: null },
-      data: { ownerOrgNodeId: deptOrgNode.id },
-    });
-    await tx.project.updateMany({
-      where: { departmentId, teamId: null },
-      data: { orgNodeId: deptOrgNode.id },
-    });
-    await tx.quarterlyWork.updateMany({
-      where: { departmentId, teamId: null },
-      data: { orgNodeId: deptOrgNode.id },
-    });
+    await rebuildOrgClosures(tx);
 
     return {
       departmentName: department.name,

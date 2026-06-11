@@ -1,26 +1,5 @@
 import { prisma } from "@/server/db/prisma";
 
-function extractLegacyId(orgNodeId: string, prefix: string) {
-  return orgNodeId.startsWith(prefix) ? orgNodeId.slice(prefix.length) : null;
-}
-
-export function getDepartmentIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_dept_") ? orgNodeId.slice("org_dept_".length) : null;
-}
-
-export function getTeamIdFromOrgNodeId(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
-}
-
-export function getDepartmentOrgNodeId(departmentId: string) {
-  return `org_dept_${departmentId}`;
-}
-
-export function getTeamOrgNodeId(teamId: string) {
-  return `org_team_${teamId}`;
-}
-
-/** Return all descendant org node IDs for the given node (includes self via depth=0). */
 export async function getDescendantOrgNodeIds(orgNodeId: string | null): Promise<string[]> {
   if (!orgNodeId) return [];
   const rows = await prisma.orgClosure.findMany({
@@ -95,18 +74,4 @@ export async function isOrgNodeInSubtree(
   });
 
   return Boolean(row);
-}
-
-export async function getDescendantTeamIds(orgNodeId: string | null): Promise<string[]> {
-  const teamNodes = await getDescendantOrgNodes(orgNodeId, "TEAM");
-  return teamNodes
-    .map((node) => extractLegacyId(node.id, "org_team_"))
-    .filter((value): value is string => Boolean(value));
-}
-
-export async function getDescendantDepartmentIds(orgNodeId: string | null): Promise<string[]> {
-  const departmentNodes = await getDescendantOrgNodes(orgNodeId, "DEPARTMENT");
-  return departmentNodes
-    .map((node) => extractLegacyId(node.id, "org_dept_"))
-    .filter((value): value is string => Boolean(value));
 }

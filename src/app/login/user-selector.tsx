@@ -1,10 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check } from "lucide-react";
 import { avatarColor } from "@/lib/avatar-color";
 import { Button } from "@/components/ui-kit";
-import { selectLoginUser } from "@/server/auth/actions";
 import { getRoleLabel } from "@/server/permissions/role-labels";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
@@ -25,6 +25,7 @@ function Avatar({ name, size = "small" }: { name: string; size?: "small" | "larg
 }
 
 export function UserSelector({ users }: { users: LoginUser[] }) {
+  const router = useRouter();
   const [selectedUserId, setSelectedUserId] = useState(users[0]?.id ?? "");
 
   return (
@@ -34,7 +35,7 @@ export function UserSelector({ users }: { users: LoginUser[] }) {
         MVP 演示用，请选择登录身份
       </div>
 
-      <form action={selectLoginUser}>
+      <div>
         <input type="hidden" name="userId" value={selectedUserId} />
         <div className="grid gap-2 max-h-[420px] overflow-y-auto pr-1">
           {users.map((user) => {
@@ -68,11 +69,18 @@ export function UserSelector({ users }: { users: LoginUser[] }) {
         </div>
 
         <div className="mt-8">
-          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={!selectedUserId}>
+          <Button
+            type="button"
+            variant="primary"
+            size="lg"
+            className="w-full"
+            disabled={!selectedUserId}
+            onClick={() => router.push(`/login?userId=${encodeURIComponent(selectedUserId)}`)}
+          >
             下一步
           </Button>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

@@ -6,35 +6,26 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { getAnnualGoalCapabilities, getAnnualGoalPermissionMap, getAnnualGoalPlanPermissions, buildOrgScopeContext } from "@/server/organization/annual-goal-permissions";
 import {
   findNearestDepartmentOrgNodeId,
-  getDepartmentIdFromOrgNodeId,
-  getDepartmentOrgNodeId,
   getDescendantOrgNodeIds,
-  getDescendantTeamIds,
-  getTeamIdFromOrgNodeId,
-  getTeamOrgNodeId,
+  findOrgNodeById,
 } from "@/server/organization/org-tree-utils";
 import type { AnnualGoalOwnerType, AnnualMetricCalculationType, Prisma, RiskStatus } from "@prisma/client";
 
 const calculationTypes = ["RATIO", "BOOLEAN", "MANUAL_SCORE"] as const;
 const riskStatuses = ["NORMAL", "SLIGHT_DELAY", "RISK", "COMPLETED"] as const;
 
-async function findDepartmentIdForOrgNodeId(orgNodeId: string | null | undefined): Promise<string | null> {
-  const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(orgNodeId);
-  return getDepartmentIdFromOrgNodeId(departmentOrgNodeId);
-}
-
-async function findTeamRecordById(teamId: string) {
+async function findTeamRecordByOrgNodeId(orgNodeId: string) {
   const teamNode = await prisma.orgNode.findUnique({
-    where: { id: getTeamOrgNodeId(teamId) },
-    select: { id: true, name: true, parentId: true },
+    where: { id: orgNodeId },
+    select: { id: true, name: true, parentId: true, nodeType: true },
   });
 
-  if (!teamNode) return null;
+  if (!teamNode || teamNode.nodeType !== "TEAM") return null;
+
   return {
-    id: teamId,
+    id: teamNode.id,
     orgNodeId: teamNode.id,
     name: teamNode.name,
-    departmentId: getDepartmentIdFromOrgNodeId(teamNode.parentId),
     departmentOrgNodeId: teamNode.parentId,
   };
 }
@@ -59,64 +50,67 @@ async function getAnnualGoalActionContext() {
 
 function getScopedPlanPermissions(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
-  plan: { ownerType: AnnualGoalOwnerType; departmentId: string | null; teamId: string | null; ownerOrgNodeId?: string | null; deletedAt?: Date | null }
+  plan: { ownerType: AnnualGoalOwnerType; departmentOrgNodeId: string | null; teamOrgNodeId: string | null; ownerOrgNodeId?: string | null; deletedAt?: Date | null }
 ) {
-  return getAnnualGoalPlanPermissions(context.user, context.capabilities, plan, context.orgScopeContext);
+  return getAnnualGoalPlanPermissions(context.user, context.capabilities, {
+    ...plan,
+    departmentId: plan.departmentOrgNodeId,
+    teamId: plan.teamOrgNodeId,
+  }, context.orgScopeContext);
 }
 
 function canEditDepartmentScope(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
-  scope: { departmentId: string | null; ownerOrgNodeId?: string | null }
+  scope: { departmentOrgNodeId: string | null; ownerOrgNodeId?: string | null }
 ) {
   return getScopedPlanPermissions(context, {
     ownerType: "DEPARTMENT",
-    departmentId: scope.departmentId,
-    teamId: null,
+    departmentOrgNodeId: scope.departmentOrgNodeId,
+    teamOrgNodeId: null,
     ownerOrgNodeId: scope.ownerOrgNodeId ?? null,
   }).canEditDepartmentPlan;
 }
 
 function canEditTeamScope(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
-  scope: { teamId: string | null; departmentId?: string | null; ownerOrgNodeId?: string | null }
+  scope: { teamOrgNodeId: string | null; departmentOrgNodeId?: string | null; ownerOrgNodeId?: string | null }
 ) {
   return getScopedPlanPermissions(context, {
     ownerType: "TEAM",
-    departmentId: scope.departmentId ?? null,
-    teamId: scope.teamId,
+    departmentOrgNodeId: scope.departmentOrgNodeId ?? null,
+    teamOrgNodeId: scope.teamOrgNodeId,
     ownerOrgNodeId: scope.ownerOrgNodeId ?? null,
   }).canEditTeamPlan;
 }
 
 function canUpdateDepartmentProgressScope(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
-  scope: { departmentId: string | null; ownerOrgNodeId?: string | null }
+  scope: { departmentOrgNodeId: string | null; ownerOrgNodeId?: string | null }
 ) {
   return getScopedPlanPermissions(context, {
     ownerType: "DEPARTMENT",
-    departmentId: scope.departmentId,
-    teamId: null,
+    departmentOrgNodeId: scope.departmentOrgNodeId,
+    teamOrgNodeId: null,
     ownerOrgNodeId: scope.ownerOrgNodeId ?? null,
   }).canUpdateQuarterProgress;
 }
 
 function canUpdateTeamProgressScope(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
-  scope: { teamId: string | null; departmentId?: string | null; ownerOrgNodeId?: string | null }
+  scope: { teamOrgNodeId: string | null; departmentOrgNodeId?: string | null; ownerOrgNodeId?: string | null }
 ) {
   return getScopedPlanPermissions(context, {
     ownerType: "TEAM",
-    departmentId: scope.departmentId ?? null,
-    teamId: scope.teamId,
+    departmentOrgNodeId: scope.departmentOrgNodeId ?? null,
+    teamOrgNodeId: scope.teamOrgNodeId,
     ownerOrgNodeId: scope.ownerOrgNodeId ?? null,
   }).canUpdateTeamProgress;
 }
 
 async function requireAnnualGoalDepartmentEditor() {
   const context = await getAnnualGoalActionContext();
-  const departmentId = await findDepartmentIdForOrgNodeId(context.user.orgNodeId);
-  const departmentOrgNodeId = departmentId ? getDepartmentOrgNodeId(departmentId) : null;
-  if (!canEditDepartmentScope(context, { departmentId, ownerOrgNodeId: departmentOrgNodeId })) {
+  const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(context.user.orgNodeId);
+  if (!departmentOrgNodeId || !canEditDepartmentScope(context, { departmentOrgNodeId, ownerOrgNodeId: departmentOrgNodeId })) {
     throw new Error("无权维护部门年度指标");
   }
   return context;
@@ -159,37 +153,35 @@ async function resolveResponsibleUserId(
 
 async function resolveDepartmentResponsibleUserId(
   responsibleUserId: string | null,
-  scope: { departmentId: string | null; ownerOrgNodeId?: string | null },
+  scope: { departmentOrgNodeId: string | null; ownerOrgNodeId?: string | null },
 ) {
   return resolveResponsibleUserId(responsibleUserId, scope, "负责人必须为本部门成员");
 }
 
 async function resolveTeamResponsibleUserId(
   responsibleUserId: string | null,
-  scope: { departmentId: string | null; teamId: string | null; ownerOrgNodeId?: string | null },
+  scope: { departmentOrgNodeId: string | null; teamOrgNodeId: string | null; ownerOrgNodeId?: string | null },
 ) {
   return resolveResponsibleUserId(responsibleUserId, scope, "负责人必须为本小组成员");
 }
 
 async function resolveScopedTeams(
-  departmentId: string | null,
   ownerOrgNodeId: string | null,
-  teamIds: string[],
+  teamOrgNodeIds: string[],
 ) {
-  if (teamIds.length === 0 || !ownerOrgNodeId) return [];
+  if (teamOrgNodeIds.length === 0 || !ownerOrgNodeId) return [];
 
-  const scopedTeamIds = await getDescendantTeamIds(ownerOrgNodeId);
-  if (scopedTeamIds.length === 0) return [];
+  const scopedOrgNodeIds = new Set(await getDescendantOrgNodeIds(ownerOrgNodeId));
+  if (scopedOrgNodeIds.size === 0) return [];
 
-  const filteredTeamIds = teamIds.filter((teamId) => scopedTeamIds.includes(teamId));
-  if (filteredTeamIds.length === 0) return [];
+  const filteredTeamOrgNodeIds = teamOrgNodeIds.filter((orgNodeId) => scopedOrgNodeIds.has(orgNodeId));
+  if (filteredTeamOrgNodeIds.length === 0) return [];
 
-  const teams = await Promise.all(filteredTeamIds.map((teamId) => findTeamRecordById(teamId)));
-  return teams.filter((team): team is { id: string; name: string; departmentId: string | null } => Boolean(team && team.departmentId));
+  const teams = await Promise.all(filteredTeamOrgNodeIds.map((orgNodeId) => findTeamRecordByOrgNodeId(orgNodeId)));
+  return teams.filter((team): team is { id: string; name: string; departmentOrgNodeId: string | null; orgNodeId: string } => Boolean(team && team.departmentOrgNodeId));
 }
 
 async function resolveScopedTeamPlanIds(scope: {
-  departmentId: string | null;
   ownerOrgNodeId?: string | null;
   year: number;
   includeDeleted?: boolean;
@@ -209,18 +201,15 @@ async function resolveScopedTeamPlanIds(scope: {
       ...(scope.includeDeleted ? {} : { deletedAt: null }),
       ownerOrgNodeId: { in: ownerOrgScopeIds },
     },
-    select: { id: true, teamId: true },
+    select: { id: true, ownerOrgNodeId: true },
   });
 }
 
 function isSameDepartmentScope(
-  left: { departmentId: string | null; ownerOrgNodeId?: string | null },
-  right: { departmentId: string | null; ownerOrgNodeId?: string | null },
+  left: { ownerOrgNodeId?: string | null },
+  right: { ownerOrgNodeId?: string | null },
 ) {
-  if (left.ownerOrgNodeId && right.ownerOrgNodeId) {
-    return left.ownerOrgNodeId === right.ownerOrgNodeId;
-  }
-  return left.departmentId === right.departmentId;
+  return left.ownerOrgNodeId === right.ownerOrgNodeId;
 }
 
 async function resolveOwner(
@@ -228,26 +217,26 @@ async function resolveOwner(
   formData: FormData
 ) {
   const ownerType = formData.get("ownerType") as AnnualGoalOwnerType;
-  const requestedDepartmentId = (formData.get("departmentId") as string) || null;
-  const requestedTeamId = (formData.get("teamId") as string) || null;
+  const requestedDepartmentOrgNodeId = (formData.get("departmentOrgNodeId") as string) || null;
+  const requestedTeamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
 
   if (ownerType !== "DEPARTMENT" && ownerType !== "TEAM") throw new Error("请选择方案归属");
 
   if (ownerType === "DEPARTMENT") {
-    const departmentId = requestedDepartmentId || await findDepartmentIdForOrgNodeId(context.user.orgNodeId);
-    if (!departmentId) throw new Error("请选择所属部门");
-    const ownerOrgNodeId = getDepartmentOrgNodeId(departmentId);
-    if (!canEditDepartmentScope(context, { departmentId, ownerOrgNodeId })) throw new Error("无权维护该部门方案");
-    return { ownerType, departmentId, teamId: null, ownerOrgNodeId };
+    const ownerOrgNodeId = requestedDepartmentOrgNodeId || await findNearestDepartmentOrgNodeId(context.user.orgNodeId);
+    if (!ownerOrgNodeId) throw new Error("请选择所属部门");
+    const departmentNode = await findOrgNodeById(ownerOrgNodeId);
+    if (!departmentNode || departmentNode.nodeType !== "DEPARTMENT") throw new Error("所属部门无效");
+    if (!canEditDepartmentScope(context, { departmentOrgNodeId: ownerOrgNodeId, ownerOrgNodeId })) throw new Error("无权维护该部门方案");
+    return { ownerType, departmentOrgNodeId: ownerOrgNodeId, teamOrgNodeId: null, ownerOrgNodeId };
   }
 
-  const teamId = requestedTeamId;
-  if (!teamId) throw new Error("请选择所属小组");
-  const team = await findTeamRecordById(teamId);
-  if (!team || !team.departmentId) throw new Error("小组不存在");
-  const ownerOrgNodeId = team.orgNodeId;
-  if (!canEditTeamScope(context, { teamId, departmentId: team.departmentId, ownerOrgNodeId })) throw new Error("无权维护该部门小组方案");
-  return { ownerType, departmentId: team.departmentId, teamId, ownerOrgNodeId };
+  const ownerOrgNodeId = requestedTeamOrgNodeId;
+  if (!ownerOrgNodeId) throw new Error("请选择所属小组");
+  const team = await findTeamRecordByOrgNodeId(ownerOrgNodeId);
+  if (!team || !team.departmentOrgNodeId) throw new Error("小组不存在");
+  if (!canEditTeamScope(context, { teamOrgNodeId: ownerOrgNodeId, departmentOrgNodeId: team.departmentOrgNodeId, ownerOrgNodeId })) throw new Error("无权维护该部门小组方案");
+  return { ownerType, departmentOrgNodeId: team.departmentOrgNodeId, teamOrgNodeId: ownerOrgNodeId, ownerOrgNodeId };
 }
 
 async function assertPlanEditable(planId: string) {
@@ -255,11 +244,11 @@ async function assertPlanEditable(planId: string) {
   const plan = await prisma.annualGoalPlan.findUnique({ where: { id: planId } });
   if (!plan || plan.deletedAt) throw new Error("年度方案不存在");
 
-  if (plan.ownerType === "DEPARTMENT" && canEditDepartmentScope(context, { departmentId: plan.departmentId, ownerOrgNodeId: plan.ownerOrgNodeId })) {
+  if (plan.ownerType === "DEPARTMENT" && canEditDepartmentScope(context, { departmentOrgNodeId: plan.ownerOrgNodeId, ownerOrgNodeId: plan.ownerOrgNodeId })) {
     return { context, plan };
   }
 
-  if (plan.ownerType === "TEAM" && canEditTeamScope(context, { teamId: plan.teamId, departmentId: plan.departmentId, ownerOrgNodeId: plan.ownerOrgNodeId })) {
+  if (plan.ownerType === "TEAM" && canEditTeamScope(context, { teamOrgNodeId: plan.ownerOrgNodeId, departmentOrgNodeId: plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(plan.ownerOrgNodeId) : null, ownerOrgNodeId: plan.ownerOrgNodeId })) {
     return { context, plan };
   }
 
@@ -288,7 +277,7 @@ async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: 
   }
 
   if (canUpdateDepartmentProgressScope(context, {
-    departmentId: departmentPlan.departmentId,
+    departmentOrgNodeId: departmentPlan.ownerOrgNodeId,
     ownerOrgNodeId: departmentPlan.ownerOrgNodeId,
   })) {
     return { metric, sourceMetric };
@@ -299,8 +288,8 @@ async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: 
   }
 
   if (metric.plan.ownerType === "TEAM" && canUpdateTeamProgressScope(context, {
-    teamId: metric.plan.teamId,
-    departmentId: metric.plan.departmentId,
+    teamOrgNodeId: metric.plan.ownerOrgNodeId,
+    departmentOrgNodeId: metric.plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(metric.plan.ownerOrgNodeId) : null,
     ownerOrgNodeId: metric.plan.ownerOrgNodeId,
   })) {
     return { metric, sourceMetric };
@@ -310,7 +299,8 @@ async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: 
     throw new Error("无权更新该季度指标");
   }
 
-  const currentUserTeamId = getTeamIdFromOrgNodeId(context.user.orgNodeId);
+  const currentUserOrgNode = await findOrgNodeById(context.user.orgNodeId);
+  const currentUserTeamId = currentUserOrgNode?.nodeType === "TEAM" ? currentUserOrgNode.id : null;
   if (currentUserTeamId) {
     const teamPlan = await prisma.annualGoalPlan.findFirst({
       where: {
@@ -378,7 +368,7 @@ async function assertWeightWithinLimit(planId: string, weight: number, metricId?
 
 async function assertSourceMetricAvailable(
   sourceMetricId: string,
-  scope: { departmentId: string | null; ownerOrgNodeId?: string | null },
+  scope: { departmentOrgNodeId: string | null; ownerOrgNodeId?: string | null },
 ) {
   const sourceMetric = await prisma.annualGoalMetricSource.findUnique({
     where: { id: sourceMetricId },
@@ -461,7 +451,7 @@ export async function createAnnualGoalPlan(formData: FormData) {
   if (!year || year < 2000 || year > 2100) throw new Error("年份不正确");
   if (!name) throw new Error("方案名称为必填项");
 
-  const { departmentId, teamId, ownerOrgNodeId } = await resolveOwner(context, formData);
+  const { departmentOrgNodeId, teamOrgNodeId, ownerOrgNodeId } = await resolveOwner(context, formData);
 
   await prisma.annualGoalPlan.create({
     data: {
@@ -469,17 +459,17 @@ export async function createAnnualGoalPlan(formData: FormData) {
       name,
       description,
       ownerType,
-      departmentId,
-      teamId,
+      departmentId: departmentOrgNodeId,
+      teamId: teamOrgNodeId,
       createdById: context.user.id,
       ownerOrgNodeId,
     },
   });
 
   if (ownerType === "DEPARTMENT") {
-    const teamIds = formData.getAll("teamIds").filter((v) => typeof v === "string") as string[];
-    if (teamIds.length > 0) {
-      const teams = await resolveScopedTeams(departmentId, ownerOrgNodeId, teamIds);
+    const teamOrgNodeIds = formData.getAll("teamOrgNodeIds").filter((v) => typeof v === "string") as string[];
+    if (teamOrgNodeIds.length > 0) {
+      const teams = await resolveScopedTeams(ownerOrgNodeId, teamOrgNodeIds);
 
       if (teams.length > 0) {
         const teamPlans = teams.map((team) => ({
@@ -494,8 +484,8 @@ export async function createAnnualGoalPlan(formData: FormData) {
                 name: `${team.name} ${year} 年度业绩指标`,
                 description: null,
                 ownerType: "TEAM",
-                departmentId: team.departmentId,
-                teamId: team.id,
+                departmentId: team.departmentOrgNodeId,
+                teamId: team.orgNodeId,
                 createdById: context.user.id,
                 ownerOrgNodeId: orgNodeId,
               },
@@ -516,27 +506,26 @@ export async function updateAnnualGoalPlan(formData: FormData) {
   const year = numberFromForm(formData.get("year"), "年份");
   const name = (formData.get("name") as string)?.trim();
   const description = optionalString(formData.get("description"));
-  const { ownerType, departmentId, teamId, ownerOrgNodeId } = await resolveOwner(context, formData);
+  const { ownerType, departmentOrgNodeId, teamOrgNodeId, ownerOrgNodeId } = await resolveOwner(context, formData);
 
   if (!year || year < 2000 || year > 2100) throw new Error("年份不正确");
   if (!name) throw new Error("方案名称为必填项");
 
   await prisma.annualGoalPlan.update({
     where: { id },
-    data: { year, name, description, ownerType, departmentId, teamId, ownerOrgNodeId },
+    data: { year, name, description, ownerType, departmentId: departmentOrgNodeId, teamId: teamOrgNodeId, ownerOrgNodeId },
   });
 
-  if (ownerType === "DEPARTMENT" && departmentId) {
-    const selectedTeamIds = formData.getAll("teamIds").filter((v) => typeof v === "string") as string[];
+  if (ownerType === "DEPARTMENT" && ownerOrgNodeId) {
+    const selectedTeamOrgNodeIds = formData.getAll("teamOrgNodeIds").filter((v) => typeof v === "string") as string[];
     const existingTeamPlans = await resolveScopedTeamPlanIds({
-      departmentId,
       ownerOrgNodeId,
       year,
     });
 
-    const existingTeamIds = new Set(existingTeamPlans.map((p) => p.teamId!).filter(Boolean));
-    const selectedSet = new Set(selectedTeamIds);
-    const toRemove = existingTeamPlans.filter((p) => p.teamId && !selectedSet.has(p.teamId));
+    const existingTeamOrgNodeIds = new Set(existingTeamPlans.map((p) => p.ownerOrgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)));
+    const selectedSet = new Set(selectedTeamOrgNodeIds);
+    const toRemove = existingTeamPlans.filter((p) => p.ownerOrgNodeId && !selectedSet.has(p.ownerOrgNodeId));
     if (toRemove.length > 0) {
       await prisma.annualGoalPlan.updateMany({
         where: { id: { in: toRemove.map((p) => p.id) } },
@@ -544,9 +533,9 @@ export async function updateAnnualGoalPlan(formData: FormData) {
       });
     }
 
-    const toAdd = selectedTeamIds.filter((tid) => !existingTeamIds.has(tid));
+    const toAdd = selectedTeamOrgNodeIds.filter((orgNodeId) => !existingTeamOrgNodeIds.has(orgNodeId));
     if (toAdd.length > 0) {
-      const teams = await resolveScopedTeams(departmentId, ownerOrgNodeId, toAdd);
+      const teams = await resolveScopedTeams(ownerOrgNodeId, toAdd);
       if (teams.length > 0) {
         const teamPlans = teams.map((team) => ({
           team,
@@ -560,8 +549,8 @@ export async function updateAnnualGoalPlan(formData: FormData) {
                 name: `${team.name} ${year} 年度业绩指标`,
                 description: null,
                 ownerType: "TEAM",
-                departmentId: team.departmentId,
-                teamId: team.id,
+                departmentId: team.departmentOrgNodeId,
+                teamId: team.orgNodeId,
                 createdById: context.user.id,
                 ownerOrgNodeId: orgNodeId,
               },
@@ -711,8 +700,8 @@ export async function createAnnualGoalMetric(formData: FormData) {
   if (plan.ownerType === "TEAM") {
     if (!!sourceMetricId === !!parentMetricId) throw new Error("请选择一个指标项或元指标");
     const responsibleUserId = await resolveTeamResponsibleUserId(responsibleUserIdInput, {
-      departmentId: plan.departmentId,
-      teamId: plan.teamId,
+      departmentOrgNodeId: plan.ownerOrgNodeId,
+      teamOrgNodeId: plan.ownerOrgNodeId,
       ownerOrgNodeId: plan.ownerOrgNodeId,
     });
 
@@ -869,7 +858,7 @@ export async function createAnnualGoalMetricSource(formData: FormData) {
   const calculationType = formData.get("calculationType") as AnnualMetricCalculationType;
   const riskStatus = formData.get("riskStatus") as RiskStatus;
   const responsibleUserId = await resolveDepartmentResponsibleUserId((formData.get("responsibleUserId") as string) || null, {
-    departmentId: parentMetric.plan.departmentId,
+    departmentOrgNodeId: parentMetric.plan.ownerOrgNodeId,
     ownerOrgNodeId: parentMetric.plan.ownerOrgNodeId,
   });
 
@@ -908,7 +897,7 @@ export async function updateAnnualGoalMetricSource(formData: FormData) {
   const calculationType = formData.get("calculationType") as AnnualMetricCalculationType;
   const riskStatus = formData.get("riskStatus") as RiskStatus;
   const responsibleUserId = await resolveDepartmentResponsibleUserId((formData.get("responsibleUserId") as string) || null, {
-    departmentId: sourceMetric.parentMetric.plan.departmentId,
+    departmentOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId,
     ownerOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId,
   });
 

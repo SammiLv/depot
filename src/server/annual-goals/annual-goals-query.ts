@@ -1,9 +1,5 @@
 import { prisma } from "@/server/db/prisma";
-import {
-  getDepartmentIdFromOrgNodeId,
-  getDescendantOrgNodeIds,
-  getTeamIdFromOrgNodeId,
-} from "@/server/organization/org-tree-utils";
+import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilities,
@@ -209,39 +205,53 @@ function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
     }
   }
 
-  return { departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId };
+  return { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId };
 }
 
 function getDepartmentOrgNodeIdForRecord(
   orgNodeId: string | null | undefined,
+  orgNodeById: Map<string, OrgNodeSummary>,
   departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>,
 ) {
   if (!orgNodeId) {
     return null;
   }
 
-  if (orgNodeId.startsWith("org_dept_")) {
-    return orgNodeId;
+  const node = orgNodeById.get(orgNodeId) ?? null;
+  if (!node) {
+    return null;
   }
 
-  if (orgNodeId.startsWith("org_team_")) {
-    return departmentOrgNodeIdByTeamOrgNodeId.get(orgNodeId) ?? null;
+  if (node.nodeType === "DEPARTMENT") {
+    return node.id;
+  }
+
+  if (node.nodeType === "TEAM") {
+    return departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null;
   }
 
   return null;
 }
 
-function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined) {
-  return orgNodeId?.startsWith("org_team_") ? orgNodeId : null;
+function getTeamOrgNodeIdForRecord(
+  orgNodeId: string | null | undefined,
+  orgNodeById: Map<string, OrgNodeSummary>,
+) {
+  const node = orgNodeId ? orgNodeById.get(orgNodeId) ?? null : null;
+  return node?.nodeType === "TEAM" ? node.id : null;
 }
 
-function mapMemberOption(user: { id: string; name: string; title: string | null; orgNodeId: string | null | undefined }, departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>) {
+function mapMemberOption(
+  user: { id: string; name: string; title: string | null; orgNodeId: string | null | undefined },
+  orgNodeById: Map<string, OrgNodeSummary>,
+  departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>,
+) {
   return {
     id: user.id,
     name: user.name,
     title: user.title,
-    departmentOrgNodeId: getDepartmentOrgNodeIdForRecord(user.orgNodeId, departmentOrgNodeIdByTeamOrgNodeId),
-    teamOrgNodeId: getTeamOrgNodeIdForRecord(user.orgNodeId),
+    departmentOrgNodeId: getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId),
+    teamOrgNodeId: getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById),
   };
 }
 
@@ -352,7 +362,7 @@ function comparePlans(a: { ownerType: AnnualGoalOwnerType; ownerName: string; ye
 
 function getPlanPermissions(
   currentUser: DataScopeInput,
-  plan: { ownerType: AnnualGoalOwnerType; departmentId: string | null; teamId: string | null; ownerOrgNodeId?: string | null; deletedAt: Date | null },
+  plan: { ownerType: AnnualGoalOwnerType; ownerOrgNodeId?: string | null; deletedAt: Date | null },
   capabilities: {
     canEditDepartmentPlans: boolean;
     canEditTeamPlans: boolean;
@@ -410,7 +420,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     orderBy: [{ nodeType: "asc" }, { name: "asc" }],
     select: { id: true, name: true, nodeType: true, parentId: true },
   });
-  const { departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
+  const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
   const teams = orgNodes
     .filter((node) => node.nodeType === "TEAM" && Boolean(node.parentId))
     .map((node) => ({
@@ -511,20 +521,20 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     scopedDepartmentOrgNodeIds.map((departmentOrgNodeId) => [
       departmentOrgNodeId,
       scopedUsers
-        .filter((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, departmentOrgNodeIdByTeamOrgNodeId) === departmentOrgNodeId)
-        .map((user) => mapMemberOption(user, departmentOrgNodeIdByTeamOrgNodeId)),
+        .filter((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId) === departmentOrgNodeId)
+        .map((user) => mapMemberOption(user, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );
   const memberOptionsByTeam = Object.fromEntries(
     scopedTeamOrgNodeIds.map((teamOrgNodeId) => [
       teamOrgNodeId,
       scopedUsers
-        .filter((user) => getTeamOrgNodeIdForRecord(user.orgNodeId) === teamOrgNodeId)
-        .map((user) => mapMemberOption(user, departmentOrgNodeIdByTeamOrgNodeId)),
+        .filter((user) => getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById) === teamOrgNodeId)
+        .map((user) => mapMemberOption(user, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );
   function getPlanScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
-    return getDepartmentOrgNodeIdForRecord(plan.ownerOrgNodeId, departmentOrgNodeIdByTeamOrgNodeId);
+    return getDepartmentOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
   }
 
   const departmentMetricByPlan = new Map(selectedDepartmentMetrics.map((metric) => [`${getPlanScopeDepartmentOrgNodeId(metric.plan)}:${metric.plan.year}:${metric.metricCode}`, metric]));
@@ -609,8 +619,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
         metricCode: m.metricCode,
         name: m.name,
         description: m.description,
-        departmentId: scopeDepartmentId,
-        scopeDepartmentId: getMetricScopeDepartmentId(plan),
+        departmentOrgNodeId: getMetricScopeDepartmentOrgNodeId(plan),
+        scopeDepartmentOrgNodeId: getMetricScopeDepartmentOrgNodeId(plan),
         responsibleUserId: m.responsibleUserId,
         responsibleUser: mapResponsibleUser(m.responsibleUserId ? userById.get(m.responsibleUserId) : null),
         rawTargetValue: roundValue(m.targetValue),
@@ -677,10 +687,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       };
     });
 
-    const scopeDepartmentId = getPlanScopeDepartmentId(plan);
-    const departmentName = scopeDepartmentId ? departmentNameById.get(scopeDepartmentId) : null;
-    const teamId = getTeamIdForRecord(plan.ownerOrgNodeId);
-    const teamName = teamId ? teamNameById.get(teamId) : null;
+    const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
+    const departmentName = scopeDepartmentOrgNodeId ? departmentNameByOrgNodeId.get(scopeDepartmentOrgNodeId) : null;
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId);
+    const teamName = teamOrgNodeId ? teamNameByOrgNodeId.get(teamOrgNodeId) : null;
 
     const permissions = getPlanPermissions(currentUser, plan, annualGoalCapabilities, scopeContext);
 
@@ -691,9 +701,9 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       description: plan.description,
       ownerType: plan.ownerType,
       ownerName: plan.ownerType === "DEPARTMENT" ? departmentName ?? "部门" : teamName ?? "小组",
-      departmentId: scopeDepartmentId,
-      scopeDepartmentId,
-      teamId,
+      departmentOrgNodeId: scopeDepartmentOrgNodeId,
+      scopeDepartmentOrgNodeId,
+      teamOrgNodeId,
       ownerOrgNodeId: plan.ownerOrgNodeId ?? null,
       version: `v${plan.version}`,
       isActive: plan.isActive,
@@ -704,22 +714,22 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       metrics: metricsData,
       totalWeight: roundPercent(totalWeight),
       permissions,
-      linkedTeamIds: [] as string[],
+      linkedTeamOrgNodeIds: [] as string[],
       createdAt: plan.createdAt,
     };
   }
 
   // Compute linked team IDs for department plans (team plans with same department + year)
-  const linkedTeamIdsByDeptPlan = new Map<string, string[]>();
+  const linkedTeamOrgNodeIdsByDeptPlan = new Map<string, string[]>();
   for (const plan of plans) {
-    const scopeDepartmentId = getPlanScopeDepartmentId(plan);
-    if (plan.ownerType === "DEPARTMENT" && scopeDepartmentId) {
-      linkedTeamIdsByDeptPlan.set(
+    const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
+    if (plan.ownerType === "DEPARTMENT" && scopeDepartmentOrgNodeId) {
+      linkedTeamOrgNodeIdsByDeptPlan.set(
         plan.id,
         plans
-          .filter((p) => p.ownerType === "TEAM" && getPlanScopeDepartmentId(p) === scopeDepartmentId && p.year === plan.year)
-          .map((p) => getTeamIdForRecord(p.ownerOrgNodeId))
-          .filter((teamId): teamId is string => Boolean(teamId)),
+          .filter((p) => p.ownerType === "TEAM" && getPlanScopeDepartmentOrgNodeId(p) === scopeDepartmentOrgNodeId && p.year === plan.year)
+          .map((p) => getTeamOrgNodeIdForRecord(p.ownerOrgNodeId))
+          .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId)),
       );
     }
   }
@@ -727,7 +737,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   const plansWithProgress = plans.map((p) => {
     const mapped = mapPlan(p);
     if (p.ownerType === "DEPARTMENT") {
-      mapped.linkedTeamIds = linkedTeamIdsByDeptPlan.get(p.id) ?? [];
+      mapped.linkedTeamOrgNodeIds = linkedTeamOrgNodeIdsByDeptPlan.get(p.id) ?? [];
     }
     return mapped;
   }).sort(comparePlans);
@@ -768,28 +778,26 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   const canManageDepartmentPlans = annualGoalCapabilities.canEditDepartmentPlans;
 
   // Build scope items: all visible departments + teams, with or without plans
-  const deptPlanByDept = new Map(plansWithProgress.filter((p) => p.ownerType === "DEPARTMENT").map((p) => [p.scopeDepartmentId!, p]));
-  const teamPlanByTeam = new Map(plansWithProgress.filter((p) => p.ownerType === "TEAM").map((p) => [p.teamId!, p]));
+  const deptPlanByDept = new Map(plansWithProgress.filter((p) => p.ownerType === "DEPARTMENT").map((p) => [p.scopeDepartmentOrgNodeId!, p]));
+  const teamPlanByTeam = new Map(plansWithProgress.filter((p) => p.ownerType === "TEAM").map((p) => [p.teamOrgNodeId!, p]));
   const scopeItems: ScopeItem[] = [
     ...scopeDepartments.map((department) => ({
       type: "DEPARTMENT" as const,
-      id: department.id,
+      orgNodeId: department.orgNodeId,
       name: department.name,
-      scopeDepartmentId: department.id,
-      departmentId: department.departmentId,
-      teamId: null,
-      ownerOrgNodeId: deptPlanByDept.get(department.id)?.ownerOrgNodeId ?? null,
-      plan: deptPlanByDept.get(department.id) ?? null,
+      scopeDepartmentOrgNodeId: department.orgNodeId,
+      teamOrgNodeId: null,
+      ownerOrgNodeId: deptPlanByDept.get(department.orgNodeId)?.ownerOrgNodeId ?? null,
+      plan: deptPlanByDept.get(department.orgNodeId) ?? null,
     })),
     ...teams.map((team) => ({
       type: "TEAM" as const,
-      id: team.id,
+      orgNodeId: team.orgNodeId,
       name: team.name,
-      scopeDepartmentId: team.departmentId,
-      departmentId: team.departmentId,
-      teamId: team.id,
-      ownerOrgNodeId: teamPlanByTeam.get(team.id)?.ownerOrgNodeId ?? null,
-      plan: teamPlanByTeam.get(team.id) ?? null,
+      scopeDepartmentOrgNodeId: team.departmentOrgNodeId,
+      teamOrgNodeId: team.orgNodeId,
+      ownerOrgNodeId: teamPlanByTeam.get(team.orgNodeId)?.ownerOrgNodeId ?? null,
+      plan: teamPlanByTeam.get(team.orgNodeId) ?? null,
     })),
   ];
 
@@ -813,7 +821,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       canEditTeamPlans: annualGoalCapabilities.canEditTeamPlans,
       canUpdateProgress: annualGoalCapabilities.canUpdateProgress,
     },
-    defaultDepartmentId,
+    defaultDepartmentOrgNodeId,
     summary: {
       planCount: plans.length,
       metricCount: totalMetrics,

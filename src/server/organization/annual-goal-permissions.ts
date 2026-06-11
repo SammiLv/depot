@@ -1,6 +1,6 @@
 import type { AnnualGoalOwnerType, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { getDescendantOrgNodeIds, getDescendantTeamIds } from "@/server/organization/org-tree-utils";
+import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 
 export const annualGoalPermissionCodes = [
   "annualGoal.viewDepartmentPlans",
@@ -401,7 +401,7 @@ export async function getAnnualGoalTeamWhere(
     return { id: "__no_team__" };
   }
 
-  const teamIds = await getDescendantTeamIds(user.orgNodeId);
+  const teamIds = await getDescendantOrgNodeIds(user.orgNodeId);
   if (teamIds.length === 0) {
     return { id: "__no_team__" };
   }

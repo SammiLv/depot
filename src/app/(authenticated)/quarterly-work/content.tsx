@@ -31,7 +31,7 @@ type ProjectDialogState = {
   title: string;
 } | null;
 
-type FormSuccessHandler = (ownerTeamId: Props["data"]["memberOptions"][number]["teamId"] | null) => void;
+type FormSuccessHandler = (ownerTeamOrgNodeId: Props["data"]["memberOptions"][number]["teamOrgNodeId"] | null) => void;
 
 const columnTitleByStatus: Record<ColumnStatus, string> = {
   NOT_STARTED: "未启动",
@@ -93,8 +93,8 @@ function QuarterlyWorkForm({
     [data.memberOptions]
   );
   const statusOptions = useMemo(() => editableStatuses, []);
-  const ownerTeamIdByMemberId = useMemo(
-    () => new Map(data.memberOptions.map((member) => [member.id, member.teamId ?? null])),
+  const ownerTeamOrgNodeIdByMemberId = useMemo(
+    () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
     [data.memberOptions]
   );
 
@@ -105,7 +105,7 @@ function QuarterlyWorkForm({
     } else {
       await createQuarterlyWork(fd);
     }
-    onSuccess(ownerTeamIdByMemberId.get(nextOwnerId) ?? null);
+    onSuccess(ownerTeamOrgNodeIdByMemberId.get(nextOwnerId) ?? null);
     onClose();
   };
 
@@ -441,7 +441,7 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
 
 export function QuarterlyWorkContent({ data }: Props) {
   const [tab, setTab] = useState<BoardTab>("project");
-  const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentId ?? data.departments[0]?.id ?? "");
+  const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentOrgNodeId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
   const [editDialog, setEditDialog] = useState<EditDialogState>(null);
@@ -449,11 +449,11 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [createProjectDialog, setCreateProjectDialog] = useState<ProjectStatus | null>(null);
   const allItems = useMemo(() => data.columns.flatMap((column) => column.items), [data.columns]);
   const teamDepartmentMap = useMemo(
-    () => new Map(data.teamOptions.map((team) => [team.id, team.departmentId])),
+    () => new Map(data.teamOptions.map((team) => [team.id, team.departmentOrgNodeId])),
     [data.teamOptions]
   );
   const filteredTeamOptions = useMemo(
-    () => data.teamOptions.filter((team) => team.departmentId === departmentTab),
+    () => data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentTab),
     [data.teamOptions, departmentTab]
   );
   const teamTabs = useMemo(
@@ -461,11 +461,11 @@ export function QuarterlyWorkContent({ data }: Props) {
     [filteredTeamOptions]
   );
   const belongsToSelectedDepartment = useMemo(
-    () => (teamId: string | null) => Boolean(teamId && teamDepartmentMap.get(teamId) === departmentTab),
+    () => (teamOrgNodeId: string | null) => Boolean(teamOrgNodeId && teamDepartmentMap.get(teamOrgNodeId) === departmentTab),
     [departmentTab, teamDepartmentMap]
   );
-  const handleFormSuccess = (ownerTeamId: Props["data"]["memberOptions"][number]["teamId"] | null) => {
-    if (teamTab !== "all" && ownerTeamId !== teamTab) {
+  const handleFormSuccess = (ownerTeamOrgNodeId: Props["data"]["memberOptions"][number]["teamOrgNodeId"] | null) => {
+    if (teamTab !== "all" && ownerTeamOrgNodeId !== teamTab) {
       setTeamTab("all");
     }
   };
@@ -473,8 +473,8 @@ export function QuarterlyWorkContent({ data }: Props) {
     () => data.columns.map((column) => ({
       ...column,
       items: column.items.filter((item) => {
-        if (!belongsToSelectedDepartment(item.teamId)) return false;
-        return teamTab === "all" ? true : item.teamId === teamTab;
+        if (!belongsToSelectedDepartment(item.teamOrgNodeId)) return false;
+        return teamTab === "all" ? true : item.teamOrgNodeId === teamTab;
       }),
     })),
     [data.columns, belongsToSelectedDepartment, teamTab]
@@ -483,17 +483,17 @@ export function QuarterlyWorkContent({ data }: Props) {
     () => data.projectColumns.map((column) => ({
       ...column,
       items: column.items.filter((item) => {
-        if (!belongsToSelectedDepartment(item.teamId)) return false;
-        return teamTab === "all" ? true : item.teamId === teamTab;
+        if (!belongsToSelectedDepartment(item.teamOrgNodeId)) return false;
+        return teamTab === "all" ? true : item.teamOrgNodeId === teamTab;
       }),
     })),
     [data.projectColumns, belongsToSelectedDepartment, teamTab]
   );
   const visibleReminders = useMemo(
     () => data.updateReminders.filter((reminder) => {
-      const teamId = allItems.find((item) => item.id === reminder.id)?.teamId ?? null;
-      if (!belongsToSelectedDepartment(teamId)) return false;
-      return teamTab === "all" ? true : teamId === teamTab;
+      const teamOrgNodeId = allItems.find((item) => item.id === reminder.id)?.teamOrgNodeId ?? null;
+      if (!belongsToSelectedDepartment(teamOrgNodeId)) return false;
+      return teamTab === "all" ? true : teamOrgNodeId === teamTab;
     }),
     [allItems, data.updateReminders, belongsToSelectedDepartment, teamTab]
   );

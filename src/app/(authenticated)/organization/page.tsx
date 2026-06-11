@@ -1,7 +1,7 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { getAnnualGoalPermissionMatrix } from "@/server/organization/annual-goal-permissions";
-import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { getUserWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
 
@@ -49,6 +49,7 @@ export default async function OrgPage() {
   ]);
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
+  const departmentById = new Map(orgNodes.filter((node) => node.nodeType === "DEPARTMENT").map((node) => [node.id, node]));
 
   const departments = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
@@ -76,19 +77,33 @@ export default async function OrgPage() {
     })
     .filter((team): team is { orgNodeId: string; departmentOrgNodeId: string; name: string; leaderId: string | null; description: null } => Boolean(team));
 
-  const mappedUsers = await Promise.all(users.map(async (user) => ({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    mobile: user.mobile,
-    roleType: user.roleType,
-    departmentOrgNodeId: await findNearestDepartmentOrgNodeId(user.orgNodeId),
-    teamOrgNodeId: orgNodeById.get(user.orgNodeId ?? "")?.nodeType === "TEAM" ? user.orgNodeId : null,
-    title: user.title,
-    isActive: user.isActive,
-  })));
+  const mappedUsers = users.map((user) => {
+    const orgNode = user.orgNodeId ? orgNodeById.get(user.orgNodeId) ?? null : null;
+    const departmentOrgNodeId = orgNode?.nodeType === "DEPARTMENT"
+      ? orgNode.id
+      : orgNode?.parentId && departmentById.has(orgNode.parentId)
+        ? orgNode.parentId
+        : null;
+    const teamOrgNodeId = orgNode?.nodeType === "TEAM" ? orgNode.id : null;
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      mobile: user.mobile,
+      roleType: user.roleType,
+      departmentOrgNodeId,
+      teamOrgNodeId,
+      title: user.title,
+      isActive: user.isActive,
+    };
+  });
 
-  const currentDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
+  const currentOrgNode = currentUser.orgNodeId ? orgNodeById.get(currentUser.orgNodeId) ?? null : null;
+  const currentDepartmentOrgNodeId = currentOrgNode?.nodeType === "DEPARTMENT"
+    ? currentOrgNode.id
+    : currentOrgNode?.parentId && departmentById.has(currentOrgNode.parentId)
+      ? currentOrgNode.parentId
+      : null;
   const department = departments.find((item) => item.orgNodeId === currentDepartmentOrgNodeId) ?? departments[0] ?? null;
 
   const teamData = teams.map((team) => {

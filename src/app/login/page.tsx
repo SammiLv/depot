@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { loginAsUser } from "@/server/auth/actions";
 import { getCurrentUser } from "@/server/auth/current-user";
+import { loginAsUser } from "@/server/auth/actions";
 import { prisma } from "@/server/db/prisma";
 import { getRoleLabel } from "@/server/permissions/role-labels";
 import { avatarColor } from "@/lib/avatar-color";

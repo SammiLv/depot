@@ -1,7 +1,7 @@
 import type { RoleType } from "@prisma/client";
 import type { AnnualGoalCapabilities } from "@/server/organization/annual-goal-permissions";
 import { prisma } from "@/server/db/prisma";
-import { getDescendantOrgNodeIds, getDescendantTeamIds } from "@/server/organization/org-tree-utils";
+import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 
 type DataScopeInput = {
   id: string;
@@ -37,7 +37,7 @@ export async function getTeamWhereByScope(user: DataScopeInput) {
     return { id: "__no_team__" };
   }
 
-  const teamIds = await getDescendantTeamIds(user.orgNodeId);
+  const teamIds = await getDescendantOrgNodeIds(user.orgNodeId);
   if (teamIds.length === 0) {
     return { id: "__no_team__" };
   }
