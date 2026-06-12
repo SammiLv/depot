@@ -1,4 +1,4 @@
-import type { AnnualGoalOwnerType, RoleType } from "@prisma/client";
+import type { AnnualGoalOwnerType, PermissionScopeType, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 
@@ -102,8 +102,37 @@ export type AnnualGoalPermissionItem = {
 };
 
 export type RoleAnnualGoalPermissionItem = {
+  scopeType: PermissionScopeType;
+  departmentOrgNodeId: string;
   roleType: RoleType;
   annualGoalPermissionId: string;
+  allowed: boolean;
+};
+
+export type PermissionScopeInput = {
+  scopeType: PermissionScopeType;
+  departmentOrgNodeId?: string | null;
+};
+
+export type AnnualGoalPermissionScopeUser = {
+  roleType: RoleType;
+  orgNodeId?: string | null;
+};
+
+export type PermissionCellState = {
+  allowed: boolean;
+  source: PermissionScopeType;
+  inherited: boolean;
+  explicit: boolean;
+};
+
+export type ScopedAnnualGoalPermissionMatrixRow = {
+  id: string;
+  code: AnnualGoalPermissionCode;
+  name: string;
+  description: string;
+  sortOrder: number;
+  cells: Record<RoleType, PermissionCellState>;
 };
 
 const emptyAnnualGoalPlanPermissions: AnnualGoalPlanPermissions = {
@@ -122,7 +151,6 @@ const emptyAnnualGoalPlanPermissions: AnnualGoalPlanPermissions = {
 
 // ---- Org-tree scope context builder ----
 
-/** Find the nearest ancestor OrgNode with nodeType === "DEPARTMENT". */
 async function findNearestDeptAncestor(orgNodeId: string): Promise<string | null> {
   const ancestorRows = await prisma.orgClosure.findMany({
     where: { descendantId: orgNodeId },
@@ -273,39 +301,127 @@ export async function ensureAnnualGoalPermissions() {
   );
 }
 
-export async function getAnnualGoalPermissionMatrix() {
-  await ensureAnnualGoalPermissions();
-  const [permissions, rolePermissions] = await Promise.all([
-    prisma.annualGoalPermission.findMany({ orderBy: { sortOrder: "asc" } }),
-    prisma.roleAnnualGoalPermission.findMany(),
-  ]);
+function normalizeScope(scope: PermissionScopeInput): { scopeType: PermissionScopeType; departmentOrgNodeId: string } {
+  return {
+    scopeType: scope.scopeType,
+    departmentOrgNodeId: scope.scopeType === "SYSTEM" ? "" : (scope.departmentOrgNodeId ?? ""),
+  };
+}
+
+export async function resolveAnnualGoalPermissionScope(user: AnnualGoalPermissionScopeUser): Promise<PermissionScopeInput> {
+  if (user.roleType === "ADMIN") {
+    return { scopeType: "SYSTEM" };
+  }
+
+  const orgNodeId = user.orgNodeId ?? null;
+  if (!orgNodeId) {
+    return { scopeType: "SYSTEM" };
+  }
+
+  const departmentOrgNodeId = await findNearestDeptAncestor(orgNodeId);
+  if (!departmentOrgNodeId) {
+    return { scopeType: "SYSTEM" };
+  }
 
   return {
-    permissions: permissions.map((permission) => ({
+    scopeType: "DEPARTMENT",
+    departmentOrgNodeId,
+  };
+}
+
+export async function getAnnualGoalPermissionMapForUser(user: AnnualGoalPermissionScopeUser) {
+  return getAnnualGoalPermissionMap(await resolveAnnualGoalPermissionScope(user));
+}
+
+export async function getAnnualGoalCapabilitiesForUser(user: AnnualGoalPermissionScopeUser) {
+  const permissionMap = await getAnnualGoalPermissionMapForUser(user);
+  return getAnnualGoalCapabilities(user.roleType, permissionMap);
+}
+
+const roleTypes: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+export async function getScopedAnnualGoalPermissionMatrix(scope: PermissionScopeInput) {
+  await ensureAnnualGoalPermissions();
+  const normalizedScope = normalizeScope(scope);
+
+  const [permissions, systemRows, scopedRows] = await Promise.all([
+    prisma.annualGoalPermission.findMany({ orderBy: { sortOrder: "asc" } }),
+    prisma.roleAnnualGoalPermission.findMany({
+      where: { scopeType: "SYSTEM", departmentOrgNodeId: "" },
+    }),
+    normalizedScope.scopeType === "SYSTEM"
+      ? Promise.resolve([])
+      : prisma.roleAnnualGoalPermission.findMany({
+          where: {
+            scopeType: normalizedScope.scopeType,
+            departmentOrgNodeId: normalizedScope.departmentOrgNodeId,
+          },
+        }),
+  ]);
+
+  const systemMap = new Map(systemRows.map((row) => [`${row.roleType}:${row.annualGoalPermissionId}`, row]));
+  const scopedMap = new Map(scopedRows.map((row) => [`${row.roleType}:${row.annualGoalPermissionId}`, row]));
+
+  const rows: ScopedAnnualGoalPermissionMatrixRow[] = permissions.map((permission) => {
+    const cells = Object.fromEntries(roleTypes.map((roleType) => {
+      const key = `${roleType}:${permission.id}`;
+      const scopedRow = scopedMap.get(key);
+      const systemRow = systemMap.get(key);
+      const sourceRow = scopedRow ?? systemRow;
+      const allowed = sourceRow?.allowed ?? false;
+      const source = scopedRow ? scopedRow.scopeType : "SYSTEM";
+      const explicit = Boolean(scopedRow || (normalizedScope.scopeType === "SYSTEM" && systemRow));
+      const inherited = normalizedScope.scopeType !== "SYSTEM" && !scopedRow;
+      return [roleType, { allowed, source, explicit, inherited } satisfies PermissionCellState];
+    })) as Record<RoleType, PermissionCellState>;
+
+    return {
       id: permission.id,
       code: permission.code as AnnualGoalPermissionCode,
       name: permission.name,
       description: permission.description,
       sortOrder: permission.sortOrder,
+      cells,
+    };
+  });
+
+  return rows;
+}
+
+export async function getAnnualGoalPermissionMatrix() {
+  const rows = await getScopedAnnualGoalPermissionMatrix({ scopeType: "SYSTEM" });
+
+  return {
+    permissions: rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      description: row.description,
+      sortOrder: row.sortOrder,
     })),
-    rolePermissions: rolePermissions.map((permission) => ({
-      roleType: permission.roleType,
-      annualGoalPermissionId: permission.annualGoalPermissionId,
-    })),
+    rolePermissions: rows.flatMap((row) =>
+      roleTypes
+        .filter((roleType) => row.cells[roleType].allowed)
+        .map((roleType) => ({
+          scopeType: "SYSTEM" as const,
+          departmentOrgNodeId: "",
+          roleType,
+          annualGoalPermissionId: row.id,
+          allowed: true,
+        }))
+    ),
   };
 }
 
-export async function getAnnualGoalPermissionMap() {
-  await ensureAnnualGoalPermissions();
-  const rolePermissions = await prisma.roleAnnualGoalPermission.findMany({
-    include: { annualGoalPermission: true },
-  });
-
+export async function getAnnualGoalPermissionMap(scope: PermissionScopeInput = { scopeType: "SYSTEM" }) {
+  const rows = await getScopedAnnualGoalPermissionMatrix(scope);
   const map = new Map<RoleType, Set<AnnualGoalPermissionCode>>();
-  for (const permission of rolePermissions) {
-    const current = map.get(permission.roleType) ?? new Set<AnnualGoalPermissionCode>();
-    current.add(permission.annualGoalPermission.code as AnnualGoalPermissionCode);
-    map.set(permission.roleType, current);
+
+  for (const roleType of roleTypes) {
+    const allowedCodes = rows
+      .filter((row) => row.cells[roleType].allowed)
+      .map((row) => row.code);
+    map.set(roleType, new Set(allowedCodes));
   }
 
   return map;
