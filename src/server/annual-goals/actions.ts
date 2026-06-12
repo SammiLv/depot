@@ -439,6 +439,22 @@ async function generateSourceMetricCode(year: number) {
   return `AGM-${year}-${String(count + 1).padStart(3, "0")}`;
 }
 
+async function assertAnnualGoalPlanYearUnique(ownerOrgNodeId: string, year: number, excludePlanId?: string) {
+  const existingPlan = await prisma.annualGoalPlan.findFirst({
+    where: {
+      ownerOrgNodeId,
+      year,
+      deletedAt: null,
+      ...(excludePlanId ? { id: { not: excludePlanId } } : {}),
+    },
+    select: { id: true },
+  });
+
+  if (existingPlan) {
+    throw new Error("同一组织同一年只能有一个年度方案");
+  }
+}
+
 export async function createAnnualGoalPlan(formData: FormData) {
   const context = await requireAnnualGoalDepartmentEditor();
   const year = numberFromForm(formData.get("year"), "年份");
@@ -453,6 +469,17 @@ export async function createAnnualGoalPlan(formData: FormData) {
 
   const { departmentOrgNodeId, teamOrgNodeId, ownerOrgNodeId } = await resolveOwner(context, formData);
 
+  await assertAnnualGoalPlanYearUnique(ownerOrgNodeId, year);
+
+  const teamOrgNodeIds = ownerType === "DEPARTMENT"
+    ? formData.getAll("teamOrgNodeIds").filter((v) => typeof v === "string") as string[]
+    : [];
+  const uniqueTeamOrgNodeIds = Array.from(new Set(teamOrgNodeIds));
+
+  if (ownerType === "DEPARTMENT" && uniqueTeamOrgNodeIds.length > 0) {
+    await Promise.all(uniqueTeamOrgNodeIds.map((teamOrgNodeId) => assertAnnualGoalPlanYearUnique(teamOrgNodeId, year)));
+  }
+
   await prisma.annualGoalPlan.create({
     data: {
       year,
@@ -465,9 +492,8 @@ export async function createAnnualGoalPlan(formData: FormData) {
   });
 
   if (ownerType === "DEPARTMENT") {
-    const teamOrgNodeIds = formData.getAll("teamOrgNodeIds").filter((v) => typeof v === "string") as string[];
-    if (teamOrgNodeIds.length > 0) {
-      const teams = await resolveScopedTeams(ownerOrgNodeId, teamOrgNodeIds);
+    if (uniqueTeamOrgNodeIds.length > 0) {
+      const teams = await resolveScopedTeams(ownerOrgNodeId, uniqueTeamOrgNodeIds);
 
       if (teams.length > 0) {
         const teamPlans = teams.map((team) => ({
@@ -504,6 +530,8 @@ export async function updateAnnualGoalPlan(formData: FormData) {
   const description = optionalString(formData.get("description"));
   const { ownerType, departmentOrgNodeId, teamOrgNodeId, ownerOrgNodeId } = await resolveOwner(context, formData);
 
+  await assertAnnualGoalPlanYearUnique(ownerOrgNodeId, year, id);
+
   if (!year || year < 2000 || year > 2100) throw new Error("年份不正确");
   if (!name) throw new Error("方案名称为必填项");
 
@@ -513,7 +541,7 @@ export async function updateAnnualGoalPlan(formData: FormData) {
   });
 
   if (ownerType === "DEPARTMENT" && ownerOrgNodeId) {
-    const selectedTeamOrgNodeIds = formData.getAll("teamOrgNodeIds").filter((v) => typeof v === "string") as string[];
+    const selectedTeamOrgNodeIds = Array.from(new Set(formData.getAll("teamOrgNodeIds").filter((v) => typeof v === "string") as string[]));
     const existingTeamPlans = await resolveScopedTeamPlanIds({
       ownerOrgNodeId,
       year,
@@ -523,14 +551,14 @@ export async function updateAnnualGoalPlan(formData: FormData) {
     const selectedSet = new Set(selectedTeamOrgNodeIds);
     const toRemove = existingTeamPlans.filter((p) => p.ownerOrgNodeId && !selectedSet.has(p.ownerOrgNodeId));
     if (toRemove.length > 0) {
-      await prisma.annualGoalPlan.updateMany({
+      await prisma.annualGoalPlan.deleteMany({
         where: { id: { in: toRemove.map((p) => p.id) } },
-        data: { deletedAt: new Date() },
       });
     }
 
     const toAdd = selectedTeamOrgNodeIds.filter((orgNodeId) => !existingTeamOrgNodeIds.has(orgNodeId));
     if (toAdd.length > 0) {
+      await Promise.all(toAdd.map((teamOrgNodeId) => assertAnnualGoalPlanYearUnique(teamOrgNodeId, year)));
       const teams = await resolveScopedTeams(ownerOrgNodeId, toAdd);
       if (teams.length > 0) {
         const teamPlans = teams.map((team) => ({
@@ -554,30 +582,6 @@ export async function updateAnnualGoalPlan(formData: FormData) {
       }
     }
   }
-
-  revalidateAnnualGoals();
-}
-
-export async function archiveAnnualGoalPlan(formData: FormData) {
-  const id = formData.get("id") as string;
-  if (!id) throw new Error("缺少方案 ID");
-  const { plan } = await assertPlanEditable(id);
-
-  const deletedAt = new Date();
-  const planIds = [id];
-
-  if (plan.ownerType === "DEPARTMENT") {
-    const teamPlans = await resolveScopedTeamPlanIds({
-      ownerOrgNodeId: plan.ownerOrgNodeId,
-      year: plan.year,
-    });
-    planIds.push(...teamPlans.map((p) => p.id));
-  }
-
-  await prisma.annualGoalPlan.updateMany({
-    where: { id: { in: planIds } },
-    data: { isActive: false, deletedAt },
-  });
 
   revalidateAnnualGoals();
 }
@@ -642,34 +646,6 @@ export async function deleteAnnualGoalPlan(formData: FormData) {
     if (teamMetricIds.length > 0) {
       await tx.annualGoalQuarterTarget.updateMany({ where: { metricId: { in: teamMetricIds }, deletedAt: null }, data: { deletedAt } });
     }
-  });
-
-  revalidateAnnualGoals();
-}
-
-export async function restoreAnnualGoalPlan(formData: FormData) {
-  const id = formData.get("id") as string;
-  if (!id) throw new Error("缺少方案 ID");
-  const context = await requireAnnualGoalDepartmentEditor();
-  const plan = await prisma.annualGoalPlan.findUnique({ where: { id } });
-  if (!plan || !plan.deletedAt) throw new Error("历史方案不存在");
-  if (!canEditDepartmentScope(context, { departmentOrgNodeId: plan.ownerOrgNodeId, ownerOrgNodeId: plan.ownerOrgNodeId })) {
-    throw new Error("无权恢复该年度方案");
-  }
-
-  const restorePlanIds = [id];
-  if (plan.ownerType === "DEPARTMENT") {
-    const teamPlans = await resolveScopedTeamPlanIds({
-      ownerOrgNodeId: plan.ownerOrgNodeId,
-      year: plan.year,
-      includeDeleted: true,
-    });
-    restorePlanIds.push(...teamPlans.filter((item) => item.id !== id).map((item) => item.id));
-  }
-
-  await prisma.annualGoalPlan.updateMany({
-    where: { id: { in: restorePlanIds } },
-    data: { deletedAt: null, isActive: true },
   });
 
   revalidateAnnualGoals();

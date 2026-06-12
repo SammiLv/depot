@@ -87,7 +87,6 @@ type MetricData = {
 
 type PlanPermissionFlags = {
   canEditPlan: boolean;
-  canArchivePlan: boolean;
   canEditMetrics: boolean;
   canManageSources: boolean;
   canManageQuarterTargets: boolean;
@@ -134,11 +133,16 @@ type ScopeItem = {
   plan: PlanData | null;
 };
 
+type HistoryYearGroup = {
+  year: number;
+  plans: PlanData[];
+};
+
 type AnnualGoalsResult = {
   scopeDepartments: ScopeDepartment[];
   scopeItems: ScopeItem[];
   plans: PlanData[];
-  archivedPlans: PlanData[];
+  historyPlansByYear: HistoryYearGroup[];
   availableSourceMetrics: MetricSourceData[];
   availableParentMetrics: MetricData[];
   teams: { orgNodeId: string; name: string; departmentOrgNodeId: string }[];
@@ -147,7 +151,6 @@ type AnnualGoalsResult = {
   canManage: boolean;
   permissions: {
     canCreatePlan: boolean;
-    canRestorePlan: boolean;
     canViewDepartmentPlans: boolean;
     canEditDepartmentPlans: boolean;
     canViewTeamPlans: boolean;
@@ -386,30 +389,17 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
   const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
   const activeWhere = await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities);
-  const archivedWhere = { ...activeWhere, deletedAt: { not: null } };
 
-  const [plans, archivedPlans] = await Promise.all([
-    prisma.annualGoalPlan.findMany({
-      where: activeWhere,
-      orderBy: [{ ownerType: "asc" }, { year: "desc" }, { createdAt: "desc" }],
-      include: {
-        metrics: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: "desc" },
-        },
+  const plans = await prisma.annualGoalPlan.findMany({
+    where: activeWhere,
+    orderBy: [{ ownerType: "asc" }, { year: "desc" }, { createdAt: "desc" }],
+    include: {
+      metrics: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: "desc" },
       },
-    }),
-    prisma.annualGoalPlan.findMany({
-      where: archivedWhere,
-      orderBy: [{ deletedAt: "desc" }, { year: "desc" }, { createdAt: "desc" }],
-      include: {
-        metrics: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: "desc" },
-        },
-      },
-    }),
-  ]);
+    },
+  });
   const scopedOrgNodeIds = currentUser.roleType === "ADMIN"
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
@@ -431,7 +421,6 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   const scopedDepartmentOrgNodeIds = Array.from(new Set([
     ...teams.map((team) => team.departmentOrgNodeId),
     ...plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
-    ...archivedPlans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
   ]));
   const scopeDepartments: ScopeDepartment[] = scopedDepartmentOrgNodeIds.map((orgNodeId) => ({
     orgNodeId,
@@ -444,7 +433,6 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   const scopedTeamOrgNodeIds = Array.from(new Set([
     ...teams.map((team) => team.orgNodeId),
     ...plans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
-    ...archivedPlans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
   ]));
   const scopedUsersOrgNodeIds = Array.from(new Set([
     ...scopedDepartmentOrgNodeIds,
@@ -453,7 +441,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
 
   // Get quarter targets and source metadata for all metrics.
   // Team plans inherit quarter targets from the selected department metric/source metric.
-  const allPlans = [...plans, ...archivedPlans];
+  const allPlans = plans;
   const metricIds = allPlans.flatMap((p) => p.metrics.map((m) => m.id));
   const teamMetrics = allPlans.filter((p) => p.ownerType === "TEAM").flatMap((p) => p.metrics.map((m) => ({ plan: p, metric: m })));
   const selectedSourceMetricIds = Array.from(new Set(teamMetrics.flatMap(({ metric }) => metric.sourceMetricId ? [metric.sourceMetricId] : [])));
@@ -709,7 +697,6 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       isActive: plan.isActive,
       approvalStatus: plan.approvalStatus,
       revisionReason: plan.revisionReason,
-      deletedAt: plan.deletedAt,
       weightedProgress: roundPercent(weightedProgress),
       metrics: metricsData,
       totalWeight: roundPercent(totalWeight),
@@ -741,7 +728,19 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     }
     return mapped;
   }).sort(comparePlans);
-  const archivedPlansWithProgress = archivedPlans.map(mapPlan).sort(comparePlans);
+  const historyPlansByYear = Array.from(
+    plansWithProgress.reduce((groups, plan) => {
+      const existingPlans = groups.get(plan.year) ?? [];
+      existingPlans.push(plan);
+      groups.set(plan.year, existingPlans);
+      return groups;
+    }, new Map<number, PlanData[]>())
+  )
+    .sort((a, b) => b[0] - a[0])
+    .map(([year, groupedPlans]) => ({
+      year,
+      plans: groupedPlans.sort(comparePlans),
+    }));
   const availableParentMetrics = plansWithProgress
     .filter((p) => p.ownerType === "DEPARTMENT")
     .flatMap((p) => p.metrics);
@@ -805,7 +804,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     scopeDepartments,
     scopeItems,
     plans: plansWithProgress,
-    archivedPlans: archivedPlansWithProgress,
+    historyPlansByYear,
     availableSourceMetrics,
     availableParentMetrics,
     teams,
@@ -814,7 +813,6 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     canManage,
     permissions: {
       canCreatePlan: canManageDepartmentPlans,
-      canRestorePlan: canManageDepartmentPlans,
       canViewDepartmentPlans: annualGoalCapabilities.canViewDepartmentPlans,
       canEditDepartmentPlans: annualGoalCapabilities.canEditDepartmentPlans,
       canViewTeamPlans: annualGoalCapabilities.canViewTeamPlans,
