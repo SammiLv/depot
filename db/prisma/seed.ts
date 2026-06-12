@@ -8,6 +8,10 @@ const databaseUrl = process.env.DATABASE_URL === "file:./dev.db" ? "file:./db/de
 const adapter = new PrismaBetterSqlite3({ url: databaseUrl ?? "file:./db/dev.db" });
 const prisma = new PrismaClient({ adapter });
 
+function createOrgNodeId() {
+  return randomUUID();
+}
+
 type OrgNodeSeed = {
   id: string;
   name: string;
@@ -63,89 +67,51 @@ async function syncLegacyOrgReferences(rootNodeId: string) {
     data: { orgNodeId: rootNodeId },
   });
 
-  await prisma.user.updateMany({
-    where: { roleType: { not: RoleType.ADMIN }, teamId: { not: null } },
-    data: {},
+  const nonAdminUsers = await prisma.user.findMany({
+    where: { roleType: { not: RoleType.ADMIN } },
+    select: { id: true, orgNodeId: true },
   });
-
-  const teamUsers = await prisma.user.findMany({
-    where: { roleType: { not: RoleType.ADMIN }, teamId: { not: null } },
-    select: { id: true, teamId: true },
-  });
-  for (const user of teamUsers) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orgNodeId: `org_team_${user.teamId}` },
-    });
-  }
-
-  const departmentUsers = await prisma.user.findMany({
-    where: { roleType: { not: RoleType.ADMIN }, teamId: null, departmentId: { not: null } },
-    select: { id: true, departmentId: true },
-  });
-  for (const user of departmentUsers) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { orgNodeId: `org_dept_${user.departmentId}` },
-    });
+  for (const user of nonAdminUsers) {
+    if (user.orgNodeId) continue;
+    throw new Error(`用户缺少 orgNodeId: ${user.id}`);
   }
 
   const annualGoalPlans = await prisma.annualGoalPlan.findMany({
-    select: { id: true, ownerType: true, departmentId: true, teamId: true },
+    select: { id: true, ownerOrgNodeId: true },
   });
   for (const plan of annualGoalPlans) {
-    await prisma.annualGoalPlan.update({
-      where: { id: plan.id },
-      data: {
-        ownerOrgNodeId: plan.ownerType === AnnualGoalOwnerType.TEAM && plan.teamId
-          ? `org_team_${plan.teamId}`
-          : plan.departmentId
-            ? `org_dept_${plan.departmentId}`
-            : null,
-      },
-    });
+    if (plan.ownerOrgNodeId) continue;
+    throw new Error(`年度方案缺少 ownerOrgNodeId: ${plan.id}`);
   }
 
   const projects = await prisma.project.findMany({
-    select: { id: true, departmentId: true, teamId: true },
+    select: { id: true, orgNodeId: true },
   });
   for (const project of projects) {
-    await prisma.project.update({
-      where: { id: project.id },
-      data: {
-        orgNodeId: project.teamId
-          ? `org_team_${project.teamId}`
-          : project.departmentId
-            ? `org_dept_${project.departmentId}`
-            : null,
-      },
-    });
+    if (project.orgNodeId) continue;
+    throw new Error(`项目缺少 orgNodeId: ${project.id}`);
   }
 
   const quarterlyWorks = await prisma.quarterlyWork.findMany({
-    select: { id: true, departmentId: true, teamId: true },
+    select: { id: true, orgNodeId: true },
   });
   for (const work of quarterlyWorks) {
-    await prisma.quarterlyWork.update({
-      where: { id: work.id },
-      data: {
-        orgNodeId: work.teamId
-          ? `org_team_${work.teamId}`
-          : work.departmentId
-            ? `org_dept_${work.departmentId}`
-            : null,
-      },
-    });
+    if (work.orgNodeId) continue;
+    throw new Error(`季度工作缺少 orgNodeId: ${work.id}`);
   }
 
   const personalKpis = await prisma.personalKpi.findMany({
-    select: { id: true, teamId: true, userId: true },
+    select: { id: true, orgNodeId: true, userId: true },
   });
   for (const kpi of personalKpis) {
+    if (kpi.orgNodeId) continue;
     const owner = await prisma.user.findUnique({ where: { id: kpi.userId }, select: { orgNodeId: true } });
+    if (!owner?.orgNodeId) {
+      throw new Error(`个人 KPI 缺少 orgNodeId: ${kpi.id}`);
+    }
     await prisma.personalKpi.update({
       where: { id: kpi.id },
-      data: { orgNodeId: kpi.teamId ? `org_team_${kpi.teamId}` : owner?.orgNodeId ?? null },
+      data: { orgNodeId: owner.orgNodeId },
     });
   }
 }
@@ -157,14 +123,14 @@ async function main() {
     dingtalkDeptId: "product-dept",
   };
 
-  const rootOrgNodeId = "org_root_seed";
-  const departmentOrgNodeId = `org_dept_${department.id}`;
+  const rootOrgNodeId = createOrgNodeId();
+  const departmentOrgNodeId = createOrgNodeId();
 
   const teamDefinitions = [
-    { id: "seed_team_procurement", name: "采购组" },
-    { id: "seed_team_b_end", name: "B端组" },
-    { id: "seed_team_c_end", name: "C端组" },
-    { id: "seed_team_design", name: "设计组" },
+    { id: "seed_team_procurement", name: "采购组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_b_end", name: "B端组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_c_end", name: "C端组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_design", name: "设计组", orgNodeId: createOrgNodeId() },
   ] as const;
   const teamNames = teamDefinitions.map((team) => team.name);
   const sampleUserNames = [
@@ -188,7 +154,6 @@ async function main() {
     data: {
       name: "系统管理员",
       roleType: RoleType.ADMIN,
-      departmentId: department.id,
       orgNodeId: rootOrgNodeId,
       title: "管理员",
     },
@@ -198,7 +163,6 @@ async function main() {
     data: {
       name: "产品部主管",
       roleType: RoleType.DEPARTMENT_MANAGER,
-      departmentId: department.id,
       orgNodeId: departmentOrgNodeId,
       title: "部门主管",
     },
@@ -213,9 +177,7 @@ async function main() {
       data: {
         name: `${team.name}组长`,
         roleType: RoleType.TEAM_LEADER,
-        departmentId: department.id,
-        teamId: team.id,
-        orgNodeId: `org_team_${team.id}`,
+        orgNodeId: team.orgNodeId,
         title: "组长",
       },
     });
@@ -224,9 +186,7 @@ async function main() {
       data: {
         name: `${team.name}成员A`,
         roleType: RoleType.MEMBER,
-        departmentId: department.id,
-        teamId: team.id,
-        orgNodeId: `org_team_${team.id}`,
+        orgNodeId: team.orgNodeId,
         title: "产品经理",
       },
     });
@@ -253,7 +213,7 @@ async function main() {
       dingtalkDeptId: department.dingtalkDeptId,
     },
     ...teamDefinitions.map((team) => ({
-      id: `org_team_${team.id}`,
+      id: team.orgNodeId,
       name: team.name,
       nodeType: "TEAM" as const,
       parentId: departmentOrgNodeId,
@@ -403,7 +363,6 @@ async function main() {
       name: "产品部 2026 年度业绩指标",
       description: "产品部承接公司下达年度业绩指标，并拆解最细指标元数据分配到小组",
       ownerType: AnnualGoalOwnerType.DEPARTMENT,
-      departmentId: department.id,
       ownerOrgNodeId: departmentOrgNodeId,
       version: 1,
       isActive: true,
@@ -559,9 +518,7 @@ async function main() {
         year: 2026,
         name: `${plan.teamName} 2026 年度业绩指标`,
         ownerType: AnnualGoalOwnerType.TEAM,
-        departmentId: department.id,
-        teamId: team.id,
-        ownerOrgNodeId: `org_team_${team.id}`,
+        ownerOrgNodeId: team.orgNodeId,
         parentPlanId: productAnnualPlan.id,
         version: 1,
         isActive: true,

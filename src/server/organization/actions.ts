@@ -224,13 +224,12 @@ export async function createTeam(formData: FormData) {
   if (!departmentOrgNodeId) throw new Error("请选择所属部门");
 
   const departmentNode = await assertDepartmentExists(departmentOrgNodeId);
-  const teamOrgNodeId = `org_team_${randomUUID()}`;
+  const teamOrgNodeId = randomUUID();
 
   await prisma.$transaction(async (tx) => {
     await tx.orgNode.create({
       data: {
         id: teamOrgNodeId,
-        dingtalkDeptId: `__manual_team__${teamOrgNodeId.slice("org_team_".length)}`,
         name: name.trim(),
         nodeType: "TEAM",
         parentId: departmentNode.id,
@@ -269,6 +268,7 @@ export async function updateTeam(formData: FormData) {
 
   const teamNode = await findTeamNode(id);
   if (!teamNode) throw new Error("小组不存在");
+  if (!teamNode.parentId) throw new Error("小组未绑定所属部门");
   await assertDepartmentManagerScope(currentUser, teamNode.parentId);
 
   await prisma.orgNode.update({

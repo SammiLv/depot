@@ -8,8 +8,6 @@ type DataScopeInput = {
   orgNodeId?: string | null;
 };
 
-
-
 const stageLabels: Record<string, string> = {
   DRAFT: "待制定",
   PENDING_LEADER: "待主管审批",
@@ -39,7 +37,6 @@ export async function getKpiData(currentUser: DataScopeInput) {
     orderBy: { createdAt: "desc" },
   });
 
-  // Query items separately
   const kpiIds = kpis.map((k) => k.id);
   const allItems = kpiIds.length
     ? await prisma.personalKpiItem.findMany({ where: { personalKpiId: { in: kpiIds } } })
@@ -51,26 +48,23 @@ export async function getKpiData(currentUser: DataScopeInput) {
     itemsByKpi.set(item.personalKpiId, list);
   }
 
-  // Resolve user and team names
   const userIds = [...new Set(kpis.map((k) => k.userId))];
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
     select: { id: true, name: true, orgNodeId: true },
   });
   const userMap = new Map(users.map((u) => [u.id, u]));
-  const teamOrgNodeIds = [...new Set(users.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId?.startsWith("org_team_"))))];
-  const teamNodes = teamOrgNodeIds.length
-    ? await prisma.orgNode.findMany({ where: { id: { in: teamOrgNodeIds } }, select: { id: true, name: true } })
+  const orgNodeIds = [...new Set(users.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)))];
+  const orgNodes = orgNodeIds.length
+    ? await prisma.orgNode.findMany({ where: { id: { in: orgNodeIds } }, select: { id: true, name: true, nodeType: true } })
     : [];
-  const teamMap = new Map(teamNodes.map((team) => [team.id, team.name]));
+  const orgNodeMap = new Map(orgNodes.map((orgNode) => [orgNode.id, orgNode]));
 
-  // Stage counts
   const stageCounts: Record<string, number> = {};
   for (const s of stageOrder) {
     stageCounts[s] = kpis.filter((k) => k.status === s).length;
   }
 
-  // Rows
   const rows = kpis.map((k) => {
     const user = userMap.get(k.userId);
     const items = itemsByKpi.get(k.id) ?? [];
@@ -83,11 +77,12 @@ export async function getKpiData(currentUser: DataScopeInput) {
       : k.status.includes("REVIEW") ? "info"
       : k.status.includes("PENDING") ? "warning"
       : "default";
+    const orgNode = user?.orgNodeId ? orgNodeMap.get(user.orgNodeId) : null;
 
     return {
       id: k.id,
       userName: user?.name ?? "—",
-      teamName: user?.orgNodeId?.startsWith("org_team_") ? teamMap.get(user.orgNodeId) ?? "—" : "—",
+      teamName: orgNode?.nodeType === "TEAM" ? orgNode.name : "—",
       status: stageLabels[k.status] ?? k.status,
       tone,
       score: k.finalScore?.toString() ?? "—",

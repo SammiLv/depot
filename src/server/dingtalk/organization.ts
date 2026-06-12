@@ -70,7 +70,6 @@ type DepartmentRecord = {
 
 type OrgDepartmentRecord = {
   id: string;
-  businessId: string;
   name: string;
   dingtalkDeptId: string | null;
 };
@@ -89,17 +88,9 @@ type SyncResult = {
 };
 
 type OrgAssignmentMaps = {
-  departmentNodeIdByBusinessId: Map<string, string>;
-  teamNodeIdByBusinessId: Map<string, string>;
+  departmentNodeIdByDingTalkDeptId: Map<string, string>;
+  teamNodeIdByDingTalkDeptId: Map<string, string>;
 };
-
-function getDepartmentOrgNodeId(departmentId: string) {
-  return `org_dept_${departmentId}`;
-}
-
-function getTeamOrgNodeId(teamId: string) {
-  return `org_team_${teamId}`;
-}
 
 function getAppKey() {
   const appKey = process.env.DINGTALK_APP_KEY;
@@ -195,7 +186,7 @@ async function resolveCanonicalDepartment(
     ?? findOrgDepartmentByName(orgDepartments, dingTalkDepartment.name);
 
   if (matchedDepartment) {
-    const updatedDepartment = await tx.orgNode.update({
+    return tx.orgNode.update({
       where: { id: matchedDepartment.id },
       data: {
         name: dingTalkDepartment.name,
@@ -204,16 +195,11 @@ async function resolveCanonicalDepartment(
       },
       select: { id: true, name: true, dingtalkDeptId: true },
     });
-
-    const businessId = extractDepartmentIdFromOrgNodeId(updatedDepartment.id);
-    if (!businessId) throw new Error("部门组织节点缺少业务 ID");
-    return { ...updatedDepartment, businessId };
   }
 
-  const businessId = randomUUID();
-  const createdDepartment = await tx.orgNode.create({
+  return tx.orgNode.create({
     data: {
-      id: getDepartmentOrgNodeId(businessId),
+      id: randomUUID(),
       name: dingTalkDepartment.name,
       dingtalkDeptId: dingTalkDepartment.deptId,
       nodeType: "DEPARTMENT",
@@ -221,70 +207,33 @@ async function resolveCanonicalDepartment(
     },
     select: { id: true, name: true, dingtalkDeptId: true },
   });
-
-  return { ...createdDepartment, businessId };
-}
-
-function extractDepartmentIdFromOrgNodeId(orgNodeId: string) {
-  return orgNodeId.startsWith("org_dept_") ? orgNodeId.slice("org_dept_".length) : null;
-}
-
-function extractTeamIdFromOrgNodeId(orgNodeId: string) {
-  return orgNodeId.startsWith("org_team_") ? orgNodeId.slice("org_team_".length) : null;
 }
 
 async function backfillOrgAssignments(
   tx: Prisma.TransactionClient,
   maps: OrgAssignmentMaps,
-  canonicalDepartmentId?: string,
 ) {
-  for (const [teamId, orgNodeId] of maps.teamNodeIdByBusinessId) {
-    await tx.user.updateMany({
-      where: { teamId },
-      data: { orgNodeId },
-    });
-    await tx.annualGoalPlan.updateMany({
-      where: canonicalDepartmentId ? { teamId, departmentId: canonicalDepartmentId } : { teamId },
-      data: { ownerOrgNodeId: orgNodeId },
-    });
-    await tx.project.updateMany({
-      where: { teamId },
-      data: { orgNodeId },
-    });
-    await tx.quarterlyWork.updateMany({
-      where: { teamId },
-      data: { orgNodeId },
-    });
-    await tx.personalKpi.updateMany({
-      where: { teamId },
-      data: { orgNodeId },
-    });
-  }
+  const assignedOrgNodeIds = new Set([
+    ...maps.teamNodeIdByDingTalkDeptId.values(),
+    ...maps.departmentNodeIdByDingTalkDeptId.values(),
+  ]);
 
-  for (const [departmentId, orgNodeId] of maps.departmentNodeIdByBusinessId) {
-    await tx.user.updateMany({
-      where: {
-        departmentId,
-        OR: [
-          { teamId: null },
-          { orgNodeId: null },
-        ],
-      },
-      data: { orgNodeId },
-    });
-    await tx.annualGoalPlan.updateMany({
-      where: { departmentId, teamId: null },
-      data: { ownerOrgNodeId: orgNodeId },
-    });
-    await tx.project.updateMany({
-      where: { departmentId, teamId: null },
-      data: { orgNodeId },
-    });
-    await tx.quarterlyWork.updateMany({
-      where: { departmentId, teamId: null },
-      data: { orgNodeId },
-    });
-  }
+  if (assignedOrgNodeIds.size === 0) return;
+
+  await tx.user.updateMany({
+    where: {
+      dingtalkUserId: { not: null },
+      orgNodeId: { notIn: [...assignedOrgNodeIds] },
+    },
+    data: {},
+  });
+
+  await tx.personalKpi.updateMany({
+    where: {
+      orgNodeId: { notIn: [...assignedOrgNodeIds] },
+    },
+    data: {},
+  });
 }
 
 async function rebuildOrgClosures(tx: Prisma.TransactionClient) {
@@ -309,55 +258,40 @@ async function rebuildOrgClosures(tx: Prisma.TransactionClient) {
   }
 }
 
-async function mergeDepartmentBusinessIds(
+async function mergeDepartmentNodes(
   tx: Prisma.TransactionClient,
-  canonicalDepartmentId: string,
+  canonicalDepartmentNodeId: string,
   dingTalkDepartment: DepartmentRecord,
 ) {
-  const duplicateDepartmentIds = (await tx.orgNode.findMany({
+  const duplicateDepartmentNodeIds = (await tx.orgNode.findMany({
     where: {
       nodeType: "DEPARTMENT",
-      id: { not: getDepartmentOrgNodeId(canonicalDepartmentId) },
+      id: { not: canonicalDepartmentNodeId },
       OR: [
         { dingtalkDeptId: dingTalkDepartment.deptId },
         { name: dingTalkDepartment.name },
       ],
     },
     select: { id: true },
-  }))
-    .map((item) => extractDepartmentIdFromOrgNodeId(item.id))
-    .filter((item): item is string => Boolean(item));
+  })).map((item) => item.id);
 
-  if (duplicateDepartmentIds.length === 0) {
+  if (duplicateDepartmentNodeIds.length === 0) {
     return;
   }
 
-  await tx.user.updateMany({
-    where: { departmentId: { in: duplicateDepartmentIds } },
-    data: { departmentId: canonicalDepartmentId },
-  });
-  await tx.project.updateMany({
-    where: { departmentId: { in: duplicateDepartmentIds } },
-    data: { departmentId: canonicalDepartmentId },
-  });
-  await tx.quarterlyWork.updateMany({
-    where: { departmentId: { in: duplicateDepartmentIds } },
-    data: { departmentId: canonicalDepartmentId },
-  });
   await tx.annualGoalPlan.updateMany({
-    where: { departmentId: { in: duplicateDepartmentIds } },
-    data: { departmentId: canonicalDepartmentId },
+    where: { ownerOrgNodeId: { in: duplicateDepartmentNodeIds } },
+    data: { ownerOrgNodeId: canonicalDepartmentNodeId },
   });
 }
 
-async function upsertDepartmentNodeForBusinessId(
+async function upsertDepartmentNode(
   tx: Prisma.TransactionClient,
-  departmentId: string,
   department: OrgDepartmentRecord,
   rootNodeId: string,
 ) {
   return tx.orgNode.upsert({
-    where: { id: getDepartmentOrgNodeId(departmentId) },
+    where: { id: department.id },
     update: {
       dingtalkDeptId: department.dingtalkDeptId,
       name: department.name,
@@ -365,7 +299,7 @@ async function upsertDepartmentNodeForBusinessId(
       parentId: rootNodeId,
     },
     create: {
-      id: getDepartmentOrgNodeId(departmentId),
+      id: department.id,
       dingtalkDeptId: department.dingtalkDeptId,
       name: department.name,
       nodeType: "DEPARTMENT",
@@ -377,16 +311,15 @@ async function upsertDepartmentNodeForBusinessId(
 
 async function upsertTeamNode(
   tx: Prisma.TransactionClient,
-  parentDepartmentId: string,
+  parentDepartmentNodeId: string,
   dingTalkDepartment: DepartmentRecord,
 ): Promise<OrgTeamRecord> {
-  const teamNodeId = getTeamOrgNodeId(randomUUID());
   const existing = await tx.orgNode.findFirst({
     where: {
       nodeType: "TEAM",
       OR: [
         { dingtalkDeptId: dingTalkDepartment.deptId },
-        { parentId: parentDepartmentId, name: dingTalkDepartment.name },
+        { parentId: parentDepartmentNodeId, name: dingTalkDepartment.name },
       ],
     },
     orderBy: { createdAt: "asc" },
@@ -400,7 +333,7 @@ async function upsertTeamNode(
         name: dingTalkDepartment.name,
         dingtalkDeptId: dingTalkDepartment.deptId,
         nodeType: "TEAM",
-        parentId: parentDepartmentId,
+        parentId: parentDepartmentNodeId,
       },
       select: { id: true, name: true, dingtalkDeptId: true, parentId: true },
     });
@@ -408,11 +341,11 @@ async function upsertTeamNode(
 
   return tx.orgNode.create({
     data: {
-      id: teamNodeId,
+      id: randomUUID(),
       name: dingTalkDepartment.name,
       dingtalkDeptId: dingTalkDepartment.deptId,
       nodeType: "TEAM",
-      parentId: parentDepartmentId,
+      parentId: parentDepartmentNodeId,
     },
     select: { id: true, name: true, dingtalkDeptId: true, parentId: true },
   });
@@ -528,50 +461,36 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
     });
 
     const department = await resolveCanonicalDepartment(tx, productDepartment);
-    const departmentId = department.businessId;
 
-    const deptOrgNode = await upsertDepartmentNodeForBusinessId(tx, departmentId, department, rootNode.id);
-    await mergeDepartmentBusinessIds(tx, departmentId, productDepartment);
+    const deptOrgNode = await upsertDepartmentNode(tx, department, rootNode.id);
+    await mergeDepartmentNodes(tx, deptOrgNode.id, productDepartment);
 
-    const teamIdByDingTalkDeptId = new Map<string, string>();
-    const departmentNodeIdByBusinessId = new Map<string, string>([[departmentId, deptOrgNode.id]]);
-    const teamNodeIdByBusinessId = new Map<string, string>();
+    const teamNodeIdByDingTalkDeptId = new Map<string, string>();
+    const departmentNodeIdByDingTalkDeptId = new Map<string, string>();
+    if (department.dingtalkDeptId) {
+      departmentNodeIdByDingTalkDeptId.set(department.dingtalkDeptId, deptOrgNode.id);
+    }
     for (const child of childDepartments) {
       const teamNode = await upsertTeamNode(tx, deptOrgNode.id, child);
-      const teamId = extractTeamIdFromOrgNodeId(teamNode.id);
-      if (!teamId) throw new Error("小组组织节点缺少业务 ID");
-      teamIdByDingTalkDeptId.set(child.deptId, teamId);
-      teamNodeIdByBusinessId.set(teamId, teamNode.id);
+      teamNodeIdByDingTalkDeptId.set(child.deptId, teamNode.id);
     }
 
     const assignmentMaps = {
-      departmentNodeIdByBusinessId,
-      teamNodeIdByBusinessId,
+      departmentNodeIdByDingTalkDeptId,
+      teamNodeIdByDingTalkDeptId,
     } satisfies OrgAssignmentMaps;
 
-    await backfillOrgAssignments(tx, assignmentMaps, departmentId);
-
-    const canonicalTeamIds = Array.from(teamNodeIdByBusinessId.keys());
-    if (canonicalTeamIds.length > 0) {
-      await tx.user.updateMany({
-        where: {
-          teamId: { in: canonicalTeamIds },
-          departmentId: null,
-        },
-        data: { departmentId },
-      });
-    }
+    await backfillOrgAssignments(tx, assignmentMaps);
 
     const syncedUserIds: string[] = [];
     for (const user of validUsers) {
       const seed = user.userId ? seedByUserId.get(user.userId) : undefined;
       const userDeptIds = getUserDepartmentIds(user, seed?.deptId);
-      const teamId = userDeptIds.map((deptId) => teamIdByDingTalkDeptId.get(deptId)).find(Boolean) ?? null;
       const name = getUserName(user)!;
       const title = getUserTitle(user);
       const isDeptAdmin = deptAdminUserIds.has(user.userId!);
       const inferredRoleType = isDeptAdmin ? "DEPARTMENT_MANAGER" : inferRoleType(title);
-      const orgNodeId = teamId ? (teamNodeIdByBusinessId.get(teamId) ?? deptOrgNode.id) : deptOrgNode.id;
+      const orgNodeId = userDeptIds.map((deptId) => teamNodeIdByDingTalkDeptId.get(deptId)).find(Boolean) ?? deptOrgNode.id;
       let existing = await tx.user.findUnique({
         where: { dingtalkUserId: user.userId },
       });
@@ -592,7 +511,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         const nameMatchedUsers = await tx.user.findMany({
           where: {
             deletedAt: null,
-            departmentId,
+            orgNodeId: deptOrgNode.id,
             name,
           },
         });
@@ -606,8 +525,6 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         name,
         mobile: user.mobile ?? null,
         email: user.email ?? null,
-        departmentId,
-        teamId,
         orgNodeId,
         title,
         roleType: existing?.roleType === "ADMIN" ? "ADMIN" : inferredRoleType,

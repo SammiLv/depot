@@ -88,8 +88,6 @@ model User {
   email           String?
   mobile          String?
   avatarUrl       String?
-  departmentId    String?
-  teamId          String?
   orgNodeId       String?
   roleType        RoleType  @default(MEMBER)
   title           String?
@@ -100,8 +98,6 @@ model User {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  @@index([departmentId])
-  @@index([teamId])
   @@index([orgNodeId])
   @@index([roleType])
 }
@@ -215,8 +211,6 @@ model AnnualGoalPlan {
   name              String
   description       String?
   ownerType         AnnualGoalOwnerType
-  departmentId      String?
-  teamId            String?
   ownerOrgNodeId    String?
   parentPlanId      String?
   version           Int                 @default(1)
@@ -236,7 +230,6 @@ model AnnualGoalPlan {
 
   @@index([year])
   @@index([ownerType])
-  @@index([departmentId, teamId])
   @@index([ownerOrgNodeId])
   @@index([parentPlanId])
   @@index([isActive])
@@ -368,8 +361,6 @@ model Project {
   startQuarter    String?
   endQuarter      String?
   ownerId         String
-  teamId          String?
-  departmentId    String?
   orgNodeId       String?
   status          ProjectStatus @default(NOT_STARTED)
   createdById     String
@@ -381,7 +372,6 @@ model Project {
   quarterlyWorks QuarterlyWork[]
 
   @@index([ownerId])
-  @@index([departmentId, teamId])
   @@index([orgNodeId])
   @@index([status])
 }
@@ -395,8 +385,6 @@ model QuarterlyWork {
   description     String?
   workType        String?
   ownerId         String
-  teamId          String?
-  departmentId    String?
   orgNodeId       String?
   status          WorkStatus     @default(NOT_STARTED)
   approvalStatus  ApprovalStatus @default(DRAFT)
@@ -415,7 +403,6 @@ model QuarterlyWork {
   @@index([projectId])
   @@index([year, quarter])
   @@index([ownerId])
-  @@index([departmentId, teamId])
   @@index([orgNodeId])
 }
 
@@ -457,7 +444,6 @@ model RequirementValueTrack {
   projectName     String
   requirementName String
   ownerId         String
-  teamId          String?
   background      String?
   expectedValue   String
   actualValue     String?
@@ -469,7 +455,6 @@ model RequirementValueTrack {
   deletedAt       DateTime?
 
   @@index([ownerId])
-  @@index([teamId])
 }
 
 model KpiTemplate {
@@ -502,7 +487,6 @@ model PersonalKpi {
   year           Int
   quarter        Int
   userId         String
-  teamId         String?
   orgNodeId      String?
   templateId     String?
   status         KpiStatus @default(DRAFT)
@@ -521,7 +505,6 @@ model PersonalKpi {
 
   @@index([year, quarter])
   @@index([userId])
-  @@index([teamId])
   @@index([orgNodeId])
 }
 

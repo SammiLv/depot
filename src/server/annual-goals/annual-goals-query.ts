@@ -443,8 +443,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     ?? null;
   const scopedTeamOrgNodeIds = Array.from(new Set([
     ...teams.map((team) => team.orgNodeId),
-    ...plans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
-    ...archivedPlans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
+    ...plans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
+    ...archivedPlans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
   ]));
   const scopedUsersOrgNodeIds = Array.from(new Set([
     ...scopedDepartmentOrgNodeIds,
@@ -689,7 +689,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
 
     const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
     const departmentName = scopeDepartmentOrgNodeId ? departmentNameByOrgNodeId.get(scopeDepartmentOrgNodeId) : null;
-    const teamOrgNodeId = getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId);
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById);
     const teamName = teamOrgNodeId ? teamNameByOrgNodeId.get(teamOrgNodeId) : null;
 
     const permissions = getPlanPermissions(currentUser, plan, annualGoalCapabilities, scopeContext);
@@ -728,7 +728,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
         plan.id,
         plans
           .filter((p) => p.ownerType === "TEAM" && getPlanScopeDepartmentOrgNodeId(p) === scopeDepartmentOrgNodeId && p.year === plan.year)
-          .map((p) => getTeamOrgNodeIdForRecord(p.ownerOrgNodeId))
+          .map((p) => getTeamOrgNodeIdForRecord(p.ownerOrgNodeId, orgNodeById))
           .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId)),
       );
     }
