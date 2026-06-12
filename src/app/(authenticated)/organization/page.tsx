@@ -19,7 +19,7 @@ export default async function OrgPage({
   const currentUser = await requireCurrentUser();
   const canManageUsers = currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER";
   const canManageTeams = canManageUsers;
-  const canManageRolePermissions = currentUser.roleType === "ADMIN";
+  const canManageRolePermissions = currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER";
   const scopedOrgNodeIds = currentUser.roleType === "ADMIN"
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
@@ -143,11 +143,13 @@ export default async function OrgPage({
           label: item.name,
         })),
       ]
-    : departments.map((item) => ({
-        scopeType: "DEPARTMENT" as const,
-        departmentOrgNodeId: item.orgNodeId,
-        label: item.name,
-      }));
+    : currentDepartmentOrgNodeId
+      ? [{
+          scopeType: "DEPARTMENT" as const,
+          departmentOrgNodeId: currentDepartmentOrgNodeId,
+          label: departments.find((item) => item.orgNodeId === currentDepartmentOrgNodeId)?.name ?? "当前部门",
+        }]
+      : [];
 
   const roleMenuRows = await prisma.roleMenuPermission.findMany({
     where: { roleType: { in: [...roleTypes] } },
@@ -219,7 +221,7 @@ export default async function OrgPage({
       canManageUsers={canManageUsers}
       canManageTeams={canManageTeams}
       canManageRolePermissions={canManageRolePermissions}
-      manageableRoleOptions={currentUser.roleType === "ADMIN" ? [...roleTypes] : ["TEAM_LEADER", "MEMBER"]}
+      manageableRoleOptions={currentUser.roleType === "ADMIN" ? [...roleTypes] : ["DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"]}
     />
   );
 }

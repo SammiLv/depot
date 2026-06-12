@@ -55,8 +55,7 @@ export function UserSelector({ users }: { users: LoginUser[] }) {
                 <Avatar name={user.name} size="small" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium">
-                    {user.name}{" "}
-                    <span className="text-xs text-muted-foreground font-normal">· {user.title}</span>
+                    {user.name} <span className="text-xs text-muted-foreground font-normal">· {user.title}</span>
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {getRoleLabel(user.roleType)}

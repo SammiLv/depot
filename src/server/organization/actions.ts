@@ -402,10 +402,16 @@ export async function setDepartmentManager(formData: FormData) {
 }
 
 export async function saveRoleMenuPermissions(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
   const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+  console.log("[saveRoleMenuPermissions] start", {
+    userId: currentUser.id,
+    roleType: currentUser.roleType,
+    scope,
+    payloadLength: permissionsValue?.length ?? 0,
+  });
 
   const menus = await prisma.menuPermission.findMany({
     where: { isEnabled: true },
@@ -414,6 +420,11 @@ export async function saveRoleMenuPermissions(formData: FormData) {
   const menuIdSet = new Set(menus.map((menu) => menu.id));
   const requestedCells = parsePermissionCells(permissionsValue, menuIdSet);
   const nextCells = new Map(requestedCells.map((cell) => [`${cell.roleType}:${cell.permissionId}`, cell]));
+  const annualGoalsMemberCell = requestedCells.find((cell) => cell.roleType === "MEMBER" && cell.permissionId === menus.find((menu) => menu.code === "annual-goals")?.id);
+  console.log("[saveRoleMenuPermissions] parsed", {
+    requestedCount: requestedCells.length,
+    annualGoalsMemberCell,
+  });
 
   for (const menu of menus) {
     if (["/organization", "/dashboard"].includes(menu.path)) {
@@ -430,7 +441,7 @@ export async function saveRoleMenuPermissions(formData: FormData) {
     const permissionIds = menus.map((menu) => menu.id);
 
     if (scope.scopeType === "SYSTEM") {
-      await tx.roleMenuPermission.deleteMany({
+      const deleted = await tx.roleMenuPermission.deleteMany({
         where: {
           scopeType: scope.scopeType,
           departmentOrgNodeId: scope.departmentOrgNodeId,
@@ -438,9 +449,10 @@ export async function saveRoleMenuPermissions(formData: FormData) {
           menuPermissionId: { in: permissionIds },
         },
       });
+      console.log("[saveRoleMenuPermissions] system delete", deleted);
 
       if (nextCells.size > 0) {
-        await tx.roleMenuPermission.createMany({
+        const created = await tx.roleMenuPermission.createMany({
           data: [...nextCells.values()].map((cell) => ({
             scopeType: scope.scopeType,
             departmentOrgNodeId: scope.departmentOrgNodeId,
@@ -449,12 +461,13 @@ export async function saveRoleMenuPermissions(formData: FormData) {
             allowed: cell.allowed,
           })),
         });
+        console.log("[saveRoleMenuPermissions] system create", created);
       }
 
       return;
     }
 
-    await tx.roleMenuPermission.deleteMany({
+    const deleted = await tx.roleMenuPermission.deleteMany({
       where: {
         scopeType: scope.scopeType,
         departmentOrgNodeId: scope.departmentOrgNodeId,
@@ -462,10 +475,11 @@ export async function saveRoleMenuPermissions(formData: FormData) {
         menuPermissionId: { in: permissionIds },
       },
     });
+    console.log("[saveRoleMenuPermissions] department delete", deleted);
 
     const scopedCells = [...nextCells.values()].filter((cell) => cell.explicit);
     if (scopedCells.length > 0) {
-      await tx.roleMenuPermission.createMany({
+      const created = await tx.roleMenuPermission.createMany({
         data: scopedCells.map((cell) => ({
           scopeType: scope.scopeType,
           departmentOrgNodeId: scope.departmentOrgNodeId,
@@ -474,6 +488,7 @@ export async function saveRoleMenuPermissions(formData: FormData) {
           allowed: cell.allowed,
         })),
       });
+      console.log("[saveRoleMenuPermissions] department create", created);
     }
   });
 

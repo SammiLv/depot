@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/server/auth/current-user";
 import { getRoleLabel } from "@/server/permissions/role-labels";
 import { prisma } from "@/server/db/prisma";
 import { AppShell } from "@/components/app-shell";
+import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 import type { ReactNode } from "react";
 
 export default async function AuthenticatedLayout({ children }: { children: ReactNode }) {
@@ -35,22 +36,43 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
     avatarInitial: currentUser.name.charAt(0),
   };
 
-  const roleMenus = await prisma.roleMenuPermission.findMany({
-    where: { roleType: currentUser.roleType },
-  });
-  const menuIds = roleMenus.map((rm) => rm.menuPermissionId);
-  const menuPermissions = menuIds.length
-    ? await prisma.menuPermission.findMany({
-        where: { id: { in: menuIds }, isEnabled: true },
-        orderBy: { sortOrder: "asc" },
-      })
-    : [];
+  const scopedDepartmentOrgNodeId = currentUser.roleType === "ADMIN"
+    ? ""
+    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
 
-  const allowedMenus = menuPermissions.map((mp) => ({
-    code: mp.code,
-    name: mp.name,
-    path: mp.path,
-  }));
+  const [menuPermissions, systemRoleMenus, scopedRoleMenus] = await Promise.all([
+    prisma.menuPermission.findMany({
+      where: { isEnabled: true },
+      orderBy: { sortOrder: "asc" },
+    }),
+    prisma.roleMenuPermission.findMany({
+      where: {
+        scopeType: "SYSTEM",
+        departmentOrgNodeId: "",
+        roleType: currentUser.roleType,
+      },
+    }),
+    currentUser.roleType === "ADMIN" || !scopedDepartmentOrgNodeId
+      ? Promise.resolve([])
+      : prisma.roleMenuPermission.findMany({
+          where: {
+            scopeType: "DEPARTMENT",
+            departmentOrgNodeId: scopedDepartmentOrgNodeId,
+            roleType: currentUser.roleType,
+          },
+        }),
+  ]);
+
+  const systemMenuMap = new Map(systemRoleMenus.map((row) => [row.menuPermissionId, row]));
+  const scopedMenuMap = new Map(scopedRoleMenus.map((row) => [row.menuPermissionId, row]));
+
+  const allowedMenus = menuPermissions
+    .filter((menuPermission) => (scopedMenuMap.get(menuPermission.id) ?? systemMenuMap.get(menuPermission.id))?.allowed)
+    .map((menuPermission) => ({
+      code: menuPermission.code,
+      name: menuPermission.name,
+      path: menuPermission.path,
+    }));
 
   return <AppShell user={user} allowedMenus={allowedMenus}>{children}</AppShell>;
 }

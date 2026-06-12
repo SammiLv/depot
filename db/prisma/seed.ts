@@ -122,9 +122,15 @@ async function main() {
     name: "产品部",
     dingtalkDeptId: "product-dept",
   };
+  const secondDepartment = {
+    id: "seed_dept_platform",
+    name: "平台部",
+    dingtalkDeptId: "platform-dept",
+  };
 
   const rootOrgNodeId = createOrgNodeId();
   const departmentOrgNodeId = createOrgNodeId();
+  const secondDepartmentOrgNodeId = createOrgNodeId();
 
   const teamDefinitions = [
     { id: "seed_team_procurement", name: "采购组", orgNodeId: createOrgNodeId() },
@@ -132,11 +138,18 @@ async function main() {
     { id: "seed_team_c_end", name: "C端组", orgNodeId: createOrgNodeId() },
     { id: "seed_team_design", name: "设计组", orgNodeId: createOrgNodeId() },
   ] as const;
+  const secondTeamDefinitions = [
+    { id: "seed_team_platform_arch", name: "平台架构组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_data_strategy", name: "数据策略组", orgNodeId: createOrgNodeId() },
+  ] as const;
   const teamNames = teamDefinitions.map((team) => team.name);
+  const secondTeamNames = secondTeamDefinitions.map((team) => team.name);
   const sampleUserNames = [
     "系统管理员",
     "产品部主管",
+    "平台部主管",
     ...teamNames.flatMap((teamName) => [`${teamName}组长`, `${teamName}成员A`]),
+    ...secondTeamNames.flatMap((teamName) => [`${teamName}组长`, `${teamName}成员A`]),
   ];
 
   await prisma.todoItem.deleteMany();
@@ -168,7 +181,17 @@ async function main() {
     },
   });
 
-  const teams = Object.fromEntries(teamDefinitions.map((team) => [team.name, team])) as Record<string, { id: string; name: string }>;
+  const secondDepartmentManager = await prisma.user.create({
+    data: {
+      name: "平台部主管",
+      roleType: RoleType.DEPARTMENT_MANAGER,
+      orgNodeId: secondDepartmentOrgNodeId,
+      title: "部门主管",
+    },
+  });
+
+  const teams = Object.fromEntries(teamDefinitions.map((team) => [team.name, team])) as Record<string, { id: string; name: string; orgNodeId: string }>;
+  const secondDepartmentTeams = Object.fromEntries(secondTeamDefinitions.map((team) => [team.name, team])) as Record<string, { id: string; name: string; orgNodeId: string }>;
   let sampleLeaderId = "";
   let sampleMemberId = "";
 
@@ -197,6 +220,26 @@ async function main() {
     }
   }
 
+  for (const team of secondTeamDefinitions) {
+    await prisma.user.create({
+      data: {
+        name: `${team.name}组长`,
+        roleType: RoleType.TEAM_LEADER,
+        orgNodeId: team.orgNodeId,
+        title: "组长",
+      },
+    });
+
+    await prisma.user.create({
+      data: {
+        name: `${team.name}成员A`,
+        roleType: RoleType.MEMBER,
+        orgNodeId: team.orgNodeId,
+        title: "产品经理",
+      },
+    });
+  }
+
   await rebuildOrgTree([
     {
       id: rootOrgNodeId,
@@ -217,6 +260,20 @@ async function main() {
       name: team.name,
       nodeType: "TEAM" as const,
       parentId: departmentOrgNodeId,
+      dingtalkDeptId: null,
+    })),
+    {
+      id: secondDepartmentOrgNodeId,
+      name: secondDepartment.name,
+      nodeType: "DEPARTMENT",
+      parentId: rootOrgNodeId,
+      dingtalkDeptId: secondDepartment.dingtalkDeptId,
+    },
+    ...secondTeamDefinitions.map((team) => ({
+      id: team.orgNodeId,
+      name: team.name,
+      nodeType: "TEAM" as const,
+      parentId: secondDepartmentOrgNodeId,
       dingtalkDeptId: null,
     })),
   ]);
@@ -352,6 +409,12 @@ async function main() {
         type: "SYSTEM",
         title: "第一刀功能切片已准备",
         content: "当前版本先支持模拟登录、基础权限、Dashboard 和待办通知入口。",
+      },
+      {
+        userId: secondDepartmentManager.id,
+        type: "SYSTEM",
+        title: "平台部并行测试数据已准备",
+        content: "你可以从平台部视角验证跨部门并行流程和数据隔离。",
       },
       {
         userId: sampleLeaderId,
@@ -558,6 +621,47 @@ async function main() {
       },
     });
   }
+
+  await prisma.annualGoalPlan.create({
+    data: {
+      year: 2026,
+      name: "平台部 2026 年度业绩指标",
+      description: "用于验证多部门并行推进时的平台部年度目标和数据隔离。",
+      ownerType: AnnualGoalOwnerType.DEPARTMENT,
+      ownerOrgNodeId: secondDepartmentOrgNodeId,
+      version: 1,
+      isActive: true,
+      approvalStatus: ApprovalStatus.APPROVED,
+      effectiveFrom: new Date("2026-01-01"),
+      effectiveTo: new Date("2026-12-31"),
+      approvedAt: new Date("2026-01-06"),
+      createdById: secondDepartmentManager.id,
+      metrics: {
+        create: [
+          {
+            metricCode: "PLATFORM-AG-2026-001",
+            name: "平台稳定性改进项交付",
+            targetValue: 12,
+            currentValue: 5,
+            unit: "项",
+            weight: 55,
+            calculationType: AnnualMetricCalculationType.RATIO,
+            sortOrder: 10,
+          },
+          {
+            metricCode: "PLATFORM-AG-2026-002",
+            name: "跨部门数据服务支撑",
+            targetValue: 8,
+            currentValue: 3,
+            unit: "项",
+            weight: 45,
+            calculationType: AnnualMetricCalculationType.RATIO,
+            sortOrder: 20,
+          },
+        ],
+      },
+    },
+  });
 
   await prisma.kpiTemplate.create({
     data: {

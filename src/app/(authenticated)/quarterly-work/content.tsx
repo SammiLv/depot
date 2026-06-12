@@ -516,7 +516,7 @@ export function QuarterlyWorkContent({ data }: Props) {
       />
 
       <div className="mb-4 rounded-xl bg-card p-0 shadow-sm overflow-hidden">
-        <div className="px-5 pt-4 border-b border-border flex flex-wrap items-end gap-8 text-sm shrink-0">
+        <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
           {data.departments.map((department) => (
             <button
               key={department.id}
@@ -536,7 +536,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           ))}
         </div>
 
-        <div className="px-5 py-4 flex flex-wrap items-center gap-2 border-b border-border">
+        <div className="px-5 py-4 flex flex-wrap items-center gap-2">
           {teamTabs.map((team) => (
             <button
               key={team.id}
