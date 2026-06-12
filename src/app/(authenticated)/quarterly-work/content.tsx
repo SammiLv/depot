@@ -515,62 +515,63 @@ export function QuarterlyWorkContent({ data }: Props) {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        {data.departments.map((department) => (
-          <button
-            key={department.id}
-            type="button"
-            onClick={() => {
-              setDepartmentTab(department.id);
-              setTeamTab("all");
-            }}
-            className={`rounded-lg px-4 py-2 text-sm transition ${departmentTab === department.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-          >
-            {department.name}
-          </button>
-        ))}
-      </div>
-
-      <div className="mb-4 rounded-xl bg-card p-5 shadow-sm">
-        <div className="inline-flex rounded-lg bg-muted p-1">
-          {[
-            { k: "project" as const, label: "项目看板" },
-            { k: "board" as const, label: "工作看板" },
-            { k: "value" as const, label: "需求价值跟踪" },
-          ].map((t) => (
+      <div className="mb-4 rounded-xl bg-card p-0 shadow-sm overflow-hidden">
+        <div className="px-5 pt-4 border-b border-border flex flex-wrap items-end gap-8 text-sm shrink-0">
+          {data.departments.map((department) => (
             <button
-              key={t.k}
-              onClick={() => setTab(t.k)}
-              className={`rounded-md px-4 py-1.5 text-sm transition ${
-                tab === t.k ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              key={department.id}
+              type="button"
+              onClick={() => {
+                setDepartmentTab(department.id);
+                setTeamTab("all");
+              }}
+              className={`pb-3 border-b-2 transition ${
+                departmentTab === department.id
+                  ? "border-primary text-primary font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {t.label}
+              {department.name}
             </button>
           ))}
         </div>
 
-        {tab !== "value" ? (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {teamTabs.map((team) => (
+        <div className="px-5 py-4 flex flex-wrap items-center gap-2 border-b border-border">
+          {teamTabs.map((team) => (
+            <button
+              key={team.id}
+              type="button"
+              onClick={() => setTeamTab(team.id)}
+              className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+            >
+              {team.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="inline-flex rounded-lg bg-muted p-1">
+            {[
+              { k: "project" as const, label: "项目看板" },
+              { k: "board" as const, label: "工作看板" },
+              { k: "value" as const, label: "需求价值跟踪" },
+            ].map((t) => (
               <button
-                key={team.id}
-                type="button"
-                onClick={() => setTeamTab(team.id)}
-                className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+                key={t.k}
+                onClick={() => setTab(t.k)}
+                className={`rounded-md px-4 py-1.5 text-sm transition ${
+                  tab === t.k ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                {team.name}
+                {t.label}
               </button>
             ))}
-            <div className="ml-auto text-xs text-muted-foreground">
-              {tab === "project" ? `当前项目：${data.projectTotalCount} 个` : `当前看板：${data.year} Q${data.quarter}`}
-            </div>
           </div>
-        ) : (
-          <div className="mt-4 text-sm text-muted-foreground">
-            对季度工作中已上线需求的<span className="font-medium text-foreground"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
+
+          <div className="text-xs text-muted-foreground">
+            {tab === "value" ? "需求价值跟踪视图" : tab === "project" ? `当前项目：${data.projectTotalCount} 个` : `当前看板：${data.year} Q${data.quarter}`}
           </div>
-        )}
+        </div>
       </div>
 
       {tab === "project" ? (

@@ -37,7 +37,6 @@ export type AnnualGoalPlanPermissions = {
   canEditTeamPlan: boolean;
   canUpdateTeamProgress: boolean;
   canEditPlan: boolean;
-  canArchivePlan: boolean;
   canEditMetrics: boolean;
   canManageSources: boolean;
   canManageQuarterTargets: boolean;
@@ -112,7 +111,6 @@ const emptyAnnualGoalPlanPermissions: AnnualGoalPlanPermissions = {
   canEditTeamPlan: false,
   canUpdateTeamProgress: false,
   canEditPlan: false,
-  canArchivePlan: false,
   canEditMetrics: false,
   canManageSources: false,
   canManageQuarterTargets: false,
@@ -206,7 +204,6 @@ export function getAnnualGoalPlanPermissions(
       canEditTeamPlan,
       canUpdateTeamProgress,
       canEditPlan: canEditDepartmentPlan || canEditTeamPlan,
-      canArchivePlan: canEditDepartmentPlan || canEditTeamPlan,
       canEditMetrics: canEditDepartmentPlan || canEditTeamPlan,
       canManageSources: canEditDepartmentPlan,
       canManageQuarterTargets: canEditDepartmentPlan || canEditTeamPlan,
@@ -246,7 +243,6 @@ export function getAnnualGoalPlanPermissions(
     canEditTeamPlan,
     canUpdateTeamProgress,
     canEditPlan: canEditDepartmentPlan || canEditTeamPlan,
-    canArchivePlan: canEditDepartmentPlan || canEditTeamPlan,
     canEditMetrics: canEditDepartmentPlan || canEditTeamPlan,
     canManageSources: canEditDepartmentPlan,
     canManageQuarterTargets: canEditDepartmentPlan || canEditTeamPlan,
