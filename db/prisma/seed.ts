@@ -249,15 +249,20 @@ async function main() {
     for (const roleType of allowedRoles) {
       await prisma.roleMenuPermission.upsert({
         where: {
-          roleType_menuPermissionId: {
+          scopeType_departmentOrgNodeId_roleType_menuPermissionId: {
+            scopeType: "SYSTEM",
+            departmentOrgNodeId: "",
             roleType,
             menuPermissionId: menu.id,
           },
         },
-        update: {},
+        update: { allowed: true },
         create: {
+          scopeType: "SYSTEM",
+          departmentOrgNodeId: "",
           roleType,
           menuPermissionId: menu.id,
+          allowed: true,
         },
       });
     }
@@ -290,7 +295,13 @@ async function main() {
       const annualGoalPermissionId = annualGoalPermissionIdByCode.get(code);
       if (!annualGoalPermissionId) continue;
       await prisma.roleAnnualGoalPermission.create({
-        data: { roleType, annualGoalPermissionId },
+        data: {
+          scopeType: "SYSTEM",
+          departmentOrgNodeId: "",
+          roleType,
+          annualGoalPermissionId,
+          allowed: true,
+        },
       });
     }
   }

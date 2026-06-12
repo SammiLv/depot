@@ -4,8 +4,7 @@ import { getOwnerWhereByScope, getKpiWhereByScope } from "@/server/permissions/d
 import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/role-labels";
 import {
   buildOrgScopeContext,
-  getAnnualGoalCapabilities,
-  getAnnualGoalPermissionMap,
+  getAnnualGoalCapabilitiesForUser,
   getAnnualGoalPlanPermissions,
   getAnnualGoalPlanWhere,
 } from "@/server/organization/annual-goal-permissions";
@@ -37,8 +36,7 @@ function getPlanOwnerName(
 }
 
 export async function getDashboardData(currentUser: CurrentUser) {
-  const annualGoalPermissionMap = await getAnnualGoalPermissionMap();
-  const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
+  const annualGoalCapabilities = await getAnnualGoalCapabilitiesForUser(currentUser);
 
   const [currentOrgNode, todoCount, latestTodos, latestNotifications, activePlans, quarterlyWorks, kpis] = await Promise.all([
     currentUser.orgNodeId

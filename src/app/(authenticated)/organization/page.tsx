@@ -1,13 +1,21 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
-import { getAnnualGoalPermissionMatrix } from "@/server/organization/annual-goal-permissions";
+import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { getUserWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
 
 const roleTypes = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
 
-export default async function OrgPage() {
+export default async function OrgPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const requestedScope = Array.isArray(params.scope) ? params.scope[0] : params.scope;
+  const requestedDepartment = Array.isArray(params.department) ? params.department[0] : params.department;
+  const requestedTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
   const currentUser = await requireCurrentUser();
   const canManageUsers = currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER";
   const canManageTeams = canManageUsers;
@@ -16,7 +24,7 @@ export default async function OrgPage() {
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
 
-  const [users, orgNodes, menus, roleMenuPermissions, annualGoalPermissionMatrix] = await Promise.all([
+  const [users, orgNodes, menus, annualGoalPermissions] = await Promise.all([
     prisma.user.findMany({
       where: { ...(await getUserWhereByScope(currentUser)), isActive: true },
       orderBy: [{ roleType: "asc" }, { name: "asc" }],
@@ -42,10 +50,10 @@ export default async function OrgPage() {
       where: { isEnabled: true },
       orderBy: { sortOrder: "asc" },
     }),
-    prisma.roleMenuPermission.findMany({
-      where: { roleType: { in: [...roleTypes] } },
-    }),
-    getAnnualGoalPermissionMatrix(),
+    (async () => {
+      await ensureAnnualGoalPermissions();
+      return prisma.annualGoalPermission.findMany({ orderBy: { sortOrder: "asc" } });
+    })(),
   ]);
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
@@ -98,6 +106,12 @@ export default async function OrgPage() {
     };
   });
 
+  const teamData = teams.map((team) => {
+    const teamUsers = mappedUsers.filter((user) => user.teamOrgNodeId === team.orgNodeId && user.isActive);
+    const leader = teamUsers.find((user) => user.roleType === "TEAM_LEADER") ?? null;
+    return { teamOrgNodeId: team.orgNodeId, count: teamUsers.length, leaderName: leader?.name };
+  });
+
   const currentOrgNode = currentUser.orgNodeId ? orgNodeById.get(currentUser.orgNodeId) ?? null : null;
   const currentDepartmentOrgNodeId = currentOrgNode?.nodeType === "DEPARTMENT"
     ? currentOrgNode.id
@@ -105,12 +119,89 @@ export default async function OrgPage() {
       ? currentOrgNode.parentId
       : null;
   const department = departments.find((item) => item.orgNodeId === currentDepartmentOrgNodeId) ?? departments[0] ?? null;
+  const defaultScope = currentUser.roleType === "ADMIN"
+    ? { scopeType: "SYSTEM" as const, departmentOrgNodeId: "" }
+    : { scopeType: "DEPARTMENT" as const, departmentOrgNodeId: currentDepartmentOrgNodeId ?? department?.orgNodeId ?? "" };
+  const requestedScopeType = requestedScope === "SYSTEM" || requestedScope === "DEPARTMENT"
+    ? requestedScope
+    : defaultScope.scopeType;
+  const normalizedScopeType = currentUser.roleType === "ADMIN"
+    ? requestedScopeType
+    : "DEPARTMENT" as const;
+  const requestedDepartmentId = requestedDepartment && departments.some((item) => item.orgNodeId === requestedDepartment)
+    ? requestedDepartment
+    : defaultScope.departmentOrgNodeId;
+  const initialScope = normalizedScopeType === "SYSTEM"
+    ? { scopeType: "SYSTEM" as const, departmentOrgNodeId: "" }
+    : { scopeType: "DEPARTMENT" as const, departmentOrgNodeId: requestedDepartmentId };
+  const scopeOptions = currentUser.roleType === "ADMIN"
+    ? [
+        { scopeType: "SYSTEM" as const, departmentOrgNodeId: "", label: "系统" },
+        ...departments.map((item) => ({
+          scopeType: "DEPARTMENT" as const,
+          departmentOrgNodeId: item.orgNodeId,
+          label: item.name,
+        })),
+      ]
+    : departments.map((item) => ({
+        scopeType: "DEPARTMENT" as const,
+        departmentOrgNodeId: item.orgNodeId,
+        label: item.name,
+      }));
 
-  const teamData = teams.map((team) => {
-    const teamUsers = mappedUsers.filter((user) => user.teamOrgNodeId === team.orgNodeId && user.isActive);
-    const leader = teamUsers.find((user) => user.roleType === "TEAM_LEADER") ?? null;
-    return { teamOrgNodeId: team.orgNodeId, count: teamUsers.length, leaderName: leader?.name };
+  const roleMenuRows = await prisma.roleMenuPermission.findMany({
+    where: { roleType: { in: [...roleTypes] } },
   });
+  const roleMenuMap = new Map(roleMenuRows.map((row) => [`${row.scopeType}:${row.departmentOrgNodeId}:${row.roleType}:${row.menuPermissionId}`, row]));
+  const roleMenuMatrix = menus.map((menu) => ({
+    id: menu.id,
+    code: menu.code,
+    name: menu.name,
+    path: menu.path,
+    cells: Object.fromEntries(roleTypes.map((roleType) => {
+      const systemRow = roleMenuMap.get(`SYSTEM::${roleType}:${menu.id}`);
+      const scopedRow = initialScope.scopeType === "DEPARTMENT"
+        ? roleMenuMap.get(`DEPARTMENT:${initialScope.departmentOrgNodeId}:${roleType}:${menu.id}`)
+        : undefined;
+      const sourceRow = scopedRow ?? systemRow;
+      const allowed = sourceRow?.allowed ?? false;
+      return [roleType, {
+        allowed,
+        source: scopedRow ? "DEPARTMENT" : "SYSTEM",
+        explicit: Boolean(scopedRow || (initialScope.scopeType === "SYSTEM" && systemRow)),
+        inherited: initialScope.scopeType === "DEPARTMENT" && !scopedRow,
+      }];
+    })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
+  }));
+
+  const annualGoalMatrixRows = await prisma.roleAnnualGoalPermission.findMany({
+    where: { roleType: { in: [...roleTypes] } },
+  });
+  const annualGoalMatrixMap = new Map(annualGoalMatrixRows.map((row) => [`${row.scopeType}:${row.departmentOrgNodeId}:${row.roleType}:${row.annualGoalPermissionId}`, row]));
+  const annualGoalMatrix = annualGoalPermissions.map((permission) => ({
+    id: permission.id,
+    code: permission.code,
+    name: permission.name,
+    description: permission.description,
+    cells: Object.fromEntries(roleTypes.map((roleType) => {
+      const systemRow = annualGoalMatrixMap.get(`SYSTEM::${roleType}:${permission.id}`);
+      const scopedRow = initialScope.scopeType === "DEPARTMENT"
+        ? annualGoalMatrixMap.get(`DEPARTMENT:${initialScope.departmentOrgNodeId}:${roleType}:${permission.id}`)
+        : undefined;
+      const sourceRow = scopedRow ?? systemRow;
+      const allowed = sourceRow?.allowed ?? false;
+      return [roleType, {
+        allowed,
+        source: scopedRow ? "DEPARTMENT" : "SYSTEM",
+        explicit: Boolean(scopedRow || (initialScope.scopeType === "SYSTEM" && systemRow)),
+        inherited: initialScope.scopeType === "DEPARTMENT" && !scopedRow,
+      }];
+    })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
+  }));
+
+  const selectedDepartment = initialScope.scopeType === "DEPARTMENT"
+    ? departments.find((item) => item.orgNodeId === initialScope.departmentOrgNodeId) ?? null
+    : null;
 
   return (
     <OrgContent
@@ -119,11 +210,12 @@ export default async function OrgPage() {
       teams={teams}
       teamData={teamData}
       departments={departments}
-      department={department}
-      menus={menus.map((menu) => ({ id: menu.id, code: menu.code, name: menu.name, path: menu.path }))}
-      roleMenuPermissions={roleMenuPermissions.map((permission) => ({ roleType: permission.roleType, menuPermissionId: permission.menuPermissionId }))}
-      annualGoalPermissions={annualGoalPermissionMatrix.permissions}
-      roleAnnualGoalPermissions={annualGoalPermissionMatrix.rolePermissions}
+      department={selectedDepartment}
+      scopeOptions={scopeOptions}
+      initialScope={initialScope}
+      initialTab={requestedTab === "permissions" ? "permissions" : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
+      menus={roleMenuMatrix}
+      annualGoalPermissions={annualGoalMatrix}
       canManageUsers={canManageUsers}
       canManageTeams={canManageTeams}
       canManageRolePermissions={canManageRolePermissions}

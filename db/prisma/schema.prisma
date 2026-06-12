@@ -18,6 +18,11 @@ enum AnnualGoalOwnerType {
   TEAM
 }
 
+enum PermissionScopeType {
+  SYSTEM
+  DEPARTMENT
+}
+
 enum AnnualMetricCalculationType {
   RATIO
   BOOLEAN
@@ -142,12 +147,18 @@ model MenuPermission {
 }
 
 model RoleMenuPermission {
-  id               String   @id @default(cuid())
-  roleType         RoleType
-  menuPermissionId String
-  createdAt        DateTime @default(now())
+  id                  String              @id @default(cuid())
+  scopeType           PermissionScopeType @default(SYSTEM)
+  departmentOrgNodeId String              @default("")
+  roleType            RoleType
+  menuPermissionId    String
+  allowed             Boolean             @default(true)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
-  @@unique([roleType, menuPermissionId])
+  @@unique([scopeType, departmentOrgNodeId, roleType, menuPermissionId])
+  @@index([scopeType, departmentOrgNodeId])
+  @@index([menuPermissionId])
 }
 
 model AnnualGoalPermission {
@@ -162,14 +173,19 @@ model AnnualGoalPermission {
 }
 
 model RoleAnnualGoalPermission {
-  id                     String   @id @default(cuid())
+  id                     String              @id @default(cuid())
+  scopeType              PermissionScopeType @default(SYSTEM)
+  departmentOrgNodeId    String              @default("")
   roleType               RoleType
   annualGoalPermissionId String
-  createdAt              DateTime @default(now())
+  allowed                Boolean             @default(true)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   annualGoalPermission AnnualGoalPermission @relation(fields: [annualGoalPermissionId], references: [id])
 
-  @@unique([roleType, annualGoalPermissionId])
+  @@unique([scopeType, departmentOrgNodeId, roleType, annualGoalPermissionId])
+  @@index([scopeType, departmentOrgNodeId])
   @@index([annualGoalPermissionId])
 }
 

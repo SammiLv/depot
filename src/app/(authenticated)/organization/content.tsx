@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { Plus, Users, X, Check, RefreshCw } from "lucide-react";
@@ -35,18 +36,35 @@ type OrgDepartment = {
   managerName: string | null;
 };
 
+type PermissionScopeType = "SYSTEM" | "DEPARTMENT";
+
+type PermissionCellState = {
+  allowed: boolean;
+  source: PermissionScopeType;
+  inherited: boolean;
+  explicit: boolean;
+};
+
 type OrgMenu = {
   id: string;
   code: string;
   name: string;
   path: string;
+  cells: Record<RoleType, PermissionCellState>;
 };
 
-type AnnualGoalPermission = {
+type ScopedAnnualGoalPermission = {
   id: string;
   code: string;
   name: string;
   description: string;
+  cells: Record<RoleType, PermissionCellState>;
+};
+
+type PermissionScopeOption = {
+  scopeType: PermissionScopeType;
+  departmentOrgNodeId: string;
+  label: string;
 };
 
 type Props = {
@@ -56,10 +74,11 @@ type Props = {
   teamData: { teamOrgNodeId: string; count: number; leaderName?: string }[];
   departments: OrgDepartment[];
   department: OrgDepartment | null;
+  scopeOptions: PermissionScopeOption[];
+  initialScope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
+  initialTab: "organization" | "permissions";
   menus: OrgMenu[];
-  roleMenuPermissions: { roleType: RoleType; menuPermissionId: string }[];
-  annualGoalPermissions: AnnualGoalPermission[];
-  roleAnnualGoalPermissions: { roleType: RoleType; annualGoalPermissionId: string }[];
+  annualGoalPermissions: ScopedAnnualGoalPermission[];
   canManageUsers: boolean;
   canManageTeams: boolean;
   canManageRolePermissions: boolean;
@@ -212,68 +231,106 @@ export function OrgContent({
   teamData,
   departments,
   department,
+  scopeOptions,
+  initialScope,
+  initialTab,
   menus,
-  roleMenuPermissions,
   annualGoalPermissions,
-  roleAnnualGoalPermissions,
   canManageUsers,
   canManageTeams,
   canManageRolePermissions,
   manageableRoleOptions,
 }: Props) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isAdmin = currentUser.roleType === "ADMIN";
   const countMap = new Map(teamData.map((t) => [t.teamOrgNodeId, t]));
-  const initialRoleMenuKeys = roleMenuPermissions.map((p) => `${p.roleType}:${p.menuPermissionId}`).sort();
-  const initialRoleMenuKeyString = initialRoleMenuKeys.join("|");
-  const [draftRoleMenuKeys, setDraftRoleMenuKeys] = useState(() => new Set(initialRoleMenuKeys));
-  const initialAnnualGoalPermissionKeys = roleAnnualGoalPermissions.map((p) => `${p.roleType}:${p.annualGoalPermissionId}`).sort();
-  const initialAnnualGoalPermissionKeyString = initialAnnualGoalPermissionKeys.join("|");
-  const [draftAnnualGoalPermissionKeys, setDraftAnnualGoalPermissionKeys] = useState(() => new Set(initialAnnualGoalPermissionKeys));
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [tab, setTab] = useState<"organization" | "permissions">("organization");
-  const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(departments[0]?.orgNodeId ?? department?.orgNodeId ?? "");
-  const draftRoleMenuKeyString = [...draftRoleMenuKeys].sort().join("|");
-  const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
-  const draftAnnualGoalPermissionKeyString = [...draftAnnualGoalPermissionKeys].sort().join("|");
-  const hasAnnualGoalPermissionChanges = draftAnnualGoalPermissionKeyString !== initialAnnualGoalPermissionKeyString;
+  const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
+  const selectedScope = initialScope;
+  const selectedDepartmentOrgNodeId = initialScope.departmentOrgNodeId || (departments[0]?.orgNodeId ?? department?.orgNodeId ?? "");
   const visibleTeams = teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
   const visibleUsers = users.filter((user) => user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
   const selectedDepartment = departments.find((item) => item.orgNodeId === selectedDepartmentOrgNodeId) ?? department;
+  const initialRoleMenuCells = Object.fromEntries(menus.flatMap((menu) => roleOptions.map((role) => [
+    `${role.value}:${menu.id}`,
+    { ...menu.cells[role.value] },
+  ])));
+  const [draftRoleMenuCells, setDraftRoleMenuCells] = useState<Record<string, PermissionCellState>>(initialRoleMenuCells);
+  const initialAnnualGoalCells = Object.fromEntries(annualGoalPermissions.flatMap((permission) => roleOptions.map((role) => [
+    `${role.value}:${permission.id}`,
+    { ...permission.cells[role.value] },
+  ])));
+  const [draftAnnualGoalCells, setDraftAnnualGoalCells] = useState<Record<string, PermissionCellState>>(initialAnnualGoalCells);
+  const draftRoleMenuKeyString = JSON.stringify(draftRoleMenuCells);
+  const initialRoleMenuKeyString = JSON.stringify(initialRoleMenuCells);
+  const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
+  const draftAnnualGoalPermissionKeyString = JSON.stringify(draftAnnualGoalCells);
+  const initialAnnualGoalPermissionKeyString = JSON.stringify(initialAnnualGoalCells);
+  const hasAnnualGoalPermissionChanges = draftAnnualGoalPermissionKeyString !== initialAnnualGoalPermissionKeyString;
+  const draftRoleMenuPayload = JSON.stringify(Object.entries(draftRoleMenuCells).map(([key, cell]) => {
+    const [roleType, permissionId] = key.split(":");
+    return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
+  }));
+  const draftAnnualGoalPayload = JSON.stringify(Object.entries(draftAnnualGoalCells).map(([key, cell]) => {
+    const [roleType, permissionId] = key.split(":");
+    return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
+  }));
+
+  useEffect(() => {
+    setDraftRoleMenuCells(initialRoleMenuCells);
+  }, [initialRoleMenuKeyString]);
+
+  useEffect(() => {
+    setDraftAnnualGoalCells(initialAnnualGoalCells);
+  }, [initialAnnualGoalPermissionKeyString]);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab, initialScope.scopeType, initialScope.departmentOrgNodeId]);
 
   function toggleDraftPermission(roleType: RoleType, menu: OrgMenu) {
     if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) return;
     const key = `${roleType}:${menu.id}`;
-    setDraftRoleMenuKeys((current) => {
-      const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
+    setDraftRoleMenuCells((current) => {
+      const cell = current[key];
+      const nextAllowed = !cell.allowed;
+      return {
+        ...current,
+        [key]: {
+          allowed: nextAllowed,
+          source: selectedScope.scopeType,
+          explicit: true,
+          inherited: false,
+        },
+      };
     });
   }
 
-  function toggleDraftAnnualGoalPermission(roleType: RoleType, permission: AnnualGoalPermission) {
+  function toggleDraftAnnualGoalPermission(roleType: RoleType, permission: ScopedAnnualGoalPermission) {
     const key = `${roleType}:${permission.id}`;
-    setDraftAnnualGoalPermissionKeys((current) => {
-      const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
+    setDraftAnnualGoalCells((current) => {
+      const cell = current[key];
+      const nextAllowed = !cell.allowed;
+      return {
+        ...current,
+        [key]: {
+          allowed: nextAllowed,
+          source: selectedScope.scopeType,
+          explicit: true,
+          inherited: false,
+        },
+      };
     });
   }
 
   function resetDraftPermissions() {
-    setDraftRoleMenuKeys(new Set(initialRoleMenuKeys));
+    setDraftRoleMenuCells(initialRoleMenuCells);
   }
 
   function resetDraftAnnualGoalPermissions() {
-    setDraftAnnualGoalPermissionKeys(new Set(initialAnnualGoalPermissionKeys));
+    setDraftAnnualGoalCells(initialAnnualGoalCells);
   }
 
   async function handleDingTalkSync() {
@@ -314,6 +371,38 @@ export function OrgContent({
       />
       {syncMessage && <div className="-mt-3 mb-4 text-xs text-muted-foreground">{syncMessage}</div>}
 
+      <div className="mb-4 rounded-xl bg-card border border-border p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {scopeOptions.map((option) => {
+            const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;
+            return (
+              <button
+                key={`${option.scopeType}:${option.departmentOrgNodeId}`}
+                type="button"
+                onClick={() => {
+                  const nextParams = new URLSearchParams(searchParams.toString());
+                  nextParams.set("scope", option.scopeType);
+                  nextParams.set("tab", option.scopeType === "SYSTEM" ? "permissions" : tab);
+                  if (option.scopeType === "DEPARTMENT") {
+                    nextParams.set("department", option.departmentOrgNodeId);
+                  } else {
+                    nextParams.delete("department");
+                  }
+                  router.push(`/organization?${nextParams.toString()}`);
+                }}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                  active
+                    ? "border-primary bg-primary/5 text-primary"
+                    : "border-border bg-background text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="mb-4 rounded-xl bg-card border border-border p-5 shadow-sm">
         <div className="inline-flex p-1 rounded-lg bg-muted">
           {[
@@ -323,7 +412,11 @@ export function OrgContent({
             <button
               key={item.key}
               type="button"
-              onClick={() => setTab(item.key as "organization" | "permissions")}
+              onClick={() => {
+                const nextParams = new URLSearchParams(searchParams.toString());
+                nextParams.set("tab", item.key);
+                router.push(`/organization?${nextParams.toString()}`);
+              }}
               className={`px-4 py-1.5 rounded-md text-sm transition ${
                 tab === item.key ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
               }`}
@@ -335,6 +428,11 @@ export function OrgContent({
       </div>
 
       {tab === "organization" ? (
+        selectedScope.scopeType === "SYSTEM" ? (
+          <Card>
+            <div className="text-sm text-muted-foreground">系统作用域下不展示部门组织结构，请切换到具体部门查看组织信息。</div>
+          </Card>
+        ) : (
         <>
           <div className="mb-4 rounded-xl bg-card border border-border p-4 shadow-sm">
             <div className="flex flex-wrap gap-2">
@@ -342,7 +440,13 @@ export function OrgContent({
                 <button
                   key={item.orgNodeId}
                   type="button"
-                  onClick={() => setSelectedDepartmentOrgNodeId(item.orgNodeId)}
+                  onClick={() => {
+                    const nextParams = new URLSearchParams(searchParams.toString());
+                    nextParams.set("scope", "DEPARTMENT");
+                    nextParams.set("department", item.orgNodeId);
+                    nextParams.set("tab", "organization");
+                    router.push(`/organization?${nextParams.toString()}`);
+                  }}
                   className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
                     selectedDepartmentOrgNodeId === item.orgNodeId
                       ? "border-primary bg-primary/5 text-primary"
@@ -429,6 +533,7 @@ export function OrgContent({
             </table>
           </Card>
         </>
+        )
       ) : (
         <Card>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -472,7 +577,9 @@ export function OrgContent({
             </div>
             {canManageRolePermissions && (
               <form action={async (fd) => { await saveRoleMenuPermissions(fd); }} className="flex gap-2">
-                <input type="hidden" name="permissions" value={JSON.stringify([...draftRoleMenuKeys])} />
+                <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
+                <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
+                <input type="hidden" name="permissions" value={draftRoleMenuPayload} />
                 <button type="button" disabled={!hasRoleMenuChanges} onClick={resetDraftPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
                 <button type="submit" disabled={!hasRoleMenuChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
               </form>
@@ -500,13 +607,15 @@ export function OrgContent({
                       </div>
                     </td>
                     {roleOptions.map((role) => {
-                      const enabled = draftRoleMenuKeys.has(`${role.value}:${menu.id}`);
+                      const cell = draftRoleMenuCells[`${role.value}:${menu.id}`];
+                      const enabled = cell?.allowed ?? false;
                       const locked = role.value === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path);
+                      const inherited = cell?.inherited;
                       return (
                         <td key={role.value} className="py-0 text-right align-middle">
                           <div className="min-h-[72px] flex items-center justify-end">
                             {canManageRolePermissions ? (
-                              <button type="button" disabled={locked} onClick={() => toggleDraftPermission(role.value, menu)} className={`mx-auto inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${locked ? "opacity-60 cursor-not-allowed" : "hover:ring-1 hover:ring-ring"}`} title={locked ? "核心入口不可移除" : "调整后需点击保存生效"}>
+                              <button type="button" disabled={locked} onClick={() => toggleDraftPermission(role.value, menu)} className={`mx-auto inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} ${locked ? "opacity-60 cursor-not-allowed" : "hover:ring-1 hover:ring-ring"}`} title={locked ? "核心入口不可移除" : inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
                                 {enabled && <Check className="w-3.5 h-3.5" />}
                               </button>
                             ) : (
@@ -529,7 +638,9 @@ export function OrgContent({
             </div>
             {canManageRolePermissions && (
               <form action={async (fd) => { await saveAnnualGoalRolePermissions(fd); }} className="flex gap-2">
-                <input type="hidden" name="permissions" value={JSON.stringify([...draftAnnualGoalPermissionKeys])} />
+                <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
+                <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
+                <input type="hidden" name="permissions" value={draftAnnualGoalPayload} />
                 <button type="button" disabled={!hasAnnualGoalPermissionChanges} onClick={resetDraftAnnualGoalPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
                 <button type="submit" disabled={!hasAnnualGoalPermissionChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
               </form>
@@ -557,12 +668,14 @@ export function OrgContent({
                       </div>
                     </td>
                     {roleOptions.map((role) => {
-                      const enabled = draftAnnualGoalPermissionKeys.has(`${role.value}:${permission.id}`);
+                      const cell = draftAnnualGoalCells[`${role.value}:${permission.id}`];
+                      const enabled = cell?.allowed ?? false;
+                      const inherited = cell?.inherited;
                       return (
                         <td key={role.value} className="py-0 text-right align-middle">
                           <div className="min-h-[72px] flex items-center justify-end">
                             {canManageRolePermissions ? (
-                              <button type="button" onClick={() => toggleDraftAnnualGoalPermission(role.value, permission)} className={`mx-auto inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} hover:ring-1 hover:ring-ring`} title="调整后需点击保存生效">
+                              <button type="button" onClick={() => toggleDraftAnnualGoalPermission(role.value, permission)} className={`mx-auto inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
                                 {enabled && <Check className="w-3.5 h-3.5" />}
                               </button>
                             ) : (

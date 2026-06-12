@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
-import { annualGoalPermissionCodes, annualGoalPermissionDefinitions } from "@/server/organization/annual-goal-permissions";
+import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, getScopedAnnualGoalPermissionMatrix, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
 import type { OrgNodeType, RoleType } from "@prisma/client";
 
@@ -103,7 +103,67 @@ function revalidateOrganization() {
   revalidatePath("/dashboard");
 }
 
-// ── OrgNode helpers ──
+async function resolvePermissionScope(formData: FormData): Promise<{ scopeType: PermissionScopeInput["scopeType"]; departmentOrgNodeId: string }> {
+  const scopeType = formData.get("scopeType");
+  if (scopeType !== "SYSTEM" && scopeType !== "DEPARTMENT") {
+    throw new Error("权限作用域无效");
+  }
+
+  if (scopeType === "SYSTEM") {
+    return { scopeType, departmentOrgNodeId: "" };
+  }
+
+  const departmentOrgNodeId = (formData.get("departmentOrgNodeId") as string) || "";
+  if (!departmentOrgNodeId) {
+    throw new Error("部门权限缺少部门信息");
+  }
+
+  await assertDepartmentExists(departmentOrgNodeId);
+  return { scopeType, departmentOrgNodeId };
+}
+
+function parsePermissionCells(permissionsValue: string, validIds: Set<string>) {
+  let requestedCells: unknown;
+  try {
+    requestedCells = JSON.parse(permissionsValue || "[]");
+  } catch {
+    throw new Error("权限数据格式错误");
+  }
+
+  if (!Array.isArray(requestedCells)) {
+    throw new Error("权限数据格式错误");
+  }
+
+  return requestedCells.map((cell) => {
+    if (!cell || typeof cell !== "object") {
+      throw new Error("权限数据格式错误");
+    }
+
+    const roleType = Reflect.get(cell, "roleType");
+    const permissionId = Reflect.get(cell, "permissionId");
+    const allowed = Reflect.get(cell, "allowed");
+    const explicit = Reflect.get(cell, "explicit");
+    const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+    if (
+      !validRoles.includes(roleType as RoleType) ||
+      typeof permissionId !== "string" ||
+      !validIds.has(permissionId) ||
+      typeof allowed !== "boolean" ||
+      typeof explicit !== "boolean"
+    ) {
+      throw new Error("权限数据包含无效项");
+    }
+
+    return {
+      roleType: roleType as RoleType,
+      permissionId,
+      allowed,
+      explicit,
+    };
+  });
+}
+
 
 export async function updateFromDingTalk() {
   const currentUser = await requireAdmin();
@@ -344,54 +404,75 @@ export async function setDepartmentManager(formData: FormData) {
 export async function saveRoleMenuPermissions(formData: FormData) {
   await requireAdmin();
   const permissionsValue = formData.get("permissions") as string;
+  const scope = await resolvePermissionScope(formData);
   const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
-
-  let requestedKeys: unknown;
-  try {
-    requestedKeys = JSON.parse(permissionsValue || "[]");
-  } catch {
-    throw new Error("权限数据格式错误");
-  }
-
-  if (!Array.isArray(requestedKeys) || requestedKeys.some((key) => typeof key !== "string")) {
-    throw new Error("权限数据格式错误");
-  }
 
   const menus = await prisma.menuPermission.findMany({
     where: { isEnabled: true },
     select: { id: true, path: true },
   });
   const menuIdSet = new Set(menus.map((menu) => menu.id));
-  const nextKeys = new Set<string>();
-
-  for (const key of requestedKeys) {
-    const [roleType, menuPermissionId, extra] = key.split(":");
-    if (extra || !validRoles.includes(roleType as RoleType) || !menuIdSet.has(menuPermissionId)) {
-      throw new Error("权限数据包含无效项");
-    }
-    nextKeys.add(`${roleType}:${menuPermissionId}`);
-  }
+  const requestedCells = parsePermissionCells(permissionsValue, menuIdSet);
+  const nextCells = new Map(requestedCells.map((cell) => [`${cell.roleType}:${cell.permissionId}`, cell]));
 
   for (const menu of menus) {
     if (["/organization", "/dashboard"].includes(menu.path)) {
-      nextKeys.add(`ADMIN:${menu.id}`);
+      nextCells.set(`ADMIN:${menu.id}`, {
+        roleType: "ADMIN",
+        permissionId: menu.id,
+        allowed: true,
+        explicit: true,
+      });
     }
   }
 
   await prisma.$transaction(async (tx) => {
+    const permissionIds = menus.map((menu) => menu.id);
+
+    if (scope.scopeType === "SYSTEM") {
+      await tx.roleMenuPermission.deleteMany({
+        where: {
+          scopeType: scope.scopeType,
+          departmentOrgNodeId: scope.departmentOrgNodeId,
+          roleType: { in: validRoles },
+          menuPermissionId: { in: permissionIds },
+        },
+      });
+
+      if (nextCells.size > 0) {
+        await tx.roleMenuPermission.createMany({
+          data: [...nextCells.values()].map((cell) => ({
+            scopeType: scope.scopeType,
+            departmentOrgNodeId: scope.departmentOrgNodeId,
+            roleType: cell.roleType,
+            menuPermissionId: cell.permissionId,
+            allowed: cell.allowed,
+          })),
+        });
+      }
+
+      return;
+    }
+
     await tx.roleMenuPermission.deleteMany({
       where: {
+        scopeType: scope.scopeType,
+        departmentOrgNodeId: scope.departmentOrgNodeId,
         roleType: { in: validRoles },
-        menuPermissionId: { in: [...menuIdSet] },
+        menuPermissionId: { in: permissionIds },
       },
     });
 
-    if (nextKeys.size > 0) {
+    const scopedCells = [...nextCells.values()].filter((cell) => cell.explicit);
+    if (scopedCells.length > 0) {
       await tx.roleMenuPermission.createMany({
-        data: [...nextKeys].map((key) => {
-          const [roleType, menuPermissionId] = key.split(":");
-          return { roleType: roleType as RoleType, menuPermissionId };
-        }),
+        data: scopedCells.map((cell) => ({
+          scopeType: scope.scopeType,
+          departmentOrgNodeId: scope.departmentOrgNodeId,
+          roleType: cell.roleType,
+          menuPermissionId: cell.permissionId,
+          allowed: cell.allowed,
+        })),
       });
     }
   });
@@ -402,18 +483,8 @@ export async function saveRoleMenuPermissions(formData: FormData) {
 export async function saveAnnualGoalRolePermissions(formData: FormData) {
   await requireAdmin();
   const permissionsValue = formData.get("permissions") as string;
+  const scope = await resolvePermissionScope(formData);
   const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
-
-  let requestedKeys: unknown;
-  try {
-    requestedKeys = JSON.parse(permissionsValue || "[]");
-  } catch {
-    throw new Error("年度指标权限数据格式错误");
-  }
-
-  if (!Array.isArray(requestedKeys) || requestedKeys.some((key) => typeof key !== "string")) {
-    throw new Error("年度指标权限数据格式错误");
-  }
 
   await prisma.$transaction(async (tx) => {
     for (const definition of annualGoalPermissionDefinitions) {
@@ -433,29 +504,30 @@ export async function saveAnnualGoalRolePermissions(formData: FormData) {
       select: { id: true },
     });
     const permissionIdSet = new Set(permissionRows.map((row) => row.id));
-    const nextKeys = new Set<string>();
-
-    for (const key of requestedKeys) {
-      const [roleType, annualGoalPermissionId, extra] = key.split(":");
-      if (extra || !validRoles.includes(roleType as RoleType) || !permissionIdSet.has(annualGoalPermissionId)) {
-        throw new Error("年度指标权限数据包含无效项");
-      }
-      nextKeys.add(`${roleType}:${annualGoalPermissionId}`);
-    }
+    const requestedCells = parsePermissionCells(permissionsValue, permissionIdSet);
 
     await tx.roleAnnualGoalPermission.deleteMany({
       where: {
+        scopeType: scope.scopeType,
+        departmentOrgNodeId: scope.departmentOrgNodeId,
         roleType: { in: validRoles },
         annualGoalPermissionId: { in: permissionRows.map((row) => row.id) },
       },
     });
 
-    if (nextKeys.size > 0) {
+    const cellsToPersist = scope.scopeType === "SYSTEM"
+      ? requestedCells
+      : requestedCells.filter((cell) => cell.explicit);
+
+    if (cellsToPersist.length > 0) {
       await tx.roleAnnualGoalPermission.createMany({
-        data: [...nextKeys].map((key) => {
-          const [roleType, annualGoalPermissionId] = key.split(":");
-          return { roleType: roleType as RoleType, annualGoalPermissionId };
-        }),
+        data: cellsToPersist.map((cell) => ({
+          scopeType: scope.scopeType,
+          departmentOrgNodeId: scope.departmentOrgNodeId,
+          roleType: cell.roleType,
+          annualGoalPermissionId: cell.permissionId,
+          allowed: cell.allowed,
+        })),
       });
     }
   });

@@ -68,7 +68,23 @@
 3. platform
 4. db
 
-## 4. 菜单式 worktree / branch 命名
+## 4. 启动脚本与端口约定
+
+以后统一按以下启动配置来启动本地服务：
+
+- `dev:office` → `http://depot.rj-info.com:80`
+- `dev:home` → `3000`
+- `dev:quarterly` → `3001`
+- `dev:annual` → `3002`
+- `dev:platform` → `3003`
+
+约定说明：
+
+- `platform` 终端默认启动 `dev:platform`
+- 如当前 worktree 为 `../depot-coordination/depot-platform`，默认按 `3003` 端口启动
+- 菜单终端按各自对应脚本启动，避免多终端本地端口冲突
+
+## 5. 菜单式 worktree / branch 命名
 
 建议直接按菜单命名。
 

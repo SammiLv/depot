@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getAnnualGoalCapabilities, getAnnualGoalPermissionMap, getAnnualGoalPlanPermissions, buildOrgScopeContext } from "@/server/organization/annual-goal-permissions";
+import { getAnnualGoalCapabilities, getAnnualGoalPermissionMapForUser, getAnnualGoalPlanPermissions, buildOrgScopeContext } from "@/server/organization/annual-goal-permissions";
 import {
   findNearestDepartmentOrgNodeId,
   getDescendantOrgNodeIds,
@@ -37,7 +37,7 @@ function revalidateAnnualGoals() {
 
 async function getAnnualGoalActionContext() {
   const user = await requireCurrentUser();
-  const permissionMap = await getAnnualGoalPermissionMap();
+  const permissionMap = await getAnnualGoalPermissionMapForUser(user);
   const capabilities = getAnnualGoalCapabilities(user.roleType, permissionMap);
   const orgScopeContext = await buildOrgScopeContext(user, capabilities);
 

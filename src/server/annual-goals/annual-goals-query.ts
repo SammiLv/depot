@@ -3,7 +3,7 @@ import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilities,
-  getAnnualGoalPermissionMap,
+  getAnnualGoalPermissionMapForUser,
   getAnnualGoalPlanPermissions,
   getAnnualGoalPlanWhere,
   type OrgScopeContext,
@@ -385,7 +385,7 @@ function getPlanPermissions(
 }
 
 export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<AnnualGoalsResult> {
-  const annualGoalPermissionMap = await getAnnualGoalPermissionMap();
+  const annualGoalPermissionMap = await getAnnualGoalPermissionMapForUser(currentUser);
   const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
   const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
   const activeWhere = await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities);
