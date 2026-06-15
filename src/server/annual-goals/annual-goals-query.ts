@@ -109,7 +109,6 @@ type PlanData = {
   isActive: boolean;
   approvalStatus: ApprovalStatus;
   revisionReason: string | null;
-  deletedAt: Date | null;
   weightedProgress: number;
   metrics: MetricData[];
   totalWeight: number;

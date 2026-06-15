@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
-import { Plus, Users, X, Check, RefreshCw } from "lucide-react";
-import { createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
+import { Plus, Users, X, Check, RefreshCw, Wand2 } from "lucide-react";
+import { applyAnnualGoalPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -67,6 +67,15 @@ type PermissionScopeOption = {
   label: string;
 };
 
+type ApplyAllDialogData = {
+  kind: "menu" | "annual-goal";
+  permissionId: string;
+  permissionName: string;
+  roleType: RoleType;
+  roleLabel: string;
+  allowed: boolean;
+};
+
 type Props = {
   currentUser: { id: string; roleType: RoleType };
   users: OrgUser[];
@@ -125,15 +134,54 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
 }
 
 // ── User form ──
-function UserForm({ user, teams, departmentOrgNodeId, roleOptionsForForm, onClose }: { user?: OrgUser; teams: OrgTeam[]; departmentOrgNodeId: string; roleOptionsForForm: RoleType[]; onClose: () => void }) {
+function UserForm({
+  user,
+  teams,
+  departments,
+  departmentOrgNodeId,
+  roleOptionsForForm,
+  canSelectDepartment,
+  onClose,
+}: {
+  user?: OrgUser;
+  teams: OrgTeam[];
+  departments: OrgDepartment[];
+  departmentOrgNodeId: string;
+  roleOptionsForForm: RoleType[];
+  canSelectDepartment: boolean;
+  onClose: () => void;
+}) {
   const isEdit = !!user;
   const action = isEdit ? updateUser : createUser;
+  const initialDepartmentOrgNodeId = user?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "";
+  const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(initialDepartmentOrgNodeId);
+  const availableTeams = teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+
+  useEffect(() => {
+    setSelectedDepartmentOrgNodeId(user?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "");
+  }, [user?.departmentOrgNodeId, departmentOrgNodeId, departments]);
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }}>
       {isEdit && <input type="hidden" name="id" value={user.id} />}
-      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
+      <input type="hidden" name="departmentOrgNodeId" value={selectedDepartmentOrgNodeId} />
       <div className="space-y-4">
+        {canSelectDepartment && (
+          <div>
+            <label className="block text-sm font-medium mb-1">所属部门 *</label>
+            <select
+              value={selectedDepartmentOrgNodeId}
+              onChange={(event) => setSelectedDepartmentOrgNodeId(event.target.value)}
+              required
+              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring"
+            >
+              <option value="">请选择部门</option>
+              {departments.map((department) => (
+                <option key={department.orgNodeId} value={department.orgNodeId}>{department.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium mb-1">姓名 *</label>
           <input name="name" defaultValue={user?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
@@ -159,7 +207,7 @@ function UserForm({ user, teams, departmentOrgNodeId, roleOptionsForForm, onClos
             <label className="block text-sm font-medium mb-1">小组</label>
             <select name="teamOrgNodeId" defaultValue={user?.teamOrgNodeId ?? ""} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
               <option value="">不分配</option>
-              {teams.map((t) => <option key={t.orgNodeId} value={t.orgNodeId}>{t.name}</option>)}
+              {availableTeams.map((t) => <option key={t.orgNodeId} value={t.orgNodeId}>{t.name}</option>)}
             </select>
           </div>
         </div>
@@ -177,15 +225,52 @@ function UserForm({ user, teams, departmentOrgNodeId, roleOptionsForForm, onClos
 }
 
 // ── Team form ──
-function TeamForm({ team, users, departmentOrgNodeId, onClose }: { team?: OrgTeam; users: OrgUser[]; departmentOrgNodeId: string; onClose: () => void }) {
+function TeamForm({
+  team,
+  users,
+  departments,
+  departmentOrgNodeId,
+  canSelectDepartment,
+  onClose,
+}: {
+  team?: OrgTeam;
+  users: OrgUser[];
+  departments: OrgDepartment[];
+  departmentOrgNodeId: string;
+  canSelectDepartment: boolean;
+  onClose: () => void;
+}) {
   const isEdit = !!team;
   const action = isEdit ? updateTeam : createTeam;
+  const initialDepartmentOrgNodeId = team?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "";
+  const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(initialDepartmentOrgNodeId);
+  const availableUsers = users.filter((user) => user.isActive && user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+
+  useEffect(() => {
+    setSelectedDepartmentOrgNodeId(team?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "");
+  }, [team?.departmentOrgNodeId, departmentOrgNodeId, departments]);
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }}>
       {isEdit && <input type="hidden" name="id" value={team.orgNodeId} />}
-      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
+      <input type="hidden" name="departmentOrgNodeId" value={selectedDepartmentOrgNodeId} />
       <div className="space-y-4">
+        {canSelectDepartment && (
+          <div>
+            <label className="block text-sm font-medium mb-1">所属部门 *</label>
+            <select
+              value={selectedDepartmentOrgNodeId}
+              onChange={(event) => setSelectedDepartmentOrgNodeId(event.target.value)}
+              required
+              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring"
+            >
+              <option value="">请选择部门</option>
+              {departments.map((department) => (
+                <option key={department.orgNodeId} value={department.orgNodeId}>{department.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium mb-1">小组名称 *</label>
           <input name="name" defaultValue={team?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
@@ -194,7 +279,7 @@ function TeamForm({ team, users, departmentOrgNodeId, onClose }: { team?: OrgTea
           <label className="block text-sm font-medium mb-1">组长</label>
           <select name="leaderId" defaultValue={team?.leaderId ?? ""} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
             <option value="">不指定</option>
-            {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {availableUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
         <div>
@@ -220,6 +305,27 @@ function DeleteConfirm({ message, action, onClose }: { message: string; action: 
         <Button variant="primary" onClick={async () => { await action(); onClose(); }} className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
       </div>
     </div>
+  );
+}
+
+function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogData; onClose: () => void }) {
+  const action = data.kind === "menu" ? applyRoleMenuPermissionToAllDepartments : applyAnnualGoalPermissionToAllDepartments;
+
+  return (
+    <form action={async (fd) => { await action(fd); onClose(); }} className="space-y-4">
+      <input type="hidden" name="permissionId" value={data.permissionId} />
+      <input type="hidden" name="roleType" value={data.roleType} />
+      <input type="hidden" name="allowed" value={String(data.allowed)} />
+      <p className="text-sm text-muted-foreground">
+        将“{data.permissionName}”中“{data.roleLabel}”的当前系统权限
+        <span className="mx-1 font-medium text-foreground">{data.allowed ? "开启" : "关闭"}</span>
+        覆盖应用到全部部门。此操作会替换各部门当前该权限的显式配置。
+      </p>
+      <div className="flex justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="submit">确认应用</Button>
+      </div>
+    </form>
   );
 }
 
@@ -249,10 +355,18 @@ export function OrgContent({
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
   const selectedScope = initialScope;
-  const selectedDepartmentOrgNodeId = initialScope.departmentOrgNodeId || (departments[0]?.orgNodeId ?? department?.orgNodeId ?? "");
-  const visibleTeams = teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
-  const visibleUsers = users.filter((user) => user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
-  const selectedDepartment = departments.find((item) => item.orgNodeId === selectedDepartmentOrgNodeId) ?? department;
+  const selectedDepartmentOrgNodeId = selectedScope.scopeType === "SYSTEM"
+    ? ""
+    : initialScope.departmentOrgNodeId || (departments[0]?.orgNodeId ?? department?.orgNodeId ?? "");
+  const visibleTeams = selectedScope.scopeType === "SYSTEM"
+    ? []
+    : teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+  const visibleUsers = selectedScope.scopeType === "SYSTEM"
+    ? users.filter((user) => user.roleType === "ADMIN")
+    : users.filter((user) => user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+  const permissionRoleOptions = selectedScope.scopeType === "SYSTEM"
+    ? roleOptions
+    : roleOptions.filter((role) => role.value !== "ADMIN");
   const initialRoleMenuCells = Object.fromEntries(menus.flatMap((menu) => roleOptions.map((role) => [
     `${role.value}:${menu.id}`,
     { ...menu.cells[role.value] },
@@ -347,7 +461,10 @@ export function OrgContent({
   }
 
   // Dialog states
-  const [dialog, setDialog] = useState<{ type: "user" | "team" | "deleteUser" | "deleteTeam"; data?: OrgUser | OrgTeam } | null>(null);
+  const [dialog, setDialog] = useState<{
+    type: "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments";
+    data?: OrgUser | OrgTeam | ApplyAllDialogData;
+  } | null>(null);
 
   return (
     <>
@@ -355,7 +472,7 @@ export function OrgContent({
         title="组织与权限"
         description="部门、小组、成员、角色与页面权限管理"
         action={
-          canManageUsers && tab === "organization" && (
+          (canManageUsers || canManageTeams || isAdmin) && tab === "organization" && (
             <div className="flex gap-2">
               {isAdmin && (
                 <Button variant="outline" onClick={handleDingTalkSync} className="text-primary border-primary/40" disabled={syncing}>
@@ -363,8 +480,8 @@ export function OrgContent({
                   {syncing ? "更新中" : "从钉钉更新"}
                 </Button>
               )}
-              <Button onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>
-              <Button onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>
+              {canManageTeams && <Button onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
+              {canManageUsers && <Button onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
             </div>
           )
         }
@@ -416,6 +533,9 @@ export function OrgContent({
                 onClick={() => {
                   const nextParams = new URLSearchParams(searchParams.toString());
                   nextParams.set("tab", item.key);
+                  if (selectedScope.scopeType === "SYSTEM") {
+                    nextParams.delete("department");
+                  }
                   router.push(`/organization?${nextParams.toString()}`);
                 }}
                 className={`px-4 py-1.5 rounded-md text-sm transition ${
@@ -486,12 +606,12 @@ export function OrgContent({
                 <table className="w-full min-w-[960px] table-fixed text-xs">
                   <colgroup>
                     <col className="w-[220px]" />
-                    {roleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
                   </colgroup>
                   <thead>
                     <tr className="text-left text-muted-foreground">
                       <th className="py-2 font-medium">菜单</th>
-                      {roleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
+                      {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -503,20 +623,40 @@ export function OrgContent({
                             <div className="text-[10px] text-muted-foreground break-all">{menu.path}</div>
                           </div>
                         </td>
-                        {roleOptions.map((role) => {
+                        {permissionRoleOptions.map((role) => {
                           const cell = draftRoleMenuCells[`${role.value}:${menu.id}`];
                           const enabled = cell?.allowed ?? false;
                           const locked = role.value === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path);
                           const inherited = cell?.inherited;
                           return (
                             <td key={role.value} className="py-0 text-center align-middle">
-                              <div className="min-h-[72px] flex items-center justify-center">
+                              <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
                                 {canManageRolePermissions ? (
                                   <button type="button" disabled={locked} onClick={() => toggleDraftPermission(role.value, menu)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} ${locked ? "opacity-60 cursor-not-allowed" : "hover:ring-1 hover:ring-ring"}`} title={locked ? "核心入口不可移除" : inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
                                     {enabled && <Check className="w-3.5 h-3.5" />}
                                   </button>
                                 ) : (
                                   <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
+                                )}
+                                {isAdmin && selectedScope.scopeType === "SYSTEM" && !locked && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDialog({
+                                      type: "applyAllDepartments",
+                                      data: {
+                                        kind: "menu",
+                                        permissionId: menu.id,
+                                        permissionName: menu.name,
+                                        roleType: role.value,
+                                        roleLabel: role.label,
+                                        allowed: enabled,
+                                      },
+                                    })}
+                                    className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                    title="按当前系统值覆盖到全部部门"
+                                  >
+                                    <Wand2 className="w-3 h-3" />
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -549,12 +689,12 @@ export function OrgContent({
                 <table className="w-full min-w-[960px] table-fixed text-xs">
                   <colgroup>
                     <col className="w-[220px]" />
-                    {roleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
                   </colgroup>
                   <thead>
                     <tr className="text-left text-muted-foreground">
                       <th className="py-2 font-medium">能力项</th>
-                      {roleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
+                      {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -566,19 +706,39 @@ export function OrgContent({
                             <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
                           </div>
                         </td>
-                        {roleOptions.map((role) => {
+                        {permissionRoleOptions.map((role) => {
                           const cell = draftAnnualGoalCells[`${role.value}:${permission.id}`];
                           const enabled = cell?.allowed ?? false;
                           const inherited = cell?.inherited;
                           return (
                             <td key={role.value} className="py-0 text-center align-middle">
-                              <div className="min-h-[72px] flex items-center justify-center">
+                              <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
                                 {canManageRolePermissions ? (
                                   <button type="button" onClick={() => toggleDraftAnnualGoalPermission(role.value, permission)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
                                     {enabled && <Check className="w-3.5 h-3.5" />}
                                   </button>
                                 ) : (
                                   <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
+                                )}
+                                {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDialog({
+                                      type: "applyAllDepartments",
+                                      data: {
+                                        kind: "annual-goal",
+                                        permissionId: permission.id,
+                                        permissionName: permission.name,
+                                        roleType: role.value,
+                                        roleLabel: role.label,
+                                        allowed: enabled,
+                                      },
+                                    })}
+                                    className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                    title="按当前系统值覆盖到全部部门"
+                                  >
+                                    <Wand2 className="w-3 h-3" />
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -591,11 +751,45 @@ export function OrgContent({
               </div>
             </div>
           </>
-        ) : (
-        selectedScope.scopeType === "SYSTEM" ? (
-          <div className="p-5">
-            <div className="text-sm text-muted-foreground">系统作用域下不展示部门组织结构，请切换到具体部门查看组织信息。</div>
-          </div>
+        ) : selectedScope.scopeType === "SYSTEM" ? (
+          <>
+            <div className="border-b border-border px-5 py-3 flex items-center justify-between">
+              <h3 className="font-semibold flex items-center gap-2"><Users className="w-4 h-4" />成员列表</h3>
+              <span className="text-xs text-muted-foreground">共 {visibleUsers.length} 人</span>
+            </div>
+            <table className="w-full">
+              <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-5 py-3 font-medium">姓名</th>
+                  <th className="px-5 py-3 font-medium">职务</th>
+                  <th className="px-5 py-3 font-medium">角色</th>
+                  <th className="px-5 py-3 font-medium text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleUsers.map((u) => (
+                  <tr key={u.id} className="border-t border-border hover:bg-muted/30 transition">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full text-white text-xs flex items-center justify-center ${avatarColor(u.name)}`}>{u.name.charAt(0)}</div>
+                        <span className="text-sm font-medium">{u.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-sm text-muted-foreground">{u.title ?? "—"}</td>
+                    <td className="px-5 py-3"><Badge tone={roleBadgeTone(u.roleType)}>{getRoleLabel(u.roleType)}</Badge></td>
+                    <td className="px-5 py-3 text-right text-xs">
+                      {canManageUsers && (
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => setDialog({ type: "user", data: u })} className="text-primary hover:underline">编辑</button>
+                          <button onClick={() => setDialog({ type: "deleteUser", data: u })} className="text-destructive hover:underline">删除</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         ) : (
           <>
             <div className="border-b border-border px-5 py-3 flex items-center justify-between">
@@ -661,7 +855,7 @@ export function OrgContent({
                       <td className="px-5 py-3 text-sm text-muted-foreground">{u.title ?? "—"}</td>
                       <td className="px-5 py-3"><Badge tone={roleBadgeTone(u.roleType)}>{getRoleLabel(u.roleType)}</Badge></td>
                       <td className="px-5 py-3 text-right text-xs">
-                        {canManageUsers && !(currentUser.roleType === "DEPARTMENT_MANAGER" && !["TEAM_LEADER", "MEMBER"].includes(u.roleType)) && (
+                        {canManageUsers && u.roleType !== "ADMIN" && !(currentUser.roleType === "DEPARTMENT_MANAGER" && !["TEAM_LEADER", "MEMBER"].includes(u.roleType)) && (
                           <div className="flex justify-end gap-2">
                             <button onClick={() => setDialog({ type: "user", data: u })} className="text-primary hover:underline">编辑</button>
                             <button onClick={() => setDialog({ type: "deleteUser", data: u })} className="text-destructive hover:underline">删除</button>
@@ -674,15 +868,33 @@ export function OrgContent({
               </tbody>
             </table>
           </>
-
         )}
       </Card>
       <Dialog open={dialog?.type === "user"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑成员" : "新增成员"}>
-        <UserForm user={dialog?.data as OrgUser | undefined} teams={visibleTeams} departmentOrgNodeId={selectedDepartmentOrgNodeId} roleOptionsForForm={manageableRoleOptions} onClose={() => setDialog(null)} />
+        <UserForm
+          user={dialog?.data as OrgUser | undefined}
+          teams={teams}
+          departments={departments}
+          departmentOrgNodeId={selectedDepartmentOrgNodeId}
+          roleOptionsForForm={manageableRoleOptions}
+          canSelectDepartment={isAdmin}
+          onClose={() => setDialog(null)}
+        />
       </Dialog>
 
       <Dialog open={dialog?.type === "team"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑小组" : "新增小组"}>
-        <TeamForm team={dialog?.data as OrgTeam | undefined} users={visibleUsers} departmentOrgNodeId={selectedDepartmentOrgNodeId} onClose={() => setDialog(null)} />
+        <TeamForm
+          team={dialog?.data as OrgTeam | undefined}
+          users={users}
+          departments={departments}
+          departmentOrgNodeId={selectedDepartmentOrgNodeId}
+          canSelectDepartment={isAdmin}
+          onClose={() => setDialog(null)}
+        />
+      </Dialog>
+
+      <Dialog open={dialog?.type === "applyAllDepartments"} onClose={() => setDialog(null)} title="应用到全部部门">
+        <ApplyAllDepartmentsConfirm data={dialog?.data as ApplyAllDialogData} onClose={() => setDialog(null)} />
       </Dialog>
 
       <Dialog open={dialog?.type === "deleteUser"} onClose={() => setDialog(null)} title="删除成员">

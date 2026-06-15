@@ -20,8 +20,29 @@ async function requireOrgManager() {
 }
 
 async function requireAdmin() {
+  return requirePermissionEditor({ scopeType: "SYSTEM" });
+}
+
+async function requirePermissionEditor(scope: PermissionScopeInput) {
   const user = await requireCurrentUser();
-  if (user.roleType !== "ADMIN") throw new Error("仅管理员可执行此操作");
+  if (scope.scopeType === "SYSTEM") {
+    if (user.roleType !== "ADMIN") {
+      throw new Error("仅管理员可执行此操作");
+    }
+    return user;
+  }
+
+  if (user.roleType !== "ADMIN" && user.roleType !== "DEPARTMENT_MANAGER") {
+    throw new Error("仅管理员或部门主管可执行此操作");
+  }
+
+  if (user.roleType === "DEPARTMENT_MANAGER") {
+    const currentDepartmentOrgNodeId = await findDepartmentOrgNodeId(user.orgNodeId);
+    if (!currentDepartmentOrgNodeId || currentDepartmentOrgNodeId !== scope.departmentOrgNodeId) {
+      throw new Error("无权管理该部门权限");
+    }
+  }
+
   return user;
 }
 
@@ -402,9 +423,9 @@ export async function setDepartmentManager(formData: FormData) {
 }
 
 export async function saveRoleMenuPermissions(formData: FormData) {
-  const currentUser = await requireAdmin();
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
+  const currentUser = await requirePermissionEditor(scope);
   const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
   console.log("[saveRoleMenuPermissions] start", {
     userId: currentUser.id,
@@ -415,7 +436,7 @@ export async function saveRoleMenuPermissions(formData: FormData) {
 
   const menus = await prisma.menuPermission.findMany({
     where: { isEnabled: true },
-    select: { id: true, path: true },
+    select: { id: true, path: true, code: true },
   });
   const menuIdSet = new Set(menus.map((menu) => menu.id));
   const requestedCells = parsePermissionCells(permissionsValue, menuIdSet);
@@ -496,9 +517,9 @@ export async function saveRoleMenuPermissions(formData: FormData) {
 }
 
 export async function saveAnnualGoalRolePermissions(formData: FormData) {
-  await requireAdmin();
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
+  await requirePermissionEditor(scope);
   const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
 
   await prisma.$transaction(async (tx) => {
@@ -542,6 +563,147 @@ export async function saveAnnualGoalRolePermissions(formData: FormData) {
           roleType: cell.roleType,
           annualGoalPermissionId: cell.permissionId,
           allowed: cell.allowed,
+        })),
+      });
+    }
+  });
+
+  revalidateOrganization();
+}
+
+export async function applyRoleMenuPermissionToAllDepartments(formData: FormData) {
+  await requireAdmin();
+  const permissionId = formData.get("permissionId") as string;
+  const roleType = formData.get("roleType") as RoleType;
+  const allowed = formData.get("allowed") === "true";
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  if (!permissionId || !validRoles.includes(roleType)) {
+    throw new Error("缺少必要参数");
+  }
+
+  const menu = await prisma.menuPermission.findUnique({
+    where: { id: permissionId },
+    select: { id: true, path: true },
+  });
+  if (!menu) {
+    throw new Error("菜单权限不存在");
+  }
+  if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) {
+    throw new Error("核心入口不可批量覆盖");
+  }
+
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.roleMenuPermission.deleteMany({
+      where: {
+        scopeType: "SYSTEM",
+        departmentOrgNodeId: "",
+        roleType,
+        menuPermissionId: permissionId,
+      },
+    });
+
+    await tx.roleMenuPermission.create({
+      data: {
+        scopeType: "SYSTEM",
+        departmentOrgNodeId: "",
+        roleType,
+        menuPermissionId: permissionId,
+        allowed,
+      },
+    });
+
+    await tx.roleMenuPermission.deleteMany({
+      where: {
+        scopeType: "DEPARTMENT",
+        departmentOrgNodeId: { in: departments.map((department) => department.id) },
+        roleType,
+        menuPermissionId: permissionId,
+      },
+    });
+
+    if (departments.length > 0) {
+      await tx.roleMenuPermission.createMany({
+        data: departments.map((department) => ({
+          scopeType: "DEPARTMENT" as const,
+          departmentOrgNodeId: department.id,
+          roleType,
+          menuPermissionId: permissionId,
+          allowed,
+        })),
+      });
+    }
+  });
+
+  revalidateOrganization();
+}
+
+export async function applyAnnualGoalPermissionToAllDepartments(formData: FormData) {
+  await requireAdmin();
+  const permissionId = formData.get("permissionId") as string;
+  const roleType = formData.get("roleType") as RoleType;
+  const allowed = formData.get("allowed") === "true";
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  if (!permissionId || !validRoles.includes(roleType)) {
+    throw new Error("缺少必要参数");
+  }
+
+  const permission = await prisma.annualGoalPermission.findUnique({
+    where: { id: permissionId },
+    select: { id: true },
+  });
+  if (!permission) {
+    throw new Error("年度指标权限不存在");
+  }
+
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.roleAnnualGoalPermission.deleteMany({
+      where: {
+        scopeType: "SYSTEM",
+        departmentOrgNodeId: "",
+        roleType,
+        annualGoalPermissionId: permissionId,
+      },
+    });
+
+    await tx.roleAnnualGoalPermission.create({
+      data: {
+        scopeType: "SYSTEM",
+        departmentOrgNodeId: "",
+        roleType,
+        annualGoalPermissionId: permissionId,
+        allowed,
+      },
+    });
+
+    await tx.roleAnnualGoalPermission.deleteMany({
+      where: {
+        scopeType: "DEPARTMENT",
+        departmentOrgNodeId: { in: departments.map((department) => department.id) },
+        roleType,
+        annualGoalPermissionId: permissionId,
+      },
+    });
+
+    if (departments.length > 0) {
+      await tx.roleAnnualGoalPermission.createMany({
+        data: departments.map((department) => ({
+          scopeType: "DEPARTMENT" as const,
+          departmentOrgNodeId: department.id,
+          roleType,
+          annualGoalPermissionId: permissionId,
+          allowed,
         })),
       });
     }

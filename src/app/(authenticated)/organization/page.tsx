@@ -215,7 +215,7 @@ export default async function OrgPage({
       department={selectedDepartment}
       scopeOptions={scopeOptions}
       initialScope={initialScope}
-      initialTab={requestedTab === "permissions" ? "permissions" : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
+      initialTab={requestedTab === "organization" || requestedTab === "permissions" ? requestedTab : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
       menus={roleMenuMatrix}
       annualGoalPermissions={annualGoalMatrix}
       canManageUsers={canManageUsers}
