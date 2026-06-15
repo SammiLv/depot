@@ -415,7 +415,6 @@ model QuarterlyWork {
 
   project Project @relation(fields: [projectId], references: [id])
 
-  @@unique([projectId, year, quarter])
   @@index([projectId])
   @@index([year, quarter])
   @@index([ownerId])

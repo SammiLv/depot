@@ -19,6 +19,7 @@ type DepartmentTab = Props["data"]["departments"][number]["id"];
 type CreateDialogState = {
   status: ColumnStatus;
   title: string;
+  projectId?: string;
 } | null;
 
 type EditDialogState = {
@@ -57,7 +58,7 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-xl rounded-2xl border border-border bg-card p-6 shadow-xl">
+      <div className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted">
@@ -70,11 +71,21 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
   );
 }
 
+function FormRow({ label, children, align = "start" }: { label: string; children: React.ReactNode; align?: "start" | "center" }) {
+  return (
+    <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4">
+      <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{label}</label>
+      <div>{children}</div>
+    </div>
+  );
+}
+
 function QuarterlyWorkForm({
   data,
   mode,
   status,
   item,
+  defaultProjectId,
   onClose,
   onSuccess,
 }: {
@@ -82,6 +93,7 @@ function QuarterlyWorkForm({
   mode: "create" | "edit";
   status: ColumnStatus;
   item?: BoardItem;
+  defaultProjectId?: string;
   onClose: () => void;
   onSuccess: FormSuccessHandler;
 }) {
@@ -93,13 +105,26 @@ function QuarterlyWorkForm({
     [data.memberOptions]
   );
   const statusOptions = useMemo(() => editableStatuses, []);
+  const projectOptionById = useMemo(
+    () => new Map(data.projectOptions.map((project) => [project.id, project])),
+    [data.projectOptions]
+  );
+  const selectedProjectId = item?.projectId ?? defaultProjectId ?? "";
+  const selectedProject = selectedProjectId ? projectOptionById.get(selectedProjectId) ?? null : null;
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
     [data.memberOptions]
   );
 
   const submitAction = async (fd: FormData) => {
-    const nextOwnerId = String(fd.get("ownerId") ?? item?.ownerId ?? memberOptions[0]?.id ?? "");
+    const nextOwnerId = String(
+      fd.get("ownerId")
+        ?? item?.ownerId
+        ?? selectedProject?.ownerId
+        ?? data.currentUserId
+        ?? memberOptions[0]?.id
+        ?? ""
+    );
     if (mode === "edit") {
       await updateQuarterlyWork(fd);
     } else {
@@ -113,11 +138,10 @@ function QuarterlyWorkForm({
     <form action={submitAction}>
       {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
       <div className="space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium">所属项目</label>
+        <FormRow label="所属项目" align="center">
           <select
             name="projectId"
-            defaultValue={item?.projectId ?? ""}
+            defaultValue={selectedProjectId}
             disabled={mode === "edit"}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
           >
@@ -126,9 +150,8 @@ function QuarterlyWorkForm({
               <option key={project.id} value={project.id}>{project.title}</option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">季度工作名称 *</label>
+        </FormRow>
+        <FormRow label="季度工作名称 *" align="center">
           <input
             name="title"
             required
@@ -136,22 +159,20 @@ function QuarterlyWorkForm({
             placeholder="请输入季度工作名称"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">负责人 *</label>
+        </FormRow>
+        <FormRow label="负责人 *" align="center">
           <select
             name="ownerId"
             required
-            defaultValue={item?.ownerId ?? memberOptions[0]?.id ?? ""}
+            defaultValue={item?.ownerId ?? selectedProject?.ownerId ?? data.currentUserId ?? memberOptions[0]?.id ?? ""}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {memberOptions.map((member) => (
               <option key={member.id} value={member.id}>{member.label}</option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">本季度工作目标 *</label>
+        </FormRow>
+        <FormRow label="本季度工作目标 *">
           <textarea
             name="description"
             required
@@ -160,20 +181,19 @@ function QuarterlyWorkForm({
             placeholder="请输入本季度工作目标"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目预期收益 *</label>
+        </FormRow>
+        <FormRow label="项目预期收益 *">
           <textarea
             name="expectedOutcome"
             required
-            defaultValue={item?.expectedOutcome ?? ""}
+            defaultValue={item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? ""}
             rows={3}
             placeholder="请输入项目预期收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            readOnly={mode === "create" && Boolean(selectedProject)}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none read-only:cursor-not-allowed read-only:bg-muted"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">季度工作状态</label>
+        </FormRow>
+        <FormRow label="季度工作状态" align="center">
           <select
             name="status"
             defaultValue={item?.status ?? status}
@@ -183,7 +203,7 @@ function QuarterlyWorkForm({
               <option key={option} value={option}>{columnTitleByStatus[option]}</option>
             ))}
           </select>
-        </div>
+        </FormRow>
       </div>
       <div className="mt-6 flex justify-end gap-3">
         <Button type="button" variant="outline" onClick={onClose}>取消</Button>
@@ -225,17 +245,15 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
     }}>
       <input type="hidden" name="projectId" value={item.id} />
       <div className="space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目名称 *</label>
+        <FormRow label="项目名称 *" align="center">
           <input
             name="title"
             required
             defaultValue={item.title}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">负责人 *</label>
+        </FormRow>
+        <FormRow label="负责人 *" align="center">
           <select
             name="ownerId"
             required
@@ -246,9 +264,8 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
               <option key={member.id} value={member.id}>{member.label}</option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">规划周期</label>
+        </FormRow>
+        <FormRow label="规划周期" align="center">
           <div className="flex items-center gap-2">
             <select
               name="startQuarter"
@@ -272,9 +289,8 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
               ))}
             </select>
           </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目描述</label>
+        </FormRow>
+        <FormRow label="项目描述">
           <textarea
             name="description"
             rows={3}
@@ -282,9 +298,8 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
             placeholder="请输入项目描述"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">预期收益</label>
+        </FormRow>
+        <FormRow label="预期收益">
           <textarea
             name="expectedOutcome"
             rows={3}
@@ -292,9 +307,8 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
             placeholder="请输入项目预期收益"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目状态 *</label>
+        </FormRow>
+        <FormRow label="项目状态" align="center">
           <select
             name="status"
             required
@@ -305,7 +319,7 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
               <option key={option} value={option}>{projectTitleByStatus[option]}</option>
             ))}
           </select>
-        </div>
+        </FormRow>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
           项目变更为已完成或关闭时，将同步更新其下所有季度工作状态。
         </div>
@@ -343,36 +357,47 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
     return quarters;
   }, []);
 
+  const validateQuarterRange = (formData: FormData) => {
+    const startQuarter = String(formData.get("startQuarter") ?? "").trim();
+    const endQuarter = String(formData.get("endQuarter") ?? "").trim();
+    if (!startQuarter || !endQuarter) return;
+    const [startYear, startQ] = startQuarter.split("-Q");
+    const [endYear, endQ] = endQuarter.split("-Q");
+    const startValue = Number(startYear) * 10 + Number(startQ);
+    const endValue = Number(endYear) * 10 + Number(endQ);
+    if (startValue > endValue) {
+      throw new Error("起始季度不能晚于结束季度");
+    }
+  };
+
   return (
     <form action={async (fd: FormData) => {
+      validateQuarterRange(fd);
       await createProject(fd);
       onClose();
     }}>
       <div className="space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目名称 *</label>
+        <FormRow label="项目名称 *" align="center">
           <input
             name="title"
             required
             placeholder="请输入项目名称"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">负责人 *</label>
+        </FormRow>
+        <FormRow label="负责人 *" align="center">
           <select
             name="ownerId"
             required
-            defaultValue={memberOptions[0]?.id ?? ""}
+            defaultValue={data.currentUserId ?? memberOptions[0]?.id ?? ""}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {memberOptions.map((member) => (
               <option key={member.id} value={member.id}>{member.label}</option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">规划周期</label>
+        </FormRow>
+        <FormRow label="规划周期 *" align="center">
           <div className="flex items-center gap-2">
             <select
               name="startQuarter"
@@ -396,27 +421,26 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
               ))}
             </select>
           </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目描述</label>
+        </FormRow>
+        <FormRow label="项目描述 *">
           <textarea
             name="description"
+            required
             rows={3}
             placeholder="请输入项目描述"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">预期收益</label>
+        </FormRow>
+        <FormRow label="预期收益 *">
           <textarea
             name="expectedOutcome"
+            required
             rows={3}
             placeholder="请输入项目预期收益"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">项目状态</label>
+        </FormRow>
+        <FormRow label="项目状态" align="center">
           <select
             name="status"
             defaultValue={defaultStatus ?? "NOT_STARTED"}
@@ -426,7 +450,7 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
               <option key={option} value={option}>{projectTitleByStatus[option]}</option>
             ))}
           </select>
-        </div>
+        </FormRow>
       </div>
       <div className="mt-6 flex justify-end gap-3">
         <Button type="button" variant="outline" onClick={onClose}>取消</Button>
@@ -515,26 +539,28 @@ export function QuarterlyWorkContent({ data }: Props) {
         }
       />
 
-      <div className="mb-4 rounded-xl bg-card p-0 shadow-sm overflow-hidden">
-        <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
-          {data.departments.map((department) => (
-            <button
-              key={department.id}
-              type="button"
-              onClick={() => {
-                setDepartmentTab(department.id);
-                setTeamTab("all");
-              }}
-              className={`pb-3 border-b-2 transition ${
-                departmentTab === department.id
-                  ? "border-primary text-primary font-medium"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {department.name}
-            </button>
-          ))}
-        </div>
+      <Card className="mb-4 p-0 overflow-hidden">
+        {data.isSystemAdmin ? (
+          <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
+            {data.departments.map((department) => (
+              <button
+                key={department.id}
+                type="button"
+                onClick={() => {
+                  setDepartmentTab(department.id);
+                  setTeamTab("all");
+                }}
+                className={`pb-3 border-b-2 transition ${
+                  departmentTab === department.id
+                    ? "border-primary text-primary font-medium"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {department.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="px-5 py-4 flex flex-wrap items-center gap-2">
           {teamTabs.map((team) => (
@@ -572,162 +598,176 @@ export function QuarterlyWorkContent({ data }: Props) {
             {tab === "value" ? "需求价值跟踪视图" : tab === "project" ? `当前项目：${data.projectTotalCount} 个` : `当前看板：${data.year} Q${data.quarter}`}
           </div>
         </div>
-      </div>
 
-      {tab === "project" ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {visibleProjectColumns.map((column) => (
-            <div key={column.key} className="min-h-[320px] rounded-xl border border-border p-3 shadow-sm" style={{ background: "var(--card)" }}>
-              <div className="mb-3 flex items-center justify-between px-1">
-                <div className="flex items-center gap-2">
-                  <Badge tone={column.tone}>{column.title}</Badge>
-                  <span className="text-xs text-muted-foreground">{column.items.length}</span>
-                </div>
-                {data.canCreate && (
-                  <button
-                    type="button"
-                    onClick={() => setCreateProjectDialog(column.status)}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    + 添加
-                  </button>
-                )}
-              </div>
-              <div className="space-y-2">
-                {column.items.length ? (
-                  column.items.map((item) => (
-                    <div key={item.id} className="rounded-lg border border-border bg-muted/50 p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium leading-snug">{item.title}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{item.owner}{item.teamName ? ` · ${item.teamName}` : ""}</div>
-                          {item.startQuarter && item.endQuarter && (
-                            <div className="mt-1 text-xs text-muted-foreground">规划周期：{item.startQuarter} ~ {item.endQuarter}</div>
-                          )}
-                          {item.startQuarter && !item.endQuarter && (
-                            <div className="mt-1 text-xs text-muted-foreground">规划周期：{item.startQuarter} 起</div>
-                          )}
+        <div className="px-5 pb-5 pt-4">
+          {tab === "project" ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {visibleProjectColumns.map((column) => (
+                <div key={column.key} className="min-h-[320px] rounded-xl border border-border bg-background p-3 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between px-1">
+                    <div className="flex items-center gap-2">
+                      <Badge tone={column.tone}>{column.title}</Badge>
+                      <span className="text-xs text-muted-foreground">{column.items.length}</span>
+                    </div>
+                    {data.canCreate && (
+                      <button
+                        type="button"
+                        onClick={() => setCreateProjectDialog(column.status)}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        + 添加
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {column.items.length ? (
+                      column.items.map((item) => (
+                        <div key={item.id} className="rounded-lg border border-border bg-muted/50 p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium leading-snug">{item.title}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {item.owner}{item.teamName ? ` · ${item.teamName}` : ""}
+                                {item.startQuarter && item.endQuarter ? ` · ${item.startQuarter} ~ ${item.endQuarter}` : ""}
+                                {item.startQuarter && !item.endQuarter ? ` · ${item.startQuarter} 起` : ""}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}
+                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                aria-label={`为${item.title}新增季度工作`}
+                              >
+                                <Plus className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setProjectDialog({ item, title: column.title })}
+                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                aria-label={`编辑${item.title}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                            <div className="rounded-md bg-background px-2 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px]">季度工作数</span>
+                                <span className="font-medium text-foreground">{item.workCount}</span>
+                              </div>
+                            </div>
+                            <div className="rounded-md bg-background px-2 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px]">未完结季度</span>
+                                <span className="font-medium text-foreground">{item.activeQuarterCount}</span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : tab === "board" ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {visibleColumns.map((c) => (
+                  <div key={c.key} className="min-h-[400px] rounded-xl border border-border bg-background p-3 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between px-1">
+                      <div className="flex items-center gap-2">
+                        <Badge tone={c.tone}>{c.title}</Badge>
+                        <span className="text-xs text-muted-foreground">{c.items.length}</span>
+                      </div>
+                      {data.canCreate && (
                         <button
                           type="button"
-                          onClick={() => setProjectDialog({ item, title: column.title })}
-                          className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                          aria-label={`编辑${item.title}`}
+                          onClick={() => setCreateDialog({ status: c.status, title: c.title })}
+                          className="text-xs text-muted-foreground hover:text-foreground"
                         >
-                          <Pencil className="h-4 w-4" />
+                          + 添加
                         </button>
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                        <div className="rounded-md bg-background px-2 py-2">
-                          <div className="text-[11px]">季度工作数</div>
-                          <div className="mt-1 font-medium text-foreground">{item.workCount}</div>
-                        </div>
-                        <div className="rounded-md bg-background px-2 py-2">
-                          <div className="text-[11px]">未完结季度</div>
-                          <div className="mt-1 font-medium text-foreground">{item.activeQuarterCount}</div>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  ))
-                ) : (
-                  <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : tab === "board" ? (
-        <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {visibleColumns.map((c) => (
-              <div key={c.key} className="min-h-[400px] rounded-xl border border-border p-3 shadow-sm" style={{ background: "var(--card)" }}>
-                <div className="mb-3 flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
-                    <Badge tone={c.tone}>{c.title}</Badge>
-                    <span className="text-xs text-muted-foreground">{c.items.length}</span>
-                  </div>
-                  {data.canCreate && (
-                    <button
-                      type="button"
-                      onClick={() => setCreateDialog({ status: c.status, title: c.title })}
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      + 添加
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  {c.items.length ? (
-                    c.items.map((it) => (
-                      <div key={it.id} className="rounded-lg border border-border bg-muted/50 p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-medium leading-snug">{it.title}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
+                    <div className="space-y-2">
+                      {c.items.length ? (
+                        c.items.map((it) => (
+                          <div key={it.id} className="rounded-lg border border-border bg-muted/50 p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium leading-snug">{it.title}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setEditDialog({ item: it, title: c.title })}
+                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                aria-label={`编辑${it.title}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                              <span>{it.owner}</span>
+                              <span>{it.weeks} 周</span>
+                            </div>
+                            {it.progress !== undefined && (
+                              <div className="mt-2">
+                                <Progress value={it.progress} tone={c.key === "delayed" ? "warning" : "primary"} />
+                              </div>
+                            )}
+                            {it.delay && (
+                              <div className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
+                                <AlertTriangle className="h-3 w-3" />延期 {it.delay} 周
+                              </div>
+                            )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setEditDialog({ item: it, title: c.title })}
-                            className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                            aria-label={`编辑${it.title}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{it.owner}</span>
-                          <span>{it.weeks} 周</span>
-                        </div>
-                        {it.progress !== undefined && (
-                          <div className="mt-2">
-                            <Progress value={it.progress} tone={c.key === "delayed" ? "warning" : "primary"} />
-                          </div>
-                        )}
-                        {it.delay && (
-                          <div className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
-                            <AlertTriangle className="h-3 w-3" />延期 {it.delay} 周
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {visibleReminders.length > 0 && (
-            <Card className="mt-6">
-              <h3 className="mb-3 font-semibold">本周更新提醒</h3>
-              <div className="space-y-2">
-                {visibleReminders.map((r, i) => (
-                  <div key={i} className="flex items-center justify-between border-b border-border py-2 last:border-0">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">{r.who[0]}</div>
-                      <div>
-                        <div className="text-sm font-medium">{r.task}</div>
-                        <div className="text-xs text-muted-foreground">{r.who}</div>
-                      </div>
+                        ))
+                      ) : (
+                        <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
+                      )}
                     </div>
-                    <Badge tone={r.tone}>{r.status}</Badge>
                   </div>
                 ))}
               </div>
-            </Card>
+
+              {visibleReminders.length > 0 && (
+                <Card className="mt-6">
+                  <h3 className="mb-3 font-semibold">本周更新提醒</h3>
+                  <div className="space-y-2">
+                    {visibleReminders.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between border-b border-border py-2 last:border-0">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">{r.who[0]}</div>
+                          <div>
+                            <div className="text-sm font-medium">{r.task}</div>
+                            <div className="text-xs text-muted-foreground">{r.who}</div>
+                          </div>
+                        </div>
+                        <Badge tone={r.tone}>{r.status}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              对季度工作中已上线需求的<span className="font-medium text-foreground"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
+              <div className="mt-4">
+                <Link href="/value-tracking" className="font-medium text-primary hover:underline">
+                  前往需求价值跟踪页面 →
+                </Link>
+              </div>
+            </div>
           )}
-        </>
-      ) : (
-        <div className="text-sm text-muted-foreground">
-          对季度工作中已上线需求的<span className="font-medium text-foreground"> 预期收益 vs 实际收益 </span>进行对比与 ROI 跟踪。
-          <div className="mt-4">
-            <Link href="/value-tracking" className="font-medium text-primary hover:underline">
-              前往需求价值跟踪页面 →
-            </Link>
-          </div>
         </div>
-      )}
+      </Card>
 
       <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增季度工作">
         {createDialog && (
@@ -735,6 +775,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             data={data}
             mode="create"
             status={createDialog.status}
+            defaultProjectId={createDialog.projectId}
             onClose={() => setCreateDialog(null)}
             onSuccess={handleFormSuccess}
           />
