@@ -9,7 +9,7 @@ export async function setUserSession(userId: string) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: false,
   });
 }
 
