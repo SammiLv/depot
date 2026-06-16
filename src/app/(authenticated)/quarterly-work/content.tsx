@@ -524,22 +524,12 @@ export function QuarterlyWorkContent({ data }: Props) {
 
   return (
     <>
-      <PageHeader
-        title={`${data.year} Q${data.quarter} 季度工作`}
-        description="按小组规划季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值"
-        action={
-          data.canCreate
-            ? (
-              <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="w-4 h-4" />新增项目</Button>
-                <Button onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="w-4 h-4" />新增季度工作</Button>
-              </div>
-            )
-            : undefined
-        }
-      />
-
       <Card className="mb-4 p-0 overflow-hidden">
+        <div className="px-5 pt-5">
+          <h1 className="text-3xl font-semibold tracking-tight">{data.year} Q{data.quarter} 季度工作</h1>
+          <p className="mt-2 text-sm text-muted-foreground">按小组规划季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
+        </div>
+
         {data.isSystemAdmin ? (
           <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
             {data.departments.map((department) => (
@@ -576,22 +566,31 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
 
         <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-4">
-          <div className="inline-flex rounded-lg bg-muted p-1">
-            {[
-              { k: "project" as const, label: "项目看板" },
-              { k: "board" as const, label: "工作看板" },
-              { k: "value" as const, label: "需求价值跟踪" },
-            ].map((t) => (
-              <button
-                key={t.k}
-                onClick={() => setTab(t.k)}
-                className={`rounded-md px-4 py-1.5 text-sm transition ${
-                  tab === t.k ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="inline-flex rounded-lg bg-muted p-1">
+              {[
+                { k: "project" as const, label: "项目看板" },
+                { k: "board" as const, label: "工作看板" },
+                { k: "value" as const, label: "需求价值跟踪" },
+              ].map((t) => (
+                <button
+                  key={t.k}
+                  onClick={() => setTab(t.k)}
+                  className={`rounded-md px-4 py-1.5 text-sm transition ${
+                    tab === t.k ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {data.canCreate && (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="w-4 h-4" />新增项目</Button>
+                <Button onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="w-4 h-4" />新增季度工作</Button>
+              </div>
+            )}
           </div>
 
           <div className="text-xs text-muted-foreground">

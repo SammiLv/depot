@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
+import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { createAnnualGoalMetric, createAnnualGoalMetricSource, createAnnualGoalPlan, deleteAnnualGoalMetric, deleteAnnualGoalMetricSource, deleteAnnualGoalPlan, deleteAnnualGoalQuarterTargets, saveAnnualGoalQuarterTargets, updateAnnualGoalMetric, updateAnnualGoalMetricSource, updateAnnualGoalPlan, updateAnnualGoalQuarterProgress, updateAnnualGoalWeeklyProgress } from "@/server/annual-goals/actions";
 import type { getAnnualGoalsData } from "@/server/annual-goals/annual-goals-query";
 import { Edit, GitBranch, History, Plus, Target, Trash2, TrendingUp, X } from "lucide-react";
@@ -777,8 +777,7 @@ function DeletePlanConfirm({ plan, onClose }: { plan: Plan; onClose: () => void 
   );
 }
 
-function PlanDetailTabs({ plan, onCreateMetric, onEditMetric, onSourceMetric, onCreateSourceMetric, onDeleteMetric, onDeleteSourceMetric, onQuarterTarget, onDeleteQuarterTargets, onQuarterProgress, onWeeklyProgress, onChooseQuarterTarget }: { plan: PlanDetailView; onCreateMetric: () => void; onEditMetric: (metric: Metric) => void; onSourceMetric: (parentMetric: Metric, sourceMetric?: SourceMetric) => void; onCreateSourceMetric: () => void; onDeleteMetric: (metric: Metric) => void; onDeleteSourceMetric: (parentMetric: Metric, sourceMetric: SourceMetric) => void; onQuarterTarget: (metric: Metric, sourceMetric?: SourceMetric) => void; onDeleteQuarterTargets: (metric: Metric, sourceMetric?: SourceMetric) => void; onQuarterProgress: (metric: Metric, sourceMetric?: SourceMetric) => void; onWeeklyProgress: () => void; onChooseQuarterTarget: () => void }) {
-  const [tab, setTab] = useState<PlanTab>("metrics");
+function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSourceMetric, onCreateSourceMetric, onDeleteMetric, onDeleteSourceMetric, onQuarterTarget, onDeleteQuarterTargets, onQuarterProgress, onWeeklyProgress, onChooseQuarterTarget }: { plan: PlanDetailView; tab: PlanTab; setTab: (tab: PlanTab) => void; onCreateMetric: () => void; onEditMetric: (metric: Metric) => void; onSourceMetric: (parentMetric: Metric, sourceMetric?: SourceMetric) => void; onCreateSourceMetric: () => void; onDeleteMetric: (metric: Metric) => void; onDeleteSourceMetric: (parentMetric: Metric, sourceMetric: SourceMetric) => void; onQuarterTarget: (metric: Metric, sourceMetric?: SourceMetric) => void; onDeleteQuarterTargets: (metric: Metric, sourceMetric?: SourceMetric) => void; onQuarterProgress: (metric: Metric, sourceMetric?: SourceMetric) => void; onWeeklyProgress: () => void; onChooseQuarterTarget: () => void }) {
   const tabs: { key: PlanTab; label: string }[] = plan.ownerType === "DEPARTMENT"
     ? [
         { key: "metrics", label: "年度指标" },
@@ -811,22 +810,6 @@ function PlanDetailTabs({ plan, onCreateMetric, onEditMetric, onSourceMetric, on
 
   return (
     <>
-      <div className="px-5 py-4 border-b border-border">
-        <div className="inline-flex rounded-lg bg-muted p-1">
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setTab(item.key)}
-              className={`rounded-md px-4 py-1.5 text-sm transition ${
-                tab === item.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
       <div className="overflow-x-auto">
         {tab === "metrics" && (
           <>
@@ -1018,27 +1001,6 @@ function PlanDetailTabs({ plan, onCreateMetric, onEditMetric, onSourceMetric, on
         ) : (
           <span className="text-muted-foreground">共 {quarterRows.length} 项</span>
         )}
-        <div className="ml-auto flex items-center justify-end gap-2">
-          {tab === "metrics" && plan.permissions.canEditMetrics && (
-            <button onClick={onCreateMetric} className={footerPrimaryButtonClass}>{plan.ownerType === "TEAM" ? "选择指标" : "新增年度指标"}</button>
-          )}
-          {tab === "sources" && plan.ownerType === "DEPARTMENT" && plan.permissions.canManageSources && (
-            <button onClick={onCreateSourceMetric} className={footerPrimaryButtonClass}>拆解元指标</button>
-          )}
-          {tab === "quarters" && (plan.ownerType === "DEPARTMENT" || plan.ownerType === "TEAM") && (
-            <>
-              {quarterFooterActions.map((action) => (
-                <button
-                  key={action.key}
-                  onClick={action.onClick}
-                  className={action.primary ? footerPrimaryButtonClass : footerSecondaryButtonClass}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </>
-          )}
-        </div>
       </div>
     </>
   );
@@ -1075,6 +1037,35 @@ export function AnnualGoalsContent({ data }: Props) {
     ?? null;
   const activePlan = activeItem?.plan ?? null;
   const activePlanDetailView = activePlan ?? (activeItem ? buildEmptyPlanDetailView(activeItem) : null);
+  const activePlanTabs: { key: PlanTab; label: string }[] = activePlanDetailView?.ownerType === "DEPARTMENT"
+    ? [
+        { key: "metrics", label: "年度指标" },
+        { key: "sources", label: "元指标" },
+        { key: "quarters", label: "季度指标" },
+      ]
+    : [
+        { key: "metrics", label: "年度指标" },
+        { key: "quarters", label: "季度指标" },
+      ];
+  const [tab, setTab] = useState<PlanTab>("metrics");
+  const topTabActions = activePlan
+    ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {tab === "metrics" && activePlan.permissions.canEditMetrics && (
+            <Button onClick={() => setMetricDialog({ plan: activePlan })}>{activePlan.ownerType === "TEAM" ? "选择指标" : "新增年度指标"}</Button>
+          )}
+          {tab === "sources" && activePlan.ownerType === "DEPARTMENT" && activePlan.permissions.canManageSources && (
+            <Button onClick={() => setSourceMetricDialog({ plan: activePlan })}>拆解元指标</Button>
+          )}
+          {tab === "quarters" && (activePlan.ownerType === "DEPARTMENT" || activePlan.ownerType === "TEAM") && activePlan.permissions.canUpdateWeeklyProgress && (
+            <Button variant="outline" onClick={() => setWeeklyProgressPlan(activePlan)}>周更新</Button>
+          )}
+          {tab === "quarters" && (activePlan.ownerType === "DEPARTMENT" || activePlan.ownerType === "TEAM") && activePlan.permissions.canManageQuarterTargets && (
+            <Button onClick={() => setQuarterChooserPlan(activePlan)}>拆解季度指标</Button>
+          )}
+        </div>
+      )
+    : null;
 
   function handleSelectedYearChange(year: number) {
     router.push(`/annual-goals?year=${year}`);
@@ -1082,30 +1073,31 @@ export function AnnualGoalsContent({ data }: Props) {
 
   return (
     <>
-      <PageHeader
-        title="年度指标方案"
-        description={`${getYearLabel(data.selectedYear)}视角下查看部门指标承接、拆解与执行进展`}
-        action={
-          <div className="flex gap-2">
-            <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
-              <History className="w-4 h-4 text-muted-foreground" />
-              <select
-                value={String(data.selectedYear)}
-                onChange={(event) => handleSelectedYearChange(Number.parseInt(event.target.value, 10))}
-                className="h-10 bg-transparent outline-none"
-              >
-                {data.availableYears.map((year) => (
-                  <option key={year} value={year}>{getYearLabel(year)}</option>
-                ))}
-              </select>
-            </label>
-            {data.permissions.canCreatePlan && <Button onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建年度方案</Button>}
-          </div>
-        }
-      />
-
       {(data.scopeDepartments.length > 0 || activeItem) ? (
         <Card className="mb-6 !p-0 overflow-hidden">
+          <div className="px-5 pt-5 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight">年度指标方案</h1>
+              <p className="mt-2 text-sm text-muted-foreground">{getYearLabel(data.selectedYear)}视角下查看部门指标承接、拆解与执行进展</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                <History className="w-4 h-4 text-muted-foreground" />
+                <select
+                  value={String(data.selectedYear)}
+                  onChange={(event) => handleSelectedYearChange(Number.parseInt(event.target.value, 10))}
+                  className="h-10 bg-transparent outline-none"
+                >
+                  {data.availableYears.map((year) => (
+                    <option key={year} value={year}>{getYearLabel(year)}</option>
+                  ))}
+                </select>
+              </label>
+              {data.permissions.canCreatePlan && <Button onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建年度方案</Button>}
+            </div>
+          </div>
+
           {data.scopeDepartments.length > 0 && (
             <>
               {data.showDepartmentNavigation && data.scopeDepartments.length > 0 && (
@@ -1203,8 +1195,28 @@ export function AnnualGoalsContent({ data }: Props) {
                 </div>
               )}
 
+              <div className="px-5 pb-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex rounded-lg bg-muted p-1">
+                    {activePlanTabs.map((currentTab) => (
+                      <button
+                        key={currentTab.key}
+                        type="button"
+                        onClick={() => setTab(currentTab.key)}
+                        className={`rounded-md px-4 py-2 text-sm transition ${tab === currentTab.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {currentTab.label}
+                      </button>
+                    ))}
+                  </div>
+                  {topTabActions}
+                </div>
+              </div>
+
               <PlanDetailTabs
                 plan={activePlanDetailView}
+                tab={tab}
+                setTab={setTab}
                 onCreateMetric={() => activePlan && setMetricDialog({ plan: activePlan })}
                 onEditMetric={(metric) => activePlan && setMetricDialog({ plan: activePlan, metric })}
                 onSourceMetric={(parentMetric, sourceMetric) => activePlan && setSourceMetricDialog({ plan: activePlan, parentMetric, sourceMetric })}
