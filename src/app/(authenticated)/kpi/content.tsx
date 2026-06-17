@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Progress, avatarColor } from "@/components/ui-kit";
-import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis } from "@/server/kpi/actions";
-import { Search, Upload, X } from "lucide-react";
+import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate } from "@/server/kpi/actions";
+import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
 
 
@@ -15,6 +15,8 @@ type TemplateRow = Props["data"]["templateRows"][number];
 
 type InitializationResult = Awaited<ReturnType<typeof initializeQuarterlyKpis>>;
 type TemplateImportResult = Awaited<ReturnType<typeof importKpiTemplates>>;
+type TemplateUpdateResult = Awaited<ReturnType<typeof updateKpiTemplate>>;
+type TemplateCreateResult = Awaited<ReturnType<typeof createKpiTemplate>>;
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -27,19 +29,34 @@ function formatDateTime(value: string) {
   }).format(new Date(value));
 }
 
-function TemplateList({ rows }: { rows: TemplateRow[] }) {
+function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
+  const nextItems = [...items];
+  const [movedItem] = nextItems.splice(fromIndex, 1);
+  nextItems.splice(toIndex, 0, movedItem);
+  return nextItems;
+}
+
+function TemplateList({
+  rows,
+  onView,
+  onEdit,
+}: {
+  rows: TemplateRow[];
+  onView: (row: TemplateRow) => void;
+  onEdit: (row: TemplateRow) => void;
+}) {
   return (
     <Card className="!p-0 overflow-hidden">
       <table className="w-full">
         <thead className="bg-muted/40">
-          <tr className="text-left text-xs text-muted-foreground">
+          <tr className="text-left text-sm text-muted-foreground">
             <th className="px-5 py-3 font-medium">模板名称</th>
             <th className="px-5 py-3 font-medium">创建人</th>
             <th className="px-5 py-3 font-medium">适用范围</th>
-            <th className="px-5 py-3 font-medium">创建时间</th>
-            <th className="px-5 py-3 font-medium">最后更新</th>
-            <th className="px-5 py-3 font-medium">最后更新时间</th>
-            <th className="px-5 py-3 font-medium">操作</th>
+            <th className="px-4 py-3 font-medium">创建时间</th>
+            <th className="px-4 py-3 font-medium">最后更新</th>
+            <th className="px-4 py-3 font-medium whitespace-nowrap">最后更新时间</th>
+            <th className="w-[180px] px-5 py-3 text-right font-medium">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -49,14 +66,14 @@ function TemplateList({ rows }: { rows: TemplateRow[] }) {
                 <td className="px-5 py-3 text-sm font-medium">{row.name}</td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">{row.createdByName}</td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">{row.scopeName}</td>
-                <td className="px-5 py-3 text-sm text-muted-foreground tabular-nums">{formatDateTime(row.createdAt)}</td>
-                <td className="px-5 py-3 text-sm text-muted-foreground">{row.updatedByName}</td>
-                <td className="px-5 py-3 text-sm text-muted-foreground tabular-nums">{formatDateTime(row.updatedAt)}</td>
-                <td className="px-5 py-3">
-                  <div className="flex items-center gap-2">
-                    <Button type="button" variant="ghost" size="sm" disabled>查看</Button>
-                    <Button type="button" variant="ghost" size="sm" disabled>编辑</Button>
-                    <Button type="button" variant="ghost" size="sm" disabled>删除</Button>
+                <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
+                <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.updatedByName}</td>
+                <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.updatedAt)}</td>
+                <td className="w-[180px] px-5 py-3 text-right">
+                  <div className="inline-flex items-center justify-end gap-2 text-sm whitespace-nowrap">
+                    <button type="button" className="text-primary hover:underline" onClick={() => onView(row)}>查看</button>
+                    <button type="button" className="text-primary hover:underline" onClick={() => onEdit(row)}>编辑</button>
+                    <button type="button" className="text-destructive hover:underline" disabled>删除</button>
                   </div>
                 </td>
               </tr>
@@ -91,7 +108,858 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
   );
 }
 
-function KpiInitializationForm({
+function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  return (
+    <div className={`fixed inset-0 z-50 transition ${open ? "pointer-events-auto" : "pointer-events-none"}`}>
+      <div
+        className={`absolute inset-0 bg-black/40 transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
+        onClick={onClose}
+      />
+      <div
+        className={`absolute right-0 top-0 h-full w-full max-w-4xl border-l border-border bg-card shadow-2xl transition-transform duration-200 ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-border px-6 py-4">
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-6">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplateDetailDrawer({ row }: { row: TemplateRow }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div>
+          <div className="text-xs text-muted-foreground">模板名称</div>
+          <div className="mt-1 text-sm font-medium">{row.name}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">适用范围</div>
+          <div className="mt-1 text-sm font-medium">{row.scopeName}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">创建人</div>
+          <div className="mt-1 text-sm font-medium">{row.createdByName}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">创建时间</div>
+          <div className="mt-1 text-sm font-medium">{formatDateTime(row.createdAt)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">最后更新</div>
+          <div className="mt-1 text-sm font-medium">{row.updatedByName}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">最后更新时间</div>
+          <div className="mt-1 text-sm font-medium">{formatDateTime(row.updatedAt)}</div>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-medium">模板说明</div>
+        <div className="rounded-xl border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+          {row.description || "暂无模板说明"}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-3 text-sm font-medium">模板项</div>
+        <div className="overflow-hidden rounded-xl border border-border">
+          <table className="w-full">
+            <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">指标项</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                <th className="px-4 py-3 font-medium">评分标准</th>
+              </tr>
+            </thead>
+            <tbody>
+              {row.items.map((item: TemplateRow["items"][number]) => (
+                <tr key={item.id} className="border-t border-border align-top">
+                  <td className="px-4 py-3 text-sm font-medium">{item.name}</td>
+                  <td className="px-4 py-3 text-sm tabular-nums text-muted-foreground">{item.score}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground whitespace-pre-wrap">{item.scoringStandard || item.description || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildTemplateScopeOptions(data: Props["data"], departmentOrgNodeId: string) {
+  const teamOptions = data.teamOptions
+    .filter((team) => team.departmentOrgNodeId === departmentOrgNodeId)
+    .map((team) => ({ id: team.id, name: team.name }));
+  const memberOptions = data.memberOptions
+    .filter((member) => member.orgNodeId && teamOptions.some((team) => team.id === member.orgNodeId))
+    .map((member) => ({ id: member.id, name: member.name, orgNodeId: member.orgNodeId ?? null }));
+
+  return { teamOptions, memberOptions };
+}
+
+function CreateTemplateDrawer({
+  data,
+  departmentOrgNodeId,
+  onClose,
+  onComplete,
+}: {
+  data: Props["data"];
+  departmentOrgNodeId: string;
+  onClose: () => void;
+  onComplete: (result: TemplateCreateResult) => void;
+}) {
+  const [draftItems, setDraftItems] = useState([
+    { id: `new-${Date.now()}-0`, name: "", score: "0", description: "", scoringStandard: "" },
+  ]);
+  const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+  const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
+  const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const scopeOptions = useMemo(
+    () => buildTemplateScopeOptions(data, departmentOrgNodeId),
+    [data, departmentOrgNodeId]
+  );
+  const availableTeamOptions = scopeOptions.teamOptions.filter((team) => !selectedTeamIds.includes(team.id));
+  const availableMemberOptions = scopeOptions.memberOptions.filter((member) => {
+    if (selectedMemberIds.includes(member.id)) {
+      return false;
+    }
+    if (member.orgNodeId && selectedTeamIds.includes(member.orgNodeId)) {
+      return false;
+    }
+    return true;
+  });
+  const filteredTeamOptions = availableTeamOptions.filter((team) =>
+    team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
+  );
+  const filteredMemberOptions = availableMemberOptions.filter((member) =>
+    member.name.toLowerCase().includes(memberSearch.trim().toLowerCase())
+  );
+  const selectedScopes = [
+    ...selectedTeamIds.map((teamId) => ({
+      type: "team" as const,
+      id: teamId,
+      label: scopeOptions.teamOptions.find((team) => team.id === teamId)?.name ?? "",
+    })),
+    ...selectedMemberIds.map((memberId) => ({
+      type: "member" as const,
+      id: memberId,
+      label: scopeOptions.memberOptions.find((member) => member.id === memberId)?.name ?? "",
+    })),
+  ].filter((scope) => scope.label);
+  const totalScore = draftItems.reduce((sum, item) => {
+    const score = Number.parseFloat(String(item.score ?? ""));
+    return sum + (Number.isFinite(score) ? score : 0);
+  }, 0);
+  const isTotalScoreExceeded = totalScore > 110;
+
+  const moveDraftItem = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    setDraftItems((currentItems) => moveArrayItem(currentItems, fromIndex, toIndex));
+  };
+
+  return (
+    <>
+      {(showTeamDropdown || showMemberDropdown) ? (
+        <button
+          type="button"
+          aria-label="关闭适用范围下拉"
+          className="fixed inset-0 z-10 cursor-default"
+          onClick={() => {
+            setShowTeamDropdown(false);
+            setShowMemberDropdown(false);
+          }}
+        />
+      ) : null}
+      <form
+      action={async (formData) => {
+        try {
+          setErrorMessage(null);
+          const result = await createKpiTemplate(formData);
+          onComplete(result);
+          onClose();
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "模板创建失败，请稍后重试");
+        }
+      }}
+      className="space-y-6"
+    >
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
+      {selectedTeamIds.map((teamId) => <input key={teamId} type="hidden" name="scopeTeamOrgNodeId" value={teamId} />)}
+      {selectedMemberIds.map((memberId) => <input key={memberId} type="hidden" name="scopeUserId" value={memberId} />)}
+
+      {errorMessage ? (
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorMessage}</div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm font-medium">模板名称 *</label>
+          <input name="name" required className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">适用小组</label>
+          <div className="relative z-20">
+            <button
+              type="button"
+              onClick={() => {
+                setShowTeamDropdown((current) => !current);
+                setShowMemberDropdown(false);
+              }}
+              className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm"
+            >
+              <span className="truncate text-left">{selectedTeamIds.length ? `已选 ${selectedTeamIds.length} 个小组` : "请选择小组"}</span>
+              <span className="text-muted-foreground">▾</span>
+            </button>
+            {showTeamDropdown ? (
+              <div className="absolute z-20 mt-2 w-full rounded-xl border border-border bg-card p-2 shadow-lg">
+                <input
+                  value={teamSearch}
+                  onChange={(event) => setTeamSearch(event.target.value)}
+                  placeholder="搜索小组"
+                  className="mb-2 block h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                />
+                <div className="max-h-56 space-y-1 overflow-y-auto">
+                  {filteredTeamOptions.length ? filteredTeamOptions.map((team) => (
+                    <button
+                      key={team.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTeamIds((current) => current.includes(team.id) ? current : [...current, team.id]);
+                        setSelectedMemberIds((current) => current.filter((memberId) => {
+                          const member = scopeOptions.memberOptions.find((item) => item.id === memberId);
+                          return member?.orgNodeId !== team.id;
+                        }));
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted"
+                    >
+                      <span>{team.name}</span>
+                      <span className="text-primary">添加</span>
+                    </button>
+                  )) : <div className="px-3 py-2 text-sm text-muted-foreground">暂无可选小组</div>}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">适用成员</label>
+          <div className="relative z-20">
+            <button
+              type="button"
+              onClick={() => {
+                setShowMemberDropdown((current) => !current);
+                setShowTeamDropdown(false);
+              }}
+              className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm"
+            >
+              <span className="truncate text-left">{selectedMemberIds.length ? `已选 ${selectedMemberIds.length} 个成员` : "请选择成员"}</span>
+              <span className="text-muted-foreground">▾</span>
+            </button>
+            {showMemberDropdown ? (
+              <div className="absolute z-20 mt-2 w-full rounded-xl border border-border bg-card p-2 shadow-lg">
+                <input
+                  value={memberSearch}
+                  onChange={(event) => setMemberSearch(event.target.value)}
+                  placeholder="搜索成员"
+                  className="mb-2 block h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                />
+                <div className="max-h-56 space-y-1 overflow-y-auto">
+                  {filteredMemberOptions.length ? filteredMemberOptions.map((member) => (
+                    <button
+                      key={member.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedMemberIds((current) => current.includes(member.id) ? current : [...current, member.id]);
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted"
+                    >
+                      <span>{member.name}</span>
+                      <span className="text-primary">添加</span>
+                    </button>
+                  )) : <div className="px-3 py-2 text-sm text-muted-foreground">暂无可选成员</div>}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm font-medium">已选适用范围</label>
+          <div className="flex min-h-10 flex-wrap gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+            {selectedScopes.length ? selectedScopes.map((scope) => (
+              <button
+                key={`${scope.type}-${scope.id}`}
+                type="button"
+                onClick={() => {
+                  if (scope.type === "team") {
+                    setSelectedTeamIds((current) => current.filter((teamId) => teamId !== scope.id));
+                    return;
+                  }
+                  setSelectedMemberIds((current) => current.filter((memberId) => memberId !== scope.id));
+                }}
+                className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 hover:bg-muted/80"
+              >
+                <span>{scope.label}</span>
+                <span className="text-muted-foreground">×</span>
+              </button>
+            )) : <span className="text-muted-foreground">请先选择小组或成员</span>}
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm font-medium">模板说明</label>
+          <textarea name="description" rows={3} className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" />
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm font-medium">模板项</div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() =>
+              setDraftItems([
+                ...draftItems,
+                { id: `new-${Date.now()}-${draftItems.length}`, name: "", score: "0", description: "", scoringStandard: "" },
+              ])
+            }
+          >
+            添加指标项
+          </Button>
+        </div>
+        <div className="mb-2 text-xs text-muted-foreground">拖拽左侧拖动手柄可调整指标项顺序</div>
+        <div className="overflow-hidden rounded-xl border border-border">
+          <table className="w-full table-fixed">
+            <thead className="bg-muted/40 text-left text-sm text-muted-foreground">
+              <tr>
+                <th className="w-12 px-3 py-3 font-medium whitespace-nowrap"></th>
+                <th className="w-[22%] px-4 py-3 font-medium whitespace-nowrap">指标项</th>
+                <th className="w-[12%] px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">评分标准</th>
+                <th className="w-24 px-4 py-3 text-right font-medium whitespace-nowrap">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {draftItems.map((item, index) => (
+                <tr
+                  key={item.id}
+                  className={`border-t border-border align-top ${draggingItemId === item.id ? "bg-muted/50" : ""} ${dragOverItemId === item.id ? "border-t-primary" : ""}`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (draggingItemId && draggingItemId !== item.id) setDragOverItemId(item.id);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const fromIndex = draftItems.findIndex((draftItem) => draftItem.id === draggingItemId);
+                    moveDraftItem(fromIndex, index);
+                    setDraggingItemId(null);
+                    setDragOverItemId(null);
+                  }}
+                >
+                  <td className="px-3 py-3 align-middle">
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={() => {
+                        setDraggingItemId(item.id);
+                        setDragOverItemId(item.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingItemId(null);
+                        setDragOverItemId(null);
+                      }}
+                      className="flex h-10 w-8 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </button>
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      name="itemName"
+                      value={item.name ?? ""}
+                      onChange={(event) => {
+                        const nextItems = [...draftItems];
+                        nextItems[index] = { ...nextItems[index], name: event.target.value };
+                        setDraftItems(nextItems);
+                      }}
+                      required
+                      className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      name="itemScore"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.score ?? ""}
+                      onChange={(event) => {
+                        const nextItems = [...draftItems];
+                        nextItems[index] = { ...nextItems[index], score: event.target.value };
+                        setDraftItems(nextItems);
+                      }}
+                      required
+                      className="block h-10 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <textarea
+                      name="itemScoringStandard"
+                      value={item.scoringStandard ?? ""}
+                      onChange={(event) => {
+                        const nextItems = [...draftItems];
+                        nextItems[index] = { ...nextItems[index], scoringStandard: event.target.value };
+                        setDraftItems(nextItems);
+                      }}
+                      rows={3}
+                      required
+                      className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    />
+                    <input type="hidden" name="itemDescription" value={item.description} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setDraftItems(draftItems.filter((_, itemIndex) => itemIndex !== index))}
+                      className="text-sm font-medium text-destructive hover:text-destructive/80"
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border bg-muted/20">
+                <td className="px-3 py-3"></td>
+                <td className="px-4 py-3 text-sm font-medium text-muted-foreground">总分</td>
+                <td className={`px-4 py-3 text-sm font-semibold tabular-nums whitespace-nowrap ${isTotalScoreExceeded ? "text-destructive" : ""}`}>{totalScore}</td>
+                <td className="px-4 py-3 text-xs text-muted-foreground">上限 110 分</td>
+                <td className="px-4 py-3"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 border-t border-border pt-4">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="submit">创建模板</Button>
+      </div>
+    </form>
+    </>
+  );
+}
+
+function TemplateEditDrawer({
+  row,
+  data,
+  onClose,
+  onComplete,
+}: {
+  row: TemplateRow;
+  data: Props["data"];
+  onClose: () => void;
+  onComplete: (result: TemplateUpdateResult) => void;
+}) {
+  const [draftItems, setDraftItems] = useState(
+    row.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      score: item.score?.toString() ?? "0",
+      description: item.description ?? "",
+      scoringStandard: item.scoringStandard ?? "",
+    }))
+  );
+  const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>(row.scopeTeamIds ?? []);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>(row.scopeUserIds ?? []);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+  const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
+  const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const scopeOptions = useMemo(
+    () => buildTemplateScopeOptions(data, row.departmentOrgNodeId),
+    [data, row.departmentOrgNodeId]
+  );
+  const availableTeamOptions = scopeOptions.teamOptions.filter((team) => !selectedTeamIds.includes(team.id));
+  const availableMemberOptions = scopeOptions.memberOptions.filter((member) => {
+    if (selectedMemberIds.includes(member.id)) {
+      return false;
+    }
+    if (member.orgNodeId && selectedTeamIds.includes(member.orgNodeId)) {
+      return false;
+    }
+    return true;
+  });
+  const filteredTeamOptions = availableTeamOptions.filter((team) =>
+    team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
+  );
+  const filteredMemberOptions = availableMemberOptions.filter((member) =>
+    member.name.toLowerCase().includes(memberSearch.trim().toLowerCase())
+  );
+  const selectedScopes = [
+    ...selectedTeamIds.map((teamId) => ({
+      type: "team" as const,
+      id: teamId,
+      label: scopeOptions.teamOptions.find((team) => team.id === teamId)?.name ?? "",
+    })),
+    ...selectedMemberIds.map((memberId) => ({
+      type: "member" as const,
+      id: memberId,
+      label: scopeOptions.memberOptions.find((member) => member.id === memberId)?.name ?? "",
+    })),
+  ].filter((scope) => scope.label);
+
+  const totalScore = draftItems.reduce((sum, item) => {
+    const score = Number.parseFloat(String(item.score ?? ""));
+    return sum + (Number.isFinite(score) ? score : 0);
+  }, 0);
+  const isTotalScoreExceeded = totalScore > 110;
+
+  const moveDraftItem = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    setDraftItems((currentItems) => moveArrayItem(currentItems, fromIndex, toIndex));
+  };
+
+  return (
+    <>
+      {(showTeamDropdown || showMemberDropdown) ? (
+        <button
+          type="button"
+          aria-label="关闭适用范围下拉"
+          className="fixed inset-0 z-10 cursor-default"
+          onClick={() => {
+            setShowTeamDropdown(false);
+            setShowMemberDropdown(false);
+          }}
+        />
+      ) : null}
+      <form
+        action={async (formData) => {
+          try {
+            setErrorMessage(null);
+            const result = await updateKpiTemplate(formData);
+            onComplete(result);
+            onClose();
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "模板更新失败，请稍后重试");
+          }
+        }}
+        className="space-y-6"
+      >
+        <input type="hidden" name="templateId" value={row.id} />
+        {selectedTeamIds.map((teamId) => <input key={teamId} type="hidden" name="scopeTeamOrgNodeId" value={teamId} />)}
+        {selectedMemberIds.map((memberId) => <input key={memberId} type="hidden" name="scopeUserId" value={memberId} />)}
+
+        {errorMessage ? (
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">模板名称 *</label>
+            <input
+              name="name"
+              defaultValue={row.name}
+              required
+              className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">适用小组</label>
+            <div className="relative z-20">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTeamDropdown((current) => !current);
+                  setShowMemberDropdown(false);
+                }}
+                className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm"
+              >
+                <span className="truncate text-left">{selectedTeamIds.length ? `已选 ${selectedTeamIds.length} 个小组` : "请选择小组"}</span>
+                <span className="text-muted-foreground">▾</span>
+              </button>
+              {showTeamDropdown ? (
+                <div className="absolute z-20 mt-2 w-full rounded-xl border border-border bg-card p-2 shadow-lg">
+                  <input
+                    value={teamSearch}
+                    onChange={(event) => setTeamSearch(event.target.value)}
+                    placeholder="搜索小组"
+                    className="mb-2 block h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                  />
+                  <div className="max-h-56 space-y-1 overflow-y-auto">
+                    {filteredTeamOptions.length ? filteredTeamOptions.map((team) => (
+                      <button
+                        key={team.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTeamIds((current) => current.includes(team.id) ? current : [...current, team.id]);
+                          setSelectedMemberIds((current) => current.filter((memberId) => {
+                            const member = scopeOptions.memberOptions.find((item) => item.id === memberId);
+                            return member?.orgNodeId !== team.id;
+                          }));
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted"
+                      >
+                        <span>{team.name}</span>
+                        <span className="text-primary">添加</span>
+                      </button>
+                    )) : <div className="px-3 py-2 text-sm text-muted-foreground">暂无可选小组</div>}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">适用成员</label>
+            <div className="relative z-20">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMemberDropdown((current) => !current);
+                  setShowTeamDropdown(false);
+                }}
+                className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm"
+              >
+                <span className="truncate text-left">{selectedMemberIds.length ? `已选 ${selectedMemberIds.length} 个成员` : "请选择成员"}</span>
+                <span className="text-muted-foreground">▾</span>
+              </button>
+              {showMemberDropdown ? (
+                <div className="absolute z-20 mt-2 w-full rounded-xl border border-border bg-card p-2 shadow-lg">
+                  <input
+                    value={memberSearch}
+                    onChange={(event) => setMemberSearch(event.target.value)}
+                    placeholder="搜索成员"
+                    className="mb-2 block h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                  />
+                  <div className="max-h-56 space-y-1 overflow-y-auto">
+                    {filteredMemberOptions.length ? filteredMemberOptions.map((member) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMemberIds((current) => current.includes(member.id) ? current : [...current, member.id]);
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted"
+                      >
+                        <span>{member.name}</span>
+                        <span className="text-primary">添加</span>
+                      </button>
+                    )) : <div className="px-3 py-2 text-sm text-muted-foreground">暂无可选成员</div>}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">已选适用范围</label>
+            <div className="flex min-h-10 flex-wrap gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
+              {selectedScopes.length ? selectedScopes.map((scope) => (
+                <button
+                  key={`${scope.type}-${scope.id}`}
+                  type="button"
+                  onClick={() => {
+                    if (scope.type === "team") {
+                      setSelectedTeamIds((current) => current.filter((teamId) => teamId !== scope.id));
+                      return;
+                    }
+                    setSelectedMemberIds((current) => current.filter((memberId) => memberId !== scope.id));
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 hover:bg-muted/80"
+                >
+                  <span>{scope.label}</span>
+                  <span className="text-muted-foreground">×</span>
+                </button>
+              )) : <span className="text-muted-foreground">请先选择小组或成员</span>}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">模板说明</label>
+            <textarea
+              name="description"
+              defaultValue={row.description || ""}
+              rows={3}
+              className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-sm font-medium">模板项</div>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() =>
+                setDraftItems([
+                  ...draftItems,
+                  {
+                    id: `new-${Date.now()}-${draftItems.length}`,
+                    name: "",
+                    score: "0",
+                    description: "",
+                    scoringStandard: "",
+                  },
+                ])
+              }
+            >
+              添加指标项
+            </Button>
+          </div>
+          <div className="mb-2 text-xs text-muted-foreground">拖拽左侧拖动手柄可调整指标项顺序</div>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <table className="w-full table-fixed">
+              <thead className="bg-muted/40 text-left text-sm text-muted-foreground">
+                <tr>
+                  <th className="w-12 px-3 py-3 font-medium whitespace-nowrap"></th>
+                  <th className="w-[22%] px-4 py-3 font-medium whitespace-nowrap">指标项</th>
+                  <th className="w-[12%] px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                  <th className="px-4 py-3 font-medium whitespace-nowrap">评分标准</th>
+                  <th className="w-24 px-4 py-3 text-right font-medium whitespace-nowrap">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {draftItems.map((item, index) => (
+                  <tr
+                    key={item.id}
+                    className={`border-t border-border align-top ${draggingItemId === item.id ? "bg-muted/50" : ""} ${dragOverItemId === item.id ? "border-t-primary" : ""}`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (draggingItemId && draggingItemId !== item.id) {
+                        setDragOverItemId(item.id);
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const fromIndex = draftItems.findIndex((draftItem) => draftItem.id === draggingItemId);
+                      moveDraftItem(fromIndex, index);
+                      setDraggingItemId(null);
+                      setDragOverItemId(null);
+                    }}
+                  >
+                    <td className="px-3 py-3 align-middle">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={() => {
+                          setDraggingItemId(item.id);
+                          setDragOverItemId(item.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggingItemId(null);
+                          setDragOverItemId(null);
+                        }}
+                        className="flex h-10 w-8 cursor-grab items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                        aria-label={`拖拽调整${item.name || `第${index + 1}项`}顺序`}
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        name="itemName"
+                        value={item.name ?? ""}
+                        onChange={(event) => {
+                          const nextItems = [...draftItems];
+                          nextItems[index] = { ...nextItems[index], name: event.target.value };
+                          setDraftItems(nextItems);
+                        }}
+                        required
+                        className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        name="itemScore"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.score ?? ""}
+                        onChange={(event) => {
+                          const nextItems = [...draftItems];
+                          nextItems[index] = { ...nextItems[index], score: event.target.value };
+                          setDraftItems(nextItems);
+                        }}
+                        required
+                        className="block h-10 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <textarea
+                        name="itemScoringStandard"
+                        value={item.scoringStandard ?? ""}
+                        onChange={(event) => {
+                          const nextItems = [...draftItems];
+                          nextItems[index] = { ...nextItems[index], scoringStandard: event.target.value };
+                          setDraftItems(nextItems);
+                        }}
+                        rows={3}
+                        required
+                        className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      />
+                      <input type="hidden" name="itemDescription" value={item.description ?? ""} />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setDraftItems(draftItems.filter((_, itemIndex) => itemIndex !== index))}
+                        className="text-sm font-medium text-destructive hover:text-destructive/80"
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-border bg-muted/20">
+                  <td className="px-3 py-3"></td>
+                  <td className="px-4 py-3 text-sm font-medium text-muted-foreground">总分</td>
+                  <td className={`px-4 py-3 text-sm font-semibold tabular-nums whitespace-nowrap ${isTotalScoreExceeded ? "text-destructive" : ""}`}>
+                    {totalScore}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">上限 110 分</td>
+                  <td className="px-4 py-3"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="submit">保存修改</Button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function InitializeForm({
   year,
   quarter,
   onClose,
@@ -202,8 +1070,8 @@ function TemplateImportForm({
         />
       </div>
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit"><Upload className="h-4 w-4" />导入模板</Button>
+        <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="h-9 rounded-lg"><Upload className="h-4 w-4" />导入模板</Button>
       </div>
     </form>
   );
@@ -218,6 +1086,9 @@ export function KpiContent({ data }: Props) {
   const [departmentTab, setDepartmentTab] = useState(data.defaultDepartmentOrgNodeId);
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [sectionTab, setSectionTab] = useState<SectionTab>("quarterly-kpi");
+  const [showCreateDrawer, setShowCreateDrawer] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
+  const [templateDrawerMode, setTemplateDrawerMode] = useState<"view" | "edit" | null>(null);
   const filteredTeamOptions = useMemo(
     () => data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentTab),
     [data.teamOptions, departmentTab]
@@ -287,7 +1158,7 @@ export function KpiContent({ data }: Props) {
                 key={team.id}
                 type="button"
                 onClick={() => setTeamTab(team.id)}
-                className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+                className={`h-9 rounded-lg px-3 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
               >
                 {team.name}
               </button>
@@ -304,7 +1175,7 @@ export function KpiContent({ data }: Props) {
                   key={tab.key}
                   type="button"
                   onClick={() => setSectionTab(tab.key)}
-                  className={`rounded-md px-4 py-1.5 text-sm transition ${
+                  className={`h-9 rounded-lg px-4 text-sm transition ${
                     sectionTab === tab.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -315,11 +1186,12 @@ export function KpiContent({ data }: Props) {
 
             <div className="flex items-center gap-2">
               {sectionTab === "quarterly-kpi" ? (
-                <Button onClick={() => setShowInitDialog(true)}>初始化本季度 KPI</Button>
+                <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化本季度 KPI</Button>
               ) : (
                 <>
-                  <Button variant="outline" onClick={handleDownloadTemplate}>下载模板</Button>
-                  <Button onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
+                  <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
+                  <Button className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
+                  <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button>
                 </>
               )}
             </div>
@@ -405,7 +1277,7 @@ export function KpiContent({ data }: Props) {
               </div>
               <table className="w-full">
                 <thead className="bg-muted/40">
-                  <tr className="text-left text-xs text-muted-foreground">
+                  <tr className="text-left text-sm text-muted-foreground">
                     <th className="px-5 py-3 font-medium">成员</th>
                     <th className="px-5 py-3 font-medium">小组</th>
                     <th className="px-5 py-3 font-medium">KPI 数</th>
@@ -431,7 +1303,7 @@ export function KpiContent({ data }: Props) {
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
                         <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
                         <td className="px-5 py-3 text-right">
-                          <button className="text-xs text-primary hover:underline">查看详情</button>
+                          <button className="text-sm text-primary hover:underline">查看详情</button>
                         </td>
                       </tr>
                     ))
@@ -446,10 +1318,62 @@ export function KpiContent({ data }: Props) {
           </div>
         ) : (
           <div className="px-5 pb-5">
-            <TemplateList rows={data.templateRows.filter((row) => row.departmentOrgNodeId === departmentTab)} />
+            <TemplateList
+              rows={data.templateRows.filter((row) => row.departmentOrgNodeId === departmentTab)}
+              onView={(row) => {
+                setSelectedTemplate(row);
+                setTemplateDrawerMode("view");
+              }}
+              onEdit={(row) => {
+                setSelectedTemplate(row);
+                setTemplateDrawerMode("edit");
+              }}
+            />
           </div>
         )}
       </Card>
+
+      <Drawer
+        open={showCreateDrawer}
+        onClose={() => setShowCreateDrawer(false)}
+        title="新建 KPI 模板"
+      >
+        {showCreateDrawer ? (
+          <CreateTemplateDrawer
+            data={data}
+            departmentOrgNodeId={departmentTab}
+            onClose={() => setShowCreateDrawer(false)}
+            onComplete={() => {
+              setShowCreateDrawer(false);
+              router.refresh();
+            }}
+          />
+        ) : null}
+      </Drawer>
+
+      <Drawer
+        open={Boolean(selectedTemplate && templateDrawerMode)}
+        onClose={() => {
+          setSelectedTemplate(null);
+          setTemplateDrawerMode(null);
+        }}
+        title={templateDrawerMode === "edit" ? "编辑 KPI 模板" : "查看 KPI 模板"}
+      >
+        {selectedTemplate && templateDrawerMode === "view" ? <TemplateDetailDrawer row={selectedTemplate} /> : null}
+        {selectedTemplate && templateDrawerMode === "edit" ? (
+          <TemplateEditDrawer
+            row={selectedTemplate}
+            data={data}
+            onClose={() => {
+              setSelectedTemplate(null);
+              setTemplateDrawerMode(null);
+            }}
+            onComplete={() => {
+              router.refresh();
+            }}
+          />
+        ) : null}
+      </Drawer>
 
       <Dialog open={showImportDialog} onClose={() => setShowImportDialog(false)} title="导入 KPI 模板">
         <TemplateImportForm
@@ -465,7 +1389,7 @@ export function KpiContent({ data }: Props) {
       </Dialog>
 
       <Dialog open={showInitDialog} onClose={() => setShowInitDialog(false)} title={`初始化 ${data.year} Q${data.quarter} KPI`}>
-        <KpiInitializationForm
+        <InitializeForm
           year={data.year}
           quarter={data.quarter}
           onClose={() => setShowInitDialog(false)}
