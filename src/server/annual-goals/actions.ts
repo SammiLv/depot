@@ -991,9 +991,10 @@ export async function updateAnnualGoalQuarterProgress(formData: FormData) {
   const updates = [1, 2, 3, 4].flatMap((quarter) => {
     const targetId = formData.get(`q${quarter}Id`) as string | null;
     if (!targetId) return [];
+    const targetValue = numberFromForm(formData.get(`q${quarter}Target`), `Q${quarter}目标值`);
     const currentValue = numberFromForm(formData.get(`q${quarter}Current`), `Q${quarter}当前值`);
-    if (currentValue < 0) throw new Error("季度指标当前值不能小于 0");
-    return [{ id: targetId, currentValue }];
+    if (targetValue < 0 || currentValue < 0) throw new Error("季度指标数值不能小于 0");
+    return [{ id: targetId, targetValue, currentValue }];
   });
   if (updates.length === 0) throw new Error("暂无可更新的季度指标");
 
@@ -1008,7 +1009,7 @@ export async function updateAnnualGoalQuarterProgress(formData: FormData) {
     for (const update of updates) {
       await tx.annualGoalQuarterTarget.update({
         where: { id: update.id },
-        data: { currentValue: update.currentValue, progressUpdatedAt },
+        data: { targetValue: update.targetValue, currentValue: update.currentValue, progressUpdatedAt },
       });
     }
     await syncAnnualGoalCurrentValues(tx, metricId, sourceMetricId, progressUpdatedAt);
