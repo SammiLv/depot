@@ -91,7 +91,9 @@ export async function getDashboardData(currentUser: CurrentUser) {
   }, {} as Record<string, number>);
 
   const pendingApprovals =
-    (kpiStatusCounts.PENDING_LEADER ?? 0) + (kpiStatusCounts.PENDING_MANAGER ?? 0);
+    (kpiStatusCounts.PENDING_LEADER_SCORE ?? 0) + (kpiStatusCounts.PENDING_MANAGER_SCORE ?? 0);
+  const selfReviewCount =
+    (kpiStatusCounts.DRAFT ?? 0) + (kpiStatusCounts.PENDING_SELF_REVIEW ?? 0);
 
   const riskCount = visibleAnnualPlans.reduce(
     (s, p) => s + p.metrics.filter((m) => m.riskStatus === "RISK").length,
@@ -104,8 +106,8 @@ export async function getDashboardData(currentUser: CurrentUser) {
 
   const summaryCards = [
     { title: "年度指标完成度", value: "—", tone: "primary" as const, description: "加载中…" },
-    { title: "待我审批", value: pendingApprovals, tone: "warning" as const, description: `${kpiStatusCounts.PENDING_LEADER ?? 0} 项 KPI 待处理` },
-    { title: "未完成待办", value: todoCount, tone: "info" as const, description: overdueTodos > 0 ? `${overdueTodos} 项已逾期` : "暂无逾期" },
+    { title: "待我评分", value: pendingApprovals, tone: "warning" as const, description: pendingApprovals > 0 ? `${kpiStatusCounts.PENDING_LEADER_SCORE ?? 0} 项组长评分待处理` : "暂无评分待处理" },
+    { title: "待自评", value: selfReviewCount, tone: "info" as const, description: `${kpiStatusCounts.DRAFT ?? 0} 项待启动 · ${kpiStatusCounts.PENDING_SELF_REVIEW ?? 0} 项自评中` },
     { title: "风险预警", value: riskCount, tone: "brand" as const, description: riskCount > 0 ? `${riskCount} 项指标有风险` : "全部正常" },
   ];
 
@@ -146,24 +148,17 @@ export async function getDashboardData(currentUser: CurrentUser) {
   };
 
   const kpiStages = [
-    { label: "待制定", key: "DRAFT", tone: "default" as const },
-    { label: "待审批", key: "PENDING", tone: "warning" as const },
+    { label: "待自评", key: "DRAFT", tone: "default" as const },
     { label: "自评中", key: "PENDING_SELF_REVIEW", tone: "info" as const },
-    { label: "已评分", key: "SCORE", tone: "primary" as const },
+    { label: "组长评", key: "PENDING_LEADER_SCORE", tone: "warning" as const },
+    { label: "主管评", key: "PENDING_MANAGER_SCORE", tone: "primary" as const },
     { label: "已完成", key: "COMPLETED", tone: "success" as const },
   ];
 
-  const kpiStageData = kpiStages.map((s) => {
-    let count = 0;
-    if (s.key === "PENDING") {
-      count = (kpiStatusCounts.PENDING_LEADER ?? 0) + (kpiStatusCounts.PENDING_MANAGER ?? 0);
-    } else if (s.key === "SCORE") {
-      count = (kpiStatusCounts.PENDING_LEADER_SCORE ?? 0) + (kpiStatusCounts.PENDING_MANAGER_SCORE ?? 0);
-    } else {
-      count = kpiStatusCounts[s.key] ?? 0;
-    }
-    return { ...s, count };
-  });
+  const kpiStageData = kpiStages.map((s) => ({
+    ...s,
+    count: kpiStatusCounts[s.key] ?? 0,
+  }));
 
   const qwCompleted = quarterlyWorks.filter((w) => w.status === "COMPLETED").length;
   const qwInProgress = quarterlyWorks.filter((w) => w.status === "IN_PROGRESS").length;
