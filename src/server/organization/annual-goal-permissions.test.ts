@@ -175,6 +175,63 @@ test("updateProgress alone does not grant team visibility or edit", () => {
   assert.equal(permissions.canUpdateQuarterProgress, true);
 });
 
+test("member with department view can view department plan across department scope", () => {
+  const capabilities = getAnnualGoalCapabilities(
+    "MEMBER",
+    createPermissionMap("MEMBER", ["annualGoal.viewDepartmentPlans"]),
+  );
+
+  const permissions = getAnnualGoalPlanPermissions(
+    {
+      roleType: "MEMBER",
+      orgNodeId: "org_team_team-a",
+    },
+    capabilities,
+    {
+      ownerType: "DEPARTMENT",
+      ownerOrgNodeId: "org_dept_dept-1",
+      deletedAt: null,
+    },
+    {
+      deptScopeIds: new Set(["org_dept_dept-1", "org_team_team-a", "org_team_team-b"]),
+      teamScopeIds: new Set(["org_team_team-a"]),
+      deptAncestorId: "org_dept_dept-1",
+    },
+  );
+
+  assert.equal(capabilities.canViewDepartmentPlans, true);
+  assert.equal(permissions.canViewPlan, true);
+  assert.equal(permissions.canEditDepartmentPlan, false);
+});
+
+test("admin with department view+edit can edit department plans without org node", () => {
+  const capabilities = getAnnualGoalCapabilities(
+    "ADMIN",
+    createPermissionMap("ADMIN", [
+      "annualGoal.viewDepartmentPlans",
+      "annualGoal.editDepartmentPlans",
+    ]),
+  );
+
+  const permissions = getAnnualGoalPlanPermissions(
+    {
+      roleType: "ADMIN",
+      orgNodeId: null,
+    },
+    capabilities,
+    {
+      ownerType: "DEPARTMENT",
+      ownerOrgNodeId: "org_dept_dept-1",
+      deletedAt: null,
+    },
+  );
+
+  assert.equal(permissions.canViewPlan, true);
+  assert.equal(permissions.canEditDepartmentPlan, true);
+  assert.equal(permissions.canManageSources, true);
+  assert.equal(permissions.canUpdateQuarterProgress, true);
+});
+
 test("admin with team view+edit can edit team plans without department/team ids", () => {
   const capabilities = getAnnualGoalCapabilities(
     "ADMIN",

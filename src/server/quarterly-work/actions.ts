@@ -56,6 +56,23 @@ function parseProjectId(value: FormDataEntryValue | null) {
   return projectId || null;
 }
 
+function parseRequiredQuarter(value: FormDataEntryValue | null, fieldName: string) {
+  const quarter = (value as string | null)?.trim();
+  if (!quarter) throw new Error(`${fieldName}为必填项`);
+  if (!/^\d{4}-Q[1-4]$/.test(quarter)) throw new Error(`${fieldName}格式不正确`);
+  return quarter;
+}
+
+function assertQuarterRange(startQuarter: string, endQuarter: string) {
+  const [startYear, startQ] = startQuarter.split("-Q");
+  const [endYear, endQ] = endQuarter.split("-Q");
+  const startValue = Number(startYear) * 10 + Number(startQ);
+  const endValue = Number(endYear) * 10 + Number(endQ);
+  if (startValue > endValue) {
+    throw new Error("起始季度不能晚于结束季度");
+  }
+}
+
 function assertEditableStatus(status: WorkStatus) {
   if (!manuallyEditableStatuses.includes(status)) {
     throw new Error("当前状态不允许手动变更");
@@ -283,11 +300,12 @@ export async function createProject(formData: FormData) {
   const currentUser = await requireQuarterlyWorkEditor();
   const title = requiredString(formData.get("title"), "项目名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
-  const description = (formData.get("description") as string)?.trim() || null;
-  const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
+  const description = requiredString(formData.get("description"), "项目描述");
+  const expectedOutcome = requiredString(formData.get("expectedOutcome"), "预期收益");
   const status = parseProjectStatus(formData.get("status") ?? "NOT_STARTED");
-  const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
-  const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
+  const startQuarter = parseRequiredQuarter(formData.get("startQuarter"), "起始季度");
+  const endQuarter = parseRequiredQuarter(formData.get("endQuarter"), "结束季度");
+  assertQuarterRange(startQuarter, endQuarter);
   const owner = await findEditableOwner(currentUser, ownerId);
 
   await prisma.project.create({

@@ -213,7 +213,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     }),
   ]);
 
-  const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
+  const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
   const departments = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
     .map((node) => ({
@@ -363,6 +363,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     projectTotalCount: projects.length,
     updateReminders,
     canCreate: users.length > 0,
+    currentUserId: currentUser.id,
+    isSystemAdmin: currentUser.roleType === "ADMIN",
     departments: scopedDepartments.sort(compareNames).map((department) => ({
       id: department.orgNodeId,
       name: department.name,
@@ -389,6 +391,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
         id: project.id,
         title: project.title,
         ownerId: project.ownerId,
+        expectedOutcome: project.expectedOutcome,
         status: project.status,
       })),
   };

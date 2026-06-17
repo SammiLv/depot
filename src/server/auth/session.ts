@@ -1,6 +1,20 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE_NAME } from "@/server/auth/current-user";
 
+function useSecureSessionCookie() {
+  const value = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 export async function setUserSession(userId: string) {
   const cookieStore = await cookies();
   cookieStore.set({
@@ -9,7 +23,7 @@ export async function setUserSession(userId: string) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: useSecureSessionCookie(),
   });
 }
 

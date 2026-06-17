@@ -197,6 +197,8 @@ export async function buildOrgScopeContext(
     }
   }
 
+  const ownScopeIds = new Set(teamIds);
+
   return { deptScopeIds, teamScopeIds, deptAncestorId };
 }
 

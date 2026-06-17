@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/prisma";
-import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { getDescendantOrgNodeIds, findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilities,
@@ -132,22 +132,19 @@ type ScopeItem = {
   plan: PlanData | null;
 };
 
-type HistoryYearGroup = {
-  year: number;
-  plans: PlanData[];
-};
-
 type AnnualGoalsResult = {
+  selectedYear: number;
+  availableYears: number[];
   scopeDepartments: ScopeDepartment[];
   scopeItems: ScopeItem[];
   plans: PlanData[];
-  historyPlansByYear: HistoryYearGroup[];
   availableSourceMetrics: MetricSourceData[];
   availableParentMetrics: MetricData[];
   teams: { orgNodeId: string; name: string; departmentOrgNodeId: string }[];
   memberOptionsByDepartment: Record<string, MemberOption[]>;
   memberOptionsByTeam: Record<string, MemberOption[]>;
   canManage: boolean;
+  showDepartmentNavigation: boolean;
   permissions: {
     canCreatePlan: boolean;
     canViewDepartmentPlans: boolean;
@@ -383,7 +380,12 @@ function getPlanPermissions(
   }, { ...plan, ownerOrgNodeId: plan.ownerOrgNodeId ?? undefined }, scopeContext);
 }
 
-export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<AnnualGoalsResult> {
+type GetAnnualGoalsDataOptions = {
+  selectedYear?: number;
+};
+
+export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: GetAnnualGoalsDataOptions): Promise<AnnualGoalsResult> {
+  const selectedYear = options?.selectedYear;
   const annualGoalPermissionMap = await getAnnualGoalPermissionMapForUser(currentUser);
   const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
   const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
@@ -399,13 +401,28 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
       },
     },
   });
+  const currentYear = new Date().getFullYear();
+  const availableYears = Array.from(new Set([...plans.map((plan) => plan.year), currentYear])).sort((a, b) => b - a);
+  const resolvedSelectedYear = availableYears.includes(selectedYear ?? Number.NaN)
+    ? selectedYear!
+    : availableYears.includes(currentYear)
+      ? currentYear
+      : availableYears[0] ?? currentYear;
+  const selectedYearPlans = plans.filter((plan) => plan.year === resolvedSelectedYear);
   const scopedOrgNodeIds = currentUser.roleType === "ADMIN"
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
+  const departmentAncestorOrgNodeId = currentUser.roleType === "ADMIN"
+    ? null
+    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
+  const scopedOrgNodeIdSet = new Set(scopedOrgNodeIds ?? []);
+  if (departmentAncestorOrgNodeId) {
+    scopedOrgNodeIdSet.add(departmentAncestorOrgNodeId);
+  }
   const orgNodes = await prisma.orgNode.findMany({
-    where: scopedOrgNodeIds === null
+    where: currentUser.roleType === "ADMIN"
       ? { nodeType: { in: ["DEPARTMENT", "TEAM"] } }
-      : { id: { in: scopedOrgNodeIds }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
+      : { id: { in: Array.from(scopedOrgNodeIdSet) }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
     orderBy: [{ nodeType: "asc" }, { name: "asc" }],
     select: { id: true, name: true, nodeType: true, parentId: true },
   });
@@ -425,7 +442,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     orgNodeId,
     name: departmentNameByOrgNodeId.get(orgNodeId) ?? "部门",
   }));
-  const defaultDepartmentOrgNodeId = plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).find((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
+  const defaultDepartmentOrgNodeId = selectedYearPlans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).find((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
+    ?? plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).find((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
     ?? teams[0]?.departmentOrgNodeId
     ?? scopeDepartments[0]?.orgNodeId
     ?? null;
@@ -707,12 +725,12 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
 
   // Compute linked team IDs for department plans (team plans with same department + year)
   const linkedTeamOrgNodeIdsByDeptPlan = new Map<string, string[]>();
-  for (const plan of plans) {
+  for (const plan of selectedYearPlans) {
     const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
     if (plan.ownerType === "DEPARTMENT" && scopeDepartmentOrgNodeId) {
       linkedTeamOrgNodeIdsByDeptPlan.set(
         plan.id,
-        plans
+        selectedYearPlans
           .filter((p) => p.ownerType === "TEAM" && getPlanScopeDepartmentOrgNodeId(p) === scopeDepartmentOrgNodeId && p.year === plan.year)
           .map((p) => getTeamOrgNodeIdForRecord(p.ownerOrgNodeId, orgNodeById))
           .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId)),
@@ -720,42 +738,29 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     }
   }
 
-  const plansWithProgress = plans.map((p) => {
+  const plansWithProgress = selectedYearPlans.map((p) => {
     const mapped = mapPlan(p);
     if (p.ownerType === "DEPARTMENT") {
       mapped.linkedTeamOrgNodeIds = linkedTeamOrgNodeIdsByDeptPlan.get(p.id) ?? [];
     }
     return mapped;
   }).sort(comparePlans);
-  const historyPlansByYear = Array.from(
-    plansWithProgress.reduce((groups, plan) => {
-      const existingPlans = groups.get(plan.year) ?? [];
-      existingPlans.push(plan);
-      groups.set(plan.year, existingPlans);
-      return groups;
-    }, new Map<number, PlanData[]>())
-  )
-    .sort((a, b) => b[0] - a[0])
-    .map(([year, groupedPlans]) => ({
-      year,
-      plans: groupedPlans.sort(comparePlans),
-    }));
   const availableParentMetrics = plansWithProgress
     .filter((p) => p.ownerType === "DEPARTMENT")
     .flatMap((p) => p.metrics);
   const availableSourceMetrics = availableParentMetrics.flatMap((m) => m.sources);
 
   // Summary stats
-  const totalMetrics = plans.reduce((s, p) => s + p.metrics.length, 0);
-  const riskCount = plans.reduce(
+  const totalMetrics = selectedYearPlans.reduce((s, p) => s + p.metrics.length, 0);
+  const riskCount = selectedYearPlans.reduce(
     (s, p) => s + p.metrics.filter((m) => m.riskStatus === "RISK").length,
     0
   );
-  const revisionCount = plans.filter((p) => p.revisionReason).length;
+  const revisionCount = selectedYearPlans.filter((p) => p.revisionReason).length;
 
   // Overall weighted progress only counts department-owned annual performance metrics.
   let overallWeightedProgress = 0;
-  const departmentMetrics = plans
+  const departmentMetrics = selectedYearPlans
     .filter((p) => p.ownerType === "DEPARTMENT")
     .flatMap((p) => p.metrics.map((m) => ({ plan: p, metric: m })));
   const overallTotalWeight = departmentMetrics.reduce((s, { metric }) => s + metric.weight, 0);
@@ -800,16 +805,18 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
   ];
 
   return {
+    selectedYear: resolvedSelectedYear,
+    availableYears,
     scopeDepartments,
     scopeItems,
     plans: plansWithProgress,
-    historyPlansByYear,
     availableSourceMetrics,
     availableParentMetrics,
     teams,
     memberOptionsByDepartment,
     memberOptionsByTeam,
     canManage,
+    showDepartmentNavigation: currentUser.roleType === "ADMIN",
     permissions: {
       canCreatePlan: canManageDepartmentPlans,
       canViewDepartmentPlans: annualGoalCapabilities.canViewDepartmentPlans,
@@ -820,7 +827,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput): Promise<A
     },
     defaultDepartmentOrgNodeId,
     summary: {
-      planCount: plans.length,
+      planCount: selectedYearPlans.length,
       metricCount: totalMetrics,
       riskCount,
       revisionCount,
