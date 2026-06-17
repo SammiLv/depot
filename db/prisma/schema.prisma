@@ -60,15 +60,19 @@ enum RiskStatus {
   COMPLETED
 }
 
+enum KpiTemplateStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
 enum KpiStatus {
   DRAFT
-  PENDING_LEADER
-  PENDING_MANAGER
   PENDING_SELF_REVIEW
   PENDING_LEADER_SCORE
   PENDING_MANAGER_SCORE
   COMPLETED
-  REJECTED
 }
 
 enum NotificationType {
@@ -84,6 +88,12 @@ enum OrgNodeType {
   ROOT
   DEPARTMENT
   TEAM
+}
+
+enum KpiTemplateAssignmentTargetType {
+  USER
+  ORG_NODE
+  ROLE
 }
 
 model User {
@@ -474,13 +484,53 @@ model RequirementValueTrack {
 }
 
 model KpiTemplate {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  isActive    Boolean  @default(true)
-  createdById String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String            @id @default(cuid())
+  templateKey         String
+  departmentOrgNodeId String
+  name                String
+  description         String?
+  status              KpiTemplateStatus @default(DRAFT)
+  version             Int               @default(1)
+  isLatest            Boolean           @default(true)
+  isActive            Boolean           @default(true)
+  submittedAt         DateTime?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  reviewComment       String?
+  createdById         String
+  updatedById         String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  deletedAt           DateTime?
+
+  @@unique([templateKey, version])
+  @@index([departmentOrgNodeId, status, isActive])
+  @@index([templateKey, isLatest])
+  @@index([status, isActive])
+  @@index([deletedAt])
+  @@index([updatedById])
+}
+
+model KpiTemplateAssignment {
+  id                   String                          @id @default(cuid())
+  templateId           String
+  targetType           KpiTemplateAssignmentTargetType
+  targetUserId         String?
+  targetOrgNodeId      String?
+  targetRoleType       RoleType?
+  effectiveFromYear    Int?
+  effectiveFromQuarter Int?
+  effectiveToYear      Int?
+  effectiveToQuarter   Int?
+  isActive             Boolean                         @default(true)
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+
+  @@index([templateId])
+  @@index([targetType, targetUserId])
+  @@index([targetType, targetOrgNodeId])
+  @@index([targetType, targetRoleType])
+  @@index([isActive])
 }
 
 model KpiTemplateItem {
@@ -488,6 +538,7 @@ model KpiTemplateItem {
   templateId      String
   name            String
   description     String?
+  score           Float    @default(0)
   weight          Float
   scoringStandard String?
   sortOrder       Int      @default(0)
@@ -499,26 +550,30 @@ model KpiTemplateItem {
 }
 
 model PersonalKpi {
-  id             String    @id @default(cuid())
-  year           Int
-  quarter        Int
-  userId         String
-  orgNodeId      String?
-  templateId     String?
-  status         KpiStatus @default(DRAFT)
-  selfScore      Float?
-  leaderScore    Float?
-  managerScore   Float?
-  finalScore     Float?
-  selfComment    String?
-  leaderComment  String?
-  managerComment String?
-  submittedAt    DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id              String    @id @default(cuid())
+  year            Int
+  quarter         Int
+  userId          String
+  orgNodeId       String?
+  templateId      String?
+  templateVersion Int?
+  status          KpiStatus @default(DRAFT)
+  selfScore       Float?
+  leaderScore     Float?
+  managerScore    Float?
+  finalScore      Float?
+  selfComment     String?
+  leaderComment   String?
+  managerComment  String?
+  submittedAt     DateTime?
+  completedAt     DateTime?
+  initializedAt   DateTime?
+  initializedById String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
 
+  @@unique([year, quarter, userId])
   @@index([year, quarter])
   @@index([userId])
   @@index([orgNodeId])
@@ -533,6 +588,7 @@ model PersonalKpiItem {
   relatedWorkId          String?
   name                   String
   description            String?
+  score                  Float    @default(0)
   weight                 Float
   target                 String?
   scoringStandard        String?

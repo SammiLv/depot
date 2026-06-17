@@ -160,7 +160,9 @@ async function main() {
   await prisma.annualGoalMetricSource.deleteMany();
   await prisma.annualGoalMetric.deleteMany();
   await prisma.annualGoalPlan.deleteMany();
-  await prisma.kpiTemplate.deleteMany({ where: { name: "季度 KPI 默认模板" } });
+  await prisma.kpiTemplateAssignment.deleteMany();
+  await prisma.kpiTemplateItem.deleteMany();
+  await prisma.kpiTemplate.deleteMany({ where: { templateKey: { startsWith: "kpi-template-" } } });
   await prisma.user.deleteMany({ where: { name: { in: sampleUserNames } } });
 
   const admin = await prisma.user.create({
@@ -663,11 +665,110 @@ async function main() {
     },
   });
 
-  await prisma.kpiTemplate.create({
+  const defaultTemplate = await prisma.kpiTemplate.create({
     data: {
+      templateKey: `kpi-template-${departmentOrgNodeId}-default`,
+      departmentOrgNodeId,
       name: "季度 KPI 默认模板",
       description: "MVP 阶段默认模板，后续根据部门制度调整",
+      status: "APPROVED",
+      version: 1,
+      isLatest: true,
+      approvedAt: new Date("2026-01-05"),
       createdById: admin.id,
+    },
+  });
+
+  await prisma.kpiTemplateItem.createMany({
+    data: [
+      {
+        templateId: defaultTemplate.id,
+        name: "季度重点工作达成",
+        description: "围绕本季度核心工作目标评估完成情况",
+        weight: 50,
+        scoringStandard: "按季度重点工作的完成质量、进度与结果评分",
+        sortOrder: 10,
+      },
+      {
+        templateId: defaultTemplate.id,
+        name: "协作与交付质量",
+        description: "跨团队协作、响应及时性与交付稳定性",
+        weight: 30,
+        scoringStandard: "按协作效率、反馈质量与交付结果评分",
+        sortOrder: 20,
+      },
+      {
+        templateId: defaultTemplate.id,
+        name: "复盘与改进",
+        description: "复盘总结、问题闭环与持续优化动作",
+        weight: 20,
+        scoringStandard: "按复盘深度、改进动作与落地效果评分",
+        sortOrder: 30,
+      },
+    ],
+  });
+
+  await prisma.kpiTemplateAssignment.create({
+    data: {
+      templateId: defaultTemplate.id,
+      targetType: "ORG_NODE",
+      targetOrgNodeId: departmentOrgNodeId,
+      isActive: true,
+    },
+  });
+
+  const secondDepartmentTemplate = await prisma.kpiTemplate.create({
+    data: {
+      templateKey: `kpi-template-${secondDepartmentOrgNodeId}-default`,
+      departmentOrgNodeId: secondDepartmentOrgNodeId,
+      name: "平台部季度 KPI 默认模板",
+      description: "平台部默认季度 KPI 模板",
+      status: "APPROVED",
+      version: 1,
+      isLatest: true,
+      approvedAt: new Date("2026-01-05"),
+      createdById: admin.id,
+    },
+  });
+
+  await prisma.kpiTemplateItem.createMany({
+    data: [
+      {
+        templateId: secondDepartmentTemplate.id,
+        name: "平台稳定性改进",
+        description: "围绕平台稳定性与质量改进评估完成情况",
+        score: 40,
+        weight: 40,
+        scoringStandard: "按平台稳定性目标完成质量评分",
+        sortOrder: 10,
+      },
+      {
+        templateId: secondDepartmentTemplate.id,
+        name: "跨部门支撑协作",
+        description: "跨团队支撑、响应时效与交付结果",
+        score: 30,
+        weight: 30,
+        scoringStandard: "按跨部门协同质量与反馈效率评分",
+        sortOrder: 20,
+      },
+      {
+        templateId: secondDepartmentTemplate.id,
+        name: "技术复盘与优化",
+        description: "技术问题复盘、优化动作与落地效果",
+        score: 30,
+        weight: 30,
+        scoringStandard: "按复盘深度与优化落地效果评分",
+        sortOrder: 30,
+      },
+    ],
+  });
+
+  await prisma.kpiTemplateAssignment.create({
+    data: {
+      templateId: secondDepartmentTemplate.id,
+      targetType: "ORG_NODE",
+      targetOrgNodeId: secondDepartmentOrgNodeId,
+      isActive: true,
     },
   });
 

@@ -1,6 +1,8 @@
 import { prisma } from "@/server/db/prisma";
-import { getKpiWhereByScope } from "@/server/permissions/data-scope";
-import type { RoleType } from "@prisma/client";
+import { getKpiWhereByScope, getUserWhereByScope } from "@/server/permissions/data-scope";
+import { findNearestDepartmentOrgNodeId, getDescendantOrgNodes } from "@/server/organization/org-tree-utils";
+import type { KpiTemplateAssignmentTargetType, RoleType } from "@prisma/client";
+
 
 type DataScopeInput = {
   id: string;
@@ -8,33 +10,80 @@ type DataScopeInput = {
   orgNodeId?: string | null;
 };
 
+type OrgNodeSummary = {
+  id: string;
+  name: string;
+  nodeType: "DEPARTMENT" | "TEAM";
+  parentId: string | null;
+};
+
 const stageLabels: Record<string, string> = {
-  DRAFT: "待制定",
-  PENDING_LEADER: "待主管审批",
-  PENDING_MANAGER: "待经理审批",
+  DRAFT: "待自评",
   PENDING_SELF_REVIEW: "自评中",
-  PENDING_LEADER_SCORE: "主管已评分",
-  PENDING_MANAGER_SCORE: "经理已评分",
+  PENDING_LEADER_SCORE: "组长评",
+  PENDING_MANAGER_SCORE: "主管评",
   COMPLETED: "已完成",
-  REJECTED: "已退回",
 };
 
 const stageOrder = [
   "DRAFT",
-  "PENDING_LEADER",
-  "PENDING_MANAGER",
   "PENDING_SELF_REVIEW",
   "PENDING_LEADER_SCORE",
   "PENDING_MANAGER_SCORE",
   "COMPLETED",
 ];
 
+function getDepartmentOrgNodeIdForRecord(
+  orgNodeId: string | null | undefined,
+  orgNodeById: Map<string, OrgNodeSummary>,
+  departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>,
+) {
+  if (!orgNodeId) {
+    return null;
+  }
+  const node = orgNodeById.get(orgNodeId) ?? null;
+  if (!node) {
+    return null;
+  }
+  if (node.nodeType === "DEPARTMENT") {
+    return node.id;
+  }
+  if (node.nodeType === "TEAM") {
+    return departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null;
+  }
+  return null;
+}
+
+function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined, orgNodeById: Map<string, OrgNodeSummary>) {
+  if (!orgNodeId) {
+    return null;
+  }
+  const node = orgNodeById.get(orgNodeId) ?? null;
+  return node?.nodeType === "TEAM" ? node.id : null;
+}
+
 export async function getKpiData(currentUser: DataScopeInput) {
   const where = await getKpiWhereByScope(currentUser);
+  const userWhere = await getUserWhereByScope(currentUser);
+  const now = new Date();
+  const year = now.getFullYear();
+  const quarter = Math.floor(now.getMonth() / 3) + 1;
+
+  const scopedDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
+  const departments = currentUser.roleType === "ADMIN"
+    ? await prisma.orgNode.findMany({
+        where: { nodeType: "DEPARTMENT" },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      })
+    : await getDescendantOrgNodes(scopedDepartmentOrgNodeId, "DEPARTMENT");
+  const defaultDepartmentOrgNodeId = currentUser.roleType === "ADMIN"
+    ? (departments[0]?.id ?? "")
+    : (scopedDepartmentOrgNodeId ?? departments[0]?.id ?? "");
 
   const kpis = await prisma.personalKpi.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ year: "desc" }, { quarter: "desc" }, { createdAt: "desc" }],
   });
 
   const kpiIds = kpis.map((k) => k.id);
@@ -48,17 +97,32 @@ export async function getKpiData(currentUser: DataScopeInput) {
     itemsByKpi.set(item.personalKpiId, list);
   }
 
-  const userIds = [...new Set(kpis.map((k) => k.userId))];
   const users = await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, name: true, orgNodeId: true },
+    where: {
+      ...userWhere,
+      isActive: true,
+    },
+    select: { id: true, name: true, orgNodeId: true, roleType: true },
+    orderBy: { name: "asc" },
   });
   const userMap = new Map(users.map((u) => [u.id, u]));
   const orgNodeIds = [...new Set(users.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)))];
   const orgNodes = orgNodeIds.length
-    ? await prisma.orgNode.findMany({ where: { id: { in: orgNodeIds } }, select: { id: true, name: true, nodeType: true } })
+    ? await prisma.orgNode.findMany({ where: { id: { in: orgNodeIds } }, select: { id: true, name: true, nodeType: true, parentId: true } })
     : [];
-  const orgNodeMap = new Map(orgNodes.map((orgNode) => [orgNode.id, orgNode]));
+  const scopedOrgNodes = orgNodes.filter(
+    (orgNode): orgNode is OrgNodeSummary => orgNode.nodeType === "DEPARTMENT" || orgNode.nodeType === "TEAM"
+  );
+  const orgNodeMap = new Map(scopedOrgNodes.map((orgNode) => [orgNode.id, orgNode] as const));
+  const departmentOrgNodeIdByTeamOrgNodeId = new Map<string, string>();
+  for (const orgNode of scopedOrgNodes) {
+    if (orgNode.nodeType === "TEAM" && orgNode.parentId) {
+      const parentNode = orgNodeMap.get(orgNode.parentId);
+      if (parentNode?.nodeType === "DEPARTMENT") {
+        departmentOrgNodeIdByTeamOrgNodeId.set(orgNode.id, parentNode.id);
+      }
+    }
+  }
 
   const stageCounts: Record<string, number> = {};
   for (const s of stageOrder) {
@@ -77,12 +141,16 @@ export async function getKpiData(currentUser: DataScopeInput) {
       : k.status.includes("REVIEW") ? "info"
       : k.status.includes("PENDING") ? "warning"
       : "default";
-    const orgNode = user?.orgNodeId ? orgNodeMap.get(user.orgNodeId) : null;
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(user?.orgNodeId, orgNodeMap);
+    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(user?.orgNodeId, orgNodeMap, departmentOrgNodeIdByTeamOrgNodeId);
+    const teamNode = teamOrgNodeId ? orgNodeMap.get(teamOrgNodeId) : null;
 
     return {
       id: k.id,
       userName: user?.name ?? "—",
-      teamName: orgNode?.nodeType === "TEAM" ? orgNode.name : "—",
+      teamName: teamNode?.name ?? "—",
+      teamOrgNodeId,
+      departmentOrgNodeId,
       status: stageLabels[k.status] ?? k.status,
       tone,
       score: k.finalScore?.toString() ?? "—",
@@ -91,13 +159,82 @@ export async function getKpiData(currentUser: DataScopeInput) {
     };
   });
 
+  const templateDepartmentIds = currentUser.roleType === "ADMIN"
+    ? departments.map((department) => department.id)
+    : defaultDepartmentOrgNodeId ? [defaultDepartmentOrgNodeId] : [];
+  const templates = templateDepartmentIds.length
+    ? await prisma.kpiTemplate.findMany({
+        where: {
+          deletedAt: null,
+          departmentOrgNodeId: { in: templateDepartmentIds },
+        },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          name: true,
+          createdById: true,
+          updatedById: true,
+          departmentOrgNodeId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+    : [];
+  const templateUserIds = [...new Set(templates.flatMap((template) => [template.createdById, template.updatedById].filter((id): id is string => Boolean(id))))];
+  const templateUsers = templateUserIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: templateUserIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const templateUserById = new Map(templateUsers.map((user) => [user.id, user.name] as const));
+  const departmentNameById = new Map(departments.map((department) => [department.id, department.name] as const));
+
   const stages = [
-    { label: "待制定", count: stageCounts.DRAFT ?? 0 },
-    { label: "待审批", count: (stageCounts.PENDING_LEADER ?? 0) + (stageCounts.PENDING_MANAGER ?? 0) },
+    { label: "待自评", count: stageCounts.DRAFT ?? 0 },
     { label: "自评中", count: stageCounts.PENDING_SELF_REVIEW ?? 0 },
-    { label: "已评分", count: (stageCounts.PENDING_LEADER_SCORE ?? 0) + (stageCounts.PENDING_MANAGER_SCORE ?? 0) },
+    { label: "组长评", count: stageCounts.PENDING_LEADER_SCORE ?? 0 },
+    { label: "主管评", count: stageCounts.PENDING_MANAGER_SCORE ?? 0 },
     { label: "已完成", count: stageCounts.COMPLETED ?? 0 },
   ];
 
-  return { rows, stages, totalCount: kpis.length };
+  const teamOptions = scopedOrgNodes
+    .filter((orgNode) => orgNode.nodeType === "TEAM")
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
+    .map((orgNode) => ({
+      id: orgNode.id,
+      name: orgNode.name,
+      departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(orgNode.id) ?? null,
+    }));
+
+  return {
+    year,
+    quarter,
+    rows,
+    stages,
+    totalCount: kpis.length,
+    memberOptions: users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      orgNodeId: user.orgNodeId,
+      roleType: user.roleType,
+    })),
+    teamOptions,
+    departmentOptions: departments.map((department) => ({
+      id: department.id,
+      name: department.name,
+    })),
+    defaultDepartmentOrgNodeId,
+    canSelectAnyDepartment: currentUser.roleType === "ADMIN",
+    templateRows: templates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      createdByName: templateUserById.get(template.createdById) ?? "—",
+      updatedByName: template.updatedById ? (templateUserById.get(template.updatedById) ?? "—") : "—",
+      scopeName: departmentNameById.get(template.departmentOrgNodeId) ?? "—",
+      createdAt: template.createdAt.toISOString(),
+      updatedAt: template.updatedAt.toISOString(),
+      departmentOrgNodeId: template.departmentOrgNodeId,
+    })),
+  };
 }
