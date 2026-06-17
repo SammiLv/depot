@@ -74,7 +74,22 @@ type TemplateCreateSummary = {
   templateId: string;
   templateName: string;
   itemCount: number;
-  targetType: "USER" | "ORG_NODE" | "ROLE";
+  assignmentCount: number;
+  departmentOrgNodeId: string;
+};
+
+type TemplateItemInput = {
+  name: string;
+  description: string | null;
+  score: number;
+  scoringStandard: string | null;
+  sortOrder: number;
+};
+
+type TemplateUpdateSummary = {
+  templateId: string;
+  templateName: string;
+  itemCount: number;
   departmentOrgNodeId: string;
 };
 
@@ -89,6 +104,8 @@ type ParsedTemplateSheet = {
   sheetName: string;
   rows: TemplateImportRow[];
 };
+
+const KPI_TEMPLATE_MAX_TOTAL_SCORE = 110;
 
 function buildDepartmentTemplateKey(departmentOrgNodeId: string) {
   return `kpi-template-${departmentOrgNodeId}`;
@@ -118,6 +135,50 @@ function requiredString(value: FormDataEntryValue | null, fieldName: string) {
 function optionalString(value: FormDataEntryValue | null) {
   const text = typeof value === "string" ? value.trim() : "";
   return text || null;
+}
+
+function validateTemplateItemScore(score: number, fieldName: string) {
+  if (!Number.isFinite(score) || score < 0) {
+    throw new Error(`${fieldName}不正确`);
+  }
+  return score;
+}
+
+function validateTemplateItems(items: TemplateItemInput[], totalScoreLabel = "模板分值") {
+  if (items.length === 0) {
+    throw new Error("至少需要一个模板项");
+  }
+
+  const totalScore = items.reduce((sum, item) => sum + item.score, 0);
+  if (totalScore > KPI_TEMPLATE_MAX_TOTAL_SCORE) {
+    throw new Error(`${totalScoreLabel}总计不能超过${KPI_TEMPLATE_MAX_TOTAL_SCORE}分`);
+  }
+
+  return items;
+}
+
+function parseTemplateItemsFromFormData(formData: FormData) {
+  const itemNames = formData.getAll("itemName");
+  const itemScores = formData.getAll("itemScore");
+  const itemDescriptions = formData.getAll("itemDescription");
+  const itemScoringStandards = formData.getAll("itemScoringStandard");
+
+  const items = itemNames.map((value, index) => {
+    const name = requiredString(value, `模板项${index + 1}`);
+    const score = validateTemplateItemScore(
+      Number.parseFloat(requiredString(itemScores[index] ?? null, `模板项${index + 1}分值`)),
+      `模板项${index + 1}分值`
+    );
+    return {
+      name,
+      description: optionalString(itemDescriptions[index] ?? null),
+      score,
+      scoringStandard: optionalString(itemScoringStandards[index] ?? null),
+      sortOrder: (index + 1) * 10,
+    } satisfies TemplateItemInput;
+  }).filter((item) => item.name);
+
+  return validateTemplateItems(items);
 }
 
 function buildKpiTemplateWorkbook() {
@@ -195,36 +256,44 @@ function parseTemplateImportRows(buffer: Buffer) {
       throw new Error(`工作表《${sheetName}》表头不正确，请先下载最新模板`);
     }
 
-    const parsedRows = rows.slice(1)
-      .filter((cells: Array<string | number | null>) => cells.some((cell) => String(cell ?? "").trim()))
-      .map((cells: Array<string | number | null>, index: number) => {
-        const itemName = String(cells[0] ?? "").trim();
-        const scoringStandard = String(cells[1] ?? "").trim();
-        const scoreText = String(cells[2] ?? "").trim();
-        const score = scoreText ? Number.parseFloat(scoreText) : 0;
+    const parsedRows = validateTemplateItems(
+      rows.slice(1)
+        .filter((cells: Array<string | number | null>) => cells.some((cell) => String(cell ?? "").trim()))
+        .map((cells: Array<string | number | null>, index: number) => {
+          const itemName = String(cells[0] ?? "").trim();
+          const scoringStandard = String(cells[1] ?? "").trim();
+          const scoreText = String(cells[2] ?? "").trim();
+          const score = validateTemplateItemScore(
+            scoreText ? Number.parseFloat(scoreText) : 0,
+            `工作表《${sheetName}》第${index + 2}行分值`
+          );
 
-        if (!itemName) throw new Error(`工作表《${sheetName}》第${index + 2}行指标项不能为空`);
-        if (!scoringStandard) throw new Error(`工作表《${sheetName}》第${index + 2}行评分标准不能为空`);
-        if (!Number.isFinite(score) || score < 0) throw new Error(`工作表《${sheetName}》第${index + 2}行分值不正确`);
+          if (!itemName) throw new Error(`工作表《${sheetName}》第${index + 2}行指标项不能为空`);
+          if (!scoringStandard) throw new Error(`工作表《${sheetName}》第${index + 2}行评分标准不能为空`);
 
-        return {
-          itemName,
-          score,
-          description: itemName,
-          scoringStandard,
-        } satisfies TemplateImportRow;
-      });
+          return {
+            name: itemName,
+            score,
+            description: itemName,
+            scoringStandard,
+            sortOrder: (index + 1) * 10,
+          } satisfies TemplateItemInput;
+        }),
+      `工作表《${sheetName}》分值`
+    );
 
-    const totalScore = parsedRows.reduce((sum, row) => sum + row.score, 0);
-    if (totalScore > 110) {
-      throw new Error(`工作表《${sheetName}》分值总计不能超过110分`);
-    }
+    const sheetRows = parsedRows.map(({ name, score, description, scoringStandard }) => ({
+      itemName: name,
+      score,
+      description,
+      scoringStandard,
+    } satisfies TemplateImportRow));
 
-    if (parsedRows.length === 0) {
+    if (sheetRows.length === 0) {
       throw new Error(`工作表《${sheetName}》不能为空`);
     }
 
-    sheets.push({ sheetName: sheetName.trim(), rows: parsedRows });
+    sheets.push({ sheetName: sheetName.trim(), rows: sheetRows });
   }
 
   if (sheets.length === 0) {
@@ -363,6 +432,43 @@ export async function getKpiTemplateDepartmentOptions() {
       : (context.scopedDepartmentOrgNodeId ?? departments[0]?.id ?? ""),
     canSelectAnyDepartment: context.currentUser.roleType === "ADMIN",
   };
+}
+
+function parseTemplateScopeTargets(formData: FormData, memberOrgNodeIdById: Map<string, string | null>) {
+  const selectedTeamIds = formData.getAll("scopeTeamOrgNodeId")
+    .map((value) => optionalString(value))
+    .filter((value): value is string => Boolean(value));
+  const selectedMemberIds = formData.getAll("scopeUserId")
+    .map((value) => optionalString(value))
+    .filter((value): value is string => Boolean(value));
+
+  const selectedTeamIdSet = new Set(selectedTeamIds);
+  const filteredMemberIds = selectedMemberIds.filter((memberId) => {
+    const memberOrgNodeId = memberOrgNodeIdById.get(memberId) ?? null;
+    return !memberOrgNodeId || !selectedTeamIdSet.has(memberOrgNodeId);
+  });
+
+  const dedupedTeamIds = [...new Set(selectedTeamIds)];
+  const dedupedMemberIds = [...new Set(filteredMemberIds)];
+
+  if (dedupedTeamIds.length === 0 && dedupedMemberIds.length === 0) {
+    throw new Error("请至少选择一个适用范围");
+  }
+
+  return [
+    ...dedupedTeamIds.map((teamId) => ({
+      targetType: "ORG_NODE" as const,
+      targetUserId: null,
+      targetOrgNodeId: teamId,
+      targetRoleType: null,
+    })),
+    ...dedupedMemberIds.map((userId) => ({
+      targetType: "USER" as const,
+      targetUserId: userId,
+      targetOrgNodeId: null,
+      targetRoleType: null,
+    })),
+  ];
 }
 
 async function resolveScopedUsers(currentUser: Awaited<ReturnType<typeof requireKpiInitializer>>) {
@@ -621,48 +727,11 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
   );
   const templateName = requiredString(formData.get("name"), "模板名称");
   const description = optionalString(formData.get("description"));
-  const targetType = requiredString(formData.get("targetType"), "分配范围") as TemplateCreateSummary["targetType"];
-  const itemNames = formData.getAll("itemName");
-  const itemScores = formData.getAll("itemScore");
-  const itemDescriptions = formData.getAll("itemDescription");
-  const itemScoringStandards = formData.getAll("itemScoringStandard");
+  const items = parseTemplateItemsFromFormData(formData);
 
-  if (!["USER", "ORG_NODE", "ROLE"].includes(targetType)) {
-    throw new Error("模板分配范围不正确");
-  }
-
-  const items = itemNames.map((value, index) => {
-    const name = requiredString(value, `模板项${index + 1}`);
-    const score = Number.parseFloat(requiredString(itemScores[index] ?? null, `模板项${index + 1}分值`));
-    if (!Number.isFinite(score) || score <= 0) {
-      throw new Error(`模板项${index + 1}分值不正确`);
-    }
-    return {
-      name,
-      description: optionalString(itemDescriptions[index] ?? null),
-      score,
-      scoringStandard: optionalString(itemScoringStandards[index] ?? null),
-      sortOrder: (index + 1) * 10,
-    };
-  }).filter((item) => item.name);
-
-  if (items.length === 0) {
-    throw new Error("至少需要一个模板项");
-  }
-
-  const targetUserId = targetType === "USER" ? optionalString(formData.get("targetUserId")) : null;
-  const targetOrgNodeId = targetType === "ORG_NODE" ? optionalString(formData.get("targetOrgNodeId")) : null;
-  const targetRoleType = targetType === "ROLE" ? optionalString(formData.get("targetRoleType")) as RoleType | null : null;
-
-  if (targetType === "USER" && !targetUserId) {
-    throw new Error("请选择成员");
-  }
-  if (targetType === "ORG_NODE" && !targetOrgNodeId) {
-    throw new Error("请选择小组");
-  }
-  if (targetType === "ROLE" && !targetRoleType) {
-    throw new Error("请选择角色");
-  }
+  const scopedUsers = await resolveScopedUsers(context.currentUser);
+  const memberOrgNodeIdById = new Map(scopedUsers.map((user) => [user.id, user.orgNodeId] as const));
+  const scopeTargets = parseTemplateScopeTargets(formData, memberOrgNodeIdById);
 
   const templateKey = `${buildDepartmentTemplateKey(department.id)}-${Date.now()}`;
 
@@ -679,6 +748,7 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
         isActive: true,
         approvedAt: new Date(),
         createdById: context.currentUser.id,
+        updatedById: context.currentUser.id,
       },
     });
 
@@ -694,15 +764,15 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
       })),
     });
 
-    await tx.kpiTemplateAssignment.create({
-      data: {
+    await tx.kpiTemplateAssignment.createMany({
+      data: scopeTargets.map((target) => ({
         templateId: template.id,
-        targetType,
-        targetUserId,
-        targetOrgNodeId,
-        targetRoleType,
+        targetType: target.targetType,
+        targetUserId: target.targetUserId,
+        targetOrgNodeId: target.targetOrgNodeId,
+        targetRoleType: target.targetRoleType,
         isActive: true,
-      },
+      })),
     });
 
     return template;
@@ -714,9 +784,94 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
   return {
     templateId: created.id,
     templateName: created.name,
+    departmentOrgNodeId: created.departmentOrgNodeId,
     itemCount: items.length,
-    targetType,
-    departmentOrgNodeId: department.id,
+    assignmentCount: scopeTargets.length,
+  };
+}
+
+export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpdateSummary> {
+  const context = await requireKpiTemplateEditor();
+  const templateId = requiredString(formData.get("templateId"), "模板");
+  const templateName = requiredString(formData.get("name"), "模板名称");
+  const description = optionalString(formData.get("description"));
+  const items = parseTemplateItemsFromFormData(formData);
+
+  const template = await prisma.kpiTemplate.findFirst({
+    where: {
+      id: templateId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      departmentOrgNodeId: true,
+    },
+  });
+
+  if (!template) {
+    throw new Error("模板不存在或已删除");
+  }
+
+  if (context.allowedDepartmentIds && !context.allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
+    throw new Error("无权编辑该部门模板");
+  }
+
+  const scopedUsers = await resolveScopedUsers(context.currentUser);
+  const memberOrgNodeIdById = new Map(scopedUsers.map((user) => [user.id, user.orgNodeId] as const));
+  const scopeTargets = parseTemplateScopeTargets(formData, memberOrgNodeIdById);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.kpiTemplate.update({
+      where: { id: template.id },
+      data: {
+        name: templateName,
+        description,
+        updatedById: context.currentUser.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    await tx.kpiTemplateItem.deleteMany({
+      where: { templateId: template.id },
+    });
+
+    await tx.kpiTemplateItem.createMany({
+      data: items.map((item) => ({
+        templateId: template.id,
+        name: item.name,
+        description: item.description,
+        score: item.score,
+        weight: 0,
+        scoringStandard: item.scoringStandard,
+        sortOrder: item.sortOrder,
+      })),
+    });
+
+    await tx.kpiTemplateAssignment.updateMany({
+      where: { templateId: template.id, isActive: true },
+      data: { isActive: false },
+    });
+
+    await tx.kpiTemplateAssignment.createMany({
+      data: scopeTargets.map((target) => ({
+        templateId: template.id,
+        targetType: target.targetType,
+        targetUserId: target.targetUserId,
+        targetOrgNodeId: target.targetOrgNodeId,
+        targetRoleType: target.targetRoleType,
+        isActive: true,
+      })),
+    });
+  });
+
+  revalidatePath("/kpi");
+  revalidatePath("/dashboard");
+
+  return {
+    templateId,
+    templateName,
+    itemCount: items.length,
+    departmentOrgNodeId: template.departmentOrgNodeId,
   };
 }
 

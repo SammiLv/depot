@@ -172,6 +172,7 @@ export async function getKpiData(currentUser: DataScopeInput) {
         select: {
           id: true,
           name: true,
+          description: true,
           createdById: true,
           updatedById: true,
           departmentOrgNodeId: true,
@@ -180,7 +181,48 @@ export async function getKpiData(currentUser: DataScopeInput) {
         },
       })
     : [];
-  const templateUserIds = [...new Set(templates.flatMap((template) => [template.createdById, template.updatedById].filter((id): id is string => Boolean(id))))];
+  const templateItems = templates.length
+    ? await prisma.kpiTemplateItem.findMany({
+        where: { templateId: { in: templates.map((template) => template.id) } },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: {
+          id: true,
+          templateId: true,
+          name: true,
+          description: true,
+          score: true,
+          scoringStandard: true,
+          sortOrder: true,
+        },
+      })
+    : [];
+  const templateItemsByTemplateId = new Map<string, typeof templateItems>();
+  for (const item of templateItems) {
+    const items = templateItemsByTemplateId.get(item.templateId) ?? [];
+    items.push(item);
+    templateItemsByTemplateId.set(item.templateId, items);
+  }
+  const templateAssignments = templates.length
+    ? await prisma.kpiTemplateAssignment.findMany({
+        where: { templateId: { in: templates.map((template) => template.id) }, isActive: true },
+        select: {
+          templateId: true,
+          targetType: true,
+          targetUserId: true,
+          targetOrgNodeId: true,
+        },
+      })
+    : [];
+  const templateAssignmentsByTemplateId = new Map<string, typeof templateAssignments>();
+  for (const assignment of templateAssignments) {
+    const items = templateAssignmentsByTemplateId.get(assignment.templateId) ?? [];
+    items.push(assignment);
+    templateAssignmentsByTemplateId.set(assignment.templateId, items);
+  }
+  const templateUserIds = [...new Set([
+    ...templates.flatMap((template) => [template.createdById, template.updatedById].filter((id): id is string => Boolean(id))),
+    ...templateAssignments.flatMap((assignment) => assignment.targetUserId ? [assignment.targetUserId] : []),
+  ])];
   const templateUsers = templateUserIds.length
     ? await prisma.user.findMany({
         where: { id: { in: templateUserIds } },
@@ -207,6 +249,9 @@ export async function getKpiData(currentUser: DataScopeInput) {
       departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(orgNode.id) ?? null,
     }));
 
+  const teamNameById = new Map(teamOptions.map((team) => [team.id, team.name] as const));
+  const memberNameById = new Map(users.map((user) => [user.id, user.name] as const));
+
   return {
     year,
     quarter,
@@ -229,12 +274,45 @@ export async function getKpiData(currentUser: DataScopeInput) {
     templateRows: templates.map((template) => ({
       id: template.id,
       name: template.name,
+      description: template.description,
       createdByName: templateUserById.get(template.createdById) ?? "—",
       updatedByName: template.updatedById ? (templateUserById.get(template.updatedById) ?? "—") : "—",
-      scopeName: departmentNameById.get(template.departmentOrgNodeId) ?? "—",
+      scopeName: (() => {
+        const assignments = templateAssignmentsByTemplateId.get(template.id) ?? [];
+        const labels = assignments.map((assignment) => {
+          if (assignment.targetType === "ORG_NODE") {
+            return assignment.targetOrgNodeId ? (teamNameById.get(assignment.targetOrgNodeId) ?? departmentNameById.get(assignment.targetOrgNodeId) ?? "—") : "—";
+          }
+          if (assignment.targetType === "USER") {
+            return assignment.targetUserId ? (memberNameById.get(assignment.targetUserId) ?? "—") : "—";
+          }
+          return "—";
+        }).filter((label, index, list) => label !== "—" && list.indexOf(label) === index);
+        return labels.length ? labels.join("、") : "—";
+      })(),
+      scopeTeamIds: (() => {
+        const assignments = templateAssignmentsByTemplateId.get(template.id) ?? [];
+        return [...new Set(assignments
+          .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId)
+          .map((assignment) => assignment.targetOrgNodeId as string))];
+      })(),
+      scopeUserIds: (() => {
+        const assignments = templateAssignmentsByTemplateId.get(template.id) ?? [];
+        return [...new Set(assignments
+          .filter((assignment) => assignment.targetType === "USER" && assignment.targetUserId)
+          .map((assignment) => assignment.targetUserId as string))];
+      })(),
       createdAt: template.createdAt.toISOString(),
       updatedAt: template.updatedAt.toISOString(),
       departmentOrgNodeId: template.departmentOrgNodeId,
+      items: (templateItemsByTemplateId.get(template.id) ?? []).map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        score: item.score,
+        scoringStandard: item.scoringStandard,
+        sortOrder: item.sortOrder,
+      })),
     })),
   };
 }
