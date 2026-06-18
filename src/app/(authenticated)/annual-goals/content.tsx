@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentProps, type FormEvent } from "react";
+import { useEffect, useState, type ComponentProps, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button as UiButton, Card, Progress } from "@/components/ui-kit";
 import { createAnnualGoalMetric, createAnnualGoalMetricSource, createAnnualGoalPlan, deleteAnnualGoalMetric, deleteAnnualGoalMetricSource, deleteAnnualGoalPlan, deleteAnnualGoalQuarterTargets, saveAnnualGoalQuarterTargets, updateAnnualGoalMetric, updateAnnualGoalMetricSource, updateAnnualGoalPlan, updateAnnualGoalQuarterProgress, updateAnnualGoalWeeklyProgress } from "@/server/annual-goals/actions";
@@ -90,6 +90,18 @@ function getQuarterTargetsTime(targets: Metric["quarterTargets"]) {
   if (targets.length === 0) return null;
   return {
     createdAt: targets.reduce((earliest, target) => new Date(target.createdAt) < new Date(earliest) ? target.createdAt : earliest, targets[0].createdAt),
+    updatedAt: targets.reduce<Date | string | null>((latest, target) => {
+      if (!target.updatedAt) return latest;
+      return !latest || new Date(target.updatedAt) > new Date(latest) ? target.updatedAt : latest;
+    }, null),
+    createdBy: targets.reduce<typeof targets[number] | null>((earliest, target) => {
+      if (!earliest) return target;
+      return new Date(target.createdAt) < new Date(earliest.createdAt) ? target : earliest;
+    }, null)?.createdBy ?? null,
+    updatedBy: targets.reduce<typeof targets[number] | null>((latest, target) => {
+      if (!latest || new Date(target.updatedAt) > new Date(latest.updatedAt)) return target;
+      return latest;
+    }, null)?.updatedBy ?? null,
     adjustedAt: targets.reduce<Date | string | null>((latest, target) => {
       if (!target.adjustedAt) return latest;
       return !latest || new Date(target.adjustedAt) > new Date(latest) ? target.adjustedAt : latest;
@@ -111,6 +123,11 @@ function formatMemberOptionLabel(member: Data["memberOptionsByDepartment"][strin
 
 function formatResponsibleUser(user: { name: string; title: string | null } | null) {
   if (!user) return "未指定";
+  return user.title ? `${user.name} · ${user.title}` : user.name;
+}
+
+function formatActor(user: { name: string; title: string | null } | null) {
+  if (!user) return "-";
   return user.title ? `${user.name} · ${user.title}` : user.name;
 }
 
@@ -453,9 +470,12 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const availableMetrics = plan.metrics.filter(canAddSourceMetric);
   const [selectedParentId, setSelectedParentId] = useState(initialParent?.id ?? availableMetrics[0]?.id ?? "");
-  const parentMetric = initialParent ?? availableMetrics.find((m) => m.id === selectedParentId);
+  const selectedParentMetric = availableMetrics.find((metric) => metric.id === selectedParentId) ?? null;
+  const parentMetric = sourceMetric
+    ? (initialParent ?? selectedParentMetric)
+    : (selectedParentMetric ?? initialParent ?? null);
   const departmentMemberOptions = parentMetric?.scopeDepartmentOrgNodeId ? (data.memberOptionsByDepartment[parentMetric.scopeDepartmentOrgNodeId] ?? []) : [];
-  const unitValue = sourceMetric?.unit ?? parentMetric?.unit ?? "";
+  const displayUnit = sourceMetric?.unit ?? selectedParentMetric?.unit ?? initialParent?.unit ?? "";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -465,8 +485,9 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
       const formData = new FormData(event.currentTarget);
       const nextFieldErrors: Record<string, string> = {};
       const name = String(formData.get("name") ?? "").trim();
-      const targetValue = String(formData.get("targetValue") ?? "").trim();
-      const unit = String(formData.get("unit") ?? unitValue).trim();
+      const rawTargetValue = String(formData.get("targetValue") ?? "").trim();
+      const targetValue = rawTargetValue ? Number(rawTargetValue) : NaN;
+      const unit = String(formData.get("unit") ?? displayUnit).trim();
 
       if (!parentMetric) {
         nextFieldErrors.parentMetricId = "请选择年度指标";
@@ -474,20 +495,29 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
       if (!name) {
         nextFieldErrors.name = "请输入元指标名称";
       }
-      if (!targetValue) {
+      if (!rawTargetValue) {
         nextFieldErrors.targetValue = "请输入目标值";
       }
       if (!unit) {
         nextFieldErrors.unit = "请输入单位";
       }
 
-      const targetValidationError = validateUnitValue(formData.get("targetValue"), unitValue, "目标值");
+      const targetValidationError = validateUnitValue(formData.get("targetValue"), displayUnit, "目标值");
       if (targetValidationError) {
         nextFieldErrors.targetValue = targetValidationError;
       }
-      const currentValidationError = validateUnitValue(formData.get("currentValue"), unitValue, "当前值");
+      const currentValidationError = validateUnitValue(formData.get("currentValue"), displayUnit, "当前值");
       if (currentValidationError) {
         nextFieldErrors.currentValue = currentValidationError;
+      }
+      if (!nextFieldErrors.targetValue && parentMetric && Number.isFinite(targetValue)) {
+        const siblingTargetTotal = parentMetric.sources.reduce((sum, source) => {
+          if (sourceMetric && source.id === sourceMetric.id) return sum;
+          return sum + source.targetValue;
+        }, 0);
+        if (roundValue(siblingTargetTotal + targetValue) > roundValue(parentMetric.rawTargetValue)) {
+          nextFieldErrors.targetValue = "超出父指标目标值，请重新填写";
+        }
       }
       if (Object.keys(nextFieldErrors).length > 0) {
         setFieldErrors(nextFieldErrors);
@@ -502,7 +532,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
 
   return (
     <form onSubmit={handleSubmit} noValidate>
-      {sourceMetric ? <input type="hidden" name="id" value={sourceMetric.id} /> : parentMetric && <input type="hidden" name="parentMetricId" value={parentMetric.id} />}
+      {sourceMetric ? <input type="hidden" name="id" value={sourceMetric.id} /> : <input type="hidden" name="parentMetricId" value={parentMetric?.id ?? ""} />}
       <div className="space-y-4">
         {!initialParent && !sourceMetric && (
           <div className="flex items-start gap-3">
@@ -528,17 +558,17 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">目标值 *</label>
-                <input name="targetValue" type="number" step={getNumberStep(unitValue)} defaultValue={formatInputValue(sourceMetric?.targetValue)} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
+                <input key={`source-target-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} name="targetValue" type="number" step={getNumberStep(displayUnit)} defaultValue={formatInputValue(sourceMetric?.targetValue)} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
                 {fieldErrors.targetValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.targetValue}</div>}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">当前值</label>
-                <input name="currentValue" type="number" step={getNumberStep(unitValue)} defaultValue={formatInputValue(sourceMetric?.currentValue, "0")} disabled={!!sourceMetric && sourceMetric.quarterTargets.length > 0} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
+                <input key={`source-current-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} name="currentValue" type="number" step={getNumberStep(displayUnit)} defaultValue={formatInputValue(sourceMetric?.currentValue, "0")} disabled={!!sourceMetric && sourceMetric.quarterTargets.length > 0} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.currentValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.currentValue}</div>}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">单位 *</label>
-                <input name="unit" defaultValue={sourceMetric?.unit ?? parentMetric.unit} disabled className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
+                <input key={`source-unit-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} name="unit" value={displayUnit} readOnly disabled className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.unit && <div className="mt-1 text-xs text-destructive">{fieldErrors.unit}</div>}
               </div>
             </div>
@@ -1242,19 +1272,20 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
       <div className="overflow-x-auto">
         {tab === "metrics" && (
           <>
-          <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.7fr_0.7fr_1.1fr_1.6fr_0.25fr_1.1fr_1.1fr_1.1fr] gap-3 text-xs text-muted-foreground">
+          <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.7fr_0.7fr_1.1fr_1.6fr_0.25fr_1fr_1fr_1fr_1fr] gap-3 text-xs text-muted-foreground">
             <div>指标项</div>
             <div className="text-right">权重</div>
             <div>目标 / 当前</div>
             <div>完成度</div>
             <div />
+            <div>创建人</div>
             <div>创建时间</div>
-            <div>最后更新</div>
+            <div>最后更新人</div>
             <div>最后更新时间</div>
           </div>
           <div className="divide-y divide-border">
             {plan.metrics.map((metric) => (
-              <div key={metric.id} className="px-5 py-4 grid grid-cols-[1.7fr_0.7fr_1.1fr_1.6fr_0.25fr_1.1fr_1.1fr_1.1fr] gap-3 items-center hover:bg-muted/20 transition">
+              <div key={metric.id} className="px-5 py-4 grid grid-cols-[1.7fr_0.7fr_1.1fr_1.6fr_0.25fr_1fr_1fr_1fr_1fr] gap-3 items-center hover:bg-muted/20 transition">
                 <div>
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium">{metric.name}</div>
@@ -1286,8 +1317,9 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
                   </div>
                 </div>
                 <div />
+                <div className="text-xs text-muted-foreground">{formatActor(metric.createdBy)}</div>
                 <div className="text-xs text-muted-foreground">{formatDateTime(metric.createdAt)}</div>
-                <div className="text-xs text-muted-foreground">{metric.progressUpdatedAt ? formatDateTime(metric.progressUpdatedAt) : "-"}</div>
+                <div className="text-xs text-muted-foreground">{formatActor(metric.updatedBy)}</div>
                 <div className="text-xs text-muted-foreground">{formatDateTime(metric.updatedAt)}</div>
               </div>
             ))}
@@ -1299,19 +1331,20 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
         <div className="overflow-x-auto">
           {plan.ownerType === "DEPARTMENT" ? (
             <div className="min-w-[1400px]">
-              <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_1.2fr_1.1fr_1.4fr_0.25fr_1.1fr_1.1fr_1.1fr] gap-3 text-xs text-muted-foreground">
+              <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_1.2fr_1.1fr_1.4fr_0.25fr_1fr_1fr_1fr_1fr] gap-3 text-xs text-muted-foreground">
                 <div>元指标</div>
                 <div>所属指标项</div>
                 <div>目标 | 当前</div>
                 <div>完成度</div>
                 <div />
+                <div>创建人</div>
                 <div>创建时间</div>
-                <div>最后更新</div>
+                <div>最后更新人</div>
                 <div>最后更新时间</div>
               </div>
               <div className="divide-y divide-border">
                 {sourceRows.map(({ metric, source }) => (
-                  <div key={source.id} className="px-5 py-4 grid grid-cols-[1.2fr_1.2fr_1.1fr_1.4fr_0.25fr_1.1fr_1.1fr_1.1fr] gap-3 items-center hover:bg-muted/20 transition text-sm">
+                  <div key={source.id} className="px-5 py-4 grid grid-cols-[1.2fr_1.2fr_1.1fr_1.4fr_0.25fr_1fr_1fr_1fr_1fr] gap-3 items-center hover:bg-muted/20 transition text-sm">
                     <div>
                       <div className="font-medium">{source.name}</div>
                       {source.description && <div className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{source.description}</div>}
@@ -1338,8 +1371,9 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
                       <span className="text-xs font-semibold tabular-nums w-9 text-right">{formatPercent(source.progress)}%</span>
                     </div>
                     <div />
+                    <div className="text-xs text-muted-foreground">{formatActor(source.createdBy)}</div>
                     <div className="text-xs text-muted-foreground">{formatDateTime(source.createdAt)}</div>
-                    <div className="text-xs text-muted-foreground">{source.progressUpdatedAt ? formatDateTime(source.progressUpdatedAt) : "-"}</div>
+                    <div className="text-xs text-muted-foreground">{formatActor(source.updatedBy)}</div>
                     <div className="text-xs text-muted-foreground">{formatDateTime(source.updatedAt)}</div>
                   </div>
                 ))}
@@ -1354,15 +1388,16 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
       {tab === "quarters" && (
         <div className="overflow-x-auto">
           <div className="min-w-[1540px]">
-            <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.5fr_1.2fr_1.2fr_1.2fr_1.2fr_0.75fr_0.75fr_0.75fr_0.75fr] gap-4 text-xs text-muted-foreground">
+            <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.5fr_1.2fr_1.2fr_1.2fr_1.2fr_0.75fr_1fr_1fr_1fr_1fr] gap-4 text-xs text-muted-foreground">
               <div>指标</div>
               <div>Q1目标 | Q1当前 | 完成度</div>
               <div>Q2目标 | Q2当前 | 完成度</div>
               <div>Q3目标 | Q3当前 | 完成度</div>
               <div>Q4目标 | Q4当前 | 完成度</div>
               <div>本周新增</div>
+              <div>创建人</div>
               <div>创建时间</div>
-              <div>最后更新</div>
+              <div>最后更新人</div>
               <div>最后更新时间</div>
             </div>
             <div className="divide-y divide-border">
@@ -1370,7 +1405,7 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
                 const targetByQuarter = new Map(row.subject.quarterTargets.map((target) => [target.quarter, target]));
                 const time = getQuarterTargetsTime(row.subject.quarterTargets);
                 return (
-                  <div key={row.key} className="px-5 py-4 grid grid-cols-[1.5fr_1.2fr_1.2fr_1.2fr_1.2fr_0.75fr_0.75fr_0.75fr_0.75fr] gap-4 items-center hover:bg-muted/20 transition text-sm">
+                  <div key={row.key} className="px-5 py-4 grid grid-cols-[1.5fr_1.2fr_1.2fr_1.2fr_1.2fr_0.75fr_1fr_1fr_1fr_1fr] gap-4 items-center hover:bg-muted/20 transition text-sm">
                     <div className={row.depth ? "pl-5" : ""}>
                       <div className="flex items-center gap-2">
                         <div className="font-medium">{row.subject.name}</div>
@@ -1406,8 +1441,9 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
                       );
                     })}
                     <div className="text-xs text-muted-foreground font-medium">{formatValue(row.subject.quarterTargets.reduce((sum, target) => sum + target.weeklyIncrement, 0))}{row.subject.unit}</div>
+                    <div className="text-xs text-muted-foreground">{formatActor(time?.createdBy ?? null)}</div>
                     <div className="text-xs text-muted-foreground">{time ? formatDateTime(time.createdAt) : "-"}</div>
-                    <div className="text-xs text-muted-foreground">{time?.progressUpdatedAt ? formatDateTime(time.progressUpdatedAt) : "-"}</div>
+                    <div className="text-xs text-muted-foreground">{formatActor(time?.updatedBy ?? null)}</div>
                     <div className="text-xs text-muted-foreground">{time?.updatedAt ? formatDateTime(time.updatedAt) : "-"}</div>
                   </div>
                 );
@@ -1652,7 +1688,7 @@ export function AnnualGoalsContent({ data }: Props) {
                 onDeleteQuarterTargets={(metric, sourceMetric) => setDeleteQuarterTargets({ metric, sourceMetric })}
                 onQuarterProgress={(metric, sourceMetric) => setQuarterProgressDialog({ metric, sourceMetric })}
                 onWeeklyProgress={() => activePlan && setWeeklyProgressPlan(activePlan)}
-                onChooseQuarterTarget={() => activePlan && setQuarterChooserPlan(activePlan)}
+                onChooseQuarterTarget={() => activePlan && setQuarterTargetSetupPlan(activePlan)}
               />
             </div>
           ) : (
@@ -1672,7 +1708,7 @@ export function AnnualGoalsContent({ data }: Props) {
         {metricDialog && <MetricForm plan={metricDialog.plan} metric={metricDialog.metric} data={data} onClose={() => { setMetricDialog(null); router.refresh(); }} />}
       </Dialog>
       <Dialog open={!!sourceMetricDialog} onClose={() => { setSourceMetricDialog(null); router.refresh(); }} title={sourceMetricDialog?.sourceMetric ? "调整元指标" : "拆解元指标"}>
-        {sourceMetricDialog && <SourceMetricForm plan={sourceMetricDialog.plan} parentMetric={sourceMetricDialog.parentMetric} sourceMetric={sourceMetricDialog.sourceMetric} data={data} onClose={() => { setSourceMetricDialog(null); router.refresh(); }} />}
+        {sourceMetricDialog && <SourceMetricForm key={`${sourceMetricDialog.sourceMetric?.id ?? "new"}:${sourceMetricDialog.parentMetric?.id ?? "none"}:${sourceMetricDialog.plan.id}`} plan={sourceMetricDialog.plan} parentMetric={sourceMetricDialog.parentMetric} sourceMetric={sourceMetricDialog.sourceMetric} data={data} onClose={() => { setSourceMetricDialog(null); router.refresh(); }} />}
       </Dialog>
       <Dialog open={!!quarterTargetSetupPlan} onClose={() => { setQuarterTargetSetupPlan(null); router.refresh(); }} title="拆解季度指标">
         {quarterTargetSetupPlan && <QuarterTargetSetupForm plan={quarterTargetSetupPlan} onClose={() => { setQuarterTargetSetupPlan(null); router.refresh(); }} />}
