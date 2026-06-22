@@ -37,6 +37,12 @@ type ResponsibleUserSummary = {
   title: string | null;
 };
 
+type ActorSummary = {
+  id: string;
+  name: string;
+  title: string | null;
+};
+
 type MetricSourceData = {
   id: string;
   parentMetricId: string;
@@ -52,10 +58,13 @@ type MetricSourceData = {
   responsibleUser: ResponsibleUserSummary | null;
   progress: number;
   tone: "warning" | "primary";
+  createdBy: ActorSummary | null;
+  updatedBy: ActorSummary | null;
   createdAt: Date;
+  updatedAt: Date;
   adjustedAt: Date | null;
   progressUpdatedAt: Date | null;
-  quarterTargets: { id: string; metricId: string; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
+  quarterTargets: { id: string; metricId: string; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdBy: ActorSummary | null; updatedBy: ActorSummary | null; createdAt: Date; updatedAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
 };
 
 type MetricData = {
@@ -78,10 +87,13 @@ type MetricData = {
   sortOrder: number;
   progress: number;
   tone: "warning" | "primary";
+  createdBy: ActorSummary | null;
+  updatedBy: ActorSummary | null;
   createdAt: Date;
+  updatedAt: Date;
   adjustedAt: Date | null;
   progressUpdatedAt: Date | null;
-  quarterTargets: { id: string; metricId: string; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
+  quarterTargets: { id: string; metricId: string; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdBy: ActorSummary | null; updatedBy: ActorSummary | null; createdAt: Date; updatedAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
   sources: MetricSourceData[];
 };
 
@@ -176,6 +188,11 @@ function sumValues<T>(items: T[], getValue: (item: T) => number) {
 }
 
 function mapResponsibleUser(user: { id: string; name: string; title: string | null } | null | undefined) {
+  if (!user) return null;
+  return { id: user.id, name: user.name, title: user.title };
+}
+
+function mapActor(user: { id: string; name: string; title: string | null } | null | undefined) {
   if (!user) return null;
   return { id: user.id, name: user.name, title: user.title };
 }
@@ -464,7 +481,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   const selectedSourceMetricIds = Array.from(new Set(teamMetrics.flatMap(({ metric }) => metric.sourceMetricId ? [metric.sourceMetricId] : [])));
   const selectedParentMetricCodes = Array.from(new Set(teamMetrics.flatMap(({ metric }) => metric.sourceMetricId ? [] : [metric.metricCode])));
 
-  const [baseQuarterTargets, metricSources, selectedDepartmentMetrics, scopedUsers] = await Promise.all([
+  const [baseQuarterTargets, metricSources, selectedDepartmentMetrics] = await Promise.all([
     metricIds.length
       ? prisma.annualGoalQuarterTarget.findMany({
           where: { metricId: { in: metricIds }, deletedAt: null },
@@ -493,17 +510,6 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
           include: { plan: true },
         })
       : [],
-    scopedUsersOrgNodeIds.length
-      ? prisma.user.findMany({
-          where: {
-            isActive: true,
-            deletedAt: null,
-            orgNodeId: { in: scopedUsersOrgNodeIds },
-          },
-          orderBy: [{ orgNodeId: "asc" }, { name: "asc" }],
-          select: { id: true, name: true, title: true, orgNodeId: true },
-        })
-      : [],
   ]);
 
   const inheritedMetricIds = new Set<string>();
@@ -520,6 +526,26 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
       })
     : [];
   const quarterTargets = [...baseQuarterTargets, ...inheritedQuarterTargets];
+  const creatorUpdaterUserIds = Array.from(new Set([
+    ...plans.map((plan) => plan.createdById),
+    ...allPlans.flatMap((plan) => plan.metrics.flatMap((metric) => [metric.createdById, metric.updatedById].filter((userId): userId is string => Boolean(userId)))),
+    ...metricSources.flatMap((source) => [source.createdById, source.updatedById].filter((userId): userId is string => Boolean(userId))),
+    ...quarterTargets.flatMap((target) => [target.createdById, target.updatedById].filter((userId): userId is string => Boolean(userId))),
+  ]));
+  const scopedUsers = scopedUsersOrgNodeIds.length || creatorUpdaterUserIds.length
+    ? await prisma.user.findMany({
+        where: {
+          isActive: true,
+          deletedAt: null,
+          OR: [
+            ...(scopedUsersOrgNodeIds.length ? [{ orgNodeId: { in: scopedUsersOrgNodeIds } }] : []),
+            ...(creatorUpdaterUserIds.length ? [{ id: { in: creatorUpdaterUserIds } }] : []),
+          ],
+        },
+        orderBy: [{ orgNodeId: "asc" }, { name: "asc" }],
+        select: { id: true, name: true, title: true, orgNodeId: true },
+      })
+    : [];
   const sourceById = new Map(metricSources.map((source) => [source.id, source]));
   const userById = new Map(scopedUsers.map((user) => [user.id, user]));
   const memberOptionsByDepartment = Object.fromEntries(
@@ -638,7 +664,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
         sortOrder: m.sortOrder,
         progress: roundPercent(progress),
         tone: (m.riskStatus === "RISK" ? "warning" : "primary") as "warning" | "primary",
+        createdBy: mapActor(m.createdById ? userById.get(m.createdById) : null),
+        updatedBy: mapActor(m.updatedById ? userById.get(m.updatedById) : null),
         createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
         adjustedAt: m.adjustedAt,
         progressUpdatedAt: m.progressUpdatedAt,
         quarterTargets: qTargets.map((qt) => ({
@@ -649,7 +678,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
           targetValue: roundValue(qt.targetValue),
           currentValue: roundValue(qt.currentValue),
           weeklyIncrement: roundValue(qt.weeklyIncrement),
+          createdBy: mapActor(qt.createdById ? userById.get(qt.createdById) : null),
+          updatedBy: mapActor(qt.updatedById ? userById.get(qt.updatedById) : null),
           createdAt: qt.createdAt,
+          updatedAt: qt.updatedAt,
           adjustedAt: qt.adjustedAt,
           progressUpdatedAt: qt.progressUpdatedAt,
         })),
@@ -672,7 +704,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
             responsibleUser: mapResponsibleUser(source.responsibleUserId ? userById.get(source.responsibleUserId) : null),
             progress: roundPercent(sourceProgress),
             tone: (source.riskStatus === "RISK" ? "warning" : "primary") as "warning" | "primary",
+            createdBy: mapActor(source.createdById ? userById.get(source.createdById) : null),
+            updatedBy: mapActor(source.updatedById ? userById.get(source.updatedById) : null),
             createdAt: source.createdAt,
+            updatedAt: source.updatedAt,
             adjustedAt: source.adjustedAt,
             progressUpdatedAt: source.progressUpdatedAt,
             quarterTargets: sourceQuarterTargets.map((qt) => ({
@@ -683,7 +718,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
               targetValue: roundValue(qt.targetValue),
               currentValue: roundValue(qt.currentValue),
               weeklyIncrement: roundValue(qt.weeklyIncrement),
+              createdBy: mapActor(qt.createdById ? userById.get(qt.createdById) : null),
+              updatedBy: mapActor(qt.updatedById ? userById.get(qt.updatedById) : null),
               createdAt: qt.createdAt,
+              updatedAt: qt.updatedAt,
               adjustedAt: qt.adjustedAt,
               progressUpdatedAt: qt.progressUpdatedAt,
             })),

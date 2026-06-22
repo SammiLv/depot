@@ -276,6 +276,7 @@ model AnnualGoalMetricSource {
   adjustedAt        DateTime?
   progressUpdatedAt DateTime?
   createdById       String
+  updatedById       String?
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
   deletedAt         DateTime?
@@ -306,6 +307,8 @@ model AnnualGoalMetric {
   sortOrder         Int                         @default(0)
   adjustedAt        DateTime?
   progressUpdatedAt DateTime?
+  createdById       String?
+  updatedById       String?
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
   deletedAt         DateTime?
@@ -336,6 +339,8 @@ model AnnualGoalQuarterTarget {
   riskStatus        RiskStatus @default(NORMAL)
   adjustedAt        DateTime?
   progressUpdatedAt DateTime?
+  createdById       String?
+  updatedById       String?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
   deletedAt         DateTime?

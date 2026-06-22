@@ -587,8 +587,8 @@ export function QuarterlyWorkContent({ data }: Props) {
 
             {data.canCreate && (
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="w-4 h-4" />新增项目</Button>
-                <Button onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="w-4 h-4" />新增季度工作</Button>
+                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
+                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增季度工作</Button>
               </div>
             )}
           </div>

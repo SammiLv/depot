@@ -489,8 +489,8 @@ export function OrgContent({
       {syncMessage && <div className="-mt-3 mb-4 text-xs text-muted-foreground">{syncMessage}</div>}
 
       <Card className="mb-4 !p-0 overflow-hidden">
-        <div className="p-4 border-b border-border">
-          <div className="flex flex-wrap gap-2">
+        <div className="p-6 border-b border-border">
+          <div className="flex flex-wrap gap-10">
             {scopeOptions.map((option) => {
               const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;
               return (
@@ -508,13 +508,12 @@ export function OrgContent({
                     }
                     router.push(`/organization?${nextParams.toString()}`);
                   }}
-                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
-                    active
-                      ? "border-primary bg-primary/5 text-primary"
-                      : "border-border bg-background text-muted-foreground hover:text-foreground"
-                  }`}
+                  className="relative pb-3"
                 >
-                  {option.label}
+                  <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                    {option.label}
+                  </span>
+                  {active ? <span className="absolute left-0 bottom-0 h-0.5 w-10 bg-primary" /> : null}
                 </button>
               );
             })}
