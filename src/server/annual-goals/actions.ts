@@ -1060,7 +1060,7 @@ export async function updateAnnualGoalQuarterProgress(formData: FormData) {
   const sourceMetricId = (formData.get("sourceMetricId") as string) || null;
   if (!metricId) throw new Error("缺少季度指标 ID");
 
-  const { context, metric } = await assertQuarterProgressUpdatable(metricId, sourceMetricId);
+  const { context } = await assertQuarterProgressUpdatable(metricId, sourceMetricId);
 
   const updates = [1, 2, 3, 4].flatMap((quarter) => {
     const targetId = formData.get(`q${quarter}Id`) as string | null;
@@ -1101,11 +1101,10 @@ export async function updateAnnualGoalWeeklyProgress(formData: FormData) {
     const metricId = formData.get(`metricId_${index}`) as string;
     const sourceMetricId = (formData.get(`sourceMetricId_${index}`) as string) || null;
     const weeklyIncrement = numberFromForm(formData.get(`weeklyIncrement_${index}`), "本周新增");
-    const currentValue = numberFromForm(formData.get(`currentValue_${index}`), "本季度当前值");
     if (!metricId) throw new Error("缺少指标项 ID");
-    if (weeklyIncrement < 0 || currentValue < 0) throw new Error("更新数值不能小于 0");
-    return { id: targetId, metricId, sourceMetricId, weeklyIncrement, currentValue };
-  }).filter((update): update is { id: string; metricId: string; sourceMetricId: string | null; weeklyIncrement: number; currentValue: number } => Boolean(update));
+    if (weeklyIncrement < 0) throw new Error("更新数值不能小于 0");
+    return { id: targetId, metricId, sourceMetricId, weeklyIncrement };
+  }).filter((update): update is { id: string; metricId: string; sourceMetricId: string | null; weeklyIncrement: number } => Boolean(update));
 
   if (updates.length === 0) throw new Error("暂无可更新的季度指标");
   if (new Set(updates.map((update) => update.id)).size !== updates.length) throw new Error("季度指标重复");
@@ -1121,19 +1120,20 @@ export async function updateAnnualGoalWeeklyProgress(formData: FormData) {
 
   const existingTargets = await prisma.annualGoalQuarterTarget.findMany({
     where: { id: { in: updates.map((target) => target.id) }, quarter: currentQuarter, deletedAt: null },
-    select: { id: true, metricId: true, sourceMetricId: true },
+    select: { id: true, metricId: true, sourceMetricId: true, currentValue: true },
   });
   const targetById = new Map(existingTargets.map((target) => [target.id, target]));
-  for (const update of updates) {
+  const normalizedUpdates = updates.map((update) => {
     const target = targetById.get(update.id);
     if (!target || target.metricId !== update.metricId || target.sourceMetricId !== update.sourceMetricId) {
       throw new Error("季度指标不存在");
     }
-  }
+    return { ...update, currentValue: Math.round(((target.currentValue ?? 0) + update.weeklyIncrement + Number.EPSILON) * 100) / 100 };
+  });
 
   const progressUpdatedAt = new Date();
   await prisma.$transaction(async (tx) => {
-    for (const update of updates) {
+    for (const update of normalizedUpdates) {
       await tx.annualGoalQuarterTarget.update({
         where: { id: update.id },
         data: { weeklyIncrement: update.weeklyIncrement, currentValue: update.currentValue, progressUpdatedAt, updatedById: pairs.get(`${update.metricId}:${update.sourceMetricId ?? ""}`)?.updatedById },

@@ -1023,9 +1023,7 @@ function QuarterWeeklyUpdateForm({ plan, onClose }: { plan: Plan; onClose: () =>
       const nextFieldErrors: Record<string, string> = {};
       rows.forEach((row, index) => {
         const weeklyKey = `weeklyIncrement_${index}`;
-        const currentKey = `currentValue_${index}`;
         const rawWeeklyValue = String(formData.get(weeklyKey) ?? "").trim();
-        const rawCurrentValue = String(formData.get(currentKey) ?? "").trim();
 
         if (rawWeeklyValue) {
           const weeklyNumber = Number(rawWeeklyValue);
@@ -1037,20 +1035,6 @@ function QuarterWeeklyUpdateForm({ plan, onClose }: { plan: Plan; onClose: () =>
             const weeklyError = validateUnitValue(formData.get(weeklyKey), row.subject.unit, "本周新增");
             if (weeklyError) {
               nextFieldErrors[weeklyKey] = weeklyError;
-            }
-          }
-        }
-
-        if (rawCurrentValue) {
-          const currentNumber = Number(rawCurrentValue);
-          if (Number.isNaN(currentNumber)) {
-            nextFieldErrors[currentKey] = "本季度当前值格式不正确";
-          } else if (currentNumber < 0) {
-            nextFieldErrors[currentKey] = "本季度当前值不能小于 0";
-          } else {
-            const currentError = validateUnitValue(formData.get(currentKey), row.subject.unit, "本季度当前值");
-            if (currentError) {
-              nextFieldErrors[currentKey] = currentError;
             }
           }
         }
@@ -1073,20 +1057,18 @@ function QuarterWeeklyUpdateForm({ plan, onClose }: { plan: Plan; onClose: () =>
         <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
           更新范围：<span className="font-medium text-foreground">{plan.ownerName}</span> · 仅更新当前季度 Q{currentQuarter}
         </div>
-        <div className="grid grid-cols-[1.8fr_0.6fr_0.9fr_1fr_1fr] gap-3 text-xs text-muted-foreground px-1">
+        <div className="grid grid-cols-[1.8fr_0.6fr_0.9fr_1fr] gap-3 text-xs text-muted-foreground px-1">
           <div>指标</div>
           <div>季度</div>
           <div>目标值</div>
           <div>本周新增</div>
-          <div>本季度当前值</div>
         </div>
         <div className="max-h-[55vh] overflow-y-auto space-y-2 pr-1">
           {rows.map((row, index) => {
             const weeklyKey = `weeklyIncrement_${index}`;
-            const currentKey = `currentValue_${index}`;
             const step = getNumberStep(row.subject.unit);
             return (
-              <div key={row.target.id} className="grid grid-cols-[1.8fr_0.6fr_0.9fr_1fr_1fr] gap-3 items-start">
+              <div key={row.target.id} className="grid grid-cols-[1.8fr_0.6fr_0.9fr_1fr] gap-3 items-start">
                 <input type="hidden" name={`targetId_${index}`} value={row.target.id} />
                 <input type="hidden" name={`metricId_${index}`} value={row.target.metricId} />
                 {row.target.sourceMetricId && <input type="hidden" name={`sourceMetricId_${index}`} value={row.target.sourceMetricId} />}
@@ -1099,10 +1081,6 @@ function QuarterWeeklyUpdateForm({ plan, onClose }: { plan: Plan; onClose: () =>
                 <div>
                   <input name={weeklyKey} type="number" step={step} defaultValue={formatInputValue(row.target.weeklyIncrement, "0")} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
                   {fieldErrors[weeklyKey] && <div className="mt-1 text-xs text-destructive">{fieldErrors[weeklyKey]}</div>}
-                </div>
-                <div>
-                  <input name={currentKey} type="number" step={step} defaultValue={formatInputValue(row.target.currentValue, "0")} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
-                  {fieldErrors[currentKey] && <div className="mt-1 text-xs text-destructive">{fieldErrors[currentKey]}</div>}
                 </div>
               </div>
             );
