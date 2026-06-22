@@ -470,12 +470,15 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const availableMetrics = plan.metrics.filter(canAddSourceMetric);
   const [selectedParentId, setSelectedParentId] = useState(initialParent?.id ?? availableMetrics[0]?.id ?? "");
+  const isEditing = Boolean(sourceMetric);
   const selectedParentMetric = availableMetrics.find((metric) => metric.id === selectedParentId) ?? null;
-  const parentMetric = sourceMetric
-    ? (initialParent ?? selectedParentMetric)
+  const parentMetric = isEditing
+    ? (initialParent ?? null)
     : (selectedParentMetric ?? initialParent ?? null);
+  const displayUnit = isEditing
+    ? (sourceMetric?.unit ?? parentMetric?.unit ?? "")
+    : (parentMetric?.unit ?? "");
   const departmentMemberOptions = parentMetric?.scopeDepartmentOrgNodeId ? (data.memberOptionsByDepartment[parentMetric.scopeDepartmentOrgNodeId] ?? []) : [];
-  const displayUnit = sourceMetric?.unit ?? selectedParentMetric?.unit ?? initialParent?.unit ?? "";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -533,6 +536,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
   return (
     <form onSubmit={handleSubmit} noValidate>
       {sourceMetric ? <input type="hidden" name="id" value={sourceMetric.id} /> : <input type="hidden" name="parentMetricId" value={parentMetric?.id ?? ""} />}
+      <input type="hidden" name="unit" value={displayUnit} />
       <div className="space-y-4">
         {!initialParent && !sourceMetric && (
           <div className="flex items-start gap-3">
@@ -568,7 +572,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">单位 *</label>
-                <input key={`source-unit-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} name="unit" value={displayUnit} readOnly disabled className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
+                <input key={`source-unit-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} value={displayUnit} readOnly disabled className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.unit && <div className="mt-1 text-xs text-destructive">{fieldErrors.unit}</div>}
               </div>
             </div>

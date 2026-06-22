@@ -871,7 +871,7 @@ export async function createAnnualGoalMetricSource(formData: FormData) {
   const description = optionalString(formData.get("description"));
   const targetValue = numberFromForm(formData.get("targetValue"), "目标值");
   const currentValue = numberFromForm(formData.get("currentValue") || "0", "当前值");
-  const unit = (formData.get("unit") as string)?.trim() || parentMetric.unit;
+  const unit = parentMetric.unit;
   const calculationType = formData.get("calculationType") as AnnualMetricCalculationType;
   const riskStatus = formData.get("riskStatus") as RiskStatus;
   const responsibleUserId = await resolveDepartmentResponsibleUserId((formData.get("responsibleUserId") as string) || null, {
