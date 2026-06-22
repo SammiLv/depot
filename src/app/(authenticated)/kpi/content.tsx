@@ -1190,8 +1190,8 @@ export function KpiContent({ data }: Props) {
               ) : (
                 <>
                   <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
-                  <Button className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
-                  <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button>
+                  <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
+                  <Button className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button>
                 </>
               )}
             </div>
