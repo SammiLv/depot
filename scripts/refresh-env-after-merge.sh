@@ -87,8 +87,47 @@ DEV_ALLOWED_ORIGINS_VALUE="$DERIVED_DEV_ALLOWED_ORIGINS"
 LOG_BASENAME="${START_SCRIPT//:/-}"
 LOG_DIR="$ROOT_DIR/scripts/log"
 LOG_FILE="$LOG_DIR/refresh-${LOG_BASENAME}.log"
+PID_FILE="$LOG_DIR/refresh-${LOG_BASENAME}.pid"
 
 mkdir -p "$LOG_DIR"
+
+stop_managed_service() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    return 0
+  fi
+
+  local pid
+  pid="$(tr -d '[:space:]' < "$PID_FILE")"
+  if [[ -z "$pid" ]]; then
+    rm -f "$PID_FILE"
+    return 0
+  fi
+
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    rm -f "$PID_FILE"
+    return 0
+  fi
+
+  local command
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$command" != *"$ROOT_DIR"* ]] || [[ "$command" != *"npm run $START_SCRIPT"* ]]; then
+    echo "==> PID $pid in $PID_FILE does not match $START_SCRIPT under $ROOT_DIR; refusing to stop it"
+    return 1
+  fi
+
+  echo "==> Stopping managed PID: $pid"
+  kill "$pid"
+  for _ in {1..10}; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      rm -f "$PID_FILE"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Managed PID $pid did not stop within 10 seconds"
+  return 1
+}
 
 echo "==> Using start script: $START_SCRIPT"
 echo "==> Using port: $PORT"
@@ -109,12 +148,8 @@ npx prisma db push --config db/prisma.config.ts --accept-data-loss
 echo "==> Building app"
 npm run build
 
-echo "==> Stopping existing service on port $PORT"
-EXISTING_PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN || true)"
-if [[ -n "$EXISTING_PIDS" ]]; then
-  echo "==> Killing existing PID(s): $EXISTING_PIDS"
-  kill $EXISTING_PIDS
-fi
+echo "==> Stopping existing managed service (if any)"
+stop_managed_service
 
 echo "==> Starting service with $START_SCRIPT"
 if [[ -n "$DEV_ALLOWED_ORIGINS_VALUE" ]]; then
@@ -131,11 +166,20 @@ else
     APP_URL="$APP_URL" \
     npm run "$START_SCRIPT" >"$LOG_FILE" 2>&1 &
 fi
+SERVICE_PID=$!
+printf '%s\n' "$SERVICE_PID" > "$PID_FILE"
 
 echo "==> Waiting for service to accept connections"
 for _ in {1..30}; do
+  if ! kill -0 "$SERVICE_PID" >/dev/null 2>&1; then
+    echo "Managed service PID $SERVICE_PID exited unexpectedly. Check $LOG_FILE"
+    rm -f "$PID_FILE"
+    exit 1
+  fi
   if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Service is listening on port $PORT"
+    echo "Managed PID: $SERVICE_PID"
+    echo "PID file: $PID_FILE"
     echo "Log file: $LOG_FILE"
     exit 0
   fi
@@ -143,4 +187,5 @@ for _ in {1..30}; do
 done
 
 echo "Service failed to start within 30 seconds. Check $LOG_FILE"
+rm -f "$PID_FILE"
 exit 1
