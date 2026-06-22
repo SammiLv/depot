@@ -55,3 +55,6 @@ prototyes/**/tsconfig.tsbuildinfo
 
 # prototype workspace
 prototyes/**/.workspace
+
+# kpi import test files
+kpi-*.xlsx
