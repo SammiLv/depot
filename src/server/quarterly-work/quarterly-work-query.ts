@@ -184,7 +184,7 @@ function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined, orgNode
   return node?.nodeType === "TEAM" ? node.id : null;
 }
 
-export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
+export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?: { selectedYear?: number; selectedQuarter?: number }) {
   const ownerWhere = await getOwnerWhereByScope(currentUser);
   const scopedOrgNodeIds = currentUser.roleType === "ADMIN"
     ? null
@@ -229,8 +229,14 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
     }));
 
   const now = new Date();
-  const activeYear = works[0]?.year ?? now.getFullYear();
-  const activeQuarter = works[0]?.quarter ?? Math.floor(now.getMonth() / 3) + 1;
+  const fallbackYear = works[0]?.year ?? now.getFullYear();
+  const fallbackQuarter = works[0]?.quarter ?? Math.floor(now.getMonth() / 3) + 1;
+  const availableYears = Array.from(new Set(works.map((work) => work.year))).sort((a, b) => b - a);
+  if (!availableYears.includes(fallbackYear)) availableYears.unshift(fallbackYear);
+  const activeYear = availableYears.includes(options?.selectedYear ?? Number.NaN) ? options!.selectedYear! : fallbackYear;
+  const quarterSource = works.filter((work) => work.year === activeYear).map((work) => work.quarter);
+  const availableQuarters = Array.from(new Set((quarterSource.length ? quarterSource : [fallbackQuarter]))).sort((a, b) => a - b);
+  const activeQuarter = availableQuarters.includes(options?.selectedQuarter ?? Number.NaN) ? options!.selectedQuarter! : (availableQuarters.includes(fallbackQuarter) ? fallbackQuarter : availableQuarters[0]);
   const activeWorks = works.filter((work) => work.year === activeYear && work.quarter === activeQuarter);
 
   const workIds = activeWorks.map((work) => work.id);
@@ -357,6 +363,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput) {
   return {
     year: activeYear,
     quarter: activeQuarter,
+    availableYears,
+    availableQuarters,
     projectColumns,
     columns,
     totalCount: activeWorks.length,

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
 import { createProject, createQuarterlyWork, updateProject, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -109,7 +110,8 @@ function QuarterlyWorkForm({
     () => new Map(data.projectOptions.map((project) => [project.id, project])),
     [data.projectOptions]
   );
-  const selectedProjectId = item?.projectId ?? defaultProjectId ?? "";
+  const initialProjectId = item?.projectId ?? defaultProjectId ?? data.projectOptions[0]?.id ?? "";
+  const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const selectedProject = selectedProjectId ? projectOptionById.get(selectedProjectId) ?? null : null;
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
@@ -143,12 +145,19 @@ function QuarterlyWorkForm({
             name="projectId"
             defaultValue={selectedProjectId}
             disabled={mode === "edit"}
+            onChange={(event) => setSelectedProjectId(event.target.value)}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
           >
             {data.projectOptions.map((project) => (
               <option key={project.id} value={project.id}>{project.title}</option>
             ))}
           </select>
+        </FormRow>
+        <FormRow label="项目预期收益 *">
+          <input type="hidden" name="expectedOutcome" value={item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? ""} />
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+            <div className="whitespace-pre-wrap break-words">{item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? "-"}</div>
+          </div>
         </FormRow>
         <FormRow label="季度工作名称 *" align="center">
           <input
@@ -179,17 +188,6 @@ function QuarterlyWorkForm({
             rows={4}
             placeholder="请输入本季度工作目标"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-          />
-        </FormRow>
-        <FormRow label="项目预期收益 *">
-          <textarea
-            name="expectedOutcome"
-            required
-            defaultValue={item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? ""}
-            rows={3}
-            placeholder="请输入项目预期收益"
-            readOnly={mode === "create" && Boolean(selectedProject)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none read-only:cursor-not-allowed read-only:bg-muted"
           />
         </FormRow>
         <FormRow label="季度工作状态" align="center">
@@ -463,6 +461,9 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
 }
 
 export function QuarterlyWorkContent({ data }: Props) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<BoardTab>("project");
   const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentOrgNodeId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
@@ -491,6 +492,12 @@ export function QuarterlyWorkContent({ data }: Props) {
     if (teamTab !== "all" && ownerTeamOrgNodeId !== teamTab) {
       setTeamTab("all");
     }
+  };
+  const updatePeriodFilters = (nextYear: number, nextQuarter: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("year", String(nextYear));
+    params.set("quarter", String(nextQuarter));
+    router.push(`${pathname}?${params.toString()}`);
   };
   const visibleColumns = useMemo(
     () => data.columns.map((column) => ({
@@ -525,7 +532,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     <>
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
-          <h1 className="text-3xl font-semibold tracking-tight">{data.year} Q{data.quarter} 季度工作</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">季度工作</h1>
           <p className="mt-2 text-sm text-muted-foreground">按小组规划季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
         </div>
 
@@ -590,6 +597,31 @@ export function QuarterlyWorkContent({ data }: Props) {
                 <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增季度工作</Button>
               </div>
             )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                <select
+                  value={String(data.year)}
+                  onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), data.quarter)}
+                  className="h-full bg-transparent outline-none"
+                >
+                  {data.availableYears.map((year) => (
+                    <option key={year} value={year}>{year} 年</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                <select
+                  value={String(data.quarter)}
+                  onChange={(event) => updatePeriodFilters(data.year, Number.parseInt(event.target.value, 10))}
+                  className="h-full bg-transparent outline-none"
+                >
+                  {data.availableQuarters.map((quarter) => (
+                    <option key={quarter} value={quarter}>Q{quarter}季度</option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
 
           <div className="text-xs text-muted-foreground">
