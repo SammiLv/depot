@@ -450,7 +450,8 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
       orgNodeId: node.id,
       name: node.name,
       departmentOrgNodeId: node.parentId!,
-    }));
+    }))
+    .sort((a, b) => compareTeamNames(a.name, b.name));
   const scopedDepartmentOrgNodeIds = Array.from(new Set([
     ...teams.map((team) => team.departmentOrgNodeId),
     ...plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),

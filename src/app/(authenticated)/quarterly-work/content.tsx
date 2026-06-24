@@ -145,7 +145,6 @@ function QuarterlyWorkForm({
             disabled={mode === "edit"}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
           >
-            <option value="">新建项目并关联当前季度工作</option>
             {data.projectOptions.map((project) => (
               <option key={project.id} value={project.id}>{project.title}</option>
             ))}
@@ -524,7 +523,7 @@ export function QuarterlyWorkContent({ data }: Props) {
 
   return (
     <>
-      <Card className="mb-4 p-0 overflow-hidden">
+      <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
           <h1 className="text-3xl font-semibold tracking-tight">{data.year} Q{data.quarter} 季度工作</h1>
           <p className="mt-2 text-sm text-muted-foreground">按小组规划季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>

@@ -155,7 +155,10 @@ async function resolveResponsibleUserId(
 ) {
   if (!responsibleUserId) return null;
 
-  const orgScopeIds = scope.ownerOrgNodeId ? await getDescendantOrgNodeIds(scope.ownerOrgNodeId) : [];
+  const orgScopeIds = Array.from(new Set([
+    ...(scope.ownerOrgNodeId ? [scope.ownerOrgNodeId] : []),
+    ...(scope.ownerOrgNodeId ? await getDescendantOrgNodeIds(scope.ownerOrgNodeId) : []),
+  ]));
   if (orgScopeIds.length === 0) throw new Error(emptyMessage);
 
   const user = await prisma.user.findFirst({
@@ -672,16 +675,17 @@ export async function createAnnualGoalMetric(formData: FormData) {
 
   if (plan.ownerType === "TEAM") {
     if (!!sourceMetricId === !!parentMetricId) throw new Error("请选择一个指标项或元指标");
+    const teamDepartmentOrgNodeId = plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(plan.ownerOrgNodeId) : null;
     const responsibleUserId = await resolveTeamResponsibleUserId(responsibleUserIdInput, {
-      departmentOrgNodeId: plan.ownerOrgNodeId,
+      departmentOrgNodeId: teamDepartmentOrgNodeId,
       teamOrgNodeId: plan.ownerOrgNodeId,
       ownerOrgNodeId: plan.ownerOrgNodeId,
     });
 
     if (sourceMetricId) {
       const sourceMetric = await assertSourceMetricAvailable(sourceMetricId, {
-        departmentOrgNodeId: plan.ownerOrgNodeId,
-        ownerOrgNodeId: plan.ownerOrgNodeId,
+        departmentOrgNodeId: teamDepartmentOrgNodeId,
+        ownerOrgNodeId: teamDepartmentOrgNodeId,
       });
       await prisma.annualGoalMetric.create({
         data: {
@@ -710,7 +714,7 @@ export async function createAnnualGoalMetric(formData: FormData) {
     if (!parentMetric || parentMetric.deletedAt || parentMetric.plan.deletedAt) throw new Error("指标项不存在");
     if (
       parentMetric.plan.ownerType !== "DEPARTMENT"
-      || !isSameDepartmentScope(parentMetric.plan, plan)
+      || parentMetric.plan.ownerOrgNodeId !== teamDepartmentOrgNodeId
     ) throw new Error("只能选择本部门指标项");
 
     await prisma.annualGoalMetric.create({

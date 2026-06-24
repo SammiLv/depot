@@ -279,16 +279,23 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
   const availableParentMetrics = data.availableParentMetrics.filter(
     (m) => m.scopeDepartmentOrgNodeId === plan.scopeDepartmentOrgNodeId && (!plan.metrics.some((pm) => !pm.sourceMetricId && pm.metricCode === m.metricCode) || m.metricCode === metric?.metricCode)
   );
-  const [selectedParentMetricId, setSelectedParentMetricId] = useState(metric?.sourceMetricId ? metric.sourceMetricId : availableParentMetrics[0]?.id ?? "");
+  const editingParentMetricId = metric?.sourceMetricId
+    ? (availableParentMetrics.find((parentMetric) => parentMetric.sources.some((source) => source.id === metric.sourceMetricId))?.id ?? "")
+    : "";
+  const [selectedParentMetricId, setSelectedParentMetricId] = useState(editingParentMetricId || (availableParentMetrics[0]?.id ?? ""));
   const [selectedSourceMetricId, setSelectedSourceMetricId] = useState(metric?.sourceMetricId ?? "");
   const [unitValue, setUnitValue] = useState(metric?.unit ?? "");
-  const selectedParentMetric = availableParentMetrics.find((m) => m.id === (metric?.sourceMetricId ? availableParentMetrics.find((parentMetric) => parentMetric.sources.some((source) => source.id === metric.sourceMetricId))?.id : selectedParentMetricId));
+  const selectedParentMetric = availableParentMetrics.find((m) => m.id === (metric?.sourceMetricId ? editingParentMetricId : selectedParentMetricId));
   const availableSourceMetrics = (selectedParentMetric?.sources ?? []).filter(
     (m) => !plan.metrics.some((pm) => pm.sourceMetricId === m.id) || m.id === metric?.sourceMetricId
   );
   const teamMemberOptions = plan.teamOrgNodeId ? (data.memberOptionsByTeam[plan.teamOrgNodeId] ?? []) : [];
+  const teamMemberOptionIds = new Set(teamMemberOptions.map((option) => option.id));
   const selectedSourceMetric = availableSourceMetrics.find((source) => source.id === selectedSourceMetricId);
-  const defaultResponsibleUser = metric?.responsibleUser ?? selectedSourceMetric?.responsibleUser ?? (!selectedSourceMetricId ? selectedParentMetric?.responsibleUser ?? null : null);
+  const candidateResponsibleUser = metric?.responsibleUser ?? selectedSourceMetric?.responsibleUser ?? (!selectedSourceMetricId ? selectedParentMetric?.responsibleUser ?? null : null);
+  const defaultResponsibleUser = candidateResponsibleUser && teamMemberOptionIds.has(candidateResponsibleUser.id)
+    ? candidateResponsibleUser
+    : null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

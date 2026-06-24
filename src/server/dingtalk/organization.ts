@@ -351,6 +351,77 @@ async function upsertTeamNode(
   });
 }
 
+async function backfillDepartmentAnnualGoalPlans(
+  tx: Prisma.TransactionClient,
+  departmentOrgNodeId: string,
+  teamNodes: OrgTeamRecord[],
+) {
+  if (teamNodes.length === 0) return;
+
+  const departmentPlans = await tx.annualGoalPlan.findMany({
+    where: {
+      ownerType: "DEPARTMENT",
+      ownerOrgNodeId: departmentOrgNodeId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      year: true,
+      createdById: true,
+      version: true,
+      isActive: true,
+      approvalStatus: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      approvedAt: true,
+    },
+  });
+
+  if (departmentPlans.length === 0) return;
+
+  const existingTeamPlans = await tx.annualGoalPlan.findMany({
+    where: {
+      ownerType: "TEAM",
+      deletedAt: null,
+      ownerOrgNodeId: { in: teamNodes.map((team) => team.id) },
+      year: { in: departmentPlans.map((plan) => plan.year) },
+    },
+    select: { ownerOrgNodeId: true, year: true },
+  });
+
+  const existingKeys = new Set(
+    existingTeamPlans
+      .filter((plan): plan is { ownerOrgNodeId: string; year: number } => Boolean(plan.ownerOrgNodeId))
+      .map((plan) => `${plan.ownerOrgNodeId}:${plan.year}`)
+  );
+
+  const missingPlans = departmentPlans.flatMap((plan) =>
+    teamNodes
+      .filter((team) => !existingKeys.has(`${team.id}:${plan.year}`))
+      .map((team) => ({ plan, team }))
+  );
+
+  if (missingPlans.length === 0) return;
+
+  await tx.annualGoalPlan.createMany({
+    data: missingPlans.map(({ plan, team }) => ({
+      year: plan.year,
+      name: `${team.name} ${plan.year} 年度业绩指标`,
+      description: null,
+      ownerType: "TEAM",
+      ownerOrgNodeId: team.id,
+      parentPlanId: plan.id,
+      version: plan.version,
+      isActive: plan.isActive,
+      approvalStatus: plan.approvalStatus,
+      effectiveFrom: plan.effectiveFrom,
+      effectiveTo: plan.effectiveTo,
+      approvedAt: plan.approvedAt,
+      createdById: plan.createdById,
+    })),
+  });
+}
+
 function extractUserIds(value: unknown) {
   if (!value) return [];
   if (Array.isArray(value)) {
@@ -481,6 +552,13 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
     } satisfies OrgAssignmentMaps;
 
     await backfillOrgAssignments(tx, assignmentMaps);
+
+    await backfillDepartmentAnnualGoalPlans(tx, deptOrgNode.id, childDepartments.map((child) => ({
+      id: teamNodeIdByDingTalkDeptId.get(child.deptId)!,
+      name: child.name,
+      dingtalkDeptId: child.deptId,
+      parentId: deptOrgNode.id,
+    })));
 
     const syncedUserIds: string[] = [];
     for (const user of validUsers) {
