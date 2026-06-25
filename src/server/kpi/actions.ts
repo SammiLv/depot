@@ -1,10 +1,11 @@
 "use server";
 
+import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
 import type { KpiTemplate, KpiTemplateAssignment, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getUserWhereByScope } from "@/server/permissions/data-scope";
+import { getKpiWhereByScope, getUserWhereByScope } from "@/server/permissions/data-scope";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodes } from "@/server/organization/org-tree-utils";
 
 const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"] as const;
@@ -58,6 +59,23 @@ type InitializationSummary = {
   skippedUsers: string[];
 };
 
+type PersonalKpiSnapshotInput = {
+  year: number;
+  quarter: number;
+  userId: string;
+  orgNodeId: string | null;
+  initializerId: string;
+  template: TemplateSummary;
+  items: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    score: number;
+    scoringStandard: string | null;
+    sortOrder: number;
+  }>;
+};
+
 type TemplateImportSummary = {
   importedTemplateCount: number;
   importedAssignmentCount: number;
@@ -91,6 +109,17 @@ type TemplateUpdateSummary = {
   templateName: string;
   itemCount: number;
   departmentOrgNodeId: string;
+};
+
+type TemplateScopeTarget = {
+  targetType: "ORG_NODE" | "USER";
+  targetUserId: string | null;
+  targetOrgNodeId: string | null;
+  targetRoleType: null;
+};
+
+type PersonalKpiDeleteSummary = {
+  personalKpiId: string;
 };
 
 type TemplateImportRow = {
@@ -182,7 +211,6 @@ function parseTemplateItemsFromFormData(formData: FormData) {
 }
 
 function buildKpiTemplateWorkbook() {
-  const XLSX = require("xlsx") as typeof import("xlsx");
   const header = [
     "指标项*",
     "评分标准*",
@@ -222,7 +250,6 @@ function buildKpiTemplateWorkbook() {
 }
 
 function parseTemplateImportRows(buffer: Buffer) {
-  const XLSX = require("xlsx") as typeof import("xlsx");
   const workbook = XLSX.read(buffer, { type: "buffer" });
   if (workbook.SheetNames.length === 0) {
     throw new Error("导入文件不能为空");
@@ -468,7 +495,104 @@ function parseTemplateScopeTargets(formData: FormData, memberOrgNodeIdById: Map<
       targetOrgNodeId: null,
       targetRoleType: null,
     })),
-  ];
+  ] satisfies TemplateScopeTarget[];
+}
+
+async function validateTemplateScopeTargets(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  options: {
+    departmentOrgNodeId: string;
+    scopeTargets: TemplateScopeTarget[];
+    currentTemplateId?: string;
+  }
+) {
+  const teamIds = options.scopeTargets
+    .filter((target) => target.targetType === "ORG_NODE" && target.targetOrgNodeId)
+    .map((target) => target.targetOrgNodeId as string);
+  const memberIds = options.scopeTargets
+    .filter((target) => target.targetType === "USER" && target.targetUserId)
+    .map((target) => target.targetUserId as string);
+
+  if (teamIds.length === 0 && memberIds.length === 0) {
+    return;
+  }
+
+  const activeTemplateIds = await tx.kpiTemplate.findMany({
+    where: {
+      departmentOrgNodeId: options.departmentOrgNodeId,
+      isActive: true,
+      deletedAt: null,
+      ...(options.currentTemplateId ? { id: { not: options.currentTemplateId } } : {}),
+    },
+    select: { id: true },
+  });
+
+  const [departmentTeams, departmentMembers, activeAssignments] = await Promise.all([
+    tx.orgNode.findMany({
+      where: {
+        parentId: options.departmentOrgNodeId,
+        nodeType: "TEAM",
+      },
+      select: { id: true, name: true },
+    }),
+    tx.user.findMany({
+      where: {
+        orgNodeId: { in: teamIds.length ? teamIds : undefined },
+        isActive: true,
+      },
+      select: { id: true, name: true, orgNodeId: true },
+    }),
+    activeTemplateIds.length
+      ? tx.kpiTemplateAssignment.findMany({
+          where: {
+            isActive: true,
+            templateId: { in: activeTemplateIds.map((template) => template.id) },
+          },
+          select: {
+            targetType: true,
+            targetUserId: true,
+            targetOrgNodeId: true,
+          },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const occupiedMemberIdSet = new Set(
+    activeAssignments
+      .filter((assignment) => assignment.targetType === "USER" && assignment.targetUserId)
+      .map((assignment) => assignment.targetUserId as string)
+  );
+  const occupiedTeamIdSet = new Set(
+    activeAssignments
+      .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId)
+      .map((assignment) => assignment.targetOrgNodeId as string)
+  );
+
+  const invalidTeamNames = departmentTeams
+    .filter((team) => teamIds.includes(team.id))
+    .filter((team) => {
+      if (occupiedTeamIdSet.has(team.id)) {
+        return true;
+      }
+      const teamMembers = departmentMembers.filter((member) => member.orgNodeId === team.id);
+      return teamMembers.some((member) => occupiedMemberIdSet.has(member.id));
+    })
+    .map((team) => team.name);
+
+  if (invalidTeamNames.length > 0) {
+    throw new Error(`以下小组已被启用模板占用，不能保存：${invalidTeamNames.join("、")}`);
+  }
+
+  const invalidMemberNames = await tx.user.findMany({
+    where: {
+      id: { in: memberIds.filter((memberId) => occupiedMemberIdSet.has(memberId)) },
+    },
+    select: { name: true },
+  });
+
+  if (invalidMemberNames.length > 0) {
+    throw new Error(`以下成员已被启用模板占用，不能保存：${invalidMemberNames.map((member) => member.name).join("、")}`);
+  }
 }
 
 async function resolveScopedUsers(currentUser: Awaited<ReturnType<typeof requireKpiInitializer>>) {
@@ -593,6 +717,42 @@ async function resolveApplicableTemplates(users: ScopeUser[], year: number, quar
   return bestByUserId;
 }
 
+async function createPersonalKpiSnapshot(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  input: PersonalKpiSnapshotInput,
+) {
+  const createdKpi = await tx.personalKpi.create({
+    data: {
+      year: input.year,
+      quarter: input.quarter,
+      userId: input.userId,
+      orgNodeId: input.orgNodeId,
+      templateId: input.template.id,
+      templateVersion: input.template.version,
+      status: "DRAFT",
+      initializedAt: new Date(),
+      initializedById: input.initializerId,
+    },
+  });
+
+  if (input.items.length > 0) {
+    await tx.personalKpiItem.createMany({
+      data: input.items.map((item) => ({
+        personalKpiId: createdKpi.id,
+        sourceTemplateItemId: item.id,
+        name: item.name,
+        description: item.description,
+        score: item.score,
+        weight: 0,
+        scoringStandard: item.scoringStandard,
+        sortOrder: item.sortOrder,
+      })),
+    });
+  }
+
+  return createdKpi;
+}
+
 export async function downloadKpiTemplateCsv(formData: FormData) {
   const context = await requireKpiTemplateEditor();
   const department = await resolveKpiTemplateDepartmentContext(
@@ -627,7 +787,7 @@ export async function importKpiTemplates(formData: FormData): Promise<TemplateIm
   const importDate = new Date().toISOString().slice(0, 10);
 
   let importedTemplateCount = 0;
-  let importedAssignmentCount = 0;
+  const importedAssignmentCount = 0;
   let importedItemCount = 0;
   const importedTemplateNames: string[] = [];
 
@@ -662,7 +822,7 @@ export async function importKpiTemplates(formData: FormData): Promise<TemplateIm
               description: defaults.templateDescription,
               status: "APPROVED",
               isLatest: true,
-              isActive: true,
+              isActive: false,
               approvedAt: new Date(),
               updatedById: context.currentUser.id,
             },
@@ -733,6 +893,11 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
   const memberOrgNodeIdById = new Map(scopedUsers.map((user) => [user.id, user.orgNodeId] as const));
   const scopeTargets = parseTemplateScopeTargets(formData, memberOrgNodeIdById);
 
+  await validateTemplateScopeTargets(prisma, {
+    departmentOrgNodeId: department.id,
+    scopeTargets,
+  });
+
   const templateKey = `${buildDepartmentTemplateKey(department.id)}-${Date.now()}`;
 
   const created = await prisma.$transaction(async (tx) => {
@@ -745,7 +910,7 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
         status: "APPROVED",
         version: 1,
         isLatest: true,
-        isActive: true,
+        isActive: false,
         approvedAt: new Date(),
         createdById: context.currentUser.id,
         updatedById: context.currentUser.id,
@@ -820,6 +985,12 @@ export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpd
   const memberOrgNodeIdById = new Map(scopedUsers.map((user) => [user.id, user.orgNodeId] as const));
   const scopeTargets = parseTemplateScopeTargets(formData, memberOrgNodeIdById);
 
+  await validateTemplateScopeTargets(prisma, {
+    departmentOrgNodeId: template.departmentOrgNodeId,
+    scopeTargets,
+    currentTemplateId: template.id,
+  });
+
   await prisma.$transaction(async (tx) => {
     await tx.kpiTemplate.update({
       where: { id: template.id },
@@ -875,6 +1046,57 @@ export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpd
   };
 }
 
+export async function toggleKpiTemplateActive(templateId: string): Promise<{ templateId: string; isActive: boolean }> {
+  const context = await requireKpiTemplateEditor();
+  const template = await prisma.kpiTemplate.findFirst({
+    where: { id: templateId, deletedAt: null },
+    select: { id: true, departmentOrgNodeId: true, isActive: true },
+  });
+  if (!template) throw new Error("模板不存在");
+  if (context.allowedDepartmentIds && !context.allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
+    throw new Error("无权限操作该模板");
+  }
+  const updated = await prisma.kpiTemplate.update({
+    where: { id: templateId },
+    data: { isActive: !template.isActive },
+    select: { id: true, isActive: true },
+  });
+  revalidatePath("/kpi");
+  revalidatePath("/dashboard");
+  return { templateId: updated.id, isActive: updated.isActive };
+}
+
+export async function deletePersonalKpi(personalKpiId: string): Promise<PersonalKpiDeleteSummary> {
+  const currentUser = await requireKpiInitializer();
+  const where = await getKpiWhereByScope(currentUser);
+  const personalKpi = await prisma.personalKpi.findFirst({
+    where: {
+      ...where,
+      id: personalKpiId,
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+
+  if (!personalKpi) {
+    throw new Error("季度 KPI 不存在或无权限删除");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.personalKpiItem.deleteMany({
+      where: { personalKpiId },
+    });
+    await tx.personalKpi.delete({
+      where: { id: personalKpiId },
+    });
+  });
+
+  revalidatePath("/kpi");
+  revalidatePath("/dashboard");
+
+  return { personalKpiId };
+}
+
 export async function initializeQuarterlyKpis(formData: FormData): Promise<InitializationSummary> {
   const currentUser = await requireKpiInitializer();
   const year = parsePositiveInt(formData.get("year"), "年份");
@@ -905,18 +1127,26 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
       year,
       quarter,
       userId: { in: users.map((user) => user.id) },
-      deletedAt: null,
     },
-    select: { userId: true },
+    select: { userId: true, id: true, deletedAt: true },
   });
-  const existingUserIds = new Set(existingKpis.map((kpi) => kpi.userId));
+  const activeExistingUserIds = new Set(
+    existingKpis
+      .filter((kpi) => kpi.deletedAt === null)
+      .map((kpi) => kpi.userId)
+  );
+  const deletedExistingKpiByUserId = new Map(
+    existingKpis
+      .filter((kpi) => kpi.deletedAt !== null)
+      .map((kpi) => [kpi.userId, kpi.id] as const)
+  );
 
   const createdUsers: string[] = [];
   const existingUsers: string[] = [];
   const skippedUsers: string[] = [];
 
   for (const user of users) {
-    if (existingUserIds.has(user.id)) {
+    if (activeExistingUserIds.has(user.id)) {
       existingUsers.push(user.name);
       continue;
     }
@@ -928,36 +1158,27 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
     }
 
     const items = templateItemsByTemplateId.get(resolved.templateId) ?? [];
+    const deletedExistingKpiId = deletedExistingKpiByUserId.get(user.id) ?? null;
 
     await prisma.$transaction(async (tx) => {
-      const createdKpi = await tx.personalKpi.create({
-        data: {
-          year,
-          quarter,
-          userId: user.id,
-          orgNodeId: user.orgNodeId,
-          templateId: resolved.template.id,
-          templateVersion: resolved.template.version,
-          status: "DRAFT",
-          initializedAt: new Date(),
-          initializedById: currentUser.id,
-        },
-      });
-
-      if (items.length > 0) {
-        await tx.personalKpiItem.createMany({
-          data: items.map((item) => ({
-            personalKpiId: createdKpi.id,
-            sourceTemplateItemId: item.id,
-            name: item.name,
-            description: item.description,
-            score: item.score,
-            weight: 0,
-            scoringStandard: item.scoringStandard,
-            sortOrder: item.sortOrder,
-          })),
+      if (deletedExistingKpiId) {
+        await tx.personalKpiItem.deleteMany({
+          where: { personalKpiId: deletedExistingKpiId },
+        });
+        await tx.personalKpi.delete({
+          where: { id: deletedExistingKpiId },
         });
       }
+
+      await createPersonalKpiSnapshot(tx, {
+        year,
+        quarter,
+        userId: user.id,
+        orgNodeId: user.orgNodeId,
+        initializerId: currentUser.id,
+        template: resolved.template,
+        items,
+      });
     });
 
     createdUsers.push(user.name);
