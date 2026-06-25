@@ -91,42 +91,64 @@ PID_FILE="$LOG_DIR/refresh-${LOG_BASENAME}.pid"
 
 mkdir -p "$LOG_DIR"
 
-stop_managed_service() {
-  if [[ ! -f "$PID_FILE" ]]; then
+port_listening_pids() {
+  lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true
+}
+
+stop_process_tree() {
+  local pid="$1"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
     return 0
   fi
 
-  local pid
-  pid="$(tr -d '[:space:]' < "$PID_FILE")"
-  if [[ -z "$pid" ]]; then
-    rm -f "$PID_FILE"
-    return 0
+  local children
+  children="$(pgrep -P "$pid" || true)"
+  if [[ -n "$children" ]]; then
+    for child in $children; do
+      stop_process_tree "$child"
+    done
   fi
 
-  if ! kill -0 "$pid" >/dev/null 2>&1; then
-    rm -f "$PID_FILE"
-    return 0
-  fi
+  kill "$pid" >/dev/null 2>&1 || true
+}
 
-  local command
-  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  if [[ "$command" != *"$ROOT_DIR"* ]] || [[ "$command" != *"npm run $START_SCRIPT"* ]]; then
-    echo "==> PID $pid in $PID_FILE does not match $START_SCRIPT under $ROOT_DIR; refusing to stop it"
-    return 1
-  fi
-
-  echo "==> Stopping managed PID: $pid"
-  kill "$pid"
-  for _ in {1..10}; do
-    if ! kill -0 "$pid" >/dev/null 2>&1; then
-      rm -f "$PID_FILE"
+wait_for_port_release() {
+  for _ in {1..30}; do
+    if [[ -z "$(port_listening_pids)" ]]; then
       return 0
     fi
     sleep 1
   done
 
-  echo "Managed PID $pid did not stop within 10 seconds"
   return 1
+}
+
+stop_managed_service() {
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid="$(tr -d '[:space:]' < "$PID_FILE")"
+    if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      echo "==> Stopping managed PID tree: $pid"
+      stop_process_tree "$pid"
+    fi
+    rm -f "$PID_FILE"
+  fi
+
+  local port_pids
+  port_pids="$(port_listening_pids)"
+  if [[ -n "$port_pids" ]]; then
+    echo "==> Stopping existing listeners on port $PORT: $port_pids"
+    for pid in $port_pids; do
+      stop_process_tree "$pid"
+    done
+  fi
+
+  if ! wait_for_port_release; then
+    echo "Port $PORT is still in use after stop attempt"
+    return 1
+  fi
+
+  return 0
 }
 
 echo "==> Using start script: $START_SCRIPT"
@@ -139,6 +161,9 @@ fi
 echo "==> Installing dependencies"
 npm install
 
+echo "==> Stopping existing managed service (if any)"
+stop_managed_service
+
 echo "==> Generating Prisma client"
 npm run prisma:generate
 
@@ -147,9 +172,6 @@ npx prisma db push --config db/prisma.config.ts --accept-data-loss
 
 echo "==> Building app"
 npm run build
-
-echo "==> Stopping existing managed service (if any)"
-stop_managed_service
 
 echo "==> Starting service with $START_SCRIPT"
 if [[ -n "$DEV_ALLOWED_ORIGINS_VALUE" ]]; then
