@@ -284,6 +284,28 @@ export function getAnnualGoalPlanPermissions(
 // ---- Permission matrix / capabilities (unchanged) ----
 
 export async function ensureAnnualGoalPermissions() {
+  const existingPermissions = await prisma.annualGoalPermission.findMany({
+    select: {
+      code: true,
+      name: true,
+      description: true,
+      sortOrder: true,
+    },
+  });
+
+  const existingByCode = new Map(existingPermissions.map((permission) => [permission.code, permission]));
+  const needsSync = annualGoalPermissionDefinitions.some((definition) => {
+    const existing = existingByCode.get(definition.code);
+    return !existing
+      || existing.name !== definition.name
+      || existing.description !== definition.description
+      || existing.sortOrder !== definition.sortOrder;
+  });
+
+  if (!needsSync) {
+    return;
+  }
+
   await prisma.$transaction(
     annualGoalPermissionDefinitions.map((definition) =>
       prisma.annualGoalPermission.upsert({
