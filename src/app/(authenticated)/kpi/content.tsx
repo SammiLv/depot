@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Progress, avatarColor } from "@/components/ui-kit";
-import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate } from "@/server/kpi/actions";
+import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deletePersonalKpi } from "@/server/kpi/actions";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
 
@@ -17,6 +18,28 @@ type InitializationResult = Awaited<ReturnType<typeof initializeQuarterlyKpis>>;
 type TemplateImportResult = Awaited<ReturnType<typeof importKpiTemplates>>;
 type TemplateUpdateResult = Awaited<ReturnType<typeof updateKpiTemplate>>;
 type TemplateCreateResult = Awaited<ReturnType<typeof createKpiTemplate>>;
+type QuarterlyKpiRow = Props["data"]["rows"][number];
+
+type QuarterOption = {
+  value: number;
+  label: string;
+};
+
+function getQuarterlyKpiActionLabel(stageKey: string) {
+  if (stageKey === "DRAFT" || stageKey === "PENDING_SELF_REVIEW") {
+    return "自评";
+  }
+  if (stageKey === "PENDING_LEADER_SCORE") {
+    return "组长评";
+  }
+  if (stageKey === "PENDING_MANAGER_SCORE") {
+    return "主管评";
+  }
+  if (stageKey === "PENDING_FINAL_REVIEW") {
+    return "最终确认";
+  }
+  return null;
+}
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -40,10 +63,12 @@ function TemplateList({
   rows,
   onView,
   onEdit,
+  onToggleActive,
 }: {
   rows: TemplateRow[];
   onView: (row: TemplateRow) => void;
   onEdit: (row: TemplateRow) => void;
+  onToggleActive: (row: TemplateRow) => Promise<void>;
 }) {
   return (
     <Card className="!p-0 overflow-hidden">
@@ -53,10 +78,11 @@ function TemplateList({
             <th className="px-5 py-3 font-medium">模板名称</th>
             <th className="px-5 py-3 font-medium">创建人</th>
             <th className="px-5 py-3 font-medium">适用范围</th>
+            <th className="px-4 py-3 font-medium">状态</th>
             <th className="px-4 py-3 font-medium">创建时间</th>
             <th className="px-4 py-3 font-medium">最后更新</th>
             <th className="px-4 py-3 font-medium whitespace-nowrap">最后更新时间</th>
-            <th className="w-[180px] px-5 py-3 text-right font-medium">操作</th>
+            <th className="w-[220px] px-5 py-3 text-right font-medium">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -66,13 +92,17 @@ function TemplateList({
                 <td className="px-5 py-3 text-sm font-medium">{row.name}</td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">{row.createdByName}</td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">{row.scopeName}</td>
+                <td className="px-4 py-3 text-sm">
+                  <Badge tone={row.isActive ? "success" : "default"}>{row.isActive ? "启用" : "禁用"}</Badge>
+                </td>
                 <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
                 <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.updatedByName}</td>
                 <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.updatedAt)}</td>
-                <td className="w-[180px] px-5 py-3 text-right">
+                <td className="w-[220px] px-5 py-3 text-right">
                   <div className="inline-flex items-center justify-end gap-2 text-sm whitespace-nowrap">
                     <button type="button" className="text-primary hover:underline" onClick={() => onView(row)}>查看</button>
                     <button type="button" className="text-primary hover:underline" onClick={() => onEdit(row)}>编辑</button>
+                    <button type="button" className="text-primary hover:underline" onClick={() => void onToggleActive(row)}>{row.isActive ? "禁用" : "启用"}</button>
                     <button type="button" className="text-destructive hover:underline" disabled>删除</button>
                   </div>
                 </td>
@@ -80,12 +110,34 @@ function TemplateList({
             ))
           ) : (
             <tr>
-              <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 模板</td>
+              <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 模板</td>
             </tr>
           )}
         </tbody>
       </table>
     </Card>
+  );
+}
+
+function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: QuarterlyKpiRow; onClose: () => void; onComplete: () => void }) {
+  async function handleDelete() {
+    try {
+      await deletePersonalKpi(row.id);
+      onComplete();
+      onClose();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除季度 KPI 失败");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">确认删除成员「{row.userName}」的季度 KPI？删除后该成员本季度的 KPI 数据将被移除，且无法恢复。</p>
+      <div className="flex justify-end gap-3">
+        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
+      </div>
+    </div>
   );
 }
 
@@ -198,13 +250,44 @@ function TemplateDetailDrawer({ row }: { row: TemplateRow }) {
   );
 }
 
-function buildTemplateScopeOptions(data: Props["data"], departmentOrgNodeId: string) {
-  const teamOptions = data.teamOptions
-    .filter((team) => team.departmentOrgNodeId === departmentOrgNodeId)
-    .map((team) => ({ id: team.id, name: team.name }));
-  const memberOptions = data.memberOptions
-    .filter((member) => member.orgNodeId && teamOptions.some((team) => team.id === member.orgNodeId))
+function buildTemplateScopeOptions(
+  data: Props["data"],
+  departmentOrgNodeId: string,
+  options?: {
+    currentTemplateId?: string;
+    preserveTeamIds?: string[];
+    preserveMemberIds?: string[];
+  }
+) {
+  const preserveTeamIdSet = new Set(options?.preserveTeamIds ?? []);
+  const preserveMemberIdSet = new Set(options?.preserveMemberIds ?? []);
+  const activeTemplates = data.templateRows.filter(
+    (template) => template.isActive && template.id !== options?.currentTemplateId
+  );
+  const occupiedTeamIdSet = new Set(activeTemplates.flatMap((template) => template.scopeTeamIds));
+  const occupiedMemberIdSet = new Set(activeTemplates.flatMap((template) => template.scopeUserIds));
+  const departmentTeams = data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentOrgNodeId);
+  const departmentMembers = data.memberOptions.filter(
+    (member) => member.orgNodeId && departmentTeams.some((team) => team.id === member.orgNodeId)
+  );
+  const memberOptions = departmentMembers
+    .filter((member) => !occupiedMemberIdSet.has(member.id) || preserveMemberIdSet.has(member.id))
     .map((member) => ({ id: member.id, name: member.name, orgNodeId: member.orgNodeId ?? null }));
+  const teamOptions = departmentTeams
+    .filter((team) => {
+      if (preserveTeamIdSet.has(team.id)) {
+        return true;
+      }
+      if (occupiedTeamIdSet.has(team.id)) {
+        return false;
+      }
+      const teamMembers = departmentMembers.filter((member) => member.orgNodeId === team.id);
+      if (teamMembers.length === 0) {
+        return false;
+      }
+      return teamMembers.every((member) => !occupiedMemberIdSet.has(member.id) || preserveMemberIdSet.has(member.id));
+    })
+    .map((team) => ({ id: team.id, name: team.name }));
 
   return { teamOptions, memberOptions };
 }
@@ -221,7 +304,7 @@ function CreateTemplateDrawer({
   onComplete: (result: TemplateCreateResult) => void;
 }) {
   const [draftItems, setDraftItems] = useState([
-    { id: `new-${Date.now()}-0`, name: "", score: "0", description: "", scoringStandard: "" },
+    { id: "new-0", name: "", score: "0", description: "", scoringStandard: "" },
   ]);
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -232,11 +315,11 @@ function CreateTemplateDrawer({
   const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [teamSearch, setTeamSearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const nextDraftItemIdRef = useRef(1);
   const scopeOptions = useMemo(
     () => buildTemplateScopeOptions(data, departmentOrgNodeId),
     [data, departmentOrgNodeId]
   );
-  const availableTeamOptions = scopeOptions.teamOptions.filter((team) => !selectedTeamIds.includes(team.id));
   const availableMemberOptions = scopeOptions.memberOptions.filter((member) => {
     if (selectedMemberIds.includes(member.id)) {
       return false;
@@ -245,6 +328,12 @@ function CreateTemplateDrawer({
       return false;
     }
     return true;
+  });
+  const availableTeamOptions = scopeOptions.teamOptions.filter((team) => {
+    if (selectedTeamIds.includes(team.id)) {
+      return false;
+    }
+    return availableMemberOptions.some((member) => member.orgNodeId === team.id);
   });
   const filteredTeamOptions = availableTeamOptions.filter((team) =>
     team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
@@ -438,7 +527,7 @@ function CreateTemplateDrawer({
             onClick={() =>
               setDraftItems([
                 ...draftItems,
-                { id: `new-${Date.now()}-${draftItems.length}`, name: "", score: "0", description: "", scoringStandard: "" },
+                { id: `new-${nextDraftItemIdRef.current++}`, name: "", score: "0", description: "", scoringStandard: "" },
               ])
             }
           >
@@ -598,11 +687,15 @@ function TemplateEditDrawer({
   const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [teamSearch, setTeamSearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const nextDraftItemIdRef = useRef(draftItems.length);
   const scopeOptions = useMemo(
-    () => buildTemplateScopeOptions(data, row.departmentOrgNodeId),
-    [data, row.departmentOrgNodeId]
+    () => buildTemplateScopeOptions(data, row.departmentOrgNodeId, {
+      currentTemplateId: row.id,
+      preserveTeamIds: row.scopeTeamIds,
+      preserveMemberIds: row.scopeUserIds,
+    }),
+    [data, row.departmentOrgNodeId, row.id, row.scopeTeamIds, row.scopeUserIds]
   );
-  const availableTeamOptions = scopeOptions.teamOptions.filter((team) => !selectedTeamIds.includes(team.id));
   const availableMemberOptions = scopeOptions.memberOptions.filter((member) => {
     if (selectedMemberIds.includes(member.id)) {
       return false;
@@ -611,6 +704,12 @@ function TemplateEditDrawer({
       return false;
     }
     return true;
+  });
+  const availableTeamOptions = scopeOptions.teamOptions.filter((team) => {
+    if (selectedTeamIds.includes(team.id)) {
+      return false;
+    }
+    return availableMemberOptions.some((member) => member.orgNodeId === team.id);
   });
   const filteredTeamOptions = availableTeamOptions.filter((team) =>
     team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
@@ -818,7 +917,7 @@ function TemplateEditDrawer({
                 setDraftItems([
                   ...draftItems,
                   {
-                    id: `new-${Date.now()}-${draftItems.length}`,
+                    id: `new-${nextDraftItemIdRef.current++}`,
                     name: "",
                     score: "0",
                     description: "",
@@ -961,37 +1060,65 @@ function TemplateEditDrawer({
 
 function InitializeForm({
   year,
-  quarter,
+  defaultQuarter,
+  quarterOptions,
   onClose,
   onComplete,
 }: {
   year: number;
-  quarter: number;
+  defaultQuarter: number;
+  quarterOptions: QuarterOption[];
   onClose: () => void;
   onComplete: (result: InitializationResult) => void;
 }) {
+  const [selectedQuarter, setSelectedQuarter] = useState(String(defaultQuarter));
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   return (
     <form
       action={async (formData) => {
-        const result = await initializeQuarterlyKpis(formData);
-        onComplete(result);
-        onClose();
+        try {
+          setErrorMessage(null);
+          const result = await initializeQuarterlyKpis(formData);
+          onComplete(result);
+          onClose();
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "初始化季度 KPI 失败");
+        }
       }}
       className="space-y-4"
     >
       <input type="hidden" name="year" value={year} />
-      <input type="hidden" name="quarter" value={quarter} />
+      {errorMessage ? (
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {errorMessage}
+        </div>
+      ) : null}
+      <div>
+        <label className="mb-1 block text-sm font-medium">季度 *</label>
+        <select
+          name="quarter"
+          value={selectedQuarter}
+          onChange={(event) => setSelectedQuarter(event.target.value)}
+          className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+        >
+          {quarterOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
       <p className="text-sm text-muted-foreground">
-        将按当前可见范围，为 {year} Q{quarter} 批量初始化个人 KPI 单据，并基于命中的最新版已审核通过模板生成快照。
+        将按启用中的模板适用范围，为 {year} {quarterOptions.find((option) => String(option.value) === selectedQuarter)?.label ?? `Q${selectedQuarter}`} 批量初始化个人 KPI 单据，并将模板项复制到独立单据表中。
       </p>
       <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground space-y-1">
-        <div>会创建缺失的季度 KPI 单据</div>
+        <div>一人只会创建一份季度 KPI 单据</div>
         <div>已存在单据的成员会自动跳过</div>
-        <div>未命中模板的成员不会建单</div>
+        <div>未命中启用模板的成员不会建单</div>
+        <div>初始化后模板再修改，也不会影响已生成单据</div>
       </div>
       <div className="flex justify-end gap-3">
         <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit">初始化本季度 KPI</Button>
+        <Button type="submit">确定</Button>
       </div>
     </form>
   );
@@ -1081,14 +1208,18 @@ export function KpiContent({ data }: Props) {
   const router = useRouter();
   const [showInitDialog, setShowInitDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [initResult, setInitResult] = useState<InitializationResult | null>(null);
   const [templateImportResult, setTemplateImportResult] = useState<TemplateImportResult | null>(null);
   const [departmentTab, setDepartmentTab] = useState(data.defaultDepartmentOrgNodeId);
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [sectionTab, setSectionTab] = useState<SectionTab>("quarterly-kpi");
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
+  const [deleteQuarterlyKpiRow, setDeleteQuarterlyKpiRow] = useState<QuarterlyKpiRow | null>(null);
   const [templateDrawerMode, setTemplateDrawerMode] = useState<"view" | "edit" | null>(null);
+  const quarterOptions = useMemo<QuarterOption[]>(
+    () => [1, 2, 3, 4].map((quarter) => ({ value: quarter, label: `Q${quarter}` })),
+    []
+  );
   const filteredTeamOptions = useMemo(
     () => data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentTab),
     [data.teamOptions, departmentTab]
@@ -1186,7 +1317,7 @@ export function KpiContent({ data }: Props) {
 
             <div className="flex items-center gap-2">
               {sectionTab === "quarterly-kpi" ? (
-                <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化本季度 KPI</Button>
+                <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化季度 KPI</Button>
               ) : (
                 <>
                   <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
@@ -1245,12 +1376,12 @@ export function KpiContent({ data }: Props) {
               </div>
               <div className="flex items-center gap-2">
                 {data.stages.map((s, i) => {
-                  const maxCount = Math.max(...data.stages.map((stage) => stage.count), 1);
+                  const totalCount = Math.max(data.totalCount, 1);
                   return (
                     <div key={s.label} className="flex-1">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 overflow-hidden rounded-full bg-muted h-2">
-                          <div className="h-full rounded-full bg-primary" style={{ width: `${(s.count / maxCount) * 100}%` }} />
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${(s.count / totalCount) * 100}%` }} />
                         </div>
                         {i < data.stages.length - 1 ? <div className="w-2" /> : null}
                       </div>
@@ -1303,7 +1434,20 @@ export function KpiContent({ data }: Props) {
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
                         <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
                         <td className="px-5 py-3 text-right">
-                          <button className="text-sm text-primary hover:underline">查看详情</button>
+                          <div className="flex items-center justify-end gap-3">
+                            <Link href={`/kpi/${r.id}`} className="text-sm text-primary hover:underline">查看</Link>
+                            {getQuarterlyKpiActionLabel(r.stageKey) ? (
+                              <button type="button" className="text-sm text-primary hover:underline">
+                                {getQuarterlyKpiActionLabel(r.stageKey)}
+                              </button>
+                            ) : null}
+                            <button
+                              className="text-sm text-destructive hover:underline"
+                              onClick={() => setDeleteQuarterlyKpiRow(r)}
+                            >
+                              删除
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1327,6 +1471,14 @@ export function KpiContent({ data }: Props) {
               onEdit={(row) => {
                 setSelectedTemplate(row);
                 setTemplateDrawerMode("edit");
+              }}
+              onToggleActive={async (row) => {
+                try {
+                  await toggleKpiTemplateActive(row.id);
+                  router.refresh();
+                } catch (error) {
+                  window.alert(error instanceof Error ? error.message : "切换模板状态失败");
+                }
               }}
             />
           </div>
@@ -1388,16 +1540,33 @@ export function KpiContent({ data }: Props) {
         />
       </Dialog>
 
-      <Dialog open={showInitDialog} onClose={() => setShowInitDialog(false)} title={`初始化 ${data.year} Q${data.quarter} KPI`}>
+      <Dialog open={showInitDialog} onClose={() => setShowInitDialog(false)} title="初始化季度 KPI">
         <InitializeForm
           year={data.year}
-          quarter={data.quarter}
+          defaultQuarter={data.quarter}
+          quarterOptions={quarterOptions}
           onClose={() => setShowInitDialog(false)}
-          onComplete={(result) => {
-            setInitResult(result);
+          onComplete={() => {
             router.refresh();
           }}
         />
+      </Dialog>
+
+      <Dialog
+        open={Boolean(deleteQuarterlyKpiRow)}
+        onClose={() => setDeleteQuarterlyKpiRow(null)}
+        title="删除季度 KPI"
+      >
+        {deleteQuarterlyKpiRow ? (
+          <QuarterlyKpiDeleteConfirm
+            row={deleteQuarterlyKpiRow}
+            onClose={() => setDeleteQuarterlyKpiRow(null)}
+            onComplete={() => {
+              setDeleteQuarterlyKpiRow(null);
+              router.refresh();
+            }}
+          />
+        ) : null}
       </Dialog>
     </>
   );

@@ -212,7 +212,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
   }, {} as Record<string, number>);
 
   const pendingApprovals =
-    (kpiStatusCounts.PENDING_LEADER_SCORE ?? 0) + (kpiStatusCounts.PENDING_MANAGER_SCORE ?? 0);
+    (kpiStatusCounts.PENDING_LEADER_SCORE ?? 0) + (kpiStatusCounts.PENDING_MANAGER_SCORE ?? 0) + (kpiStatusCounts.PENDING_FINAL_REVIEW ?? 0);
   const selfReviewCount =
     (kpiStatusCounts.DRAFT ?? 0) + (kpiStatusCounts.PENDING_SELF_REVIEW ?? 0);
 
@@ -227,8 +227,8 @@ export async function getDashboardData(currentUser: CurrentUser) {
 
   const summaryCards = [
     { title: "年度指标完成度", value: "—", tone: "primary" as const, description: "加载中…" },
-    { title: "待我评分", value: pendingApprovals, tone: "warning" as const, description: pendingApprovals > 0 ? `${kpiStatusCounts.PENDING_LEADER_SCORE ?? 0} 项组长评分待处理` : "暂无评分待处理" },
-    { title: "待自评", value: selfReviewCount, tone: "info" as const, description: `${kpiStatusCounts.DRAFT ?? 0} 项待启动 · ${kpiStatusCounts.PENDING_SELF_REVIEW ?? 0} 项自评中` },
+    { title: "待我评分", value: pendingApprovals, tone: "warning" as const, description: pendingApprovals > 0 ? `${kpiStatusCounts.PENDING_LEADER_SCORE ?? 0} 项组长评分待处理 · ${kpiStatusCounts.PENDING_MANAGER_SCORE ?? 0} 项主管评分待处理 · ${kpiStatusCounts.PENDING_FINAL_REVIEW ?? 0} 项终审待处理` : "暂无评分待处理" },
+    { title: "待自评", value: selfReviewCount, tone: "info" as const, description: `${kpiStatusCounts.DRAFT ?? 0} 项初始化 · ${kpiStatusCounts.PENDING_SELF_REVIEW ?? 0} 项自评中` },
     { title: "风险预警", value: riskCount, tone: "brand" as const, description: riskCount > 0 ? `${riskCount} 项指标有风险` : "全部正常" },
   ];
 
@@ -266,8 +266,8 @@ export async function getDashboardData(currentUser: CurrentUser) {
   };
 
   const kpiStages = [
-    { label: "待自评", key: "DRAFT", tone: "default" as const },
-    { label: "自评中", key: "PENDING_SELF_REVIEW", tone: "info" as const },
+    { label: "初始化", key: "DRAFT", tone: "default" as const },
+    { label: "自评", key: "PENDING_SELF_REVIEW", tone: "info" as const },
     { label: "组长评", key: "PENDING_LEADER_SCORE", tone: "warning" as const },
     { label: "主管评", key: "PENDING_MANAGER_SCORE", tone: "primary" as const },
     { label: "已完成", key: "COMPLETED", tone: "success" as const },

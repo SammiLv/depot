@@ -53,6 +53,7 @@ prototyes/**/tsconfig.tsbuildinfo
 *.db-journal
 *.db-wal
 *.db-shm
+db/dev.db.backup-*
 
 # prototype workspace
 prototyes/**/.workspace

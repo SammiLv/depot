@@ -1,0 +1,2 @@
+-- No-op migration placeholder for introducing KpiStatus.PENDING_FINAL_REVIEW.
+-- SQLite stores Prisma enums as TEXT, so no database DDL is required for this status expansion in the current schema.
