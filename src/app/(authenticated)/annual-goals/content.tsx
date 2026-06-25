@@ -1257,8 +1257,8 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
   }));
 
   return (
-    <>
-      <div className="overflow-x-auto">
+    <div className="px-5 pb-5">
+      <div className="overflow-x-auto rounded-2xl border border-border bg-card">
         {tab === "metrics" && (
           <>
           <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.7fr_0.7fr_1.1fr_1.6fr_0.25fr_1fr_1fr_1fr_1fr] gap-3 text-xs text-muted-foreground">
@@ -1442,7 +1442,6 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
           </div>
         </div>
       )}
-      </div>
 
       <div className="px-5 py-3 border-t border-border bg-card flex items-center justify-between text-xs">
         {tab === "metrics" ? (
@@ -1453,7 +1452,8 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
           <span className="text-muted-foreground">共 {quarterRows.length} 项</span>
         )}
       </div>
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -1528,8 +1528,8 @@ export function AnnualGoalsContent({ data }: Props) {
         <Card className="mb-6 !p-0 overflow-hidden">
           <div className="px-5 pt-5 flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">年度指标方案</h1>
-              <p className="mt-2 text-sm text-muted-foreground">{getYearLabel(data.selectedYear)}视角下查看部门指标承接、拆解与执行进展</p>
+              <h1 className="text-3xl font-semibold tracking-tight">年度指标</h1>
+              <p className="mt-2 text-sm text-muted-foreground">查看部门指标承接、拆解与执行进展</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1570,7 +1570,7 @@ export function AnnualGoalsContent({ data }: Props) {
               )}
 
               {filteredScopeItems.length > 0 && (
-                <div className="px-5 py-4 flex flex-wrap items-center gap-2">
+                <div className="px-5 pt-3 pb-2 flex flex-wrap items-center gap-2">
                   {filteredScopeItems.map((item) => (
                     <button
                       key={getScopeItemKey(item)}
@@ -1593,7 +1593,7 @@ export function AnnualGoalsContent({ data }: Props) {
           {activeItem && activePlanDetailView ? (
             <div key={activePlan?.id ?? getScopeItemKey(activeItem)}>
               {activePlan ? (
-                <div className="px-5 py-4 flex items-start justify-between gap-4">
+                <div className="px-5 pt-1 pb-0 flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge tone="default">{activePlan.ownerType === "DEPARTMENT" ? "部门" : "小组"}</Badge>
@@ -1607,7 +1607,6 @@ export function AnnualGoalsContent({ data }: Props) {
                       </span>
                     </div>
                     <h3 className="mt-1.5 text-base font-semibold">{activePlan.name}</h3>
-                    {activePlan.description && <p className="mt-1 text-xs text-muted-foreground">{activePlan.description}</p>}
                     {activePlan.revisionReason && (
                       <div className="mt-2 inline-flex items-start gap-2 text-xs bg-info/10 text-info px-2.5 py-1.5 rounded-md">
                         <History className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -1645,8 +1644,8 @@ export function AnnualGoalsContent({ data }: Props) {
                 </div>
               )}
 
-              <div className="px-5 pb-4">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="px-5 pb-3 pt-0">
+                <div className="flex flex-wrap items-center gap-4">
                   <div className="inline-flex rounded-lg bg-muted p-1">
                     {activePlanTabs.map((currentTab) => (
                       <button

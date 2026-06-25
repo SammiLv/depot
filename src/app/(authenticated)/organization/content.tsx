@@ -471,45 +471,43 @@ export function OrgContent({
       {syncMessage && <div className="mb-4 text-xs text-muted-foreground">{syncMessage}</div>}
 
       <Card className="mb-4 !p-0 overflow-hidden">
-        <div className="px-6 pt-6 pb-4">
+        <div className="px-5 pt-5">
           <h1 className="text-3xl font-semibold tracking-tight">组织与权限</h1>
           <p className="mt-2 text-sm text-muted-foreground">部门、小组、成员、角色与页面权限管理</p>
         </div>
 
-        <div className="p-6">
-          <div className="flex flex-wrap items-end justify-between gap-6">
-            <div className="flex flex-wrap gap-10">
-              {scopeOptions.map((option) => {
-                const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;
-                return (
-                  <button
-                    key={`${option.scopeType}:${option.departmentOrgNodeId}`}
-                    type="button"
-                    onClick={() => {
-                      const nextParams = new URLSearchParams(searchParams.toString());
-                      nextParams.set("scope", option.scopeType);
-                      nextParams.set("tab", tab);
-                      if (option.scopeType === "DEPARTMENT") {
-                        nextParams.set("department", option.departmentOrgNodeId);
-                      } else {
-                        nextParams.delete("department");
-                      }
-                      router.push(`/organization?${nextParams.toString()}`);
-                    }}
-                    className="relative pb-3"
-                  >
-                    <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-                      {option.label}
-                    </span>
-                    {active ? <span className="absolute left-0 bottom-0 h-0.5 w-10 bg-primary" /> : null}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="px-5 pt-4">
+          <div className="flex flex-wrap gap-10">
+            {scopeOptions.map((option) => {
+              const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;
+              return (
+                <button
+                  key={`${option.scopeType}:${option.departmentOrgNodeId}`}
+                  type="button"
+                  onClick={() => {
+                    const nextParams = new URLSearchParams(searchParams.toString());
+                    nextParams.set("scope", option.scopeType);
+                    nextParams.set("tab", tab);
+                    if (option.scopeType === "DEPARTMENT") {
+                      nextParams.set("department", option.departmentOrgNodeId);
+                    } else {
+                      nextParams.delete("department");
+                    }
+                    router.push(`/organization?${nextParams.toString()}`);
+                  }}
+                  className="relative pb-3"
+                >
+                  <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                    {option.label}
+                  </span>
+                  {active ? <span className="absolute left-0 bottom-0 h-0.5 w-10 bg-primary" /> : null}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="px-6 pb-5">
+        <div className="px-5 pt-3 pb-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex p-1 rounded-lg bg-muted">
               {[
@@ -553,7 +551,7 @@ export function OrgContent({
 
         {tab === "permissions" ? (
           <>
-            <div className="p-5">
+            <div className="px-5 pt-3 pb-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold mb-3">角色说明</h3>

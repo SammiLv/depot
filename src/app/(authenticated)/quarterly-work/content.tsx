@@ -203,8 +203,8 @@ function QuarterlyWorkForm({
         </FormRow>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit">
+        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">
           {mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {mode === "edit" ? "保存" : "创建"}
         </Button>
@@ -322,8 +322,8 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit">
+        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">
           <Pencil className="h-4 w-4" />
           保存
         </Button>
@@ -450,8 +450,8 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
         </FormRow>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit">
+        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">
           <Plus className="h-4 w-4" />
           创建
         </Button>
@@ -558,7 +558,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           </div>
         ) : null}
 
-        <div className="px-5 py-4 flex flex-wrap items-center gap-2">
+        <div className="px-5 pt-3 pb-4 flex flex-wrap items-center gap-2">
           {teamTabs.map((team) => (
             <button
               key={team.id}
@@ -571,7 +571,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           ))}
         </div>
 
-        <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="px-5 pb-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="inline-flex rounded-lg bg-muted p-1">
               {[
@@ -629,7 +629,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           </div>
         </div>
 
-        <div className="px-5 pb-5 pt-4">
+        <div className="px-5 pb-5 pt-0">
           {tab === "project" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {visibleProjectColumns.map((column) => (
