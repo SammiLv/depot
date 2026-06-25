@@ -649,9 +649,9 @@ function CreateTemplateDrawer({
         </div>
       </div>
 
-      <div className="flex justify-end gap-3 border-t border-border pt-4">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit">创建模板</Button>
+      <div className="sticky bottom-[-1.5rem] mt-6 flex justify-end gap-3 border-t border-border bg-card px-6 py-4">
+        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">创建模板</Button>
       </div>
     </form>
     </>
@@ -765,19 +765,20 @@ function TemplateEditDrawer({
             setErrorMessage(error instanceof Error ? error.message : "模板更新失败，请稍后重试");
           }
         }}
-        className="space-y-6"
+        className="flex h-full flex-col"
       >
-        <input type="hidden" name="templateId" value={row.id} />
-        {selectedTeamIds.map((teamId) => <input key={teamId} type="hidden" name="scopeTeamOrgNodeId" value={teamId} />)}
-        {selectedMemberIds.map((memberId) => <input key={memberId} type="hidden" name="scopeUserId" value={memberId} />)}
+        <div className="space-y-6">
+          <input type="hidden" name="templateId" value={row.id} />
+          {selectedTeamIds.map((teamId) => <input key={teamId} type="hidden" name="scopeTeamOrgNodeId" value={teamId} />)}
+          {selectedMemberIds.map((memberId) => <input key={memberId} type="hidden" name="scopeUserId" value={memberId} />)}
 
-        {errorMessage ? (
-          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {errorMessage}
-          </div>
-        ) : null}
+          {errorMessage ? (
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              {errorMessage}
+            </div>
+          ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
             <label className="mb-1 block text-sm font-medium">模板名称 *</label>
             <input
@@ -1049,9 +1050,11 @@ function TemplateEditDrawer({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-border pt-4">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-          <Button type="submit">保存修改</Button>
+        </div>
+
+        <div className="sticky bottom-[-1.5rem] mt-6 flex justify-end gap-3 border-t border-border bg-card px-6 py-4">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">保存修改</Button>
         </div>
       </form>
     </>
@@ -1117,8 +1120,8 @@ function InitializeForm({
         <div>初始化后模板再修改，也不会影响已生成单据</div>
       </div>
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit">确定</Button>
+        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">确定</Button>
       </div>
     </form>
   );
@@ -1258,80 +1261,78 @@ export function KpiContent({ data }: Props) {
     <>
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
-          <div className="mb-5">
-            <h1 className="text-2xl font-semibold tracking-tight">{data.year} Q{data.quarter} KPI</h1>
-            <p className="mt-2 text-sm text-muted-foreground">按模板规则批量初始化季度 KPI 单据，并进入自评、组长评分、主管评分流程</p>
-          </div>
+          <h1 className="text-3xl font-semibold tracking-tight">KPI管理</h1>
+          <p className="mt-2 text-sm text-muted-foreground">按模板规则批量初始化季度 KPI 单据，并进入自评、组长评分、主管评分流程</p>
+        </div>
 
-          <div className="flex flex-wrap items-end gap-8 text-sm shrink-0">
-            {data.departmentOptions.map((department) => (
+        <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
+          {data.departmentOptions.map((department) => (
+            <button
+              key={department.id}
+              type="button"
+              onClick={() => {
+                setDepartmentTab(department.id);
+                setTeamTab("all");
+              }}
+              className={`pb-3 border-b-2 transition ${
+                departmentTab === department.id
+                  ? "border-primary text-primary font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {department.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-5 pt-3 pb-4 flex flex-wrap items-center gap-2">
+          {teamTabs.map((team) => (
+            <button
+              key={team.id}
+              type="button"
+              onClick={() => setTeamTab(team.id)}
+              className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+            >
+              {team.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-5 pb-4 flex flex-wrap items-center gap-4">
+          <div className="inline-flex rounded-lg bg-muted p-1">
+            {[
+              { key: "quarterly-kpi" as const, label: "季度KPI" },
+              { key: "kpi-template" as const, label: "KPI模板" },
+            ].map((tab) => (
               <button
-                key={department.id}
+                key={tab.key}
                 type="button"
-                onClick={() => {
-                  setDepartmentTab(department.id);
-                  setTeamTab("all");
-                }}
-                className={`pb-3 border-b-2 transition ${
-                  departmentTab === department.id
-                    ? "border-primary text-primary font-medium"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
+                onClick={() => setSectionTab(tab.key)}
+                className={`h-9 rounded-lg px-4 text-sm transition ${
+                  sectionTab === tab.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {department.name}
+                {tab.label}
               </button>
             ))}
           </div>
 
-          <div className="px-0 py-4 flex flex-wrap items-center gap-2">
-            {teamTabs.map((team) => (
-              <button
-                key={team.id}
-                type="button"
-                onClick={() => setTeamTab(team.id)}
-                className={`h-9 rounded-lg px-3 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-              >
-                {team.name}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            {sectionTab === "quarterly-kpi" ? (
+              <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化季度 KPI</Button>
+            ) : (
+              <>
+                <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
+                <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
+                <Button className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button>
+              </>
+            )}
           </div>
 
-          <div className="pb-5 flex flex-wrap items-center gap-4">
-            <div className="inline-flex rounded-lg bg-muted p-1">
-              {[
-                { key: "quarterly-kpi" as const, label: "季度KPI" },
-                { key: "kpi-template" as const, label: "KPI模板" },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setSectionTab(tab.key)}
-                  className={`h-9 rounded-lg px-4 text-sm transition ${
-                    sectionTab === tab.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {sectionTab === "quarterly-kpi" ? (
-                <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化季度 KPI</Button>
-              ) : (
-                <>
-                  <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
-                  <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
-                  <Button className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button>
-                </>
-              )}
-            </div>
-
-            <div className="ml-auto text-xs text-muted-foreground">
-              {sectionTab === "quarterly-kpi"
-                ? `当前看板：${data.year} Q${data.quarter}`
-                : `当前模板部门：${data.departmentOptions.find((department) => department.id === departmentTab)?.name ?? "—"}`}
-            </div>
+          <div className="ml-auto text-xs text-muted-foreground">
+            {sectionTab === "quarterly-kpi"
+              ? `当前看板：${data.year} Q${data.quarter}`
+              : `当前模板部门：${data.departmentOptions.find((department) => department.id === departmentTab)?.name ?? "—"}`}
           </div>
         </div>
 

@@ -17,6 +17,71 @@ type OrgNodeSummary = {
   parentId: string | null;
 };
 
+const asciiLetterPattern = /^[A-Za-z]$/;
+const pinyinInitialBoundaries = [
+  { initial: "A", boundary: "阿" },
+  { initial: "B", boundary: "八" },
+  { initial: "C", boundary: "嚓" },
+  { initial: "D", boundary: "哒" },
+  { initial: "E", boundary: "妸" },
+  { initial: "F", boundary: "发" },
+  { initial: "G", boundary: "旮" },
+  { initial: "H", boundary: "哈" },
+  { initial: "J", boundary: "击" },
+  { initial: "K", boundary: "喀" },
+  { initial: "L", boundary: "垃" },
+  { initial: "M", boundary: "妈" },
+  { initial: "N", boundary: "拿" },
+  { initial: "O", boundary: "哦" },
+  { initial: "P", boundary: "啪" },
+  { initial: "Q", boundary: "期" },
+  { initial: "R", boundary: "然" },
+  { initial: "S", boundary: "撒" },
+  { initial: "T", boundary: "塌" },
+  { initial: "W", boundary: "挖" },
+  { initial: "X", boundary: "昔" },
+  { initial: "Y", boundary: "压" },
+  { initial: "Z", boundary: "匝" },
+] as const;
+const pinyinCollator = new Intl.Collator("zh-Hans-CN-u-co-pinyin");
+const englishCollator = new Intl.Collator("en", { sensitivity: "base" });
+
+function getSortToken(name: string) {
+  const firstChar = name.trim()[0] ?? "";
+  if (!firstChar) return { initial: "", typeOrder: 1 as const };
+  if (asciiLetterPattern.test(firstChar)) {
+    return { initial: firstChar.toUpperCase(), typeOrder: 0 as const };
+  }
+
+  for (let index = pinyinInitialBoundaries.length - 1; index >= 0; index -= 1) {
+    const { initial, boundary } = pinyinInitialBoundaries[index];
+    if (pinyinCollator.compare(firstChar, boundary) >= 0) {
+      return { initial, typeOrder: 1 as const };
+    }
+  }
+
+  return { initial: firstChar.toUpperCase(), typeOrder: 1 as const };
+}
+
+function compareNames(left: { name: string }, right: { name: string }) {
+  const leftToken = getSortToken(left.name);
+  const rightToken = getSortToken(right.name);
+
+  if (leftToken.initial !== rightToken.initial) {
+    return englishCollator.compare(leftToken.initial, rightToken.initial);
+  }
+
+  if (leftToken.typeOrder !== rightToken.typeOrder) {
+    return leftToken.typeOrder - rightToken.typeOrder;
+  }
+
+  if (leftToken.typeOrder === 0) {
+    return englishCollator.compare(left.name, right.name);
+  }
+
+  return pinyinCollator.compare(left.name, right.name);
+}
+
 const stageLabels: Record<string, string> = {
   DRAFT: "初始化",
   PENDING_SELF_REVIEW: "自评",
@@ -422,7 +487,7 @@ export async function getKpiData(currentUser: DataScopeInput) {
 
   const teamOptions = scopedOrgNodes
     .filter((orgNode) => orgNode.nodeType === "TEAM")
-    .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
+    .sort(compareNames)
     .map((orgNode) => ({
       id: orgNode.id,
       name: orgNode.name,
