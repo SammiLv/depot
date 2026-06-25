@@ -41,7 +41,6 @@ async function rebuildOrgTree(nodes: OrgNodeSeed[]) {
   for (const node of nodes) {
     const ancestors: string[] = [];
     let currentId: string | null = node.id;
-    let depth = 0;
 
     while (currentId) {
       ancestors.push(currentId);
@@ -134,8 +133,11 @@ async function main() {
 
   const teamDefinitions = [
     { id: "seed_team_procurement", name: "采购组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_procurement_business", name: "采购业务组", orgNodeId: createOrgNodeId() },
     { id: "seed_team_b_end", name: "B端组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_b_end_business", name: "B端业务组", orgNodeId: createOrgNodeId() },
     { id: "seed_team_c_end", name: "C端组", orgNodeId: createOrgNodeId() },
+    { id: "seed_team_c_end_business", name: "C端业务组", orgNodeId: createOrgNodeId() },
     { id: "seed_team_design", name: "设计组", orgNodeId: createOrgNodeId() },
   ] as const;
   const secondTeamDefinitions = [
@@ -193,7 +195,6 @@ async function main() {
   });
 
   const teams = Object.fromEntries(teamDefinitions.map((team) => [team.name, team])) as Record<string, { id: string; name: string; orgNodeId: string }>;
-  const secondDepartmentTeams = Object.fromEntries(secondTeamDefinitions.map((team) => [team.name, team])) as Record<string, { id: string; name: string; orgNodeId: string }>;
   let sampleLeaderId = "";
   let sampleMemberId = "";
 
@@ -563,11 +564,19 @@ async function main() {
       ],
     },
     {
+      teamName: "采购业务组",
+      metrics: [],
+    },
+    {
       teamName: "B端组",
       metrics: [
         ["AGM-2026-001", 80],
         ["AGM-2026-003", 20],
       ],
+    },
+    {
+      teamName: "B端业务组",
+      metrics: [],
     },
     {
       teamName: "C端组",
@@ -576,6 +585,10 @@ async function main() {
         ["AGM-2026-004", 50],
         ["AGM-2026-002", 30],
       ],
+    },
+    {
+      teamName: "C端业务组",
+      metrics: [],
     },
     {
       teamName: "设计组",

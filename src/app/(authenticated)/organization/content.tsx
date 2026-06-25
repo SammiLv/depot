@@ -468,88 +468,92 @@ export function OrgContent({
 
   return (
     <>
-      <PageHeader
-        title="组织与权限"
-        description="部门、小组、成员、角色与页面权限管理"
-        action={
-          (canManageUsers || canManageTeams || isAdmin) && tab === "organization" && (
-            <div className="flex gap-2">
-              {isAdmin && (
-                <Button variant="outline" onClick={handleDingTalkSync} className="text-primary border-primary/40" disabled={syncing}>
-                  <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
-                  {syncing ? "更新中" : "从钉钉更新"}
-                </Button>
-              )}
-              {canManageTeams && <Button onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
-              {canManageUsers && <Button onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
-            </div>
-          )
-        }
-      />
-      {syncMessage && <div className="-mt-3 mb-4 text-xs text-muted-foreground">{syncMessage}</div>}
+      {syncMessage && <div className="mb-4 text-xs text-muted-foreground">{syncMessage}</div>}
 
       <Card className="mb-4 !p-0 overflow-hidden">
-        <div className="p-6 border-b border-border">
-          <div className="flex flex-wrap gap-10">
-            {scopeOptions.map((option) => {
-              const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;
-              return (
+        <div className="px-6 pt-6 pb-4">
+          <h1 className="text-3xl font-semibold tracking-tight">组织与权限</h1>
+          <p className="mt-2 text-sm text-muted-foreground">部门、小组、成员、角色与页面权限管理</p>
+        </div>
+
+        <div className="p-6">
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <div className="flex flex-wrap gap-10">
+              {scopeOptions.map((option) => {
+                const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;
+                return (
+                  <button
+                    key={`${option.scopeType}:${option.departmentOrgNodeId}`}
+                    type="button"
+                    onClick={() => {
+                      const nextParams = new URLSearchParams(searchParams.toString());
+                      nextParams.set("scope", option.scopeType);
+                      nextParams.set("tab", tab);
+                      if (option.scopeType === "DEPARTMENT") {
+                        nextParams.set("department", option.departmentOrgNodeId);
+                      } else {
+                        nextParams.delete("department");
+                      }
+                      router.push(`/organization?${nextParams.toString()}`);
+                    }}
+                    className="relative pb-3"
+                  >
+                    <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                      {option.label}
+                    </span>
+                    {active ? <span className="absolute left-0 bottom-0 h-0.5 w-10 bg-primary" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 pb-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex p-1 rounded-lg bg-muted">
+              {[
+                { key: "organization", label: "组织" },
+                { key: "permissions", label: "权限" },
+              ].map((item) => (
                 <button
-                  key={`${option.scopeType}:${option.departmentOrgNodeId}`}
+                  key={item.key}
                   type="button"
                   onClick={() => {
                     const nextParams = new URLSearchParams(searchParams.toString());
-                    nextParams.set("scope", option.scopeType);
-                    nextParams.set("tab", option.scopeType === "SYSTEM" ? "permissions" : tab);
-                    if (option.scopeType === "DEPARTMENT") {
-                      nextParams.set("department", option.departmentOrgNodeId);
-                    } else {
+                    nextParams.set("tab", item.key);
+                    if (selectedScope.scopeType === "SYSTEM") {
                       nextParams.delete("department");
                     }
                     router.push(`/organization?${nextParams.toString()}`);
                   }}
-                  className="relative pb-3"
+                  className={`px-4 py-1.5 rounded-md text-sm transition ${
+                    tab === item.key ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-                    {option.label}
-                  </span>
-                  {active ? <span className="absolute left-0 bottom-0 h-0.5 w-10 bg-primary" /> : null}
+                  {item.label}
                 </button>
-              );
-            })}
-          </div>
-        </div>
+              ))}
+            </div>
 
-        <div className="p-5 border-b border-border">
-          <div className="inline-flex p-1 rounded-lg bg-muted">
-            {[
-              { key: "organization", label: "组织" },
-              { key: "permissions", label: "权限" },
-            ].map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => {
-                  const nextParams = new URLSearchParams(searchParams.toString());
-                  nextParams.set("tab", item.key);
-                  if (selectedScope.scopeType === "SYSTEM") {
-                    nextParams.delete("department");
-                  }
-                  router.push(`/organization?${nextParams.toString()}`);
-                }}
-                className={`px-4 py-1.5 rounded-md text-sm transition ${
-                  tab === item.key ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+            {tab === "organization" && (canManageUsers || canManageTeams || (isAdmin && selectedScope.scopeType === "SYSTEM")) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                  <Button variant="outline" onClick={handleDingTalkSync} className="h-9 rounded-xl text-primary border-primary/40" disabled={syncing}>
+                    <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+                    {syncing ? "更新中" : "从钉钉更新"}
+                  </Button>
+                )}
+                {canManageTeams && <Button variant="outline" className="h-9 rounded-xl" onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
+                {canManageUsers && <Button className="h-9 rounded-xl" onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
+              </div>
+            )}
           </div>
         </div>
 
         {tab === "permissions" ? (
           <>
-            <div className="p-5 border-b border-border">
+            <div className="p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold mb-3">角色说明</h3>
@@ -567,25 +571,10 @@ export function OrgContent({
                     ))}
                   </div>
                 </div>
-
-                <div className="w-full lg:w-auto lg:min-w-[360px] rounded-xl bg-muted/40 px-4 py-3 text-sm">
-                  <div className="text-xs text-muted-foreground">{department?.name ?? "未设置部门"}</div>
-                  <div className="font-medium mt-1">当前主管：{department?.managerName ?? "未设置"}</div>
-                  {isAdmin && department && (
-                    <form action={setDepartmentManager} className="mt-3 flex gap-2">
-                      <input type="hidden" name="departmentOrgNodeId" value={department.orgNodeId} />
-                      <select name="managerId" defaultValue={department.managerId ?? ""} className="min-w-0 flex-1 h-9 px-2 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-ring">
-                        <option value="">选择主管</option>
-                        {users.filter((u) => u.roleType !== "ADMIN").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                      </select>
-                      <Button type="submit" variant="outline" className="h-9 px-3 text-xs">保存</Button>
-                    </form>
-                  )}
-                </div>
               </div>
             </div>
 
-            <div className="p-5 border-b border-border">
+            <div className="p-5">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="font-semibold">菜单权限</h3>
@@ -791,6 +780,25 @@ export function OrgContent({
           </>
         ) : (
           <>
+            {department && (
+              <div className="px-5 pt-2 pb-4">
+                <div className="w-full rounded-xl bg-muted/40 px-4 py-3 text-sm">
+                  <div className="text-xs text-muted-foreground">{department.name}</div>
+                  <div className="font-medium mt-1">当前主管：{department.managerName ?? "未设置"}</div>
+                  {isAdmin && (
+                    <form action={setDepartmentManager} className="mt-3 flex gap-2">
+                      <input type="hidden" name="departmentOrgNodeId" value={department.orgNodeId} />
+                      <select name="managerId" defaultValue={department.managerId ?? ""} className="min-w-0 flex-1 h-9 px-2 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-ring">
+                        <option value="">选择主管</option>
+                        {users.filter((u) => u.roleType !== "ADMIN").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                      <Button type="submit" variant="outline" className="h-9 px-3 text-xs">保存</Button>
+                    </form>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="border-b border-border px-5 py-3 flex items-center justify-between">
               <h3 className="font-semibold">组长列表</h3>
               <span className="text-xs text-muted-foreground">共 {visibleTeams.length} 个小组</span>
@@ -874,9 +882,9 @@ export function OrgContent({
           user={dialog?.data as OrgUser | undefined}
           teams={teams}
           departments={departments}
-          departmentOrgNodeId={selectedDepartmentOrgNodeId}
+          departmentOrgNodeId={selectedDepartmentOrgNodeId || departments[0]?.orgNodeId || ""}
           roleOptionsForForm={manageableRoleOptions}
-          canSelectDepartment={isAdmin}
+          canSelectDepartment={isAdmin && selectedScope.scopeType === "SYSTEM"}
           onClose={() => setDialog(null)}
         />
       </Dialog>
@@ -886,8 +894,8 @@ export function OrgContent({
           team={dialog?.data as OrgTeam | undefined}
           users={users}
           departments={departments}
-          departmentOrgNodeId={selectedDepartmentOrgNodeId}
-          canSelectDepartment={isAdmin}
+          departmentOrgNodeId={selectedDepartmentOrgNodeId || departments[0]?.orgNodeId || ""}
+          canSelectDepartment={isAdmin && selectedScope.scopeType === "SYSTEM"}
           onClose={() => setDialog(null)}
         />
       </Dialog>
