@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { findOrCreateDingTalkUser, getAppOrigin, getDingTalkUserInfo } from "@/server/auth/dingtalk";
-import { setUserSession } from "@/server/auth/session";
+import { rememberLoginMethod, setUserSession } from "@/server/auth/session";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -15,6 +15,7 @@ export async function GET(request: Request) {
     const userInfo = await getDingTalkUserInfo(token);
     const user = await findOrCreateDingTalkUser(userInfo);
     await setUserSession(user.id);
+    await rememberLoginMethod("dingtalk");
     return NextResponse.redirect(new URL("/dashboard", origin));
   } catch (error) {
     const message = error instanceof Error ? error.message : "钉钉登录失败";

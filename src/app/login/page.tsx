@@ -1,113 +1,101 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { RoleType } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth/current-user";
-import { loginAsUser } from "@/server/auth/actions";
+import { initializeAdminPassword, loginWithPassword } from "@/server/auth/actions";
 import { prisma } from "@/server/db/prisma";
-import { getRoleLabel } from "@/server/permissions/role-labels";
-import { avatarColor } from "@/lib/avatar-color";
-import { Button } from "@/components/ui-kit";
-import { ChevronLeft } from "lucide-react";
-import { UserSelector } from "./user-selector";
+import { LAST_LOGIN_METHOD_COOKIE_NAME } from "@/server/auth/session";
+import { AdminInitializationForm, PasswordLoginForm } from "./password-login-form";
 
 type LoginPageProps = {
-  searchParams: Promise<{ userId?: string; error?: string; token?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; token?: string; mode?: string }>;
 };
 
-function Avatar({ name, size = "large" }: { name: string; size?: "small" | "large" }) {
-  const className = size === "large"
-    ? "w-28 h-28 rounded-2xl text-4xl"
-    : "w-10 h-10 rounded-xl text-sm";
-
-  return (
-    <div className={`${className} flex shrink-0 items-center justify-center text-white font-medium shadow-sm ${avatarColor(name)}`}>
-      {name.slice(0, 1)}
-    </div>
-  );
-}
-
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const { userId, error, token } = await searchParams;
+  const { error, success, token, mode } = await searchParams;
 
   if (token) {
     redirect(`/login/dingtalk/callback?token=${encodeURIComponent(token)}`);
   }
 
   const currentUser = await getCurrentUser();
-
   if (currentUser) {
     redirect("/dashboard");
   }
 
-  const users = await prisma.user.findMany({
+  const cookieStore = await cookies();
+  const lastLoginMethod = cookieStore.get(LAST_LOGIN_METHOD_COOKIE_NAME)?.value;
+  if (lastLoginMethod === "dingtalk" && mode !== "password" && mode !== "init" && !error && !success) {
+    redirect("/login/dingtalk");
+  }
+
+  const initializedAdmin = await prisma.user.findFirst({
     where: {
+      roleType: RoleType.ADMIN,
       isActive: true,
       deletedAt: null,
+      loginName: { not: null },
+      passwordHash: { not: null },
+      passwordLoginEnabled: true,
     },
-    orderBy: [{ roleType: "asc" }, { name: "asc" }],
+    select: { id: true },
   });
-  const selectedUser: typeof users[number] | undefined = userId ? users.find((user) => user.id === userId) : undefined;
+  const showAdminInitEntry = !initializedAdmin;
+  const isAdminInitMode = showAdminInitEntry && mode === "init";
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <div className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-[480px] bg-card rounded-2xl border border-border/60 p-10 relative" style={{ boxShadow: "var(--shadow-card)" }}>
+        <div className="w-full max-w-[480px] bg-card rounded-2xl border border-border/60 p-10" style={{ boxShadow: "var(--shadow-card)" }}>
           {error && (
             <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {decodeURIComponent(error)}
             </div>
           )}
-          {selectedUser ? (
-            <>
-              <Link
-                href="/login"
-                className="absolute top-5 left-5 w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
-                aria-label="返回用户选择"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </Link>
-
-              <div className="flex flex-col items-center pt-6">
-                <Avatar name={selectedUser.name} />
-                <div className="mt-5 text-xl font-semibold text-foreground">{selectedUser.name}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {getRoleLabel(selectedUser.roleType)}
-                </div>
-
-                <div className="h-40" />
-
-                <div className="text-sm text-muted-foreground">
-                  此账号已在使用，可直接登录产品部管理工作台
-                </div>
-                <form action={loginAsUser} className="w-full mt-5">
-                  <input type="hidden" name="userId" value={selectedUser.id} />
-                  <Button type="submit" variant="primary" size="lg" className="w-full">
-                    立即登录
-                  </Button>
-                </form>
-                <Link
-                  href="/login"
-                  className="mt-3 text-xs text-muted-foreground hover:text-primary transition-colors"
-                >
-                  切换其他身份
-                </Link>
-              </div>
-            </>
-          ) : (
-            <>
-              <UserSelector users={users} />
-              <div className="mt-5 flex items-center gap-3">
-                <div className="h-px flex-1 bg-border" />
-                <span className="text-xs text-muted-foreground">或</span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-              <a
-                href="/login/dingtalk"
-                className="mt-5 h-12 w-full inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[15px] font-medium transition-all hover:bg-primary/90 active:scale-[0.99]"
-              >
-                钉钉授权登录
-              </a>
-            </>
+          {success && (
+            <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+              {decodeURIComponent(success)}
+            </div>
           )}
+          <div className="text-center">
+            <h1 className="text-2xl font-semibold text-foreground">登录产品部管理工作台</h1>
+            <p className="mt-3 text-sm text-muted-foreground">仅支持账号密码登录和钉钉授权登录</p>
+          </div>
+          <div className="mt-8">
+            {isAdminInitMode ? <AdminInitializationForm action={initializeAdminPassword} /> : <PasswordLoginForm action={loginWithPassword} />}
+          </div>
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <div>
+              {showAdminInitEntry ? (
+                isAdminInitMode ? (
+                  <Link href="/login?mode=password" className="text-primary hover:text-primary/80">
+                    返回账号密码登录
+                  </Link>
+                ) : (
+                  <Link href="/login?mode=init" className="text-primary hover:text-primary/80">
+                    初始化系统管理员账号密码
+                  </Link>
+                )
+              ) : null}
+            </div>
+            {lastLoginMethod === "dingtalk" ? (
+              <Link href="/login?mode=password" className="text-primary hover:text-primary/80">
+                改用账号密码登录
+              </Link>
+            ) : null}
+          </div>
+          <div className="mt-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">或</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <a
+            href="/login/dingtalk"
+            className="mt-6 h-12 w-full inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[15px] font-medium transition-all hover:bg-primary/90 active:scale-[0.99]"
+          >
+            钉钉授权登录
+          </a>
         </div>
       </div>
 

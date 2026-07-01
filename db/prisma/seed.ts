@@ -170,6 +170,9 @@ async function main() {
   const admin = await prisma.user.create({
     data: {
       name: "系统管理员",
+      loginName: "admin",
+      passwordHash: "d6ad2d7161306be4e93af1276e8dafb7f945d9a25df0b193ad1f9817031e1f7025a1c8b5afb9692d8772387a8ad2fd39553f31bf5349bce78630358f2dbc58a3",
+      passwordLoginEnabled: true,
       roleType: RoleType.ADMIN,
       orgNodeId: rootOrgNodeId,
       title: "管理员",
@@ -179,6 +182,9 @@ async function main() {
   const manager = await prisma.user.create({
     data: {
       name: "产品部主管",
+      loginName: "product-manager",
+      passwordHash: "d6ad2d7161306be4e93af1276e8dafb7f945d9a25df0b193ad1f9817031e1f7025a1c8b5afb9692d8772387a8ad2fd39553f31bf5349bce78630358f2dbc58a3",
+      passwordLoginEnabled: true,
       roleType: RoleType.DEPARTMENT_MANAGER,
       orgNodeId: departmentOrgNodeId,
       title: "部门主管",
