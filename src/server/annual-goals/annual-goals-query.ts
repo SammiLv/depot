@@ -593,18 +593,18 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     sourcesByParentMetric.set(source.parentMetricId, list);
   }
 
-  function getMetricQuarterTargets(plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number]) {
-    const sourceMetricForInheritance = plan.ownerType === "TEAM" && metric.sourceMetricId ? sourceById.get(metric.sourceMetricId) : null;
-    const parentMetricForInheritance = plan.ownerType === "TEAM" && !metric.sourceMetricId ? departmentMetricByPlan.get(`${getPlanScopeDepartmentOrgNodeId(plan)}:${plan.year}:${metric.metricCode}`) : null;
-    return sourceMetricForInheritance
-      ? targetsBySourceMetric.get(`${sourceMetricForInheritance.parentMetricId}:${sourceMetricForInheritance.id}`) ?? []
-      : parentMetricForInheritance
-        ? targetsByMetric.get(parentMetricForInheritance.id) ?? []
-        : targetsByMetric.get(metric.id) ?? [];
-  }
-
   function getMetricScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
     return getPlanScopeDepartmentOrgNodeId(plan);
+  }
+
+  function getMetricQuarterTargets(plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number]) {
+    if (plan.ownerType === "TEAM") {
+      const inheritedMetric = departmentMetricByPlan.get(`${getPlanScopeDepartmentOrgNodeId(plan)}:${plan.year}:${metric.metricCode}`);
+      if (inheritedMetric) {
+        return targetsByMetric.get(inheritedMetric.id) ?? [];
+      }
+    }
+    return targetsByMetric.get(metric.id) ?? [];
   }
 
   function getSourceCurrentValue(parentMetricId: string, source: (typeof metricSources)[number]) {

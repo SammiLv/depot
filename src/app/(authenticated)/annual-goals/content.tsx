@@ -948,7 +948,14 @@ function QuarterProgressUpdateForm({ metric, sourceMetric, onClose }: { metric: 
       await updateAnnualGoalQuarterProgress(formData);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
+      if (err instanceof Error) {
+        const message = err.message.includes("An error occurred in the Server Components render")
+          ? "保存失败，请刷新页面后重试；如果问题持续存在，请联系管理员。"
+          : err.message;
+        setError(message);
+      } else {
+        setError("保存失败");
+      }
     }
   }
 
