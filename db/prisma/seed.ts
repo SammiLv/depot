@@ -1,11 +1,28 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualGoalOwnerType, AnnualMetricCalculationType, ApprovalStatus, PrismaClient, RoleType } from "@prisma/client";
 import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
+import { kpiDefaultPermissionGrants } from "../../src/server/permissions/permission-constants";
 
-const databaseUrl = process.env.DATABASE_URL === "file:./dev.db" ? "file:./db/dev.db" : process.env.DATABASE_URL;
-const adapter = new PrismaBetterSqlite3({ url: databaseUrl ?? "file:./db/dev.db" });
+function resolveDatabaseUrl() {
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL === "file:./dev.db") {
+    return `file:${path.resolve(process.cwd(), "db/dev.db")}`;
+  }
+
+  if (process.env.DATABASE_URL.startsWith("file:")) {
+    const rawPath = process.env.DATABASE_URL.slice("file:".length);
+    if (path.isAbsolute(rawPath)) {
+      return process.env.DATABASE_URL;
+    }
+    return `file:${path.resolve(process.cwd(), rawPath)}`;
+  }
+
+  return process.env.DATABASE_URL;
+}
+
+const adapter = new PrismaBetterSqlite3({ url: resolveDatabaseUrl() });
 const prisma = new PrismaClient({ adapter });
 
 function createOrgNodeId() {
@@ -356,6 +373,7 @@ async function main() {
   ];
 
   await prisma.roleAnnualGoalPermission.deleteMany();
+  await prisma.orgPermissionGrant.deleteMany();
   for (const [roleType, codes] of annualGoalRoleDefaults) {
     for (const code of codes) {
       const annualGoalPermissionId = annualGoalPermissionIdByCode.get(code);
@@ -367,6 +385,28 @@ async function main() {
           roleType,
           annualGoalPermissionId,
           allowed: true,
+        },
+      });
+    }
+  }
+
+  for (const grant of kpiDefaultPermissionGrants) {
+    const orgNodeIds = grant.orgNodeSeedKey === null
+      ? [null]
+      : grant.orgNodeSeedKey === "ROOT"
+        ? [rootOrgNodeId]
+        : grant.orgNodeSeedKey === "DEPARTMENT"
+          ? [departmentOrgNodeId]
+          : Object.values(teams).map((team) => team.orgNodeId);
+    for (const orgNodeId of orgNodeIds) {
+      await prisma.orgPermissionGrant.create({
+        data: {
+          moduleKey: grant.moduleKey,
+          abilityKey: grant.abilityKey,
+          scopeType: grant.scopeType,
+          roleType: grant.roleType,
+          orgNodeId,
+          isActive: true,
         },
       });
     }

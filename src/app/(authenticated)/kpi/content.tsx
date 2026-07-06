@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, Progress, avatarColor } from "@/components/ui-kit";
 import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deletePersonalKpi } from "@/server/kpi/actions";
 import { Search, Upload, X, GripVertical } from "lucide-react";
@@ -13,6 +13,8 @@ type Props = { data: Awaited<ReturnType<typeof getKpiData>> };
 type SectionTab = "quarterly-kpi" | "kpi-template";
 type TeamTab = "all" | Props["data"]["teamOptions"][number]["id"];
 type TemplateRow = Props["data"]["templateRows"][number];
+
+type TeamTabOption = { id: TeamTab; name: string };
 
 type InitializationResult = Awaited<ReturnType<typeof initializeQuarterlyKpis>>;
 type TemplateImportResult = Awaited<ReturnType<typeof importKpiTemplates>>;
@@ -25,17 +27,17 @@ type QuarterOption = {
   label: string;
 };
 
-function getQuarterlyKpiActionLabel(stageKey: string) {
-  if (stageKey === "DRAFT" || stageKey === "PENDING_SELF_REVIEW") {
+function getQuarterlyKpiActionLabel(row: QuarterlyKpiRow) {
+  if (row.availableActions.canSelfReview) {
     return "自评";
   }
-  if (stageKey === "PENDING_LEADER_SCORE") {
+  if (row.availableActions.canLeaderScore) {
     return "组长评";
   }
-  if (stageKey === "PENDING_MANAGER_SCORE") {
+  if (row.availableActions.canManagerScore) {
     return "主管评";
   }
-  if (stageKey === "PENDING_FINAL_REVIEW") {
+  if (row.availableActions.canFinalReview) {
     return "最终确认";
   }
   return null;
@@ -61,26 +63,40 @@ function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
 
 function TemplateList({
   rows,
+  canManageKpiTemplate,
+  canToggleKpiTemplate,
   onView,
   onEdit,
   onToggleActive,
 }: {
   rows: TemplateRow[];
+  canManageKpiTemplate: boolean;
+  canToggleKpiTemplate: boolean;
   onView: (row: TemplateRow) => void;
   onEdit: (row: TemplateRow) => void;
   onToggleActive: (row: TemplateRow) => Promise<void>;
 }) {
   return (
     <Card className="!p-0 overflow-hidden">
-      <table className="w-full">
+      <table className="w-full table-fixed">
+        <colgroup>
+          <col className="w-[160px]" />
+          <col className="w-[140px]" />
+          <col className="w-[300px]" />
+          <col className="w-[80px]" />
+          <col className="w-[140px]" />
+          <col className="w-[120px]" />
+          <col className="w-[132px]" />
+          <col className="w-[220px]" />
+        </colgroup>
         <thead className="bg-muted/40">
           <tr className="text-left text-sm text-muted-foreground">
             <th className="px-5 py-3 font-medium">模板名称</th>
-            <th className="px-5 py-3 font-medium">创建人</th>
+            <th className="px-5 py-3 font-medium whitespace-nowrap">创建人</th>
             <th className="px-5 py-3 font-medium">适用范围</th>
-            <th className="px-4 py-3 font-medium">状态</th>
-            <th className="px-4 py-3 font-medium">创建时间</th>
-            <th className="px-4 py-3 font-medium">最后更新</th>
+            <th className="px-4 py-3 font-medium whitespace-nowrap">状态</th>
+            <th className="px-4 py-3 font-medium whitespace-nowrap">创建时间</th>
+            <th className="px-4 py-3 font-medium whitespace-nowrap">最后更新</th>
             <th className="px-4 py-3 font-medium whitespace-nowrap">最后更新时间</th>
             <th className="w-[220px] px-5 py-3 text-right font-medium">操作</th>
           </tr>
@@ -90,9 +106,9 @@ function TemplateList({
             rows.map((row) => (
               <tr key={row.id} className="border-t border-border transition hover:bg-muted/30">
                 <td className="px-5 py-3 text-sm font-medium">{row.name}</td>
-                <td className="px-5 py-3 text-sm text-muted-foreground">{row.createdByName}</td>
+                <td className="px-5 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.createdByName}</td>
                 <td className="px-5 py-3 text-sm text-muted-foreground">{row.scopeName}</td>
-                <td className="px-4 py-3 text-sm">
+                <td className="px-4 py-3 text-sm whitespace-nowrap">
                   <Badge tone={row.isActive ? "success" : "default"}>{row.isActive ? "启用" : "禁用"}</Badge>
                 </td>
                 <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
@@ -101,9 +117,9 @@ function TemplateList({
                 <td className="w-[220px] px-5 py-3 text-right">
                   <div className="inline-flex items-center justify-end gap-2 text-sm whitespace-nowrap">
                     <button type="button" className="text-primary hover:underline" onClick={() => onView(row)}>查看</button>
-                    <button type="button" className="text-primary hover:underline" onClick={() => onEdit(row)}>编辑</button>
-                    <button type="button" className="text-primary hover:underline" onClick={() => void onToggleActive(row)}>{row.isActive ? "禁用" : "启用"}</button>
-                    <button type="button" className="text-destructive hover:underline" disabled>删除</button>
+                    {canManageKpiTemplate ? <button type="button" className="text-primary hover:underline" onClick={() => onEdit(row)}>编辑</button> : null}
+                    {canToggleKpiTemplate ? <button type="button" className="text-primary hover:underline" onClick={() => void onToggleActive(row)}>{row.isActive ? "禁用" : "启用"}</button> : null}
+                    {canManageKpiTemplate ? <button type="button" className="text-destructive hover:underline" disabled>删除</button> : null}
                   </div>
                 </td>
               </tr>
@@ -1086,7 +1102,7 @@ function InitializeForm({
           onComplete(result);
           onClose();
         } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "初始化季度 KPI 失败");
+          setErrorMessage(error instanceof Error ? error.message : "维护 KPI 失败");
         }
       }}
       className="space-y-4"
@@ -1111,13 +1127,13 @@ function InitializeForm({
         </select>
       </div>
       <p className="text-sm text-muted-foreground">
-        将按启用中的模板适用范围，为 {year} {quarterOptions.find((option) => String(option.value) === selectedQuarter)?.label ?? `Q${selectedQuarter}`} 批量初始化个人 KPI 单据，并将模板项复制到独立单据表中。
+        将按启用中的模板适用范围，为 {year} {quarterOptions.find((option) => String(option.value) === selectedQuarter)?.label ?? `Q${selectedQuarter}`} 批量维护个人 KPI 单据，并将模板项复制到独立单据表中。
       </p>
       <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground space-y-1">
         <div>一人只会创建一份季度 KPI 单据</div>
         <div>已存在单据的成员会自动跳过</div>
         <div>未命中启用模板的成员不会建单</div>
-        <div>初始化后模板再修改，也不会影响已生成单据</div>
+        <div>维护后模板再修改，也不会影响已生成单据</div>
       </div>
       <div className="flex justify-end gap-3">
         <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
@@ -1209,11 +1225,13 @@ function TemplateImportForm({
 
 export function KpiContent({ data }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [showInitDialog, setShowInitDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [templateImportResult, setTemplateImportResult] = useState<TemplateImportResult | null>(null);
   const [departmentTab, setDepartmentTab] = useState(data.defaultDepartmentOrgNodeId);
-  const [teamTab, setTeamTab] = useState<TeamTab>("all");
+  const [teamTab, setTeamTab] = useState<TeamTab | null>(null);
   const [sectionTab, setSectionTab] = useState<SectionTab>("quarterly-kpi");
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
@@ -1227,16 +1245,88 @@ export function KpiContent({ data }: Props) {
     () => data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentTab),
     [data.teamOptions, departmentTab]
   );
-  const teamTabs = useMemo(
-    () => [{ id: "all" as const, name: "全部" }, ...filteredTeamOptions],
-    [filteredTeamOptions]
+  const canManageKpi = data.permissions.canManageKpi;
+  const canManageKpiTemplate = data.permissions.canManageKpiTemplate;
+  const canToggleKpiTemplate = data.permissions.canToggleKpiTemplate;
+
+  function updatePeriodFilters(nextYear: number, nextQuarter: number) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("year", String(nextYear));
+    params.set("quarter", String(nextQuarter));
+    router.push(`${pathname}?${params.toString()}`);
+  }
+  const showAllTeamTab = useMemo(
+    () => data.departmentAllTabOrgNodeIds.includes(departmentTab),
+    [data.departmentAllTabOrgNodeIds, departmentTab]
   );
+  const teamTabs = useMemo<TeamTabOption[]>(
+    () => showAllTeamTab
+      ? [{ id: "all", name: "全部" }, ...filteredTeamOptions]
+      : filteredTeamOptions,
+    [filteredTeamOptions, showAllTeamTab]
+  );
+  const defaultTeamTab = useMemo<TeamTab | null>(() => {
+    if (teamTabs.length === 0) {
+      return null;
+    }
+    return showAllTeamTab ? "all" : (teamTabs[0]?.id ?? null);
+  }, [showAllTeamTab, teamTabs]);
+
+  useEffect(() => {
+    if (!data.hasAnyViewPermission) {
+      setTeamTab(null);
+      return;
+    }
+    if (teamTabs.length === 0) {
+      setTeamTab(null);
+      return;
+    }
+    if (!teamTab) {
+      setTeamTab(defaultTeamTab);
+      return;
+    }
+    const teamTabExists = teamTabs.some((team) => team.id === teamTab);
+    if (!teamTabExists) {
+      setTeamTab(defaultTeamTab);
+    }
+  }, [data.hasAnyViewPermission, defaultTeamTab, teamTab, teamTabs]);
+
   const rows = useMemo(
     () => data.rows.filter((row) => {
       if (row.departmentOrgNodeId !== departmentTab) return false;
-      return teamTab === "all" ? true : row.teamOrgNodeId === teamTab;
+      if (showAllTeamTab && teamTab === "all") return true;
+      return teamTab ? row.teamOrgNodeId === teamTab : false;
     }),
-    [data.rows, departmentTab, teamTab]
+    [data.rows, departmentTab, showAllTeamTab, teamTab]
+  );
+  const scopedMemberCount = useMemo(() => {
+    const visibleMembers = data.memberOptions.filter((member) => {
+      const departmentOrgNodeId = member.orgNodeId
+        ? data.teamOptions.find((team) => team.id === member.orgNodeId)?.departmentOrgNodeId
+          ?? (data.departmentOptions.some((department) => department.id === member.orgNodeId) ? member.orgNodeId : null)
+        : null;
+      if (departmentOrgNodeId !== departmentTab) return false;
+      if (showAllTeamTab && teamTab === "all") return true;
+      return teamTab ? member.orgNodeId === teamTab : false;
+    });
+    return visibleMembers.length;
+  }, [data.departmentOptions, data.memberOptions, data.teamOptions, departmentTab, showAllTeamTab, teamTab]);
+  const scopedStages = useMemo(() => ([
+    { label: "初始化", count: rows.length },
+    { label: "自评", count: rows.filter((row) => row.stageKey === "PENDING_LEADER_SCORE").length },
+    { label: "组长评", count: rows.filter((row) => row.stageKey === "PENDING_MANAGER_SCORE").length },
+    { label: "主管评", count: rows.filter((row) => row.stageKey === "PENDING_FINAL_REVIEW").length },
+    { label: "终审", count: rows.filter((row) => row.stageKey === "COMPLETED").length },
+  ]), [rows]);
+  const templateRows = useMemo(
+    () => data.templateRows.filter((row) => {
+      if (row.departmentOrgNodeId !== departmentTab) return false;
+      if (showAllTeamTab && teamTab === "all") return true;
+      if (!teamTab) return false;
+      if (row.scopeDepartmentOrgNodeIds.includes(departmentTab)) return false;
+      return row.groupTeamIds.includes(teamTab);
+    }),
+    [data.templateRows, departmentTab, showAllTeamTab, teamTab]
   );
 
   async function handleDownloadTemplate() {
@@ -1257,33 +1347,39 @@ export function KpiContent({ data }: Props) {
     URL.revokeObjectURL(url);
   }
 
+  const showDepartmentTabs = data.canSelectAnyDepartment && data.departmentOptions.length > 1;
+
   return (
     <>
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
           <h1 className="text-3xl font-semibold tracking-tight">KPI管理</h1>
-          <p className="mt-2 text-sm text-muted-foreground">按模板规则批量初始化季度 KPI 单据，并进入自评、组长评分、主管评分流程</p>
+          <p className="mt-2 text-sm text-muted-foreground">按模板规则批量维护季度 KPI 单据，并进入自评、组长评分、主管评分流程</p>
         </div>
 
-        <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
-          {data.departmentOptions.map((department) => (
-            <button
-              key={department.id}
-              type="button"
-              onClick={() => {
-                setDepartmentTab(department.id);
-                setTeamTab("all");
-              }}
-              className={`pb-3 border-b-2 transition ${
-                departmentTab === department.id
-                  ? "border-primary text-primary font-medium"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {department.name}
-            </button>
-          ))}
-        </div>
+        {showDepartmentTabs ? (
+          <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
+            {data.departmentOptions.map((department) => (
+              <button
+                key={department.id}
+                type="button"
+                onClick={() => {
+                  setDepartmentTab(department.id);
+                  const nextTeamOptions = data.teamOptions.filter((team) => team.departmentOrgNodeId === department.id);
+                  const nextShowAllTeamTab = data.departmentAllTabOrgNodeIds.includes(department.id);
+                  setTeamTab(nextShowAllTeamTab ? "all" : (nextTeamOptions[0]?.id ?? null));
+                }}
+                className={`pb-3 border-b-2 transition ${
+                  departmentTab === department.id
+                    ? "border-primary text-primary font-medium"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {department.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="px-5 pt-3 pb-4 flex flex-wrap items-center gap-2">
           {teamTabs.map((team) => (
@@ -1319,15 +1415,42 @@ export function KpiContent({ data }: Props) {
 
           <div className="flex items-center gap-2">
             {sectionTab === "quarterly-kpi" ? (
-              <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化季度 KPI</Button>
-            ) : (
+              canManageKpi ? <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化季度KPI</Button> : null
+            ) : canManageKpiTemplate ? (
               <>
                 <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
-                <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button>
-                <Button className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button>
+                {canManageKpiTemplate ? <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button> : null}
+                {canManageKpiTemplate ? <Button className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button> : null}
               </>
-            )}
+            ) : null}
           </div>
+
+          {sectionTab === "quarterly-kpi" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                <select
+                  value={String(data.year)}
+                  onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), data.quarter)}
+                  className="h-full bg-transparent outline-none"
+                >
+                  {data.availableYears.map((year) => (
+                    <option key={year} value={year}>{year} 年</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                <select
+                  value={String(data.quarter)}
+                  onChange={(event) => updatePeriodFilters(data.year, Number.parseInt(event.target.value, 10))}
+                  className="h-full bg-transparent outline-none"
+                >
+                  {data.availableQuarters.map((quarter) => (
+                    <option key={quarter} value={quarter}>Q{quarter}季度</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
 
           <div className="ml-auto text-xs text-muted-foreground">
             {sectionTab === "quarterly-kpi"
@@ -1373,18 +1496,18 @@ export function KpiContent({ data }: Props) {
             <Card>
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold">流程进度</h3>
-                <span className="text-xs text-muted-foreground">共 {rows.length} 份 KPI</span>
+                <span className="text-xs text-muted-foreground">共 {scopedMemberCount} 人，已生成 {rows.length} 份 KPI</span>
               </div>
               <div className="flex items-center gap-2">
-                {data.stages.map((s, i) => {
-                  const totalCount = Math.max(data.totalCount, 1);
+                {scopedStages.map((s, i) => {
+                  const totalCount = Math.max(scopedMemberCount, 1);
                   return (
                     <div key={s.label} className="flex-1">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 overflow-hidden rounded-full bg-muted h-2">
                           <div className="h-full rounded-full bg-primary" style={{ width: `${(s.count / totalCount) * 100}%` }} />
                         </div>
-                        {i < data.stages.length - 1 ? <div className="w-2" /> : null}
+                        {i < scopedStages.length - 1 ? <div className="w-2" /> : null}
                       </div>
                       <div className="mt-2 flex items-baseline justify-between">
                         <span className="text-xs text-muted-foreground">{s.label}</span>
@@ -1436,18 +1559,20 @@ export function KpiContent({ data }: Props) {
                         <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
                         <td className="px-5 py-3 text-right">
                           <div className="flex items-center justify-end gap-3">
-                            <Link href={`/kpi/${r.id}`} className="text-sm text-primary hover:underline">查看</Link>
-                            {getQuarterlyKpiActionLabel(r.stageKey) ? (
-                              <button type="button" className="text-sm text-primary hover:underline">
-                                {getQuarterlyKpiActionLabel(r.stageKey)}
+                            <Link href={`/kpi/${r.id}?mode=view`} className="text-sm text-primary hover:underline">查看</Link>
+                            {getQuarterlyKpiActionLabel(r) ? (
+                              <Link href={`/kpi/${r.id}`} className="text-sm text-primary hover:underline">
+                                {getQuarterlyKpiActionLabel(r)}
+                              </Link>
+                            ) : null}
+                            {canManageKpi ? (
+                              <button
+                                className="text-sm text-destructive hover:underline"
+                                onClick={() => setDeleteQuarterlyKpiRow(r)}
+                              >
+                                删除
                               </button>
                             ) : null}
-                            <button
-                              className="text-sm text-destructive hover:underline"
-                              onClick={() => setDeleteQuarterlyKpiRow(r)}
-                            >
-                              删除
-                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1464,7 +1589,9 @@ export function KpiContent({ data }: Props) {
         ) : (
           <div className="px-5 pb-5">
             <TemplateList
-              rows={data.templateRows.filter((row) => row.departmentOrgNodeId === departmentTab)}
+              rows={templateRows}
+              canManageKpiTemplate={canManageKpiTemplate}
+              canToggleKpiTemplate={canToggleKpiTemplate}
               onView={(row) => {
                 setSelectedTemplate(row);
                 setTemplateDrawerMode("view");
@@ -1541,7 +1668,7 @@ export function KpiContent({ data }: Props) {
         />
       </Dialog>
 
-      <Dialog open={showInitDialog} onClose={() => setShowInitDialog(false)} title="初始化季度 KPI">
+      <Dialog open={showInitDialog} onClose={() => setShowInitDialog(false)} title="维护KPI">
         <InitializeForm
           year={data.year}
           defaultQuarter={data.quarter}

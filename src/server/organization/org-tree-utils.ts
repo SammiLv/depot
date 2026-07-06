@@ -9,6 +9,15 @@ export async function getDescendantOrgNodeIds(orgNodeId: string | null): Promise
   return rows.map((r) => r.descendantId);
 }
 
+export async function getAncestorOrgNodeIds(orgNodeId: string | null): Promise<string[]> {
+  if (!orgNodeId) return [];
+  const rows = await prisma.orgClosure.findMany({
+    where: { descendantId: orgNodeId },
+    select: { ancestorId: true },
+  });
+  return rows.map((r) => r.ancestorId);
+}
+
 export async function getDescendantOrgNodes(
   orgNodeId: string | null,
   nodeType?: "DEPARTMENT" | "TEAM",

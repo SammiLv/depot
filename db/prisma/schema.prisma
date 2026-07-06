@@ -23,6 +23,30 @@ enum PermissionScopeType {
   DEPARTMENT
 }
 
+enum OrgPermissionModuleKey {
+  ANNUAL_GOAL
+  KPI
+}
+
+enum OrgPermissionAbilityKey {
+  VIEW_KPI
+  VIEW_KPI_TEMPLATE
+  MANAGE_KPI_TEMPLATE
+  TOGGLE_KPI_TEMPLATE
+  INITIALIZE_KPI
+  SCORE_SELF
+  SCORE_LEADER
+  SCORE_MANAGER
+  SCORE_FINAL
+}
+
+enum OrgPermissionGrantScopeType {
+  SELF
+  NODE
+  SUBTREE
+  ALL
+}
+
 enum AnnualMetricCalculationType {
   RATIO
   BOOLEAN
@@ -201,6 +225,22 @@ model RoleAnnualGoalPermission {
   @@unique([scopeType, departmentOrgNodeId, roleType, annualGoalPermissionId])
   @@index([scopeType, departmentOrgNodeId])
   @@index([annualGoalPermissionId])
+}
+
+model OrgPermissionGrant {
+  id         String                      @id @default(cuid())
+  moduleKey  OrgPermissionModuleKey
+  abilityKey OrgPermissionAbilityKey
+  scopeType  OrgPermissionGrantScopeType
+  roleType   RoleType
+  orgNodeId  String?
+  isActive   Boolean                     @default(true)
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+
+  @@index([moduleKey, abilityKey, roleType, isActive])
+  @@index([orgNodeId])
+  @@unique([moduleKey, abilityKey, scopeType, roleType, orgNodeId])
 }
 
 model ApprovalInstance {
@@ -615,6 +655,19 @@ model PersonalKpiItem {
   @@index([relatedAnnualMetricId])
   @@index([relatedQuarterTargetId])
   @@index([relatedWorkId])
+}
+
+model PersonalKpiActionLog {
+  id            String   @id @default(cuid())
+  personalKpiId String
+  actorId       String
+  action        String
+  remark        String?
+  actedAt       DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([personalKpiId, actedAt])
+  @@index([actorId])
 }
 
 model Notification {

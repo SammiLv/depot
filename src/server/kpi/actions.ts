@@ -2,10 +2,11 @@
 
 import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
-import type { KpiTemplate, KpiTemplateAssignment, RoleType } from "@prisma/client";
+import type { KpiStatus, KpiTemplate, KpiTemplateAssignment, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getKpiWhereByScope, getUserWhereByScope } from "@/server/permissions/data-scope";
+import { buildKpiWhereByPermission, buildUserWhereByPermission, resolveAuthorizedOrgNodeIds, resolvePermissionScope } from "@/server/permissions/permission-resolver";
+import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodes } from "@/server/organization/org-tree-utils";
 
 const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"] as const;
@@ -42,11 +43,27 @@ type DepartmentOption = {
   name: string;
 };
 
-type KpiTemplateEditorContext = {
+type KpiPermissionContext = {
   currentUser: Awaited<ReturnType<typeof requireCurrentUser>>;
-  scopedDepartmentOrgNodeId: string | null;
-  allowedDepartmentIds: string[] | null;
+  scope: NonNullable<Awaited<ReturnType<typeof resolvePermissionScope>>>;
 };
+
+async function requireKpiAbility(abilityKey: OrgPermissionAbilityKey, errorMessage: string) {
+  const currentUser = await requireCurrentUser();
+  const scope = await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, abilityKey);
+  if (!scope) {
+    throw new Error(errorMessage);
+  }
+  return { currentUser, scope } satisfies KpiPermissionContext;
+}
+
+async function requireKpiTemplateEditor() {
+  return requireKpiAbility(kpiAbilityKeys.manageKpiTemplate, "当前角色不能维护 KPI 模板");
+}
+
+async function requireKpiManager() {
+  return requireKpiAbility(kpiAbilityKeys.initializeKpi, "当前角色不能维护 KPI");
+}
 
 type InitializationSummary = {
   year: number;
@@ -375,52 +392,49 @@ function isBetterRank(next: ReturnType<typeof rankAssignment>, current: ReturnTy
   return false;
 }
 
-async function requireKpiInitializer() {
-  const currentUser = await requireCurrentUser();
-  if (!editableRoles.includes(currentUser.roleType as (typeof editableRoles)[number])) {
-    throw new Error("当前角色不能执行季度 KPI 初始化");
-  }
-  return currentUser;
+function getScoringAbilityKey(stage: KpiEditableStage | null) {
+  if (stage === "SELF") return kpiAbilityKeys.scoreSelf;
+  if (stage === "LEADER") return kpiAbilityKeys.scoreLeader;
+  if (stage === "MANAGER") return kpiAbilityKeys.scoreManager;
+  if (stage === "FINAL") return kpiAbilityKeys.scoreFinal;
+  return null;
 }
 
-async function requireKpiTemplateEditor() {
-  const currentUser = await requireCurrentUser();
-  if (!editableRoles.includes(currentUser.roleType as (typeof editableRoles)[number])) {
-    throw new Error("当前角色不能维护 KPI 模板");
+async function resolveAllowedDepartmentOrgNodeIds(context: KpiPermissionContext) {
+  const orgNodeIds = await resolveAuthorizedOrgNodeIds(
+    context.currentUser,
+    orgPermissionModuleKeys.kpi,
+    kpiAbilityKeys.manageKpiTemplate,
+  );
+  if (orgNodeIds === null) {
+    return null;
   }
 
-  const scopedDepartmentOrgNodeId = currentUser.roleType === "ADMIN"
-    ? null
-    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
-
-  if (currentUser.roleType !== "ADMIN" && !scopedDepartmentOrgNodeId) {
-    throw new Error("当前角色未归属部门，不能维护 KPI 模板");
+  const departmentOrgNodeIds = new Set<string>();
+  for (const orgNodeId of orgNodeIds) {
+    const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(orgNodeId);
+    if (departmentOrgNodeId) {
+      departmentOrgNodeIds.add(departmentOrgNodeId);
+    }
   }
 
-  const allowedDepartmentIds = currentUser.roleType === "ADMIN"
-    ? null
-    : [scopedDepartmentOrgNodeId as string];
-
-  return {
-    currentUser,
-    scopedDepartmentOrgNodeId,
-    allowedDepartmentIds,
-  } satisfies KpiTemplateEditorContext;
+  return [...departmentOrgNodeIds];
 }
 
 async function resolveKpiTemplateDepartmentContext(
-  context: KpiTemplateEditorContext,
+  context: KpiPermissionContext,
   requestedDepartmentOrgNodeId: string | null | undefined,
 ) {
-  const departmentOrgNodeId = context.currentUser.roleType === "ADMIN"
+  const allowedDepartmentIds = await resolveAllowedDepartmentOrgNodeIds(context);
+  const departmentOrgNodeId = allowedDepartmentIds === null
     ? (requestedDepartmentOrgNodeId ?? "")
-    : context.scopedDepartmentOrgNodeId;
+    : (requestedDepartmentOrgNodeId ?? allowedDepartmentIds[0] ?? "");
 
   if (!departmentOrgNodeId) {
     throw new Error("请选择部门");
   }
 
-  if (context.allowedDepartmentIds && !context.allowedDepartmentIds.includes(departmentOrgNodeId)) {
+  if (allowedDepartmentIds !== null && !allowedDepartmentIds.includes(departmentOrgNodeId)) {
     throw new Error("无权操作该部门的 KPI 模板");
   }
 
@@ -441,23 +455,29 @@ async function resolveKpiTemplateDepartmentContext(
 
 export async function getKpiTemplateDepartmentOptions() {
   const context = await requireKpiTemplateEditor();
-  const departments = context.currentUser.roleType === "ADMIN"
+  const allowedDepartmentIds = await resolveAllowedDepartmentOrgNodeIds(context);
+  const departments = allowedDepartmentIds === null
     ? await prisma.orgNode.findMany({
         where: { nodeType: "DEPARTMENT" },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       })
-    : await getDescendantOrgNodes(context.scopedDepartmentOrgNodeId, "DEPARTMENT");
+    : await prisma.orgNode.findMany({
+        where: {
+          id: { in: allowedDepartmentIds },
+          nodeType: "DEPARTMENT",
+        },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      });
 
   return {
     departmentOptions: departments.map((department) => ({
       id: department.id,
       name: department.name,
     } satisfies DepartmentOption)),
-    defaultDepartmentOrgNodeId: context.currentUser.roleType === "ADMIN"
-      ? (departments[0]?.id ?? "")
-      : (context.scopedDepartmentOrgNodeId ?? departments[0]?.id ?? ""),
-    canSelectAnyDepartment: context.currentUser.roleType === "ADMIN",
+    defaultDepartmentOrgNodeId: departments[0]?.id ?? "",
+    canSelectAnyDepartment: allowedDepartmentIds === null,
   };
 }
 
@@ -595,8 +615,12 @@ async function validateTemplateScopeTargets(
   }
 }
 
-async function resolveScopedUsers(currentUser: Awaited<ReturnType<typeof requireKpiInitializer>>) {
-  const where = await getUserWhereByScope(currentUser);
+async function resolveScopedUsers(context: Awaited<ReturnType<typeof requireKpiManager>>) {
+  const where = await buildUserWhereByPermission(
+    context.currentUser,
+    orgPermissionModuleKeys.kpi,
+    kpiAbilityKeys.initializeKpi,
+  );
   return prisma.user.findMany({
     where: {
       ...where,
@@ -619,6 +643,18 @@ async function resolveApplicableTemplates(users: ScopeUser[], year: number, quar
     return new Map();
   }
   const roleTypes = [...new Set(users.map((user) => user.roleType))];
+  const userDepartmentOrgNodeIdEntries = await Promise.all(
+    users.map(async (user) => [user.id, await findNearestDepartmentOrgNodeId(user.orgNodeId)] as const)
+  );
+  const userDepartmentOrgNodeIdByUserId = new Map(userDepartmentOrgNodeIdEntries);
+  const departmentOrgNodeIds = [...new Set(
+    userDepartmentOrgNodeIdEntries
+      .map(([, departmentOrgNodeId]) => departmentOrgNodeId)
+      .filter((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId))
+  )];
+  if (departmentOrgNodeIds.length === 0) {
+    return new Map();
+  }
 
   const [rawAssignments, templates, closureRows] = await Promise.all([
     prisma.kpiTemplateAssignment.findMany({
@@ -650,7 +686,7 @@ async function resolveApplicableTemplates(users: ScopeUser[], year: number, quar
         isActive: true,
         isLatest: true,
         deletedAt: null,
-        departmentOrgNodeId: { in: orgNodeIds },
+        departmentOrgNodeId: { in: departmentOrgNodeIds },
       },
       select: {
         id: true,
@@ -659,6 +695,7 @@ async function resolveApplicableTemplates(users: ScopeUser[], year: number, quar
         version: true,
         approvedAt: true,
         updatedAt: true,
+        departmentOrgNodeId: true,
       },
     }),
     orgNodeIds.length
@@ -688,8 +725,12 @@ async function resolveApplicableTemplates(users: ScopeUser[], year: number, quar
   const bestByUserId = new Map<string, { assignment: TemplateAssignmentWithTemplate; rank: ReturnType<typeof rankAssignment> }>();
 
   for (const user of users) {
+    const userDepartmentOrgNodeId = userDepartmentOrgNodeIdByUserId.get(user.id) ?? null;
+    if (!userDepartmentOrgNodeId) continue;
+
     for (const assignment of assignments) {
       if (!isAssignmentEffective(assignment, year, quarter)) continue;
+      if (assignment.template.departmentOrgNodeId !== userDepartmentOrgNodeId) continue;
 
       let matched = false;
       let orgDepth: number | null = null;
@@ -889,7 +930,7 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
   const description = optionalString(formData.get("description"));
   const items = parseTemplateItemsFromFormData(formData);
 
-  const scopedUsers = await resolveScopedUsers(context.currentUser);
+  const scopedUsers = await resolveScopedUsers(context);
   const memberOrgNodeIdById = new Map(scopedUsers.map((user) => [user.id, user.orgNodeId] as const));
   const scopeTargets = parseTemplateScopeTargets(formData, memberOrgNodeIdById);
 
@@ -977,11 +1018,12 @@ export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpd
     throw new Error("模板不存在或已删除");
   }
 
-  if (context.allowedDepartmentIds && !context.allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
+  const allowedDepartmentIds = await resolveAllowedDepartmentOrgNodeIds(context);
+  if (allowedDepartmentIds !== null && !allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
     throw new Error("无权编辑该部门模板");
   }
 
-  const scopedUsers = await resolveScopedUsers(context.currentUser);
+  const scopedUsers = await resolveScopedUsers(context);
   const memberOrgNodeIdById = new Map(scopedUsers.map((user) => [user.id, user.orgNodeId] as const));
   const scopeTargets = parseTemplateScopeTargets(formData, memberOrgNodeIdById);
 
@@ -1047,13 +1089,14 @@ export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpd
 }
 
 export async function toggleKpiTemplateActive(templateId: string): Promise<{ templateId: string; isActive: boolean }> {
-  const context = await requireKpiTemplateEditor();
+  const context = await requireKpiAbility(kpiAbilityKeys.toggleKpiTemplate, "当前角色不能启用或禁用 KPI 模板");
   const template = await prisma.kpiTemplate.findFirst({
     where: { id: templateId, deletedAt: null },
     select: { id: true, departmentOrgNodeId: true, isActive: true },
   });
   if (!template) throw new Error("模板不存在");
-  if (context.allowedDepartmentIds && !context.allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
+  const allowedDepartmentIds = await resolveAllowedDepartmentOrgNodeIds(context);
+  if (allowedDepartmentIds !== null && !allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
     throw new Error("无权限操作该模板");
   }
   const updated = await prisma.kpiTemplate.update({
@@ -1067,8 +1110,12 @@ export async function toggleKpiTemplateActive(templateId: string): Promise<{ tem
 }
 
 export async function deletePersonalKpi(personalKpiId: string): Promise<PersonalKpiDeleteSummary> {
-  const currentUser = await requireKpiInitializer();
-  const where = await getKpiWhereByScope(currentUser);
+  const context = await requireKpiManager();
+  const where = await buildKpiWhereByPermission(
+    context.currentUser,
+    orgPermissionModuleKeys.kpi,
+    kpiAbilityKeys.initializeKpi,
+  );
   const personalKpi = await prisma.personalKpi.findFirst({
     where: {
       ...where,
@@ -1097,15 +1144,306 @@ export async function deletePersonalKpi(personalKpiId: string): Promise<Personal
   return { personalKpiId };
 }
 
+type KpiEditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL";
+type KpiScoringAction = "save" | "submit" | "approve" | "reject";
+
+type SummaryFields = {
+  workSummary: string;
+  abilitySummary: string;
+  praise: string;
+  opportunity: string;
+  attendanceScore: number;
+};
+
+type KpiActionLogInput = {
+  personalKpiId: string;
+  actorId: string;
+  action: string;
+  remark?: string | null;
+};
+
+function getKpiEditableStage(status: KpiStatus): KpiEditableStage | null {
+  if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") return "SELF";
+  if (status === "PENDING_LEADER_SCORE") return "LEADER";
+  if (status === "PENDING_MANAGER_SCORE") return "MANAGER";
+  if (status === "PENDING_FINAL_REVIEW") return "FINAL";
+  return null;
+}
+
+function getNextKpiStage(status: KpiStatus): KpiStatus {
+  if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") return "PENDING_LEADER_SCORE";
+  if (status === "PENDING_LEADER_SCORE") return "PENDING_MANAGER_SCORE";
+  if (status === "PENDING_MANAGER_SCORE") return "PENDING_FINAL_REVIEW";
+  if (status === "PENDING_FINAL_REVIEW") return "COMPLETED";
+  throw new Error("当前阶段不能继续流转");
+}
+
+function getPreviousKpiStage(status: KpiStatus): KpiStatus {
+  if (status === "PENDING_LEADER_SCORE") return "PENDING_SELF_REVIEW";
+  if (status === "PENDING_MANAGER_SCORE") return "PENDING_LEADER_SCORE";
+  if (status === "PENDING_FINAL_REVIEW") return "PENDING_MANAGER_SCORE";
+  throw new Error("当前阶段不能退回");
+}
+
+function assertKpiScoringActionAllowed(status: KpiStatus, action: KpiScoringAction) {
+  const editableStage = getKpiEditableStage(status);
+  if (!editableStage) throw new Error("当前 KPI 阶段不支持评分操作");
+  if (action === "submit" && editableStage !== "SELF") throw new Error("当前阶段不能提交");
+  if (action === "approve" && editableStage === "SELF") throw new Error("当前阶段不能审核通过");
+  if (action === "reject" && editableStage === "SELF") throw new Error("当前阶段不能退回");
+}
+
+function parseNonPositiveScore(value: FormDataEntryValue | null, fieldName: string) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return 0;
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed) || parsed > 0) {
+    throw new Error(`${fieldName}只能填写 0 或负数`);
+  }
+  return parsed;
+}
+
+function serializeStructuredSummary(firstLabel: string, firstValue: string, secondLabel: string, secondValue: string) {
+  const normalizedFirst = firstValue.trim();
+  const normalizedSecond = secondValue.trim();
+  if (!normalizedFirst && !normalizedSecond) return null;
+  return `【${firstLabel}】
+${normalizedFirst}
+
+【${secondLabel}】
+${normalizedSecond}`.trim();
+}
+
+function parseScoringSummary(formData: FormData): SummaryFields {
+  return {
+    workSummary: optionalString(formData.get("workSummary")) ?? "",
+    abilitySummary: optionalString(formData.get("abilitySummary")) ?? "",
+    praise: optionalString(formData.get("praise")) ?? "",
+    opportunity: optionalString(formData.get("opportunity")) ?? "",
+    attendanceScore: parseNonPositiveScore(formData.get("attendanceScore"), "考勤分"),
+  };
+}
+
+function parseRejectRemark(formData: FormData) {
+  return requiredString(formData.get("rejectRemark"), "退回原因");
+}
+
+async function createPersonalKpiActionLog(tx: any, input: KpiActionLogInput) {
+  await tx.personalKpiActionLog.create({
+    data: {
+      personalKpiId: input.personalKpiId,
+      actorId: input.actorId,
+      action: input.action,
+      remark: input.remark ?? null,
+    },
+  });
+}
+
+function getKpiActionLogLabel(editableStage: KpiEditableStage, action: KpiScoringAction) {
+  if (action === "reject") {
+    return "退回";
+  }
+  if (editableStage === "SELF") {
+    return "自评";
+  }
+  if (editableStage === "LEADER") {
+    return "组长评";
+  }
+  if (editableStage === "MANAGER") {
+    return "主管评";
+  }
+  return "终审";
+}
+
+function calculatePenaltyTotal(values: Array<number | null | undefined>) {
+  return values.reduce<number>((sum, value) => sum + Math.abs(Math.min(value ?? 0, 0)), 0);
+}
+
+function assertRequiredScoringSummary(editableStage: KpiEditableStage, summary: SummaryFields) {
+  if (editableStage === "SELF") {
+    if (!summary.workSummary.trim()) {
+      throw new Error("季度工作任务总结不能为空");
+    }
+    if (!summary.abilitySummary.trim()) {
+      throw new Error("季度工作能力总结不能为空");
+    }
+  }
+  if (editableStage === "LEADER") {
+    if (!summary.praise.trim()) {
+      throw new Error("表扬不能为空");
+    }
+    if (!summary.opportunity.trim()) {
+      throw new Error("机会不能为空");
+    }
+  }
+}
+
+async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringAction) {
+  const personalKpiId = requiredString(formData.get("personalKpiId"), "季度 KPI");
+  const currentUser = await requireCurrentUser();
+  const summary = parseScoringSummary(formData);
+  const rejectRemark = action === "reject" ? parseRejectRemark(formData) : null;
+
+  const result = await prisma.$transaction(async (tx) => {
+    const personalKpi = await tx.personalKpi.findFirst({
+      where: {
+        id: personalKpiId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        status: true,
+        selfComment: true,
+        leaderComment: true,
+        managerComment: true,
+        selfScore: true,
+        managerScore: true,
+        finalScore: true,
+      },
+    });
+
+    if (!personalKpi) {
+      throw new Error("季度 KPI 不存在或无权限操作");
+    }
+
+    assertKpiScoringActionAllowed(personalKpi.status, action);
+    const editableStage = getKpiEditableStage(personalKpi.status);
+    if (!editableStage) {
+      throw new Error("当前 KPI 阶段不支持评分操作");
+    }
+
+    const scoringAbilityKey = getScoringAbilityKey(editableStage);
+    if (!scoringAbilityKey) {
+      throw new Error("当前 KPI 阶段不支持评分操作");
+    }
+    if (action !== "save" && action !== "reject") {
+      assertRequiredScoringSummary(editableStage, summary);
+    }
+    const where = await buildKpiWhereByPermission(
+      currentUser,
+      orgPermissionModuleKeys.kpi,
+      scoringAbilityKey,
+    );
+    const authorizedKpi = await tx.personalKpi.findFirst({
+      where: {
+        ...where,
+        id: personalKpiId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!authorizedKpi) {
+      throw new Error("季度 KPI 不存在或无权限操作");
+    }
+
+    const itemIds = formData.getAll("itemId").map((value, index) => requiredString(value, `指标项${index + 1}`));
+    if (editableStage !== "FINAL") {
+      const scoreFieldName = editableStage === "SELF"
+        ? "selfScore"
+        : editableStage === "LEADER"
+          ? "leaderScore"
+          : "managerScore";
+      const stageScores = formData.getAll(scoreFieldName);
+      if (stageScores.length !== itemIds.length) {
+        throw new Error("评分项数据不完整，请刷新后重试");
+      }
+      for (const [index, itemId] of itemIds.entries()) {
+        const scoreValue = parseNonPositiveScore(stageScores[index] ?? null, `第${index + 1}项评分`);
+        if (editableStage === "SELF") {
+          await tx.personalKpiItem.update({ where: { id: itemId }, data: { selfScore: scoreValue } });
+        } else if (editableStage === "LEADER") {
+          await tx.personalKpiItem.update({ where: { id: itemId }, data: { leaderScore: scoreValue } });
+        } else {
+          await tx.personalKpiItem.update({ where: { id: itemId }, data: { managerScore: scoreValue } });
+        }
+      }
+    }
+
+    const items = await tx.personalKpiItem.findMany({
+      where: { personalKpiId },
+      select: { score: true, selfScore: true, leaderScore: true, managerScore: true },
+    });
+
+    const scoreTotal = items.reduce<number>((sum, item) => sum + item.score, 0);
+    const selfTotal = scoreTotal - calculatePenaltyTotal(items.map((item) => item.selfScore));
+    const leaderTotal = scoreTotal - calculatePenaltyTotal(items.map((item) => item.leaderScore));
+    const managerTotal = scoreTotal - calculatePenaltyTotal(items.map((item) => item.managerScore));
+    const currentAttendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
+      ? personalKpi.finalScore - personalKpi.managerScore
+      : 0;
+    const attendanceScore = editableStage === "FINAL" ? summary.attendanceScore : currentAttendanceScore;
+    const nextStatus = action === "save"
+      ? personalKpi.status
+      : action === "reject"
+        ? getPreviousKpiStage(personalKpi.status)
+        : getNextKpiStage(personalKpi.status);
+
+    await tx.personalKpi.update({
+      where: { id: personalKpiId },
+      data: {
+        status: nextStatus,
+        selfScore: selfTotal,
+        leaderScore: leaderTotal,
+        managerScore: managerTotal,
+        finalScore: managerTotal + attendanceScore,
+        selfComment: editableStage === "SELF"
+          ? serializeStructuredSummary("季度工作任务总结", summary.workSummary, "季度工作能力总结", summary.abilitySummary)
+          : personalKpi.selfComment,
+        leaderComment: editableStage === "LEADER"
+          ? serializeStructuredSummary("表扬", summary.praise, "机会", summary.opportunity)
+          : personalKpi.leaderComment,
+        managerComment: editableStage === "MANAGER"
+          ? serializeStructuredSummary("表扬", summary.praise, "机会", summary.opportunity)
+          : personalKpi.managerComment,
+        submittedAt: action === "submit" ? new Date() : undefined,
+        completedAt: nextStatus === "COMPLETED" ? new Date() : null,
+      },
+    });
+
+    if (action !== "save") {
+      await createPersonalKpiActionLog(tx, {
+        personalKpiId,
+        actorId: currentUser.id,
+        action: getKpiActionLogLabel(editableStage, action),
+        remark: action === "reject" ? rejectRemark : null,
+      });
+    }
+
+    return { personalKpiId, nextStatus };
+  });
+
+  revalidatePath("/kpi");
+  revalidatePath("/dashboard");
+  revalidatePath(`/kpi/${personalKpiId}`);
+
+  return result;
+}
+
+export async function savePersonalKpiScoring(formData: FormData) {
+  return persistPersonalKpiScoring(formData, "save");
+}
+
+export async function submitPersonalKpiScoring(formData: FormData) {
+  return persistPersonalKpiScoring(formData, "submit");
+}
+
+export async function approvePersonalKpiScoring(formData: FormData) {
+  return persistPersonalKpiScoring(formData, "approve");
+}
+
+export async function rejectPersonalKpiScoring(formData: FormData) {
+  return persistPersonalKpiScoring(formData, "reject");
+}
+
 export async function initializeQuarterlyKpis(formData: FormData): Promise<InitializationSummary> {
-  const currentUser = await requireKpiInitializer();
+  const context = await requireKpiManager();
   const year = parsePositiveInt(formData.get("year"), "年份");
   const quarter = parsePositiveInt(formData.get("quarter"), "季度");
   if (quarter < 1 || quarter > 4) {
     throw new Error("季度不正确");
   }
 
-  const users = await resolveScopedUsers(currentUser);
+  const users = await resolveScopedUsers(context);
   const assignmentByUserId = await resolveApplicableTemplates(users, year, quarter);
 
   const templateIds = [...new Set([...assignmentByUserId.values()].map((item) => item.assignment.templateId))];
@@ -1175,7 +1513,7 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
         quarter,
         userId: user.id,
         orgNodeId: user.orgNodeId,
-        initializerId: currentUser.id,
+        initializerId: context.currentUser.id,
         template: resolved.template,
         items,
       });

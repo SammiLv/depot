@@ -7,9 +7,29 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
 import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, getScopedAnnualGoalPermissionMatrix, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
-import type { OrgNodeType, RoleType } from "@prisma/client";
+import { kpiAbilityKeys, manageableRoleTypes, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
+import { getActivePermissionGrants } from "@/server/permissions/permission-query";
+import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, RoleType } from "@prisma/client";
 
 const managerEditableRoles: RoleType[] = ["TEAM_LEADER", "MEMBER"];
+const permissionRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+const kpiPermissionScopeByRole: Record<RoleType, OrgPermissionGrantScopeType> = {
+  ADMIN: "ALL",
+  DEPARTMENT_MANAGER: "SUBTREE",
+  TEAM_LEADER: "NODE",
+  MEMBER: "SELF",
+};
+const kpiPermissionLabels: Record<OrgPermissionAbilityKey, string> = {
+  VIEW_KPI: "查看 KPI",
+  INITIALIZE_KPI: "维护KPI",
+  VIEW_KPI_TEMPLATE: "查看 KPI 模板",
+  MANAGE_KPI_TEMPLATE: "维护 KPI 模板",
+  TOGGLE_KPI_TEMPLATE: "启用/禁用 KPI 模板",
+  SCORE_SELF: "自评",
+  SCORE_LEADER: "组长评分",
+  SCORE_MANAGER: "主管评分",
+  SCORE_FINAL: "终审",
+};
 
 async function requireOrgManager() {
   const user = await requireCurrentUser();
@@ -571,6 +591,49 @@ export async function saveAnnualGoalRolePermissions(formData: FormData) {
   revalidateOrganization();
 }
 
+export async function saveKpiRolePermissions(formData: FormData) {
+  const permissionsValue = formData.get("permissions") as string;
+  const scope = await resolvePermissionScope(formData);
+  await requirePermissionEditor(scope);
+  const validAbilityIds = new Set<OrgPermissionAbilityKey>(Object.values(kpiAbilityKeys));
+
+  const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
+  const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.kpi,
+        roleType: { in: permissionRoles },
+        abilityKey: { in: Object.values(kpiAbilityKeys) },
+        ...(scope.scopeType === "SYSTEM"
+          ? { orgNodeId: null }
+          : { orgNodeId }),
+      },
+    });
+
+    const cellsToPersist = (scope.scopeType === "SYSTEM"
+      ? requestedCells
+      : requestedCells.filter((cell) => cell.explicit))
+      .filter((cell) => cell.allowed);
+
+    if (cellsToPersist.length > 0) {
+      await tx.orgPermissionGrant.createMany({
+        data: cellsToPersist.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.kpi,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiPermissionScopeByRole[cell.roleType],
+          roleType: cell.roleType,
+          orgNodeId,
+          isActive: true,
+        })),
+      });
+    }
+  });
+
+  revalidateOrganization();
+}
+
 export async function applyRoleMenuPermissionToAllDepartments(formData: FormData) {
   await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
@@ -706,6 +769,65 @@ export async function applyAnnualGoalPermissionToAllDepartments(formData: FormDa
           allowed,
         })),
       });
+    }
+  });
+
+  revalidateOrganization();
+}
+
+export async function applyKpiPermissionToAllDepartments(formData: FormData) {
+  await requireAdmin();
+  const permissionId = formData.get("permissionId") as string;
+  const roleType = formData.get("roleType") as RoleType;
+  const allowed = formData.get("allowed") === "true";
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  if (!permissionId || !validRoles.includes(roleType)) {
+    throw new Error("缺少必要参数");
+  }
+
+  if (!new Set<OrgPermissionAbilityKey>(Object.values(kpiAbilityKeys)).has(permissionId as OrgPermissionAbilityKey)) {
+    throw new Error("KPI 权限不存在");
+  }
+
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.kpi,
+        roleType,
+        abilityKey: permissionId as OrgPermissionAbilityKey,
+      },
+    });
+
+    if (allowed) {
+      await tx.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.kpi,
+          abilityKey: permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiPermissionScopeByRole[roleType],
+          roleType,
+          orgNodeId: null,
+          isActive: true,
+        },
+      });
+
+      if (departments.length > 0) {
+        await tx.orgPermissionGrant.createMany({
+          data: departments.map((department) => ({
+            moduleKey: orgPermissionModuleKeys.kpi,
+            abilityKey: permissionId as OrgPermissionAbilityKey,
+            scopeType: kpiPermissionScopeByRole[roleType],
+            roleType,
+            orgNodeId: department.id,
+            isActive: true,
+          })),
+        });
+      }
     }
   });
 
