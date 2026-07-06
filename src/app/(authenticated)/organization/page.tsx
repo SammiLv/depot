@@ -2,6 +2,8 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { getActivePermissionGrants } from "@/server/permissions/permission-query";
+import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { getUserWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
 
@@ -16,6 +18,7 @@ export default async function OrgPage({
   const requestedScope = Array.isArray(params.scope) ? params.scope[0] : params.scope;
   const requestedDepartment = Array.isArray(params.department) ? params.department[0] : params.department;
   const requestedTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+  const requestedSection = Array.isArray(params.section) ? params.section[0] : params.section;
   const currentUser = await requireCurrentUser();
   const canManageUsers = currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER";
   const canManageTeams = canManageUsers;
@@ -24,7 +27,7 @@ export default async function OrgPage({
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
 
-  const [users, orgNodes, menus, annualGoalPermissions] = await Promise.all([
+  const [users, orgNodes, menus, annualGoalPermissions, kpiPermissionGrants] = await Promise.all([
     prisma.user.findMany({
       where: { ...(await getUserWhereByScope(currentUser)), isActive: true },
       orderBy: [{ roleType: "asc" }, { name: "asc" }],
@@ -54,6 +57,7 @@ export default async function OrgPage({
       await ensureAnnualGoalPermissions();
       return prisma.annualGoalPermission.findMany({ orderBy: { sortOrder: "asc" } });
     })(),
+    getActivePermissionGrants(orgPermissionModuleKeys.kpi, Object.values(kpiAbilityKeys), [...roleTypes]),
   ]);
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
@@ -201,6 +205,50 @@ export default async function OrgPage({
     })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
   }));
 
+  const kpiPermissionMap = new Map(kpiPermissionGrants.map((row) => [`${row.scopeType}:${row.orgNodeId ?? ""}:${row.roleType}:${row.abilityKey}`, row]));
+  const kpiPermissions = Object.values(kpiAbilityKeys).map((abilityKey) => ({
+    id: abilityKey,
+    code: abilityKey,
+    name: ({
+      VIEW_KPI: "查看 KPI",
+      INITIALIZE_KPI: "维护KPI",
+      VIEW_KPI_TEMPLATE: "查看 KPI 模板",
+      MANAGE_KPI_TEMPLATE: "维护 KPI 模板",
+      TOGGLE_KPI_TEMPLATE: "启用/禁用 KPI 模板",
+      SCORE_SELF: "自评",
+      SCORE_LEADER: "组长评分",
+      SCORE_MANAGER: "主管评分",
+      SCORE_FINAL: "终审",
+    })[abilityKey],
+    description: ({
+      VIEW_KPI: "允许查看 KPI 列表与详情。",
+      INITIALIZE_KPI: "允许维护季度 KPI，包括初始化与删除个人 KPI。",
+      VIEW_KPI_TEMPLATE: "允许查看 KPI 模板列表与适用范围。",
+      MANAGE_KPI_TEMPLATE: "允许新建、编辑 KPI 模板内容。",
+      TOGGLE_KPI_TEMPLATE: "允许启用或禁用 KPI 模板。",
+      SCORE_SELF: "允许执行 KPI 自评。",
+      SCORE_LEADER: "允许执行 KPI 组长评分。",
+      SCORE_MANAGER: "允许执行 KPI 主管评分。",
+      SCORE_FINAL: "允许执行 KPI 终审。",
+    })[abilityKey],
+    cells: Object.fromEntries(roleTypes.map((roleType) => {
+      const scopeByRole = roleType === "ADMIN" ? "ALL" : roleType === "DEPARTMENT_MANAGER" ? "SUBTREE" : roleType === "TEAM_LEADER" ? "NODE" : "SELF";
+      const systemRow = kpiPermissionMap.get(`${scopeByRole}:${""}:${roleType}:${abilityKey}`);
+      const scopedOrgNodeId = initialScope.scopeType === "DEPARTMENT" ? initialScope.departmentOrgNodeId : "";
+      const scopedRow = scopedOrgNodeId
+        ? kpiPermissionMap.get(`${scopeByRole}:${scopedOrgNodeId}:${roleType}:${abilityKey}`)
+        : undefined;
+      const sourceRow = scopedRow ?? systemRow;
+      const allowed = Boolean(sourceRow);
+      return [roleType, {
+        allowed,
+        source: scopedRow ? "DEPARTMENT" : "SYSTEM",
+        explicit: Boolean(scopedRow || (initialScope.scopeType === "SYSTEM" && systemRow)),
+        inherited: initialScope.scopeType === "DEPARTMENT" && !scopedRow,
+      }];
+    })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
+  }));
+
   const selectedDepartment = initialScope.scopeType === "DEPARTMENT"
     ? departments.find((item) => item.orgNodeId === initialScope.departmentOrgNodeId) ?? null
     : null;
@@ -216,8 +264,10 @@ export default async function OrgPage({
       scopeOptions={scopeOptions}
       initialScope={initialScope}
       initialTab={requestedTab === "organization" || requestedTab === "permissions" ? requestedTab : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
+      initialPermissionSection={requestedSection === "annual-goal" || requestedSection === "kpi" || requestedSection === "menu" ? requestedSection : "menu"}
       menus={roleMenuMatrix}
       annualGoalPermissions={annualGoalMatrix}
+      kpiPermissions={kpiPermissions}
       canManageUsers={canManageUsers}
       canManageTeams={canManageTeams}
       canManageRolePermissions={canManageRolePermissions}

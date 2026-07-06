@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { Plus, Users, X, Check, RefreshCw, Wand2 } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -61,6 +61,14 @@ type ScopedAnnualGoalPermission = {
   cells: Record<RoleType, PermissionCellState>;
 };
 
+type ScopedKpiPermission = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  cells: Record<RoleType, PermissionCellState>;
+};
+
 type PermissionScopeOption = {
   scopeType: PermissionScopeType;
   departmentOrgNodeId: string;
@@ -68,7 +76,7 @@ type PermissionScopeOption = {
 };
 
 type ApplyAllDialogData = {
-  kind: "menu" | "annual-goal";
+  kind: "menu" | "annual-goal" | "kpi";
   permissionId: string;
   permissionName: string;
   roleType: RoleType;
@@ -86,8 +94,10 @@ type Props = {
   scopeOptions: PermissionScopeOption[];
   initialScope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
   initialTab: "organization" | "permissions";
+  initialPermissionSection: "menu" | "annual-goal" | "kpi";
   menus: OrgMenu[];
   annualGoalPermissions: ScopedAnnualGoalPermission[];
+  kpiPermissions: ScopedKpiPermission[];
   canManageUsers: boolean;
   canManageTeams: boolean;
   canManageRolePermissions: boolean;
@@ -309,7 +319,11 @@ function DeleteConfirm({ message, action, onClose }: { message: string; action: 
 }
 
 function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogData; onClose: () => void }) {
-  const action = data.kind === "menu" ? applyRoleMenuPermissionToAllDepartments : applyAnnualGoalPermissionToAllDepartments;
+  const action = data.kind === "menu"
+    ? applyRoleMenuPermissionToAllDepartments
+    : data.kind === "annual-goal"
+      ? applyAnnualGoalPermissionToAllDepartments
+      : applyKpiPermissionToAllDepartments;
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }} className="space-y-4">
@@ -340,8 +354,10 @@ export function OrgContent({
   scopeOptions,
   initialScope,
   initialTab,
+  initialPermissionSection,
   menus,
   annualGoalPermissions,
+  kpiPermissions,
   canManageUsers,
   canManageTeams,
   canManageRolePermissions,
@@ -354,6 +370,7 @@ export function OrgContent({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
+  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi">(initialPermissionSection);
   const selectedScope = initialScope;
   const selectedDepartmentOrgNodeId = selectedScope.scopeType === "SYSTEM"
     ? ""
@@ -377,6 +394,11 @@ export function OrgContent({
     { ...permission.cells[role.value] },
   ])));
   const [draftAnnualGoalCells, setDraftAnnualGoalCells] = useState<Record<string, PermissionCellState>>(initialAnnualGoalCells);
+  const initialKpiCells = Object.fromEntries(kpiPermissions.flatMap((permission) => roleOptions.map((role) => [
+    `${role.value}:${permission.id}`,
+    { ...permission.cells[role.value] },
+  ])));
+  const [draftKpiCells, setDraftKpiCells] = useState<Record<string, PermissionCellState>>(initialKpiCells);
   const draftRoleMenuKeyString = JSON.stringify(draftRoleMenuCells);
   const initialRoleMenuKeyString = JSON.stringify(initialRoleMenuCells);
   const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
@@ -391,6 +413,13 @@ export function OrgContent({
     const [roleType, permissionId] = key.split(":");
     return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
   }));
+  const draftKpiPermissionKeyString = JSON.stringify(draftKpiCells);
+  const initialKpiPermissionKeyString = JSON.stringify(initialKpiCells);
+  const hasKpiPermissionChanges = draftKpiPermissionKeyString !== initialKpiPermissionKeyString;
+  const draftKpiPayload = JSON.stringify(Object.entries(draftKpiCells).map(([key, cell]) => {
+    const [roleType, permissionId] = key.split(":");
+    return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
+  }));
 
   useEffect(() => {
     setDraftRoleMenuCells(initialRoleMenuCells);
@@ -401,8 +430,19 @@ export function OrgContent({
   }, [initialAnnualGoalPermissionKeyString]);
 
   useEffect(() => {
+    setDraftKpiCells(initialKpiCells);
+  }, [initialKpiPermissionKeyString]);
+
+  useEffect(() => {
     setTab(initialTab);
   }, [initialTab, initialScope.scopeType, initialScope.departmentOrgNodeId]);
+
+  useEffect(() => {
+    if (initialTab === "organization") {
+      return;
+    }
+    setPermissionSection(initialPermissionSection);
+  }, [initialPermissionSection, initialTab, initialScope.scopeType, initialScope.departmentOrgNodeId]);
 
   function toggleDraftPermission(roleType: RoleType, menu: OrgMenu) {
     if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) return;
@@ -439,12 +479,33 @@ export function OrgContent({
     });
   }
 
+  function toggleDraftKpiPermission(roleType: RoleType, permission: ScopedKpiPermission) {
+    const key = `${roleType}:${permission.id}`;
+    setDraftKpiCells((current) => {
+      const cell = current[key];
+      const nextAllowed = !cell.allowed;
+      return {
+        ...current,
+        [key]: {
+          allowed: nextAllowed,
+          source: selectedScope.scopeType,
+          explicit: true,
+          inherited: false,
+        },
+      };
+    });
+  }
+
   function resetDraftPermissions() {
     setDraftRoleMenuCells(initialRoleMenuCells);
   }
 
   function resetDraftAnnualGoalPermissions() {
     setDraftAnnualGoalCells(initialAnnualGoalCells);
+  }
+
+  function resetDraftKpiPermissions() {
+    setDraftKpiCells(initialKpiCells);
   }
 
   async function handleDingTalkSync() {
@@ -488,6 +549,11 @@ export function OrgContent({
                     const nextParams = new URLSearchParams(searchParams.toString());
                     nextParams.set("scope", option.scopeType);
                     nextParams.set("tab", tab);
+                    if (tab === "permissions") {
+                      nextParams.set("section", permissionSection);
+                    } else {
+                      nextParams.delete("section");
+                    }
                     if (option.scopeType === "DEPARTMENT") {
                       nextParams.set("department", option.departmentOrgNodeId);
                     } else {
@@ -520,13 +586,20 @@ export function OrgContent({
                   onClick={() => {
                     const nextParams = new URLSearchParams(searchParams.toString());
                     nextParams.set("tab", item.key);
+                    if (item.key === "permissions") {
+                      nextParams.set("section", permissionSection);
+                    } else {
+                      nextParams.delete("section");
+                    }
                     if (selectedScope.scopeType === "SYSTEM") {
                       nextParams.delete("department");
                     }
                     router.push(`/organization?${nextParams.toString()}`);
                   }}
                   className={`px-4 py-1.5 rounded-md text-sm transition ${
-                    tab === item.key ? "bg-card text-foreground shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+                    tab === item.key
+                      ? "bg-card text-foreground shadow-sm font-medium"
+                      : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {item.label}
@@ -572,119 +645,234 @@ export function OrgContent({
               </div>
             </div>
 
-            <div className="p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="font-semibold">菜单权限</h3>
-                  {canManageRolePermissions && hasRoleMenuChanges && <div className="text-xs text-warning mt-1">有未保存的权限调整</div>}
-                </div>
-                {canManageRolePermissions && (
-                  <form action={saveRoleMenuPermissions} className="flex gap-2">
-                    <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
-                    <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
-                    <input type="hidden" name="permissions" value={draftRoleMenuPayload} />
-                    <button type="button" disabled={!hasRoleMenuChanges} onClick={resetDraftPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
-                    <button type="submit" disabled={!hasRoleMenuChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
-                  </form>
-                )}
-              </div>
-              <div className="overflow-x-auto mb-2">
-                <table className="w-full min-w-[960px] table-fixed text-xs">
-                  <colgroup>
-                    <col className="w-[220px]" />
-                    {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
-                  </colgroup>
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="py-2 font-medium">菜单</th>
-                      {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {menus.map((menu) => (
-                      <tr key={menu.id} className="border-t border-border">
-                        <td className="py-0 pr-4 align-middle">
-                          <div className="min-h-[72px] flex flex-col justify-center">
-                            <div className="font-medium break-words">{menu.name}</div>
-                            <div className="text-[10px] text-muted-foreground break-all">{menu.path}</div>
-                          </div>
-                        </td>
-                        {permissionRoleOptions.map((role) => {
-                          const cell = draftRoleMenuCells[`${role.value}:${menu.id}`];
-                          const enabled = cell?.allowed ?? false;
-                          const locked = role.value === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path);
-                          const inherited = cell?.inherited;
-                          return (
-                            <td key={role.value} className="py-0 text-center align-middle">
-                              <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
-                                {canManageRolePermissions ? (
-                                  <button type="button" disabled={locked} onClick={() => toggleDraftPermission(role.value, menu)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} ${locked ? "opacity-60 cursor-not-allowed" : "hover:ring-1 hover:ring-ring"}`} title={locked ? "核心入口不可移除" : inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
-                                    {enabled && <Check className="w-3.5 h-3.5" />}
-                                  </button>
-                                ) : (
-                                  <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
-                                )}
-                                {isAdmin && selectedScope.scopeType === "SYSTEM" && !locked && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setDialog({
-                                      type: "applyAllDepartments",
-                                      data: {
-                                        kind: "menu",
-                                        permissionId: menu.id,
-                                        permissionName: menu.name,
-                                        roleType: role.value,
-                                        roleLabel: role.label,
-                                        allowed: enabled,
-                                      },
-                                    })}
-                                    className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
-                                    title="按当前系统值覆盖到全部部门"
-                                  >
-                                    <Wand2 className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="px-5 pb-4">
+              <div className="inline-flex p-1 rounded-lg bg-muted">
+                {[
+                  { key: "menu", label: "菜单权限" },
+                  { key: "annual-goal", label: "年度指标权限" },
+                  { key: "kpi", label: "KPI 权限" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => {
+                      const nextParams = new URLSearchParams(searchParams.toString());
+                      nextParams.set("tab", "permissions");
+                      nextParams.set("section", item.key);
+                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi");
+                      if (selectedScope.scopeType === "SYSTEM") {
+                        nextParams.delete("department");
+                      }
+                      router.push(`/organization?${nextParams.toString()}`);
+                    }}
+                    className={`px-4 py-1.5 rounded-md text-sm transition ${
+                      permissionSection === item.key
+                        ? "bg-card text-foreground shadow-sm font-medium"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="font-semibold">年度指标权限</h3>
-                  {canManageRolePermissions && hasAnnualGoalPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的年度指标权限调整</div>}
+            {permissionSection === "menu" ? (
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">菜单权限</h3>
+                    {canManageRolePermissions && hasRoleMenuChanges && <div className="text-xs text-warning mt-1">有未保存的权限调整</div>}
+                  </div>
+                  {canManageRolePermissions && (
+                    <form action={saveRoleMenuPermissions} className="flex gap-2">
+                      <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
+                      <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
+                      <input type="hidden" name="permissions" value={draftRoleMenuPayload} />
+                      <button type="button" disabled={!hasRoleMenuChanges} onClick={resetDraftPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
+                      <button type="submit" disabled={!hasRoleMenuChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
+                    </form>
+                  )}
                 </div>
-                {canManageRolePermissions && (
-                  <form action={saveAnnualGoalRolePermissions} className="flex gap-2">
-                    <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
-                    <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
-                    <input type="hidden" name="permissions" value={draftAnnualGoalPayload} />
-                    <button type="button" disabled={!hasAnnualGoalPermissionChanges} onClick={resetDraftAnnualGoalPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
-                    <button type="submit" disabled={!hasAnnualGoalPermissionChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
-                  </form>
-                )}
+                <div className="overflow-x-auto mb-2">
+                  <table className="w-full min-w-[960px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[220px]" />
+                      {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 font-medium">菜单</th>
+                        {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {menus.map((menu) => (
+                        <tr key={menu.id} className="border-t border-border">
+                          <td className="py-0 pr-4 align-middle">
+                            <div className="min-h-[72px] flex flex-col justify-center">
+                              <div className="font-medium break-words">{menu.name}</div>
+                              <div className="text-[10px] text-muted-foreground break-all">{menu.path}</div>
+                            </div>
+                          </td>
+                          {permissionRoleOptions.map((role) => {
+                            const cell = draftRoleMenuCells[`${role.value}:${menu.id}`];
+                            const enabled = cell?.allowed ?? false;
+                            const locked = role.value === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path);
+                            const inherited = cell?.inherited;
+                            return (
+                              <td key={role.value} className="py-0 text-center align-middle">
+                                <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                                  {canManageRolePermissions ? (
+                                    <button type="button" disabled={locked} onClick={() => toggleDraftPermission(role.value, menu)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} ${locked ? "opacity-60 cursor-not-allowed" : "hover:ring-1 hover:ring-ring"}`} title={locked ? "核心入口不可移除" : inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : (
+                                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
+                                  )}
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && !locked && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDialog({
+                                        type: "applyAllDepartments",
+                                        data: {
+                                          kind: "menu",
+                                          permissionId: menu.id,
+                                          permissionName: menu.name,
+                                          roleType: role.value,
+                                          roleLabel: role.label,
+                                          allowed: enabled,
+                                        },
+                                      })}
+                                      className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                      title="按当前系统值覆盖到全部部门"
+                                    >
+                                      <Wand2 className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[960px] table-fixed text-xs">
-                  <colgroup>
-                    <col className="w-[220px]" />
-                    {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
-                  </colgroup>
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="py-2 font-medium">能力项</th>
-                      {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {annualGoalPermissions.map((permission) => (
+            ) : permissionSection === "annual-goal" ? (
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">年度指标权限</h3>
+                    {canManageRolePermissions && hasAnnualGoalPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的年度指标权限调整</div>}
+                  </div>
+                  {canManageRolePermissions && (
+                    <form action={saveAnnualGoalRolePermissions} className="flex gap-2">
+                      <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
+                      <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
+                      <input type="hidden" name="permissions" value={draftAnnualGoalPayload} />
+                      <button type="button" disabled={!hasAnnualGoalPermissionChanges} onClick={resetDraftAnnualGoalPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
+                      <button type="submit" disabled={!hasAnnualGoalPermissionChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
+                    </form>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[960px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[220px]" />
+                      {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 font-medium">能力项</th>
+                        {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {annualGoalPermissions.map((permission) => (
+                        <tr key={permission.id} className="border-t border-border">
+                          <td className="py-0 pr-4 align-middle">
+                            <div className="min-h-[72px] flex flex-col justify-center">
+                              <div className="font-medium break-words">{permission.name}</div>
+                              <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
+                            </div>
+                          </td>
+                          {permissionRoleOptions.map((role) => {
+                            const cell = draftAnnualGoalCells[`${role.value}:${permission.id}`];
+                            const enabled = cell?.allowed ?? false;
+                            const inherited = cell?.inherited;
+                            return (
+                              <td key={role.value} className="py-0 text-center align-middle">
+                                <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                                  {canManageRolePermissions ? (
+                                    <button type="button" onClick={() => toggleDraftAnnualGoalPermission(role.value, permission)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : (
+                                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
+                                  )}
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDialog({
+                                        type: "applyAllDepartments",
+                                        data: {
+                                          kind: "annual-goal",
+                                          permissionId: permission.id,
+                                          permissionName: permission.name,
+                                          roleType: role.value,
+                                          roleLabel: role.label,
+                                          allowed: enabled,
+                                        },
+                                      })}
+                                      className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                      title="按当前系统值覆盖到全部部门"
+                                    >
+                                      <Wand2 className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">KPI 权限</h3>
+                    {canManageRolePermissions && hasKpiPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的 KPI 权限调整</div>}
+                  </div>
+                  {canManageRolePermissions && (
+                    <form action={saveKpiRolePermissions} className="flex gap-2">
+                      <input type="hidden" name="scopeType" value={selectedScope.scopeType} />
+                      <input type="hidden" name="departmentOrgNodeId" value={selectedScope.departmentOrgNodeId} />
+                      <input type="hidden" name="permissions" value={draftKpiPayload} />
+                      <button type="button" disabled={!hasKpiPermissionChanges} onClick={resetDraftKpiPermissions} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all border border-border bg-card hover:bg-muted text-foreground disabled:opacity-50 disabled:cursor-not-allowed">取消</button>
+                      <button type="submit" disabled={!hasKpiPermissionChanges} className="h-8 px-3 text-xs inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">保存</button>
+                    </form>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[960px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[220px]" />
+                      {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 font-medium">能力项</th>
+                        {permissionRoleOptions.map((role) => <th key={role.value} className="py-2 font-medium text-center align-middle">{role.label.slice(0, 2)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kpiPermissions.map((permission) => (
                       <tr key={permission.id} className="border-t border-border">
                         <td className="py-0 pr-4 align-middle">
                           <div className="min-h-[72px] flex flex-col justify-center">
@@ -693,14 +881,14 @@ export function OrgContent({
                           </div>
                         </td>
                         {permissionRoleOptions.map((role) => {
-                          const cell = draftAnnualGoalCells[`${role.value}:${permission.id}`];
+                          const cell = draftKpiCells[`${role.value}:${permission.id}`];
                           const enabled = cell?.allowed ?? false;
                           const inherited = cell?.inherited;
                           return (
                             <td key={role.value} className="py-0 text-center align-middle">
                               <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
                                 {canManageRolePermissions ? (
-                                  <button type="button" onClick={() => toggleDraftAnnualGoalPermission(role.value, permission)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
+                                  <button type="button" onClick={() => toggleDraftKpiPermission(role.value, permission)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
                                     {enabled && <Check className="w-3.5 h-3.5" />}
                                   </button>
                                 ) : (
@@ -712,7 +900,7 @@ export function OrgContent({
                                     onClick={() => setDialog({
                                       type: "applyAllDepartments",
                                       data: {
-                                        kind: "annual-goal",
+                                        kind: "kpi",
                                         permissionId: permission.id,
                                         permissionName: permission.name,
                                         roleType: role.value,
@@ -736,6 +924,7 @@ export function OrgContent({
                 </table>
               </div>
             </div>
+            )}
           </>
         ) : selectedScope.scopeType === "SYSTEM" ? (
           <>

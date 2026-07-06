@@ -1,7 +1,8 @@
 import { prisma } from "@/server/db/prisma";
-import { getKpiWhereByScope, getUserWhereByScope } from "@/server/permissions/data-scope";
+import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissionScope } from "@/server/permissions/permission-resolver";
+import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodes } from "@/server/organization/org-tree-utils";
-import type { RoleType } from "@prisma/client";
+import type { KpiStatus, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
 
 
 type DataScopeInput = {
@@ -9,6 +10,195 @@ type DataScopeInput = {
   roleType: RoleType;
   orgNodeId?: string | null;
 };
+
+type ViewScopeSummary = {
+  canViewKpi: boolean;
+  canViewTemplate: boolean;
+  hasAnyViewPermission: boolean;
+  hasGlobalViewKpiScope: boolean;
+  departmentAllTabOrgNodeIds: string[];
+  visibleDepartmentOrgNodeIds: string[];
+  visibleTeamOrgNodeIds: string[];
+};
+
+type ResolvedScopeNodes = {
+  scopedOrgNodes: OrgNodeSummary[];
+  departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>;
+  accessibleDepartmentOrgNodeIds: string[];
+  departments: Array<{ id: string; name: string }>;
+  teamOptions: Array<{ id: string; name: string; departmentOrgNodeId: string | null }>;
+  defaultDepartmentOrgNodeId: string;
+};
+
+type KpiPageData = {
+  year: number;
+  quarter: number;
+  availableYears: number[];
+  availableQuarters: number[];
+  rows: Array<{
+    id: string;
+    userId: string;
+    userName: string;
+    departmentOrgNodeId: string | null;
+    teamOrgNodeId: string | null;
+    teamName: string;
+    itemCount: number;
+    stageKey: string;
+    status: string;
+    tone: "primary" | "warning" | "success" | "default" | "info";
+    progress: number;
+    score: string;
+    availableActions: {
+      canSelfReview: boolean;
+      canLeaderScore: boolean;
+      canManagerScore: boolean;
+      canFinalReview: boolean;
+    };
+  }>;
+  stages: Array<{ label: string; count: number }>;
+  totalCount: number;
+  memberOptions: Array<{
+    id: string;
+    name: string;
+    orgNodeId: string | null;
+    roleType: RoleType;
+  }>;
+  teamOptions: Array<{
+    id: string;
+    name: string;
+    departmentOrgNodeId: string | null;
+  }>;
+  departmentOptions: Array<{
+    id: string;
+    name: string;
+  }>;
+  departmentAllTabOrgNodeIds: string[];
+  defaultDepartmentOrgNodeId: string;
+  canSelectAnyDepartment: boolean;
+  templateRows: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    createdByName: string;
+    updatedByName: string;
+    scopeName: string;
+    scopeDepartmentOrgNodeIds: string[];
+    scopeTeamIds: string[];
+    scopeUserIds: string[];
+    groupTeamIds: string[];
+    createdAt: string;
+    updatedAt: string;
+    departmentOrgNodeId: string;
+    isActive: boolean;
+    items: Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      score: number;
+      scoringStandard: string | null;
+      sortOrder: number;
+    }>;
+  }>;
+  permissions: {
+    canManageKpi: boolean;
+    canManageKpiTemplate: boolean;
+    canToggleKpiTemplate: boolean;
+  };
+  hasAnyViewPermission: boolean;
+};
+
+async function buildViewScopeOrgNodeIds(
+  currentUser: DataScopeInput,
+  viewKpiScope: Awaited<ReturnType<typeof resolvePermissionScope>>,
+) {
+  if (!viewKpiScope) {
+    return { departmentAllTabOrgNodeIds: [], visibleTeamOrgNodeIds: [], visibleDepartmentOrgNodeIds: [] };
+  }
+
+  const scopedOrgNodes = await prisma.orgNode.findMany({
+    where: { nodeType: { in: ["DEPARTMENT", "TEAM"] } },
+    select: { id: true, parentId: true, nodeType: true },
+  });
+  const orgNodeMap = new Map(scopedOrgNodes.map((orgNode) => [orgNode.id, orgNode] as const));
+
+  if (viewKpiScope.scopeType === "ALL") {
+    const departmentAllTabOrgNodeIds = scopedOrgNodes
+      .filter((orgNode) => orgNode.nodeType === "DEPARTMENT")
+      .map((orgNode) => orgNode.id);
+    const visibleTeamOrgNodeIds = scopedOrgNodes
+      .filter((orgNode) => orgNode.nodeType === "TEAM")
+      .map((orgNode) => orgNode.id);
+    return {
+      departmentAllTabOrgNodeIds,
+      visibleTeamOrgNodeIds,
+      visibleDepartmentOrgNodeIds: departmentAllTabOrgNodeIds,
+    };
+  }
+
+  if (viewKpiScope.scopeType === "SELF") {
+    const currentOrgNode = currentUser.orgNodeId ? orgNodeMap.get(currentUser.orgNodeId) : null;
+    if (!currentOrgNode) {
+      return { departmentAllTabOrgNodeIds: [], visibleTeamOrgNodeIds: [], visibleDepartmentOrgNodeIds: [] };
+    }
+    if (currentOrgNode.nodeType === "DEPARTMENT") {
+      return {
+        departmentAllTabOrgNodeIds: [currentOrgNode.id],
+        visibleTeamOrgNodeIds: scopedOrgNodes
+          .filter((orgNode) => orgNode.nodeType === "TEAM" && orgNode.parentId === currentOrgNode.id)
+          .map((orgNode) => orgNode.id),
+        visibleDepartmentOrgNodeIds: [currentOrgNode.id],
+      };
+    }
+    return {
+      departmentAllTabOrgNodeIds: [],
+      visibleTeamOrgNodeIds: [currentOrgNode.id],
+      visibleDepartmentOrgNodeIds: currentOrgNode.parentId ? [currentOrgNode.parentId] : [],
+    };
+  }
+
+  if (!viewKpiScope.orgNodeId) {
+    return { departmentAllTabOrgNodeIds: [], visibleTeamOrgNodeIds: [], visibleDepartmentOrgNodeIds: [] };
+  }
+
+  const scopedNode = orgNodeMap.get(viewKpiScope.orgNodeId);
+  if (!scopedNode) {
+    return { departmentAllTabOrgNodeIds: [], visibleTeamOrgNodeIds: [], visibleDepartmentOrgNodeIds: [] };
+  }
+
+  if (scopedNode.nodeType === "DEPARTMENT") {
+    return {
+      departmentAllTabOrgNodeIds: [scopedNode.id],
+      visibleTeamOrgNodeIds: scopedOrgNodes
+        .filter((orgNode) => orgNode.nodeType === "TEAM" && orgNode.parentId === scopedNode.id)
+        .map((orgNode) => orgNode.id),
+      visibleDepartmentOrgNodeIds: [scopedNode.id],
+    };
+  }
+
+  return {
+    departmentAllTabOrgNodeIds: [],
+    visibleTeamOrgNodeIds: [scopedNode.id],
+    visibleDepartmentOrgNodeIds: scopedNode.parentId ? [scopedNode.parentId] : [],
+  };
+}
+
+async function resolveKpiViewScope(currentUser: DataScopeInput): Promise<ViewScopeSummary> {
+  const viewKpiScope = await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi);
+  const viewTemplateScope = await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpiTemplate);
+  const effectiveScope = viewKpiScope ?? viewTemplateScope;
+  const { departmentAllTabOrgNodeIds, visibleTeamOrgNodeIds, visibleDepartmentOrgNodeIds } = await buildViewScopeOrgNodeIds(currentUser, effectiveScope);
+  const hasGlobalViewKpiScope = effectiveScope?.scopeType === "ALL";
+
+  return {
+    canViewKpi: Boolean(viewKpiScope),
+    canViewTemplate: Boolean(viewTemplateScope),
+    hasAnyViewPermission: Boolean(viewKpiScope || viewTemplateScope),
+    hasGlobalViewKpiScope,
+    departmentAllTabOrgNodeIds,
+    visibleDepartmentOrgNodeIds,
+    visibleTeamOrgNodeIds,
+  };
+}
 
 type OrgNodeSummary = {
   id: string;
@@ -156,8 +346,139 @@ function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined, orgNode
   return node?.nodeType === "TEAM" ? node.id : null;
 }
 
+function parseStructuredSummary(value: string | null | undefined, firstLabel: string, secondLabel: string) {
+  const text = (value ?? "").trim();
+  if (!text) {
+    return { first: "", second: "" };
+  }
+
+  const blockRegex = /【([^】]+)】\s*([\s\S]*?)(?=\n\s*【|$)/g;
+  const blockMap = new Map<string, string>();
+  let match: RegExpExecArray | null = null;
+  while ((match = blockRegex.exec(text)) !== null) {
+    blockMap.set(match[1], match[2].trim());
+  }
+
+  if (blockMap.size > 0) {
+    return {
+      first: blockMap.get(firstLabel) ?? "",
+      second: blockMap.get(secondLabel) ?? "",
+    };
+  }
+
+  return { first: text, second: "" };
+}
+
+function getEditableStage(status: string): "SELF" | "LEADER" | "MANAGER" | "FINAL" | null {
+  if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") {
+    return "SELF";
+  }
+  if (status === "PENDING_LEADER_SCORE") {
+    return "LEADER";
+  }
+  if (status === "PENDING_MANAGER_SCORE") {
+    return "MANAGER";
+  }
+  if (status === "PENDING_FINAL_REVIEW") {
+    return "FINAL";
+  }
+  return null;
+}
+
+function resolveScopeNodes(currentUser: DataScopeInput, viewScope: ViewScopeSummary, scopedOrgNodes: OrgNodeSummary[]): ResolvedScopeNodes {
+  const orgNodeMap = new Map(scopedOrgNodes.map((orgNode) => [orgNode.id, orgNode] as const));
+  const departmentOrgNodeIdByTeamOrgNodeId = new Map<string, string>();
+  for (const orgNode of scopedOrgNodes) {
+    if (orgNode.nodeType === "TEAM" && orgNode.parentId) {
+      const parentNode = orgNodeMap.get(orgNode.parentId);
+      if (parentNode?.nodeType === "DEPARTMENT") {
+        departmentOrgNodeIdByTeamOrgNodeId.set(orgNode.id, parentNode.id);
+      }
+    }
+  }
+
+  const visibleTeamOrgNodeIds = [...new Set(viewScope.visibleTeamOrgNodeIds.filter((teamOrgNodeId) => orgNodeMap.has(teamOrgNodeId)))];
+  const accessibleDepartmentOrgNodeIds = [...new Set([
+    ...viewScope.departmentAllTabOrgNodeIds.filter((departmentOrgNodeId) => orgNodeMap.has(departmentOrgNodeId)),
+    ...visibleTeamOrgNodeIds
+      .map((teamOrgNodeId) => departmentOrgNodeIdByTeamOrgNodeId.get(teamOrgNodeId))
+      .filter((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId)),
+  ])];
+  const defaultDepartmentOrgNodeId = getDepartmentOrgNodeIdForRecord(
+    currentUser.orgNodeId,
+    orgNodeMap,
+    departmentOrgNodeIdByTeamOrgNodeId,
+  ) ?? accessibleDepartmentOrgNodeIds[0] ?? "";
+  const departments = scopedOrgNodes
+    .filter((orgNode) => orgNode.nodeType === "DEPARTMENT" && accessibleDepartmentOrgNodeIds.includes(orgNode.id))
+    .sort(compareNames)
+    .map((orgNode) => ({ id: orgNode.id, name: orgNode.name }));
+  const teamOptions = scopedOrgNodes
+    .filter((orgNode) => orgNode.nodeType === "TEAM" && visibleTeamOrgNodeIds.includes(orgNode.id))
+    .sort(compareNames)
+    .map((orgNode) => ({
+      id: orgNode.id,
+      name: orgNode.name,
+      departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(orgNode.id) ?? null,
+    }));
+  const departmentAllTabOrgNodeIds = accessibleDepartmentOrgNodeIds.filter((departmentOrgNodeId) =>
+    viewScope.departmentAllTabOrgNodeIds.includes(departmentOrgNodeId)
+  );
+
+  return {
+    scopedOrgNodes,
+    departmentOrgNodeIdByTeamOrgNodeId,
+    accessibleDepartmentOrgNodeIds,
+    departments,
+    teamOptions,
+    defaultDepartmentOrgNodeId,
+  };
+}
+
+function buildEmptyKpiPageData(
+  year: number,
+  quarter: number,
+  availableYears: number[],
+  availableQuarters: number[],
+  emptyStages: Array<{ label: string; count: number }>,
+  scopeNodes: ResolvedScopeNodes,
+  departmentAllTabOrgNodeIds: string[],
+  hasAnyViewPermission: boolean,
+): KpiPageData {
+  return {
+    year,
+    quarter,
+    availableYears,
+    availableQuarters,
+    rows: [],
+    stages: emptyStages,
+    totalCount: 0,
+    memberOptions: [],
+    teamOptions: scopeNodes.teamOptions,
+    departmentOptions: scopeNodes.departments,
+    departmentAllTabOrgNodeIds,
+    defaultDepartmentOrgNodeId: scopeNodes.defaultDepartmentOrgNodeId,
+    canSelectAnyDepartment: false,
+    templateRows: [],
+    permissions: {
+      canManageKpi: false,
+      canManageKpiTemplate: false,
+      canToggleKpiTemplate: false,
+    },
+    hasAnyViewPermission,
+  };
+}
+
+function getScoringAbilityKey(stage: "SELF" | "LEADER" | "MANAGER" | "FINAL" | null) {
+  if (stage === "SELF") return kpiAbilityKeys.scoreSelf;
+  if (stage === "LEADER") return kpiAbilityKeys.scoreLeader;
+  if (stage === "MANAGER") return kpiAbilityKeys.scoreManager;
+  if (stage === "FINAL") return kpiAbilityKeys.scoreFinal;
+  return null;
+}
+
 export async function getPersonalKpiDetail(currentUser: DataScopeInput, personalKpiId: string) {
-  const where = await getKpiWhereByScope(currentUser);
+  const where = await buildKpiWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi);
   const personalKpi = await prisma.personalKpi.findFirst({
     where: {
       ...where,
@@ -185,7 +506,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     throw new Error("季度 KPI 不存在或无权限查看");
   }
 
-  const [user, items, orgNodes] = await Promise.all([
+  const [user, items, orgNodes, actionLogs, actors] = await Promise.all([
     prisma.user.findFirst({
       where: { id: personalKpi.userId },
       select: { id: true, name: true, title: true, orgNodeId: true },
@@ -214,8 +535,25 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       where: { nodeType: { in: ["DEPARTMENT", "TEAM"] } },
       select: { id: true, name: true, nodeType: true, parentId: true },
     }),
+    prisma.personalKpiActionLog.findMany({
+      where: { personalKpiId: personalKpi.id },
+      orderBy: [{ actedAt: "desc" }, { createdAt: "desc" }],
+      select: { id: true, actorId: true, action: true, remark: true, actedAt: true },
+    }),
+    prisma.user.findMany({
+      where: {
+        id: {
+          in: (await prisma.personalKpiActionLog.findMany({
+            where: { personalKpiId: personalKpi.id },
+            select: { actorId: true },
+          })).map((log) => log.actorId),
+        },
+      },
+      select: { id: true, name: true },
+    }),
   ]);
 
+  const actorNameById = new Map(actors.map((actor) => [actor.id, actor.name] as const));
   const orgNodeMap = new Map(
     orgNodes
       .filter((orgNode): orgNode is OrgNodeSummary => orgNode.nodeType === "DEPARTMENT" || orgNode.nodeType === "TEAM")
@@ -240,9 +578,9 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const teamName = teamOrgNodeId ? (orgNodeMap.get(teamOrgNodeId)?.name ?? "—") : "—";
   const departmentName = departmentOrgNodeId ? (orgNodeMap.get(departmentOrgNodeId)?.name ?? "—") : "—";
   const tone = getKpiTone(personalKpi.status);
-    const completedStageIndex = stageOrder.includes(personalKpi.status)
-      ? stageOrder.indexOf(personalKpi.status)
-      : 0;
+  const completedStageIndex = stageOrder.includes(personalKpi.status)
+    ? stageOrder.indexOf(personalKpi.status)
+    : 0;
   const stages = stageOrder.map((stage, index) => ({
     key: stage,
     label: stageLabels[stage] ?? stage,
@@ -261,13 +599,32 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     ? personalKpi.finalScore - personalKpi.managerScore
     : 0;
   const finalTotal = managerTotal + attendanceScore;
+  const editableStage = getEditableStage(personalKpi.status);
+  const scoringAbilityKey = getScoringAbilityKey(editableStage);
+  const hasStagePermission = scoringAbilityKey
+    ? Boolean(await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, scoringAbilityKey))
+    : false;
+  const canScore = editableStage === "SELF"
+    ? hasStagePermission && currentUser.id === personalKpi.userId
+    : hasStagePermission;
+  const selfSummary = parseStructuredSummary(personalKpi.selfComment, "季度工作任务总结", "季度工作能力总结");
+  const leaderSummary = parseStructuredSummary(personalKpi.leaderComment, "表扬", "机会");
+  const managerSummary = parseStructuredSummary(personalKpi.managerComment, "表扬", "机会");
 
   return {
     id: personalKpi.id,
     year: personalKpi.year,
     quarter: personalKpi.quarter,
+    stageKey: personalKpi.status,
     status: stageLabels[personalKpi.status] ?? personalKpi.status,
     tone,
+    editableStage,
+    availableActions: {
+      canSave: editableStage !== null && canScore,
+      canSubmit: editableStage === "SELF" && canScore,
+      canApprove: (editableStage === "LEADER" || editableStage === "MANAGER" || editableStage === "FINAL") && canScore,
+      canReject: (editableStage === "LEADER" || editableStage === "MANAGER" || editableStage === "FINAL") && canScore,
+    },
     stages,
     basicInfo: {
       department: departmentName,
@@ -280,7 +637,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       id: item.id,
       name: item.name,
       scoringStandard: item.scoringStandard || item.description || "—",
-      targetDetail: item.target || item.selfComment || "",
+      targetDetail: item.target || "",
       score: item.score,
       selfScore: item.selfScore ?? 0,
       leaderScore: item.leaderScore ?? 0,
@@ -295,10 +652,18 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       finalTotal,
     },
     summary: {
-      workSummary: personalKpi.selfComment ?? "",
-      abilitySummary: "",
-      praise: personalKpi.leaderComment ?? "",
-      opportunity: personalKpi.managerComment ?? "",
+      self: {
+        workSummary: selfSummary.first,
+        abilitySummary: selfSummary.second,
+      },
+      leader: {
+        praise: leaderSummary.first,
+        opportunity: leaderSummary.second,
+      },
+      manager: {
+        praise: managerSummary.first,
+        opportunity: managerSummary.second,
+      },
       crossDepartment: {
         department: "",
         praise: "",
@@ -306,32 +671,153 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
         complaint: "",
       },
     },
+    actionLogs: actionLogs.map((log) => ({
+      id: log.id,
+      actorName: actorNameById.get(log.actorId) ?? "—",
+      action: log.action,
+      actedAt: log.actedAt.toISOString(),
+      remark: log.remark,
+    })),
   };
 }
 
-export async function getKpiData(currentUser: DataScopeInput) {
-  const where = await getKpiWhereByScope(currentUser);
-  const userWhere = await getUserWhereByScope(currentUser);
+type KpiPeriodOptions = {
+  selectedYear?: number;
+  selectedQuarter?: number;
+};
+
+function parsePeriodValue(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function buildAvailableYears(nowYear: number, yearsFromData: number[]) {
+  const uniqueYears = new Set<number>([nowYear, ...yearsFromData.filter((year) => Number.isFinite(year))]);
+  return [...uniqueYears].sort((a, b) => b - a);
+}
+
+export async function getKpiData(currentUser: DataScopeInput, periodOptions: KpiPeriodOptions = {}): Promise<KpiPageData> {
+  const [viewScope, manageKpiScope, manageTemplateScope, toggleTemplateScope, scoreSelfScope, scoreLeaderScope, scoreManagerScope, scoreFinalScope] = await Promise.all([
+    resolveKpiViewScope(currentUser),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.initializeKpi),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageKpiTemplate),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.toggleKpiTemplate),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreSelf),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreLeader),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreManager),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreFinal),
+  ]);
   const now = new Date();
-  const year = now.getFullYear();
-  const quarter = Math.floor(now.getMonth() / 3) + 1;
+  const currentYear = now.getFullYear();
+  const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
+  const availableYearsFromDb = [
+    ...(await prisma.personalKpi.findMany({
+      distinct: ["year"],
+      select: { year: true },
+      orderBy: { year: "desc" },
+    })).map((item) => item.year),
+    ...(await prisma.kpiTemplateAssignment.findMany({
+      where: { effectiveFromYear: { not: null } },
+      distinct: ["effectiveFromYear"],
+      select: { effectiveFromYear: true },
+      orderBy: { effectiveFromYear: "desc" },
+    })).flatMap((item) => item.effectiveFromYear ? [item.effectiveFromYear] : []),
+    ...(await prisma.kpiTemplateAssignment.findMany({
+      where: { effectiveToYear: { not: null } },
+      distinct: ["effectiveToYear"],
+      select: { effectiveToYear: true },
+      orderBy: { effectiveToYear: "desc" },
+    })).flatMap((item) => item.effectiveToYear ? [item.effectiveToYear] : []),
+  ];
+  const availableYears = buildAvailableYears(currentYear, availableYearsFromDb);
+  const availableQuarters = [1, 2, 3, 4];
+  const selectedYear = parsePeriodValue(periodOptions.selectedYear) ?? currentYear;
+  const selectedQuarter = ([1, 2, 3, 4] as const).includes(periodOptions.selectedQuarter as 1 | 2 | 3 | 4)
+    ? periodOptions.selectedQuarter as number
+    : currentQuarter;
+  const year = selectedYear;
+  const quarter = selectedQuarter;
 
-  const scopedDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
-  const departments = currentUser.roleType === "ADMIN"
-    ? await prisma.orgNode.findMany({
-        where: { nodeType: "DEPARTMENT" },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true },
-      })
-    : await getDescendantOrgNodes(scopedDepartmentOrgNodeId, "DEPARTMENT");
-  const defaultDepartmentOrgNodeId = currentUser.roleType === "ADMIN"
-    ? (departments[0]?.id ?? "")
-    : (scopedDepartmentOrgNodeId ?? departments[0]?.id ?? "");
+  const emptyStages = [
+    { label: "初始化", count: 0 },
+    { label: "自评", count: 0 },
+    { label: "组长评", count: 0 },
+    { label: "主管评", count: 0 },
+    { label: "终审", count: 0 },
+    { label: "已完成", count: 0 },
+  ];
 
-  const kpis = await prisma.personalKpi.findMany({
-    where,
-    orderBy: [{ year: "desc" }, { quarter: "desc" }, { createdAt: "desc" }],
+  const allScopedOrgNodes = await prisma.orgNode.findMany({
+    where: { nodeType: { in: ["DEPARTMENT", "TEAM"] } },
+    select: { id: true, name: true, nodeType: true, parentId: true },
   });
+  const scopedOrgNodes = allScopedOrgNodes.filter(
+    (orgNode): orgNode is OrgNodeSummary => orgNode.nodeType === "DEPARTMENT" || orgNode.nodeType === "TEAM"
+  );
+  const scopeNodes = resolveScopeNodes(currentUser, viewScope, scopedOrgNodes);
+
+  const canViewRows = viewScope.canViewKpi;
+  const canViewTemplates = viewScope.canViewTemplate;
+  const canAccessTemplateList = canViewTemplates || Boolean(manageTemplateScope) || Boolean(toggleTemplateScope);
+
+  if (!viewScope.hasAnyViewPermission && !canAccessTemplateList) {
+    return buildEmptyKpiPageData(
+      year,
+      quarter,
+      availableYears,
+      availableQuarters,
+      emptyStages,
+      scopeNodes,
+      viewScope.departmentAllTabOrgNodeIds,
+      false,
+    );
+  }
+
+  const {
+    scopedOrgNodes: resolvedOrgNodes,
+    departmentOrgNodeIdByTeamOrgNodeId,
+    accessibleDepartmentOrgNodeIds,
+    departments,
+    teamOptions,
+    defaultDepartmentOrgNodeId,
+  } = scopeNodes;
+
+  const orgNodeMap = new Map(resolvedOrgNodes.map((orgNode) => [orgNode.id, orgNode] as const));
+  const canManageKpi = Boolean(manageKpiScope);
+  const canManageKpiTemplate = Boolean(manageTemplateScope);
+  const canToggleKpiTemplate = Boolean(toggleTemplateScope);
+  const canScoreSelf = Boolean(scoreSelfScope);
+  const canScoreLeader = Boolean(scoreLeaderScope);
+  const canScoreManager = Boolean(scoreManagerScope);
+  const canScoreFinal = Boolean(scoreFinalScope);
+  const stageCounts: Record<KpiStatus, number> = {
+    DRAFT: 0,
+    PENDING_SELF_REVIEW: 0,
+    PENDING_LEADER_SCORE: 0,
+    PENDING_MANAGER_SCORE: 0,
+    PENDING_FINAL_REVIEW: 0,
+    COMPLETED: 0,
+  };
+
+  const where = canViewRows
+    ? await buildKpiWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi)
+    : { id: { in: [] } };
+  const templateUserWhere = canAccessTemplateList
+    ? await buildUserWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpiTemplate)
+    : { id: { in: [] } };
+  const rowUserWhere = canViewRows
+    ? await buildUserWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi)
+    : { id: { in: [] } };
+
+  const kpis = canViewRows
+    ? await prisma.personalKpi.findMany({
+        where: {
+          ...where,
+          year,
+          quarter,
+        },
+        orderBy: [{ createdAt: "desc" }],
+      })
+    : [];
 
   const kpiIds = kpis.map((k) => k.id);
   const allItems = kpiIds.length
@@ -346,66 +832,70 @@ export async function getKpiData(currentUser: DataScopeInput) {
 
   const users = await prisma.user.findMany({
     where: {
-      ...userWhere,
+      ...rowUserWhere,
       isActive: true,
     },
     select: { id: true, name: true, orgNodeId: true, roleType: true },
     orderBy: { name: "asc" },
   });
-  const userMap = new Map(users.map((u) => [u.id, u]));
-  const orgNodeIds = [...new Set(users.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)))];
-  const orgNodes = orgNodeIds.length
-    ? await prisma.orgNode.findMany({ where: { id: { in: orgNodeIds } }, select: { id: true, name: true, nodeType: true, parentId: true } })
+  const totalCount = users.length;
+  const templateUsersForMatching = canAccessTemplateList
+    ? await prisma.user.findMany({
+        where: {
+          ...templateUserWhere,
+          isActive: true,
+        },
+        select: { id: true, name: true, orgNodeId: true, roleType: true },
+      })
     : [];
-  const scopedOrgNodes = orgNodes.filter(
-    (orgNode): orgNode is OrgNodeSummary => orgNode.nodeType === "DEPARTMENT" || orgNode.nodeType === "TEAM"
+  const userMap = new Map(users.map((u) => [u.id, u] as const));
+  const rowUserDepartmentOrgNodeIdEntries = await Promise.all(
+    users.map(async (user) => [user.id, await findNearestDepartmentOrgNodeId(user.orgNodeId)] as const)
   );
-  const orgNodeMap = new Map(scopedOrgNodes.map((orgNode) => [orgNode.id, orgNode] as const));
-  const departmentOrgNodeIdByTeamOrgNodeId = new Map<string, string>();
-  for (const orgNode of scopedOrgNodes) {
-    if (orgNode.nodeType === "TEAM" && orgNode.parentId) {
-      const parentNode = orgNodeMap.get(orgNode.parentId);
-      if (parentNode?.nodeType === "DEPARTMENT") {
-        departmentOrgNodeIdByTeamOrgNodeId.set(orgNode.id, parentNode.id);
-      }
-    }
-  }
-
-  const stageCounts: Record<string, number> = {};
-  for (const s of stageOrder) {
-    stageCounts[s] = kpis.filter((k) => k.status === s).length;
-  }
-
-  const rows = kpis.map((k) => {
-    const user = userMap.get(k.userId);
-    const items = itemsByKpi.get(k.id) ?? [];
-    const progress = k.status === "COMPLETED" ? 100
-      : items.length > 0 ? Math.round((items.filter((i) => i.selfScore !== null).length / items.length) * 100)
+  const rowUserDepartmentOrgNodeIdByUserId = new Map(rowUserDepartmentOrgNodeIdEntries);
+  const templateUserMap = new Map(templateUsersForMatching.map((u) => [u.id, u] as const));
+  const orgNodeIds = [...new Set(templateUsersForMatching.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)))];
+  const templateUserDepartmentOrgNodeIdEntries = await Promise.all(
+    templateUsersForMatching.map(async (user) => [user.id, await findNearestDepartmentOrgNodeId(user.orgNodeId)] as const)
+  );
+  const templateUserDepartmentOrgNodeIdByUserId = new Map(templateUserDepartmentOrgNodeIdEntries);
+  const rows = kpis.flatMap((personalKpi) => {
+    const user = userMap.get(personalKpi.userId);
+    const items = itemsByKpi.get(personalKpi.id) ?? [];
+    const totalScore = items.reduce((sum, item) => sum + item.score, 0);
+    const progress = totalScore > 0
+      ? Math.round((items.reduce((sum, item) => sum + (item.selfScore ?? 0), 0) / totalScore) * 100)
       : 0;
-    const tone = getKpiTone(k.status);
-    const teamOrgNodeId = getTeamOrgNodeIdForRecord(user?.orgNodeId, orgNodeMap);
-    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(user?.orgNodeId, orgNodeMap, departmentOrgNodeIdByTeamOrgNodeId);
-    const teamNode = teamOrgNodeId ? orgNodeMap.get(teamOrgNodeId) : null;
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(personalKpi.orgNodeId, orgNodeMap);
+    const departmentOrgNodeId = rowUserDepartmentOrgNodeIdByUserId.get(personalKpi.userId)
+      ?? getDepartmentOrgNodeIdForRecord(personalKpi.orgNodeId, orgNodeMap, departmentOrgNodeIdByTeamOrgNodeId)
+      ?? null;
+    stageCounts[personalKpi.status] += 1;
 
-    return {
-      id: k.id,
-      userName: user?.name ?? "—",
-      teamName: teamNode?.name ?? "—",
-      teamOrgNodeId,
+    return [{
+      id: personalKpi.id,
+      userId: personalKpi.userId,
+      userName: user?.name ?? "历史成员",
       departmentOrgNodeId,
-      stageKey: k.status,
-      status: getKpiListStageLabel(k.status),
-      tone,
-      score: k.finalScore?.toString() ?? "—",
-      progress,
+      teamOrgNodeId,
+      teamName: teamOrgNodeId ? (orgNodeMap.get(teamOrgNodeId)?.name ?? "—") : "—",
       itemCount: items.length,
-    };
+      stageKey: personalKpi.status,
+      status: getKpiListStageLabel(personalKpi.status),
+      tone: getKpiTone(personalKpi.status),
+      progress,
+      score: `${personalKpi.finalScore ?? personalKpi.managerScore ?? personalKpi.leaderScore ?? personalKpi.selfScore ?? 0}`,
+      availableActions: {
+        canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && (personalKpi.status === "DRAFT" || personalKpi.status === "PENDING_SELF_REVIEW"),
+        canLeaderScore: canScoreLeader && personalKpi.status === "PENDING_LEADER_SCORE",
+        canManagerScore: canScoreManager && personalKpi.status === "PENDING_MANAGER_SCORE",
+        canFinalReview: canScoreFinal && personalKpi.status === "PENDING_FINAL_REVIEW",
+      },
+    }];
   });
 
-  const templateDepartmentIds = currentUser.roleType === "ADMIN"
-    ? departments.map((department) => department.id)
-    : defaultDepartmentOrgNodeId ? [defaultDepartmentOrgNodeId] : [];
-  const templates = templateDepartmentIds.length
+  const templateDepartmentIds = canAccessTemplateList ? accessibleDepartmentOrgNodeIds : [];
+  const candidateTemplates = templateDepartmentIds.length
     ? await prisma.kpiTemplate.findMany({
         where: {
           deletedAt: null,
@@ -425,6 +915,116 @@ export async function getKpiData(currentUser: DataScopeInput) {
         },
       })
     : [];
+  const candidateTemplateAssignments = candidateTemplates.length
+    ? await prisma.kpiTemplateAssignment.findMany({
+        where: { templateId: { in: candidateTemplates.map((template) => template.id) }, isActive: true },
+        select: {
+          templateId: true,
+          targetType: true,
+          targetUserId: true,
+          targetOrgNodeId: true,
+          targetRoleType: true,
+          effectiveFromYear: true,
+          effectiveFromQuarter: true,
+          effectiveToYear: true,
+          effectiveToQuarter: true,
+        },
+      })
+    : [];
+  const assignmentOrgNodeIds = [...new Set(
+    candidateTemplateAssignments
+      .map((assignment) => assignment.targetOrgNodeId)
+      .filter((targetOrgNodeId): targetOrgNodeId is string => Boolean(targetOrgNodeId))
+  )];
+  const orgClosureRows = orgNodeIds.length && assignmentOrgNodeIds.length
+    ? await prisma.orgClosure.findMany({
+        where: {
+          descendantId: { in: orgNodeIds },
+          ancestorId: { in: assignmentOrgNodeIds },
+        },
+        select: {
+          descendantId: true,
+          ancestorId: true,
+        },
+      })
+    : [];
+  const assignmentOrgPairSet = new Set(orgClosureRows.map((row) => `${row.descendantId}:${row.ancestorId}`));
+  const visibleTemplateIds = new Set<string>();
+  const matchedUserIdsByTemplateId = new Map<string, string[]>();
+  const matchedTeamOrgNodeIdsByTemplateId = new Map<string, string[]>();
+
+  const getQuarterCode = (targetYear: number, targetQuarter: number) => targetYear * 10 + targetQuarter;
+  const currentQuarterCode = getQuarterCode(year, quarter);
+
+  for (const template of candidateTemplates) {
+    const assignments = candidateTemplateAssignments.filter((assignment) => assignment.templateId === template.id);
+    const matchedUserIds: string[] = [];
+    const matchedTeamOrgNodeIds = new Set<string>();
+
+    if (canManageKpiTemplate) {
+      visibleTemplateIds.add(template.id);
+      matchedUserIdsByTemplateId.set(template.id, []);
+      matchedTeamOrgNodeIdsByTemplateId.set(template.id, []);
+      continue;
+    }
+
+    if (assignments.length === 0) {
+      if (canToggleKpiTemplate) {
+        visibleTemplateIds.add(template.id);
+        matchedUserIdsByTemplateId.set(template.id, []);
+        matchedTeamOrgNodeIdsByTemplateId.set(template.id, []);
+      }
+      continue;
+    }
+
+    for (const user of templateUsersForMatching) {
+      const userDepartmentOrgNodeId = templateUserDepartmentOrgNodeIdByUserId.get(user.id) ?? null;
+      if (userDepartmentOrgNodeId !== template.departmentOrgNodeId) {
+        continue;
+      }
+
+      const matched = assignments.some((assignment) => {
+        const from = assignment.effectiveFromYear && assignment.effectiveFromQuarter
+          ? getQuarterCode(assignment.effectiveFromYear, assignment.effectiveFromQuarter)
+          : null;
+        const to = assignment.effectiveToYear && assignment.effectiveToQuarter
+          ? getQuarterCode(assignment.effectiveToYear, assignment.effectiveToQuarter)
+          : null;
+
+        if (from !== null && currentQuarterCode < from) return false;
+        if (to !== null && currentQuarterCode > to) return false;
+
+        if (assignment.targetType === "USER") {
+          return assignment.targetUserId === user.id;
+        }
+        if (assignment.targetType === "ROLE") {
+          return assignment.targetRoleType === user.roleType;
+        }
+        if (!user.orgNodeId || !assignment.targetOrgNodeId) {
+          return false;
+        }
+        return assignmentOrgPairSet.has(`${user.orgNodeId}:${assignment.targetOrgNodeId}`);
+      });
+
+      if (!matched) {
+        continue;
+      }
+
+      matchedUserIds.push(user.id);
+      const matchedTeamOrgNodeId = getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeMap);
+      if (matchedTeamOrgNodeId) {
+        matchedTeamOrgNodeIds.add(matchedTeamOrgNodeId);
+      }
+    }
+
+    if (matchedUserIds.length > 0) {
+      visibleTemplateIds.add(template.id);
+      matchedUserIdsByTemplateId.set(template.id, matchedUserIds);
+      matchedTeamOrgNodeIdsByTemplateId.set(template.id, [...matchedTeamOrgNodeIds]);
+    }
+  }
+
+  const templates = candidateTemplates.filter((template) => visibleTemplateIds.has(template.id));
   const templateItems = templates.length
     ? await prisma.kpiTemplateItem.findMany({
         where: { templateId: { in: templates.map((template) => template.id) } },
@@ -454,6 +1054,7 @@ export async function getKpiData(currentUser: DataScopeInput) {
           targetType: true,
           targetUserId: true,
           targetOrgNodeId: true,
+          targetRoleType: true,
         },
       })
     : [];
@@ -477,22 +1078,31 @@ export async function getKpiData(currentUser: DataScopeInput) {
   const departmentNameById = new Map(departments.map((department) => [department.id, department.name] as const));
 
   const stages = [
-    { label: "初始化", count: stageCounts.DRAFT ?? 0 },
-    { label: "自评", count: stageCounts.PENDING_SELF_REVIEW ?? 0 },
-    { label: "组长评", count: stageCounts.PENDING_LEADER_SCORE ?? 0 },
-    { label: "主管评", count: stageCounts.PENDING_MANAGER_SCORE ?? 0 },
-    { label: "终审", count: stageCounts.PENDING_FINAL_REVIEW ?? 0 },
-    { label: "已完成", count: stageCounts.COMPLETED ?? 0 },
+    {
+      label: "初始化",
+      count: rows.filter((row) => row.stageKey !== "COMPLETED").length,
+    },
+    {
+      label: "自评",
+      count: rows.filter((row) => row.stageKey === "PENDING_LEADER_SCORE").length,
+    },
+    {
+      label: "组长评",
+      count: rows.filter((row) => row.stageKey === "PENDING_MANAGER_SCORE").length,
+    },
+    {
+      label: "主管评",
+      count: rows.filter((row) => row.stageKey === "PENDING_FINAL_REVIEW").length,
+    },
+    {
+      label: "终审",
+      count: rows.filter((row) => row.stageKey === "COMPLETED").length,
+    },
+    {
+      label: "已完成",
+      count: rows.filter((row) => row.stageKey === "COMPLETED").length,
+    },
   ];
-
-  const teamOptions = scopedOrgNodes
-    .filter((orgNode) => orgNode.nodeType === "TEAM")
-    .sort(compareNames)
-    .map((orgNode) => ({
-      id: orgNode.id,
-      name: orgNode.name,
-      departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(orgNode.id) ?? null,
-    }));
 
   const teamNameById = new Map(teamOptions.map((team) => [team.id, team.name] as const));
   const memberNameById = new Map(users.map((user) => [user.id, user.name] as const));
@@ -500,9 +1110,11 @@ export async function getKpiData(currentUser: DataScopeInput) {
   return {
     year,
     quarter,
+    availableYears,
+    availableQuarters,
     rows,
     stages,
-    totalCount: kpis.length,
+    totalCount,
     memberOptions: users.map((user) => ({
       id: user.id,
       name: user.name,
@@ -510,10 +1122,8 @@ export async function getKpiData(currentUser: DataScopeInput) {
       roleType: user.roleType,
     })),
     teamOptions,
-    departmentOptions: departments.map((department) => ({
-      id: department.id,
-      name: department.name,
-    })),
+    departmentOptions: departments,
+    departmentAllTabOrgNodeIds: viewScope.departmentAllTabOrgNodeIds,
     defaultDepartmentOrgNodeId,
     canSelectAnyDepartment: currentUser.roleType === "ADMIN",
     templateRows: templates.map((template) => ({
@@ -535,10 +1145,16 @@ export async function getKpiData(currentUser: DataScopeInput) {
         }).filter((label, index, list) => label !== "—" && list.indexOf(label) === index);
         return labels.length ? labels.join("、") : "—";
       })(),
+      scopeDepartmentOrgNodeIds: (() => {
+        const assignments = templateAssignmentsByTemplateId.get(template.id) ?? [];
+        return [...new Set(assignments
+          .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId && departmentNameById.has(assignment.targetOrgNodeId))
+          .map((assignment) => assignment.targetOrgNodeId as string))];
+      })(),
       scopeTeamIds: (() => {
         const assignments = templateAssignmentsByTemplateId.get(template.id) ?? [];
         return [...new Set(assignments
-          .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId)
+          .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId && teamNameById.has(assignment.targetOrgNodeId))
           .map((assignment) => assignment.targetOrgNodeId as string))];
       })(),
       scopeUserIds: (() => {
@@ -546,6 +1162,32 @@ export async function getKpiData(currentUser: DataScopeInput) {
         return [...new Set(assignments
           .filter((assignment) => assignment.targetType === "USER" && assignment.targetUserId)
           .map((assignment) => assignment.targetUserId as string))];
+      })(),
+      groupTeamIds: (() => {
+        const assignments = templateAssignmentsByTemplateId.get(template.id) ?? [];
+        const directTeamIds = assignments
+          .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId && teamNameById.has(assignment.targetOrgNodeId))
+          .map((assignment) => assignment.targetOrgNodeId as string);
+        const departmentAssignmentIds = assignments
+          .filter((assignment) => assignment.targetType === "ORG_NODE" && assignment.targetOrgNodeId && departmentNameById.has(assignment.targetOrgNodeId))
+          .map((assignment) => assignment.targetOrgNodeId as string);
+        const roleTeamIds = assignments.flatMap((assignment) => {
+          if (assignment.targetType !== "ROLE" || !assignment.targetRoleType) return [];
+          return templateUsersForMatching
+            .filter((user) => user.roleType === assignment.targetRoleType)
+            .map((user) => getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeMap))
+            .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId));
+        });
+        const userTeamIds = assignments.flatMap((assignment) => {
+          if (assignment.targetType !== "USER" || !assignment.targetUserId) return [];
+          const user = templateUserMap.get(assignment.targetUserId);
+          const teamOrgNodeId = getTeamOrgNodeIdForRecord(user?.orgNodeId, orgNodeMap);
+          return teamOrgNodeId ? [teamOrgNodeId] : [];
+        });
+        const departmentTeamIds = departmentAssignmentIds.flatMap((departmentOrgNodeId) => teamOptions
+          .filter((team) => team.departmentOrgNodeId === departmentOrgNodeId)
+          .map((team) => team.id));
+        return [...new Set([...directTeamIds, ...roleTeamIds, ...userTeamIds, ...departmentTeamIds])];
       })(),
       createdAt: template.createdAt.toISOString(),
       updatedAt: template.updatedAt.toISOString(),
@@ -560,5 +1202,11 @@ export async function getKpiData(currentUser: DataScopeInput) {
         sortOrder: item.sortOrder,
       })),
     })),
+    permissions: {
+      canManageKpi,
+      canManageKpiTemplate,
+      canToggleKpiTemplate,
+    },
+    hasAnyViewPermission: true,
   };
 }
