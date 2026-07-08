@@ -670,6 +670,20 @@ model PersonalKpiActionLog {
   @@index([actorId])
 }
 
+model PersonalKpiApprovalStep {
+  id            String   @id @default(cuid())
+  personalKpiId String
+  stepOrder     Int
+  stageKey      String
+  approverId    String
+  status        String   @default("PENDING")
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([personalKpiId, stepOrder])
+  @@index([approverId, status])
+}
+
 model Notification {
   id         String           @id @default(cuid())
   userId     String

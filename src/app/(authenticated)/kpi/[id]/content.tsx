@@ -31,6 +31,12 @@ type Props = {
       active: boolean;
       completed: boolean;
     }>;
+    approvalSteps: Array<{
+      stepOrder: number;
+      stageKey: string;
+      approverName: string;
+      status: string;
+    }>;
     basicInfo: {
       department: string;
       team: string;
@@ -345,15 +351,31 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
           <div>
             <h3 className="mb-4 text-lg font-semibold">KPI流程进度条</h3>
             <div className="grid gap-x-6 gap-y-3 md:grid-cols-5">
-              {data.stages.map((stage) => (
-                <div key={stage.key} className="min-w-0">
-                  <div className={`mb-2 h-2 rounded-full ${stage.completed || stage.active ? "bg-primary" : "bg-muted"}`} />
-                  <div className="text-sm font-medium">{stage.label}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {stage.active ? "当前阶段" : stage.completed ? "已完成" : "未开始"}
+              {data.stages.map((stage) => {
+                const progressWidth = stage.completed ? "100%" : stage.active ? "50%" : "0%";
+                const approvalStep = data.approvalSteps.find((step) => {
+                  if (stage.key === "PENDING_LEADER_SCORE") return step.stageKey === "LEADER";
+                  if (stage.key === "PENDING_MANAGER_SCORE") return step.stageKey === "MANAGER";
+                  if (stage.key === "PENDING_FINAL_REVIEW") return step.stageKey === "FINAL";
+                  return false;
+                });
+                return (
+                  <div key={stage.key} className="min-w-0">
+                    <div className="h-2 rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary" style={{ width: progressWidth }} />
+                    </div>
+                    <div className="mt-2 text-sm font-medium">{stage.label}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {stage.active ? "当前阶段" : stage.completed ? "已完成" : "未开始"}
+                    </div>
+                    {approvalStep ? (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        审批人：{approvalStep.approverName}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

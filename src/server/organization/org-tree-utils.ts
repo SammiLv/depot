@@ -1,3 +1,4 @@
+import type { OrgNodeType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 
 export async function getDescendantOrgNodeIds(orgNodeId: string | null): Promise<string[]> {
@@ -18,9 +19,46 @@ export async function getAncestorOrgNodeIds(orgNodeId: string | null): Promise<s
   return rows.map((r) => r.ancestorId);
 }
 
-export async function getDescendantOrgNodes(
+export async function getAncestorOrgNodes(orgNodeId: string | null) {
+  if (!orgNodeId) return [];
+
+  const ancestorRows = await prisma.orgClosure.findMany({
+    where: { descendantId: orgNodeId },
+    orderBy: { depth: "asc" },
+    select: { ancestorId: true },
+  });
+
+  if (ancestorRows.length === 0) return [];
+
+  const ancestorOrder = new Map(ancestorRows.map((row, index) => [row.ancestorId, index]));
+  const nodes = await prisma.orgNode.findMany({
+    where: { id: { in: ancestorRows.map((row) => row.ancestorId) } },
+    select: { id: true, name: true, nodeType: true, parentId: true },
+  });
+
+  return nodes.sort((left, right) => (ancestorOrder.get(left.id) ?? 0) - (ancestorOrder.get(right.id) ?? 0));
+}
+
+export async function findNearestAncestorByType(
+  orgNodeId: string | null | undefined,
+  nodeType: OrgNodeType,
+) {
+  const nodes = await getAncestorOrgNodes(orgNodeId ?? null);
+  return nodes.find((node) => node.nodeType === nodeType) ?? null;
+}
+
+export async function findNearestAncestorByTypes(
+  orgNodeId: string | null | undefined,
+  nodeTypes: OrgNodeType[],
+) {
+  const nodeTypeSet = new Set(nodeTypes);
+  const nodes = await getAncestorOrgNodes(orgNodeId ?? null);
+  return nodes.find((node) => nodeTypeSet.has(node.nodeType)) ?? null;
+}
+
+export async function getDescendantOrgNodesByTypes(
   orgNodeId: string | null,
-  nodeType?: "DEPARTMENT" | "TEAM",
+  nodeTypes?: OrgNodeType[],
 ) {
   const descendantIds = await getDescendantOrgNodeIds(orgNodeId);
   if (descendantIds.length === 0) return [];
@@ -28,11 +66,18 @@ export async function getDescendantOrgNodes(
   return prisma.orgNode.findMany({
     where: {
       id: { in: descendantIds },
-      ...(nodeType ? { nodeType } : {}),
+      ...(nodeTypes?.length ? { nodeType: { in: nodeTypes } } : {}),
     },
     select: { id: true, name: true, nodeType: true, parentId: true },
     orderBy: { name: "asc" },
   });
+}
+
+export async function getDescendantOrgNodes(
+  orgNodeId: string | null,
+  nodeType?: OrgNodeType,
+) {
+  return getDescendantOrgNodesByTypes(orgNodeId, nodeType ? [nodeType] : undefined);
 }
 
 export async function findOrgNodeById(orgNodeId: string | null | undefined) {
@@ -44,26 +89,8 @@ export async function findOrgNodeById(orgNodeId: string | null | undefined) {
 }
 
 export async function findNearestDepartmentOrgNodeId(orgNodeId: string | null | undefined): Promise<string | null> {
-  if (!orgNodeId) return null;
-
-  const ancestorRows = await prisma.orgClosure.findMany({
-    where: { descendantId: orgNodeId },
-    orderBy: { depth: "desc" },
-    select: { ancestorId: true },
-  });
-
-  if (ancestorRows.length === 0) return null;
-
-  const departmentNodes = await prisma.orgNode.findMany({
-    where: {
-      id: { in: ancestorRows.map((row) => row.ancestorId) },
-      nodeType: "DEPARTMENT",
-    },
-    select: { id: true },
-  });
-
-  const departmentIdSet = new Set(departmentNodes.map((node) => node.id));
-  return ancestorRows.find((row) => departmentIdSet.has(row.ancestorId))?.ancestorId ?? null;
+  const departmentNode = await findNearestAncestorByType(orgNodeId, "DEPARTMENT");
+  return departmentNode?.id ?? null;
 }
 
 export async function isOrgNodeInSubtree(
