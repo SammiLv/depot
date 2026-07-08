@@ -284,11 +284,16 @@ function buildTemplateScopeOptions(
   const occupiedMemberIdSet = new Set(activeTemplates.flatMap((template) => template.scopeUserIds));
   const departmentTeams = data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentOrgNodeId);
   const departmentMembers = data.memberOptions.filter(
-    (member) => member.orgNodeId && departmentTeams.some((team) => team.id === member.orgNodeId)
+    (member) => member.teamOrgNodeId && departmentTeams.some((team) => team.id === member.teamOrgNodeId)
   );
   const memberOptions = departmentMembers
     .filter((member) => !occupiedMemberIdSet.has(member.id) || preserveMemberIdSet.has(member.id))
-    .map((member) => ({ id: member.id, name: member.name, orgNodeId: member.orgNodeId ?? null }));
+    .map((member) => ({
+      id: member.id,
+      name: member.name,
+      orgNodeId: member.orgNodeId ?? null,
+      teamOrgNodeId: member.teamOrgNodeId ?? null,
+    }));
   const teamOptions = departmentTeams
     .filter((team) => {
       if (preserveTeamIdSet.has(team.id)) {
@@ -340,7 +345,7 @@ function CreateTemplateDrawer({
     if (selectedMemberIds.includes(member.id)) {
       return false;
     }
-    if (member.orgNodeId && selectedTeamIds.includes(member.orgNodeId)) {
+    if (member.teamOrgNodeId && selectedTeamIds.includes(member.teamOrgNodeId)) {
       return false;
     }
     return true;
@@ -349,7 +354,7 @@ function CreateTemplateDrawer({
     if (selectedTeamIds.includes(team.id)) {
       return false;
     }
-    return availableMemberOptions.some((member) => member.orgNodeId === team.id);
+    return availableMemberOptions.some((member) => member.teamOrgNodeId === team.id);
   });
   const filteredTeamOptions = availableTeamOptions.filter((team) =>
     team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
@@ -450,7 +455,7 @@ function CreateTemplateDrawer({
                         setSelectedTeamIds((current) => current.includes(team.id) ? current : [...current, team.id]);
                         setSelectedMemberIds((current) => current.filter((memberId) => {
                           const member = scopeOptions.memberOptions.find((item) => item.id === memberId);
-                          return member?.orgNodeId !== team.id;
+                          return member?.teamOrgNodeId !== team.id;
                         }));
                       }}
                       className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted"
@@ -716,7 +721,7 @@ function TemplateEditDrawer({
     if (selectedMemberIds.includes(member.id)) {
       return false;
     }
-    if (member.orgNodeId && selectedTeamIds.includes(member.orgNodeId)) {
+    if (member.teamOrgNodeId && selectedTeamIds.includes(member.teamOrgNodeId)) {
       return false;
     }
     return true;
@@ -725,7 +730,7 @@ function TemplateEditDrawer({
     if (selectedTeamIds.includes(team.id)) {
       return false;
     }
-    return availableMemberOptions.some((member) => member.orgNodeId === team.id);
+    return availableMemberOptions.some((member) => member.teamOrgNodeId === team.id);
   });
   const filteredTeamOptions = availableTeamOptions.filter((team) =>
     team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
@@ -835,7 +840,7 @@ function TemplateEditDrawer({
                           setSelectedTeamIds((current) => current.includes(team.id) ? current : [...current, team.id]);
                           setSelectedMemberIds((current) => current.filter((memberId) => {
                             const member = scopeOptions.memberOptions.find((item) => item.id === memberId);
-                            return member?.orgNodeId !== team.id;
+                            return member?.teamOrgNodeId !== team.id;
                           }));
                         }}
                         className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted"
@@ -1227,6 +1232,8 @@ export function KpiContent({ data }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const errorMessage = searchParams.get("error");
+  const [dismissedErrorMessage, setDismissedErrorMessage] = useState<string | null>(null);
   const [showInitDialog, setShowInitDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [templateImportResult, setTemplateImportResult] = useState<TemplateImportResult | null>(null);
@@ -1241,6 +1248,17 @@ export function KpiContent({ data }: Props) {
     () => [1, 2, 3, 4].map((quarter) => ({ value: quarter, label: `Q${quarter}` })),
     []
   );
+
+  useEffect(() => {
+    if (errorMessage && errorMessage !== dismissedErrorMessage) {
+      window.alert(errorMessage);
+      setDismissedErrorMessage(errorMessage);
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.delete("error");
+      const nextQuery = nextParams.toString();
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    }
+  }, [dismissedErrorMessage, errorMessage, pathname, router, searchParams]);
   const filteredTeamOptions = useMemo(
     () => data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentTab),
     [data.teamOptions, departmentTab]
@@ -1301,16 +1319,12 @@ export function KpiContent({ data }: Props) {
   );
   const scopedMemberCount = useMemo(() => {
     const visibleMembers = data.memberOptions.filter((member) => {
-      const departmentOrgNodeId = member.orgNodeId
-        ? data.teamOptions.find((team) => team.id === member.orgNodeId)?.departmentOrgNodeId
-          ?? (data.departmentOptions.some((department) => department.id === member.orgNodeId) ? member.orgNodeId : null)
-        : null;
-      if (departmentOrgNodeId !== departmentTab) return false;
+      if (member.departmentOrgNodeId !== departmentTab) return false;
       if (showAllTeamTab && teamTab === "all") return true;
-      return teamTab ? member.orgNodeId === teamTab : false;
+      return teamTab ? member.teamOrgNodeId === teamTab : false;
     });
     return visibleMembers.length;
-  }, [data.departmentOptions, data.memberOptions, data.teamOptions, departmentTab, showAllTeamTab, teamTab]);
+  }, [data.memberOptions, departmentTab, showAllTeamTab, teamTab]);
   const scopedStages = useMemo(() => ([
     { label: "初始化", count: rows.length },
     { label: "自评", count: rows.filter((row) => row.stageKey === "PENDING_LEADER_SCORE").length },

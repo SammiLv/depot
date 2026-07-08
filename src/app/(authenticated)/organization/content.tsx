@@ -610,13 +610,13 @@ export function OrgContent({
             {tab === "organization" && (canManageUsers || canManageTeams || (isAdmin && selectedScope.scopeType === "SYSTEM")) && (
               <div className="flex flex-wrap items-center gap-2">
                 {isAdmin && selectedScope.scopeType === "SYSTEM" && (
-                  <Button variant="outline" onClick={handleDingTalkSync} className="h-9 rounded-xl text-primary border-primary/40" disabled={syncing}>
+                  <Button variant="outline" onClick={handleDingTalkSync} className="h-9 rounded-lg text-primary border-primary/40" disabled={syncing}>
                     <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
                     {syncing ? "更新中" : "从钉钉更新"}
                   </Button>
                 )}
-                {canManageTeams && <Button variant="outline" className="h-9 rounded-xl" onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
-                {canManageUsers && <Button className="h-9 rounded-xl" onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
+                {canManageTeams && <Button variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
+                {canManageUsers && <Button className="h-9 rounded-lg" onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
               </div>
             )}
           </div>

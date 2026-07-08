@@ -122,21 +122,24 @@ enum KpiTemplateAssignmentTargetType {
 }
 
 model User {
-  id              String    @id @default(cuid())
-  dingtalkUserId  String?   @unique
-  name            String
-  email           String?
-  mobile          String?
-  avatarUrl       String?
-  orgNodeId       String?
-  roleType        RoleType  @default(MEMBER)
-  title           String?
-  joinedAt        DateTime?
-  contractRenewAt DateTime?
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                   String    @id @default(cuid())
+  dingtalkUserId       String?   @unique
+  loginName            String?   @unique
+  passwordHash         String?
+  passwordLoginEnabled Boolean   @default(false)
+  name                 String
+  email                String?
+  mobile               String?
+  avatarUrl            String?
+  orgNodeId            String?
+  roleType             RoleType  @default(MEMBER)
+  title                String?
+  joinedAt             DateTime?
+  contractRenewAt      DateTime?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
 
   @@index([orgNodeId])
   @@index([roleType])
@@ -665,6 +668,20 @@ model PersonalKpiActionLog {
 
   @@index([personalKpiId, actedAt])
   @@index([actorId])
+}
+
+model PersonalKpiApprovalStep {
+  id            String   @id @default(cuid())
+  personalKpiId String
+  stepOrder     Int
+  stageKey      String
+  approverId    String
+  status        String   @default("PENDING")
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([personalKpiId, stepOrder])
+  @@index([approverId, status])
 }
 
 model Notification {
