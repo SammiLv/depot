@@ -532,7 +532,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     <>
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
-          <h1 className="text-3xl font-semibold tracking-tight">季度工作</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">项目管理</h1>
           <p className="mt-2 text-sm text-muted-foreground">按小组规划季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
         </div>
 
