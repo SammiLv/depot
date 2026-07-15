@@ -151,6 +151,38 @@ stop_managed_service() {
   return 0
 }
 
+count_initialized_admins() {
+  node - <<'NODE'
+const path = require("path");
+const Database = require("better-sqlite3");
+
+function resolveDatabasePath() {
+  const url = process.env.DATABASE_URL;
+  if (!url || url === "file:./dev.db") {
+    return path.resolve(process.cwd(), "db/dev.db");
+  }
+  if (url.startsWith("file:")) {
+    const rawPath = url.slice("file:".length);
+    return path.isAbsolute(rawPath) ? rawPath : path.resolve(process.cwd(), rawPath);
+  }
+  process.exit(1);
+}
+
+const db = new Database(resolveDatabasePath(), { readonly: true });
+const row = db.prepare(`
+  SELECT COUNT(*) AS count
+  FROM User
+  WHERE roleType = 'ADMIN'
+    AND isActive = 1
+    AND deletedAt IS NULL
+    AND loginName IS NOT NULL
+    AND passwordHash IS NOT NULL
+    AND passwordLoginEnabled = 1
+`).get();
+console.log(String(row?.count ?? 0));
+NODE
+}
+
 echo "==> Using start script: $START_SCRIPT"
 echo "==> Using port: $PORT"
 echo "==> Using APP_URL: $APP_URL"
@@ -203,6 +235,11 @@ for _ in {1..30}; do
     echo "Managed PID: $SERVICE_PID"
     echo "PID file: $PID_FILE"
     echo "Log file: $LOG_FILE"
+    initialized_admin_count="$(count_initialized_admins 2>/dev/null || echo "")"
+    if [[ "$initialized_admin_count" == "0" ]]; then
+      echo "==> 当前数据库中还没有已初始化的系统管理员。"
+      echo "==> 可直接打开 $APP_URL/login?mode=init 初始化首个系统管理员账号。"
+    fi
     exit 0
   fi
   sleep 1

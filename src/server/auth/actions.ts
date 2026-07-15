@@ -5,6 +5,7 @@ import { RoleType } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { prisma } from "@/server/db/prisma";
 import { clearUserSession, rememberLoginMethod, setUserSession } from "@/server/auth/session";
+import { ensureInitialSystemBootstrap } from "@/server/bootstrap/system-bootstrap";
 
 function hashPassword(password: string) {
   return scryptSync(password, "department-management", 64).toString("hex");
@@ -105,7 +106,7 @@ export async function initializeAdminPassword(formData: FormData) {
     redirect("/login?mode=init&error=%E8%AF%A5%E8%B4%A6%E5%8F%B7%E5%B7%B2%E8%A2%AB%E5%8D%A0%E7%94%A8");
   }
 
-  const adminUser = await prisma.user.findFirst({
+  let adminUser = await prisma.user.findFirst({
     where: {
       roleType: RoleType.ADMIN,
       isActive: true,
@@ -116,7 +117,20 @@ export async function initializeAdminPassword(formData: FormData) {
   });
 
   if (!adminUser) {
-    redirect("/login?mode=init&error=%E6%9C%AA%E6%89%BE%E5%88%B0%E5%8F%AF%E5%88%9D%E5%A7%8B%E5%8C%96%E7%9A%84%E7%B3%BB%E7%BB%9F%E7%AE%A1%E7%90%86%E5%91%98");
+    adminUser = await prisma.user.create({
+      data: {
+        name: "系统管理员",
+        roleType: RoleType.ADMIN,
+        title: "管理员",
+        loginName: normalizedLoginName,
+        passwordHash: hashPassword(password),
+        passwordLoginEnabled: true,
+      },
+      select: { id: true },
+    });
+
+    await ensureInitialSystemBootstrap();
+    redirect("/login?success=%E7%B3%BB%E7%BB%9F%E7%AE%A1%E7%90%86%E5%91%98%E8%B4%A6%E5%8F%B7%E5%B7%B2%E5%88%9D%E5%A7%8B%E5%8C%96%EF%BC%8C%E8%AF%B7%E4%BD%BF%E7%94%A8%E8%B4%A6%E5%8F%B7%E5%AF%86%E7%A0%81%E7%99%BB%E5%BD%95");
   }
 
   await prisma.user.update({
@@ -128,6 +142,7 @@ export async function initializeAdminPassword(formData: FormData) {
     },
   });
 
+  await ensureInitialSystemBootstrap();
   redirect("/login?success=%E7%B3%BB%E7%BB%9F%E7%AE%A1%E7%90%86%E5%91%98%E8%B4%A6%E5%8F%B7%E5%B7%B2%E5%88%9D%E5%A7%8B%E5%8C%96%EF%BC%8C%E8%AF%B7%E4%BD%BF%E7%94%A8%E8%B4%A6%E5%8F%B7%E5%AF%86%E7%A0%81%E7%99%BB%E5%BD%95");
 }
 
