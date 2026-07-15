@@ -21,8 +21,8 @@ import { avatarColor } from "@/components/ui-kit";
 
 const menu = [
   { to: "/dashboard", label: "首页工作台", icon: LayoutDashboard },
-  { to: "/annual-goals", label: "年度指标", icon: Target },
-  { to: "/quarterly-work", label: "季度工作", icon: CalendarRange },
+  { to: "/annual-goals", label: "指标管理", icon: Target },
+  { to: "/quarterly-work", label: "项目管理", icon: CalendarRange },
   { to: "/kpi", label: "KPI 管理", icon: ClipboardCheck },
   { to: "/talent", label: "人才发展", icon: Users },
   { to: "/todos", label: "我的待办", icon: CheckSquare },

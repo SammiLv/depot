@@ -1517,8 +1517,38 @@ export function AnnualGoalsContent({ data }: Props) {
         { key: "quarters", label: "季度指标" },
       ];
   const [tab, setTab] = useState<PlanTab>("metrics");
+  const planHeaderActions = (
+    <>
+      {tab === "metrics" && activePlanDetailView?.ownerType === "DEPARTMENT" ? (
+        <>
+          {data.permissions.canCreatePlan && <Button variant="outline" onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建部门方案</Button>}
+          {data.permissions.canEditDepartmentPlans && activeDepartmentPlan ? (
+            <>
+              <Button variant="outline" onClick={() => setPlanDialog(activeDepartmentPlan)}>
+                <Edit className="w-4 h-4" />编辑方案
+              </Button>
+              <Button variant="outline" onClick={() => setDeletePlan(activeDepartmentPlan)} className="text-destructive hover:text-destructive">
+                <Trash2 className="w-4 h-4" />删除方案
+              </Button>
+            </>
+          ) : null}
+        </>
+      ) : null}
+      <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+        <select
+          value={String(data.selectedYear)}
+          onChange={(event) => handleSelectedYearChange(Number.parseInt(event.target.value, 10))}
+          className="h-full bg-transparent outline-none"
+        >
+          {data.availableYears.map((year) => (
+            <option key={year} value={year}>{getYearLabel(year)}</option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
   const topTabActions = (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {activePlan ? (
         <>
           {tab === "metrics" && activePlan.permissions.canEditMetrics && (
@@ -1535,6 +1565,7 @@ export function AnnualGoalsContent({ data }: Props) {
           )}
         </>
       ) : null}
+      {planHeaderActions}
     </div>
   );
 
@@ -1548,33 +1579,8 @@ export function AnnualGoalsContent({ data }: Props) {
         <Card className="mb-6 !p-0 overflow-hidden">
           <div className="px-5 pt-5 flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">年度指标</h1>
+              <h1 className="text-3xl font-semibold tracking-tight">指标管理</h1>
               <p className="mt-2 text-sm text-muted-foreground">查看部门指标承接、拆解与执行进展</p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
-                <select
-                  value={String(data.selectedYear)}
-                  onChange={(event) => handleSelectedYearChange(Number.parseInt(event.target.value, 10))}
-                  className="h-full bg-transparent outline-none"
-                >
-                  {data.availableYears.map((year) => (
-                    <option key={year} value={year}>{getYearLabel(year)}</option>
-                  ))}
-                </select>
-              </label>
-              {data.permissions.canCreatePlan && <Button onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建部门方案</Button>}
-              {data.permissions.canEditDepartmentPlans && activeDepartmentPlan ? (
-                <>
-                  <Button variant="outline" onClick={() => setPlanDialog(activeDepartmentPlan)}>
-                    <Edit className="w-4 h-4" />编辑方案
-                  </Button>
-                  <Button variant="outline" onClick={() => setDeletePlan(activeDepartmentPlan)} className="text-destructive hover:text-destructive">
-                    <Trash2 className="w-4 h-4" />删除方案
-                  </Button>
-                </>
-              ) : null}
             </div>
           </div>
 
