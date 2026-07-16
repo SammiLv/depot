@@ -61,6 +61,12 @@ function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
   return nextItems;
 }
 
+function renderRequiredLabel(label: string) {
+  const trimmedLabel = label.trimEnd();
+  if (!trimmedLabel.endsWith("*")) return label;
+  return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
+}
+
 function TemplateList({
   rows,
   canManageKpiTemplate,
@@ -421,7 +427,7 @@ function CreateTemplateDrawer({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="md:col-span-2">
-          <label className="mb-1 block text-sm font-medium">模板名称 *</label>
+          <label className="mb-1 block text-sm font-medium">{renderRequiredLabel("模板名称 *")}</label>
           <input name="name" required className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" />
         </div>
         <div>
@@ -801,7 +807,7 @@ function TemplateEditDrawer({
 
           <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
-            <label className="mb-1 block text-sm font-medium">模板名称 *</label>
+            <label className="mb-1 block text-sm font-medium">{renderRequiredLabel("模板名称 *")}</label>
             <input
               name="name"
               defaultValue={row.name}
@@ -1119,7 +1125,7 @@ function InitializeForm({
         </div>
       ) : null}
       <div>
-        <label className="mb-1 block text-sm font-medium">季度 *</label>
+        <label className="mb-1 block text-sm font-medium">{renderRequiredLabel("季度 *")}</label>
         <select
           name="quarter"
           value={selectedQuarter}
@@ -1198,7 +1204,7 @@ function TemplateImportForm({
         </div>
       ) : null}
       <div>
-        <label className="mb-1 block text-sm font-medium">所属部门 *</label>
+        <label className="mb-1 block text-sm font-medium">{renderRequiredLabel("所属部门 *")}</label>
         <select
           name="departmentOrgNodeId"
           defaultValue={defaultDepartmentOrgNodeId}
@@ -1211,7 +1217,7 @@ function TemplateImportForm({
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-sm font-medium">上传模板文件 *</label>
+        <label className="mb-1 block text-sm font-medium">{renderRequiredLabel("上传模板文件 *")}</label>
         <input
           name="file"
           type="file"

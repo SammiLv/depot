@@ -72,10 +72,16 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
   );
 }
 
+function renderRequiredLabel(label: string) {
+  const trimmedLabel = label.trimEnd();
+  if (!trimmedLabel.endsWith("*")) return label;
+  return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
+}
+
 function FormRow({ label, children, align = "start" }: { label: string; children: React.ReactNode; align?: "start" | "center" }) {
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4">
-      <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{label}</label>
+      <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{renderRequiredLabel(label)}</label>
       <div>{children}</div>
     </div>
   );
@@ -270,12 +276,12 @@ function QuarterlyWorkForm({
             <div className="whitespace-pre-wrap break-words">{item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? "-"}</div>
           </div>
         </FormRow>
-        <FormRow label="季度工作名称 *" align="center">
+        <FormRow label="任务名称 *" align="center">
           <input
             name="title"
             required
             defaultValue={item?.title ?? ""}
-            placeholder="请输入季度工作名称"
+            placeholder="请输入任务名称"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
@@ -286,17 +292,17 @@ function QuarterlyWorkForm({
             defaultValue={item?.ownerId ?? selectedProject?.ownerId ?? data.currentUserId ?? memberOptions[0]?.id ?? ""}
           />
         </FormRow>
-        <FormRow label="本季度工作目标 *">
+        <FormRow label="本季度任务目标 *">
           <textarea
             name="description"
             required
             defaultValue={item?.description ?? ""}
             rows={4}
-            placeholder="请输入本季度工作目标"
+            placeholder="请输入本季度任务目标"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="季度工作状态" align="center">
+        <FormRow label="任务状态" align="center">
           <select
             name="status"
             defaultValue={item?.status ?? status}
@@ -560,7 +566,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<BoardTab>("project");
+  const [tab, setTab] = useState<BoardTab>("board");
   const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentOrgNodeId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
@@ -680,7 +686,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             <div className="inline-flex rounded-lg bg-muted p-1">
               {[
                 { k: "project" as const, label: "项目看板" },
-                { k: "board" as const, label: "工作看板" },
+                { k: "board" as const, label: "任务看板" },
                 { k: "value" as const, label: "需求价值跟踪" },
               ].map((t) => (
                 <button
@@ -698,7 +704,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             {data.canCreate && (
               <div className="flex items-center gap-2">
                 <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
-                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增季度工作</Button>
+                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增任务</Button>
               </div>
             )}
 
@@ -771,7 +777,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 type="button"
                                 onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}
                                 className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`为${item.title}新增季度工作`}
+                                aria-label={`为${item.title}新增任务`}
                               >
                                 <Plus className="h-4 w-4" />
                               </button>
@@ -788,7 +794,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                             <div className="rounded-md bg-background px-2 py-2">
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px]">季度工作数</span>
+                                <span className="text-[11px]">任务数</span>
                                 <span className="font-medium text-foreground">{item.workCount}</span>
                               </div>
                             </div>
@@ -903,7 +909,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
       </Card>
 
-      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增季度工作">
+      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增任务">
         {createDialog && (
           <QuarterlyWorkForm
             data={data}
@@ -916,7 +922,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         )}
       </Dialog>
 
-      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title={editDialog ? `编辑${editDialog.title}工作` : "编辑季度工作"}>
+      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title="编辑任务">
         {editDialog && (
           <QuarterlyWorkForm
             data={data}
