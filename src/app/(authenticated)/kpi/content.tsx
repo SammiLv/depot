@@ -1326,11 +1326,12 @@ export function KpiContent({ data }: Props) {
     return visibleMembers.length;
   }, [data.memberOptions, departmentTab, showAllTeamTab, teamTab]);
   const scopedStages = useMemo(() => ([
-    { label: "初始化", count: rows.length },
-    { label: "自评", count: rows.filter((row) => row.stageKey === "PENDING_LEADER_SCORE").length },
-    { label: "组长评", count: rows.filter((row) => row.stageKey === "PENDING_MANAGER_SCORE").length },
-    { label: "主管评", count: rows.filter((row) => row.stageKey === "PENDING_FINAL_REVIEW").length },
-    { label: "终审", count: rows.filter((row) => row.stageKey === "COMPLETED").length },
+    { label: "初始化", count: rows.filter((row) => row.stageKey === "DRAFT").length },
+    { label: "自评", count: rows.filter((row) => row.stageKey === "PENDING_SELF_REVIEW").length },
+    { label: "组长评", count: rows.filter((row) => row.stageKey === "PENDING_LEADER_SCORE").length },
+    { label: "主管评", count: rows.filter((row) => row.stageKey === "PENDING_MANAGER_SCORE").length },
+    { label: "终审", count: rows.filter((row) => row.stageKey === "PENDING_FINAL_REVIEW").length },
+    { label: "已完成", count: rows.filter((row) => row.stageKey === "COMPLETED").length },
   ]), [rows]);
   const templateRows = useMemo(
     () => data.templateRows.filter((row) => {
