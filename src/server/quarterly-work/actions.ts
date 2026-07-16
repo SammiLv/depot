@@ -3,8 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getOwnerWhereByScope } from "@/server/permissions/data-scope";
-import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { ProjectStatus, WorkStatus } from "@prisma/client";
 
 const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
@@ -87,36 +86,57 @@ function getProjectCompletedAtByStatus(status: ProjectStatus) {
   return status === "COMPLETED" ? new Date() : null;
 }
 
-async function findEditableOwner(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, ownerId: string) {
-  const ownerOrgScopeIds = currentUser.roleType === "ADMIN"
-    ? null
-    : currentUser.orgNodeId
-      ? await getDescendantOrgNodeIds(currentUser.orgNodeId)
-      : [];
+function getProjectManagementScopeWhere(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
+  if (currentUser.roleType === "ADMIN") {
+    return { deletedAt: null };
+  }
 
+  if (departmentOrgNodeId) {
+    return { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] }, deletedAt: null };
+  }
+
+  return { ownerId: currentUser.id, deletedAt: null };
+}
+
+async function getProjectManagementDepartmentScope(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>) {
+  if (currentUser.roleType === "ADMIN") {
+    return { departmentOrgNodeId: null, scopedOrgNodeIds: null };
+  }
+
+  const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
+  const scopedOrgNodeIds = departmentOrgNodeId
+    ? await getDescendantOrgNodeIds(departmentOrgNodeId)
+    : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
+
+  return { departmentOrgNodeId, scopedOrgNodeIds };
+}
+
+async function findEditableOwner(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, ownerId: string) {
+  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const owner = await prisma.user.findFirst({
     where: {
       id: ownerId,
       isActive: true,
       deletedAt: null,
-      ...(ownerOrgScopeIds === null
+      ...(currentUser.roleType === "ADMIN"
         ? {}
-        : ownerOrgScopeIds.length > 0
-          ? { orgNodeId: { in: ownerOrgScopeIds } }
+        : departmentOrgNodeId
+          ? { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] } }
           : { id: currentUser.id }),
     },
     select: { id: true, orgNodeId: true },
   });
 
-  if (!owner) throw new Error("负责人不在当前可维护范围内");
+  if (!owner) throw new Error("负责人不在当前部门范围内");
   return owner;
 }
 
 async function findEditableProject(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, projectId: string) {
+  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      ...(await getOwnerWhereByScope(currentUser)),
+      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
     select: {
       id: true,
@@ -224,11 +244,12 @@ export async function updateQuarterlyWork(formData: FormData) {
   const status = parseStatus(formData.get("status"));
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
+  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const existingWork = await prisma.quarterlyWork.findFirst({
     where: {
       id: workId,
-      ...(await getOwnerWhereByScope(currentUser)),
+      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
     select: { id: true, status: true, projectId: true },
   });
@@ -262,11 +283,12 @@ export async function updateProjectStatus(formData: FormData) {
   const currentUser = await requireQuarterlyWorkEditor();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const status = parseProjectStatus(formData.get("status"));
+  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      ...(await getOwnerWhereByScope(currentUser)),
+      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
     select: { id: true },
   });
@@ -336,9 +358,10 @@ export async function updateProject(formData: FormData) {
   const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
   const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
   const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
+  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...(await getOwnerWhereByScope(currentUser)) },
+    where: { id: projectId, ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds) },
     select: { id: true },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");

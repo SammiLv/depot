@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
 import { createProject, createQuarterlyWork, updateProject, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
-import { Plus, AlertTriangle, Pencil, X } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
 type BoardTab = "project" | "board" | "value";
@@ -77,6 +77,117 @@ function FormRow({ label, children, align = "start" }: { label: string; children
     <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4">
       <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{label}</label>
       <div>{children}</div>
+    </div>
+  );
+}
+
+function MemberPicker({
+  name,
+  options,
+  defaultValue,
+}: {
+  name: string;
+  options: Array<{ id: string; label: string }>;
+  defaultValue: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState(defaultValue);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setSelectedId(defaultValue);
+  }, [defaultValue]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
+  const selectedOption = options.find((option) => option.id === selectedId) ?? options[0] ?? null;
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
+  }, [options, query]);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input type="hidden" name={name} value={selectedOption?.id ?? ""} />
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+      >
+        <span className={`truncate text-left ${selectedOption ? "text-foreground" : "text-muted-foreground"}`}>
+          {selectedOption?.label ?? "请选择负责人"}
+        </span>
+        <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+
+      {open ? (
+        <div className="absolute z-50 mt-2 w-full rounded-lg border border-border bg-card p-2 shadow-xl">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索成员"
+            className="mb-2 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+          <div className="max-h-56 overflow-y-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => {
+                const active = option.id === selectedOption?.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(option.id);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
+                  >
+                    <span className="truncate">{option.label}</span>
+                    {active ? <Check className="ml-2 h-4 w-4 shrink-0" /> : null}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">未找到匹配成员</div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -169,16 +280,11 @@ function QuarterlyWorkForm({
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
-          <select
+          <MemberPicker
             name="ownerId"
-            required
+            options={memberOptions}
             defaultValue={item?.ownerId ?? selectedProject?.ownerId ?? data.currentUserId ?? memberOptions[0]?.id ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {memberOptions.map((member) => (
-              <option key={member.id} value={member.id}>{member.label}</option>
-            ))}
-          </select>
+          />
         </FormRow>
         <FormRow label="本季度工作目标 *">
           <textarea
@@ -251,16 +357,11 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
-          <select
+          <MemberPicker
             name="ownerId"
-            required
+            options={memberOptions}
             defaultValue={item.ownerId}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {memberOptions.map((member) => (
-              <option key={member.id} value={member.id}>{member.label}</option>
-            ))}
-          </select>
+          />
         </FormRow>
         <FormRow label="规划周期" align="center">
           <div className="flex items-center gap-2">
@@ -383,16 +484,11 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
-          <select
+          <MemberPicker
             name="ownerId"
-            required
+            options={memberOptions}
             defaultValue={data.currentUserId ?? memberOptions[0]?.id ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {memberOptions.map((member) => (
-              <option key={member.id} value={member.id}>{member.label}</option>
-            ))}
-          </select>
+          />
         </FormRow>
         <FormRow label="规划周期 *" align="center">
           <div className="flex items-center gap-2">
@@ -485,7 +581,12 @@ export function QuarterlyWorkContent({ data }: Props) {
     [filteredTeamOptions, departmentTab]
   );
   const belongsToSelectedDepartment = useMemo(
-    () => (teamOrgNodeId: string | null) => Boolean(teamOrgNodeId && teamDepartmentMap.get(teamOrgNodeId) === departmentTab),
+    () => (teamOrgNodeId: string | null, departmentOrgNodeId: string | null) => {
+      if (departmentOrgNodeId) {
+        return departmentOrgNodeId === departmentTab;
+      }
+      return Boolean(teamOrgNodeId && teamDepartmentMap.get(teamOrgNodeId) === departmentTab);
+    },
     [departmentTab, teamDepartmentMap]
   );
   const handleFormSuccess = (ownerTeamOrgNodeId: Props["data"]["memberOptions"][number]["teamOrgNodeId"] | null) => {
@@ -503,7 +604,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     () => data.columns.map((column) => ({
       ...column,
       items: column.items.filter((item) => {
-        if (!belongsToSelectedDepartment(item.teamOrgNodeId)) return false;
+        if (!belongsToSelectedDepartment(item.teamOrgNodeId, item.departmentOrgNodeId)) return false;
         return teamTab === "all" ? true : item.teamOrgNodeId === teamTab;
       }),
     })),
@@ -513,7 +614,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     () => data.projectColumns.map((column) => ({
       ...column,
       items: column.items.filter((item) => {
-        if (!belongsToSelectedDepartment(item.teamOrgNodeId)) return false;
+        if (!belongsToSelectedDepartment(item.teamOrgNodeId, item.departmentOrgNodeId)) return false;
         return teamTab === "all" ? true : item.teamOrgNodeId === teamTab;
       }),
     })),
@@ -522,7 +623,8 @@ export function QuarterlyWorkContent({ data }: Props) {
   const visibleReminders = useMemo(
     () => data.updateReminders.filter((reminder) => {
       const teamOrgNodeId = allItems.find((item) => item.id === reminder.id)?.teamOrgNodeId ?? null;
-      if (!belongsToSelectedDepartment(teamOrgNodeId)) return false;
+      const departmentOrgNodeId = allItems.find((item) => item.id === reminder.id)?.departmentOrgNodeId ?? null;
+      if (!belongsToSelectedDepartment(teamOrgNodeId, departmentOrgNodeId)) return false;
       return teamTab === "all" ? true : teamOrgNodeId === teamTab;
     }),
     [allItems, data.updateReminders, belongsToSelectedDepartment, teamTab]
