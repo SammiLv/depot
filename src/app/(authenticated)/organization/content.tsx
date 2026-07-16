@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { Plus, Users, X, Check, RefreshCw, Wand2 } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -229,6 +229,32 @@ function UserForm({
       <div className="mt-6 flex justify-end gap-3">
         <Button type="button" variant="outline" onClick={onClose}>取消</Button>
         <Button type="submit">{isEdit ? "保存" : "创建"}</Button>
+      </div>
+    </form>
+  );
+}
+
+function DepartmentForm({ users, onClose }: { users: OrgUser[]; onClose: () => void }) {
+  const availableUsers = users.filter((user) => user.isActive && user.roleType !== "ADMIN");
+
+  return (
+    <form action={async (fd) => { await createDepartment(fd); onClose(); }}>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">部门名称 *</label>
+          <input name="name" required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">部门主管</label>
+          <select name="managerId" defaultValue="" className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
+            <option value="">暂不设置</option>
+            {availableUsers.map((user) => <option key={user.id} value={user.id}>{user.name}{user.title ? ` · ${user.title}` : ""}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="submit">创建</Button>
       </div>
     </form>
   );
@@ -523,7 +549,7 @@ export function OrgContent({
 
   // Dialog states
   const [dialog, setDialog] = useState<{
-    type: "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments";
+    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments";
     data?: OrgUser | OrgTeam | ApplyAllDialogData;
   } | null>(null);
 
@@ -614,6 +640,9 @@ export function OrgContent({
                     <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
                     {syncing ? "更新中" : "从钉钉更新"}
                   </Button>
+                )}
+                {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                  <Button variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "department" })}><Plus className="w-4 h-4" />新增部门</Button>
                 )}
                 {canManageTeams && <Button variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
                 {canManageUsers && <Button className="h-9 rounded-lg" onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
@@ -1064,6 +1093,10 @@ export function OrgContent({
           </>
         )}
       </Card>
+      <Dialog open={dialog?.type === "department"} onClose={() => setDialog(null)} title="新增部门">
+        <DepartmentForm users={users} onClose={() => setDialog(null)} />
+      </Dialog>
+
       <Dialog open={dialog?.type === "user"} onClose={() => setDialog(null)} title={dialog?.data ? "编辑成员" : "新增成员"}>
         <UserForm
           user={dialog?.data as OrgUser | undefined}

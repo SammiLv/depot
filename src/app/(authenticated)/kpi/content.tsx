@@ -1373,7 +1373,7 @@ export function KpiContent({ data }: Props) {
         </div>
 
         {showDepartmentTabs ? (
-          <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
+          <div className="px-5 pt-3 flex flex-wrap items-end gap-8 text-sm shrink-0">
             {data.departmentOptions.map((department) => (
               <button
                 key={department.id}
@@ -1396,20 +1396,22 @@ export function KpiContent({ data }: Props) {
           </div>
         ) : null}
 
-        <div className="px-5 pt-3 pb-4 flex flex-wrap items-center gap-2">
-          {teamTabs.map((team) => (
-            <button
-              key={team.id}
-              type="button"
-              onClick={() => setTeamTab(team.id)}
-              className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-            >
-              {team.name}
-            </button>
-          ))}
-        </div>
+        {teamTabs.length > 0 ? (
+          <div className="px-5 pt-3 pb-4 flex flex-wrap items-center gap-2">
+            {teamTabs.map((team) => (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => setTeamTab(team.id)}
+                className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+              >
+                {team.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
-        <div className="px-5 pb-4 flex flex-wrap items-center gap-4">
+        <div className={`px-5 pb-4 flex flex-wrap items-center gap-4 ${teamTabs.length === 0 && !showDepartmentTabs ? "pt-3" : ""}`}>
           <div className="inline-flex rounded-lg bg-muted p-1">
             {[
               { key: "quarterly-kpi" as const, label: "季度KPI" },
