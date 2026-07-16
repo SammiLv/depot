@@ -77,45 +77,45 @@ function TemplateList({
   onToggleActive: (row: TemplateRow) => Promise<void>;
 }) {
   return (
-    <Card className="!p-0 overflow-hidden">
-      <table className="w-full table-fixed">
+    <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+      <table className="min-w-[1380px] w-full table-auto">
         <colgroup>
-          <col className="w-[160px]" />
-          <col className="w-[140px]" />
-          <col className="w-[300px]" />
-          <col className="w-[80px]" />
-          <col className="w-[140px]" />
-          <col className="w-[120px]" />
-          <col className="w-[132px]" />
           <col className="w-[220px]" />
+          <col className="w-[120px]" />
+          <col className="w-[320px]" />
+          <col className="w-[90px]" />
+          <col className="w-[150px]" />
+          <col className="w-[120px]" />
+          <col className="w-[150px]" />
+          <col className="w-[260px]" />
         </colgroup>
-        <thead className="bg-muted/40">
-          <tr className="text-left text-sm text-muted-foreground">
+        <thead className="bg-muted/30">
+          <tr className="text-left text-xs text-muted-foreground">
             <th className="px-5 py-3 font-medium">模板名称</th>
             <th className="px-5 py-3 font-medium whitespace-nowrap">创建人</th>
             <th className="px-5 py-3 font-medium">适用范围</th>
-            <th className="px-4 py-3 font-medium whitespace-nowrap">状态</th>
-            <th className="px-4 py-3 font-medium whitespace-nowrap">创建时间</th>
-            <th className="px-4 py-3 font-medium whitespace-nowrap">最后更新</th>
-            <th className="px-4 py-3 font-medium whitespace-nowrap">最后更新时间</th>
-            <th className="w-[220px] px-5 py-3 text-right font-medium">操作</th>
+            <th className="px-5 py-3 font-medium whitespace-nowrap">状态</th>
+            <th className="px-5 py-3 font-medium whitespace-nowrap">创建时间</th>
+            <th className="px-5 py-3 font-medium whitespace-nowrap">最后更新</th>
+            <th className="px-5 py-3 font-medium whitespace-nowrap">最后更新时间</th>
+            <th className="px-5 py-3 text-right font-medium whitespace-nowrap">操作</th>
           </tr>
         </thead>
         <tbody>
           {rows.length ? (
             rows.map((row) => (
-              <tr key={row.id} className="border-t border-border transition hover:bg-muted/30">
-                <td className="px-5 py-3 text-sm font-medium">{row.name}</td>
-                <td className="px-5 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.createdByName}</td>
-                <td className="px-5 py-3 text-sm text-muted-foreground">{row.scopeName}</td>
-                <td className="px-4 py-3 text-sm whitespace-nowrap">
+              <tr key={row.id} className="border-t border-border transition hover:bg-muted/20 align-top">
+                <td className="px-5 py-4 text-sm font-medium break-words">{row.name}</td>
+                <td className="px-5 py-4 text-sm text-muted-foreground whitespace-nowrap">{row.createdByName}</td>
+                <td className="px-5 py-4 text-sm text-muted-foreground break-words">{row.scopeName}</td>
+                <td className="px-5 py-4 text-sm whitespace-nowrap">
                   <Badge tone={row.isActive ? "success" : "default"}>{row.isActive ? "启用" : "禁用"}</Badge>
                 </td>
-                <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
-                <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.updatedByName}</td>
-                <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.updatedAt)}</td>
-                <td className="w-[220px] px-5 py-3 text-right">
-                  <div className="inline-flex items-center justify-end gap-2 text-sm whitespace-nowrap">
+                <td className="px-5 py-4 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
+                <td className="px-5 py-4 text-sm text-muted-foreground whitespace-nowrap">{row.updatedByName}</td>
+                <td className="px-5 py-4 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatDateTime(row.updatedAt)}</td>
+                <td className="px-5 py-4 text-right">
+                  <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
                     <button type="button" className="text-primary hover:underline" onClick={() => onView(row)}>查看</button>
                     {canManageKpiTemplate ? <button type="button" className="text-primary hover:underline" onClick={() => onEdit(row)}>编辑</button> : null}
                     {canToggleKpiTemplate ? <button type="button" className="text-primary hover:underline" onClick={() => void onToggleActive(row)}>{row.isActive ? "禁用" : "启用"}</button> : null}
@@ -131,7 +131,7 @@ function TemplateList({
           )}
         </tbody>
       </table>
-    </Card>
+    </div>
   );
 }
 
