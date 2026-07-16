@@ -1,7 +1,9 @@
 import type { RoleType, AnnualGoalOwnerType, OrgNodeType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { getOwnerWhereByScope, getKpiWhereByScope } from "@/server/permissions/data-scope";
+import { getOwnerWhereByScope } from "@/server/permissions/data-scope";
 import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/role-labels";
+import { buildKpiWhereByPermission, resolvePermissionScope } from "@/server/permissions/permission-resolver";
+import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilitiesForUser,
@@ -45,6 +47,19 @@ function sumValues<T>(items: T[], selector: (item: T) => number) {
 
 export async function getDashboardData(currentUser: CurrentUser) {
   const annualGoalCapabilities = await getAnnualGoalCapabilitiesForUser(currentUser);
+  const [
+    viewKpiWhere,
+    scoreSelfScope,
+    scoreLeaderScope,
+    scoreManagerScope,
+    scoreFinalScope,
+  ] = await Promise.all([
+    buildKpiWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreSelf),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreLeader),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreManager),
+    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreFinal),
+  ]);
 
   const [currentOrgNode, todoCount, latestTodos, latestNotifications, activePlans, quarterlyWorks, kpis] = await Promise.all([
     currentUser.orgNodeId
@@ -70,7 +85,10 @@ export async function getDashboardData(currentUser: CurrentUser) {
       orderBy: [{ ownerType: "asc" }, { year: "desc" }, { createdAt: "desc" }],
     }),
     prisma.quarterlyWork.findMany({ where: await getOwnerWhereByScope(currentUser) }),
-    prisma.personalKpi.findMany({ where: await getKpiWhereByScope(currentUser) }),
+    prisma.personalKpi.findMany({
+      where: viewKpiWhere,
+      select: { id: true, status: true, userId: true },
+    }),
   ]);
 
   const relatedOrgNodeIds = Array.from(new Set([
@@ -205,9 +223,60 @@ export async function getDashboardData(currentUser: CurrentUser) {
     }, 0) / totalWeight * 100);
   }
 
-  const kpiStatusCounts = kpis.reduce((acc, k) => {
-    const s = k.status;
-    acc[s] = (acc[s] ?? 0) + 1;
+  const activeApprovalSteps = kpis.length
+    ? await prisma.personalKpiApprovalStep.findMany({
+        where: {
+          personalKpiId: { in: kpis.map((kpi) => kpi.id) },
+          status: "PENDING",
+        },
+        orderBy: [{ personalKpiId: "asc" }, { stepOrder: "asc" }],
+        select: {
+          personalKpiId: true,
+          approverId: true,
+          stageKey: true,
+        },
+      })
+    : [];
+
+  const activeApprovalStepByKpiId = new Map<string, typeof activeApprovalSteps[number]>();
+  const hasApprovalChainByKpiId = new Map<string, boolean>();
+  for (const step of activeApprovalSteps) {
+    hasApprovalChainByKpiId.set(step.personalKpiId, true);
+    if (!activeApprovalStepByKpiId.has(step.personalKpiId)) {
+      activeApprovalStepByKpiId.set(step.personalKpiId, step);
+    }
+  }
+
+  const canScoreSelf = Boolean(scoreSelfScope);
+  const canScoreLeader = Boolean(scoreLeaderScope);
+  const canScoreManager = Boolean(scoreManagerScope);
+  const canScoreFinal = Boolean(scoreFinalScope);
+
+  const actionableKpis = kpis.filter((kpi) => {
+    if (canScoreSelf && kpi.userId === currentUser.id && (kpi.status === "DRAFT" || kpi.status === "PENDING_SELF_REVIEW")) {
+      return true;
+    }
+
+    const activeStep = activeApprovalStepByKpiId.get(kpi.id);
+    const hasApprovalChain = hasApprovalChainByKpiId.get(kpi.id) ?? false;
+
+    if (canScoreLeader && kpi.status === "PENDING_LEADER_SCORE") {
+      return !hasApprovalChain || activeStep?.approverId === currentUser.id;
+    }
+
+    if (canScoreManager && kpi.status === "PENDING_MANAGER_SCORE") {
+      return !hasApprovalChain || activeStep?.approverId === currentUser.id;
+    }
+
+    if (canScoreFinal && kpi.status === "PENDING_FINAL_REVIEW") {
+      return !hasApprovalChain || activeStep?.approverId === currentUser.id;
+    }
+
+    return false;
+  });
+
+  const kpiStatusCounts = actionableKpis.reduce((acc, kpi) => {
+    acc[kpi.status] = (acc[kpi.status] ?? 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
