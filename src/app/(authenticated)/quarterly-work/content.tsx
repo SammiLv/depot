@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
 import { createProject, createQuarterlyWork, updateProject, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
-import { Plus, AlertTriangle, Pencil, X } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
 type BoardTab = "project" | "board" | "value";
@@ -72,11 +72,128 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
   );
 }
 
+function renderRequiredLabel(label: string) {
+  const trimmedLabel = label.trimEnd();
+  if (!trimmedLabel.endsWith("*")) return label;
+  return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
+}
+
 function FormRow({ label, children, align = "start" }: { label: string; children: React.ReactNode; align?: "start" | "center" }) {
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4">
-      <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{label}</label>
+      <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{renderRequiredLabel(label)}</label>
       <div>{children}</div>
+    </div>
+  );
+}
+
+function MemberPicker({
+  name,
+  options,
+  defaultValue,
+}: {
+  name: string;
+  options: Array<{ id: string; label: string }>;
+  defaultValue: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState(defaultValue);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setSelectedId(defaultValue);
+  }, [defaultValue]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
+  const selectedOption = options.find((option) => option.id === selectedId) ?? options[0] ?? null;
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
+  }, [options, query]);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input type="hidden" name={name} value={selectedOption?.id ?? ""} />
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+      >
+        <span className={`truncate text-left ${selectedOption ? "text-foreground" : "text-muted-foreground"}`}>
+          {selectedOption?.label ?? "请选择负责人"}
+        </span>
+        <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+
+      {open ? (
+        <div className="absolute z-50 mt-2 w-full rounded-lg border border-border bg-card p-2 shadow-xl">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索成员"
+            className="mb-2 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+          <div className="max-h-56 overflow-y-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => {
+                const active = option.id === selectedOption?.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(option.id);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
+                  >
+                    <span className="truncate">{option.label}</span>
+                    {active ? <Check className="ml-2 h-4 w-4 shrink-0" /> : null}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">未找到匹配成员</div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -159,38 +276,33 @@ function QuarterlyWorkForm({
             <div className="whitespace-pre-wrap break-words">{item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? "-"}</div>
           </div>
         </FormRow>
-        <FormRow label="季度工作名称 *" align="center">
+        <FormRow label="任务名称 *" align="center">
           <input
             name="title"
             required
             defaultValue={item?.title ?? ""}
-            placeholder="请输入季度工作名称"
+            placeholder="请输入任务名称"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
-          <select
+          <MemberPicker
             name="ownerId"
-            required
+            options={memberOptions}
             defaultValue={item?.ownerId ?? selectedProject?.ownerId ?? data.currentUserId ?? memberOptions[0]?.id ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {memberOptions.map((member) => (
-              <option key={member.id} value={member.id}>{member.label}</option>
-            ))}
-          </select>
+          />
         </FormRow>
-        <FormRow label="本季度工作目标 *">
+        <FormRow label="本季度任务目标 *">
           <textarea
             name="description"
             required
             defaultValue={item?.description ?? ""}
             rows={4}
-            placeholder="请输入本季度工作目标"
+            placeholder="请输入本季度任务目标"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="季度工作状态" align="center">
+        <FormRow label="任务状态" align="center">
           <select
             name="status"
             defaultValue={item?.status ?? status}
@@ -251,16 +363,11 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
-          <select
+          <MemberPicker
             name="ownerId"
-            required
+            options={memberOptions}
             defaultValue={item.ownerId}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {memberOptions.map((member) => (
-              <option key={member.id} value={member.id}>{member.label}</option>
-            ))}
-          </select>
+          />
         </FormRow>
         <FormRow label="规划周期" align="center">
           <div className="flex items-center gap-2">
@@ -383,16 +490,11 @@ function ProjectCreateForm({ data, defaultStatus, onClose }: { data: Props["data
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
-          <select
+          <MemberPicker
             name="ownerId"
-            required
+            options={memberOptions}
             defaultValue={data.currentUserId ?? memberOptions[0]?.id ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {memberOptions.map((member) => (
-              <option key={member.id} value={member.id}>{member.label}</option>
-            ))}
-          </select>
+          />
         </FormRow>
         <FormRow label="规划周期 *" align="center">
           <div className="flex items-center gap-2">
@@ -464,7 +566,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<BoardTab>("project");
+  const [tab, setTab] = useState<BoardTab>("board");
   const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentOrgNodeId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
@@ -485,7 +587,12 @@ export function QuarterlyWorkContent({ data }: Props) {
     [filteredTeamOptions, departmentTab]
   );
   const belongsToSelectedDepartment = useMemo(
-    () => (teamOrgNodeId: string | null) => Boolean(teamOrgNodeId && teamDepartmentMap.get(teamOrgNodeId) === departmentTab),
+    () => (teamOrgNodeId: string | null, departmentOrgNodeId: string | null) => {
+      if (departmentOrgNodeId) {
+        return departmentOrgNodeId === departmentTab;
+      }
+      return Boolean(teamOrgNodeId && teamDepartmentMap.get(teamOrgNodeId) === departmentTab);
+    },
     [departmentTab, teamDepartmentMap]
   );
   const handleFormSuccess = (ownerTeamOrgNodeId: Props["data"]["memberOptions"][number]["teamOrgNodeId"] | null) => {
@@ -503,7 +610,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     () => data.columns.map((column) => ({
       ...column,
       items: column.items.filter((item) => {
-        if (!belongsToSelectedDepartment(item.teamOrgNodeId)) return false;
+        if (!belongsToSelectedDepartment(item.teamOrgNodeId, item.departmentOrgNodeId)) return false;
         return teamTab === "all" ? true : item.teamOrgNodeId === teamTab;
       }),
     })),
@@ -513,7 +620,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     () => data.projectColumns.map((column) => ({
       ...column,
       items: column.items.filter((item) => {
-        if (!belongsToSelectedDepartment(item.teamOrgNodeId)) return false;
+        if (!belongsToSelectedDepartment(item.teamOrgNodeId, item.departmentOrgNodeId)) return false;
         return teamTab === "all" ? true : item.teamOrgNodeId === teamTab;
       }),
     })),
@@ -522,7 +629,8 @@ export function QuarterlyWorkContent({ data }: Props) {
   const visibleReminders = useMemo(
     () => data.updateReminders.filter((reminder) => {
       const teamOrgNodeId = allItems.find((item) => item.id === reminder.id)?.teamOrgNodeId ?? null;
-      if (!belongsToSelectedDepartment(teamOrgNodeId)) return false;
+      const departmentOrgNodeId = allItems.find((item) => item.id === reminder.id)?.departmentOrgNodeId ?? null;
+      if (!belongsToSelectedDepartment(teamOrgNodeId, departmentOrgNodeId)) return false;
       return teamTab === "all" ? true : teamOrgNodeId === teamTab;
     }),
     [allItems, data.updateReminders, belongsToSelectedDepartment, teamTab]
@@ -578,7 +686,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             <div className="inline-flex rounded-lg bg-muted p-1">
               {[
                 { k: "project" as const, label: "项目看板" },
-                { k: "board" as const, label: "工作看板" },
+                { k: "board" as const, label: "任务看板" },
                 { k: "value" as const, label: "需求价值跟踪" },
               ].map((t) => (
                 <button
@@ -596,7 +704,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             {data.canCreate && (
               <div className="flex items-center gap-2">
                 <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
-                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增季度工作</Button>
+                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增任务</Button>
               </div>
             )}
 
@@ -669,7 +777,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 type="button"
                                 onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}
                                 className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`为${item.title}新增季度工作`}
+                                aria-label={`为${item.title}新增任务`}
                               >
                                 <Plus className="h-4 w-4" />
                               </button>
@@ -686,7 +794,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                             <div className="rounded-md bg-background px-2 py-2">
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px]">季度工作数</span>
+                                <span className="text-[11px]">任务数</span>
                                 <span className="font-medium text-foreground">{item.workCount}</span>
                               </div>
                             </div>
@@ -801,7 +909,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
       </Card>
 
-      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增季度工作">
+      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增任务">
         {createDialog && (
           <QuarterlyWorkForm
             data={data}
@@ -814,7 +922,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         )}
       </Dialog>
 
-      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title={editDialog ? `编辑${editDialog.title}工作` : "编辑季度工作"}>
+      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title="编辑任务">
         {editDialog && (
           <QuarterlyWorkForm
             data={data}

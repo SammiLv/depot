@@ -126,6 +126,12 @@ function getRoleLabel(roleType: RoleType) {
 
 const toneCycle: Array<"primary" | "info" | "brand" | "success"> = ["primary", "info", "brand", "success"];
 
+function renderRequiredLabel(label: string) {
+  const trimmedLabel = label.trimEnd();
+  if (!trimmedLabel.endsWith("*")) return label;
+  return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
+}
+
 // ── Dialog component ──
 function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   if (!open) return null;
@@ -178,7 +184,7 @@ function UserForm({
       <div className="space-y-4">
         {canSelectDepartment && (
           <div>
-            <label className="block text-sm font-medium mb-1">所属部门 *</label>
+            <label className="block text-sm font-medium mb-1">{renderRequiredLabel("所属部门 *")}</label>
             <select
               value={selectedDepartmentOrgNodeId}
               onChange={(event) => setSelectedDepartmentOrgNodeId(event.target.value)}
@@ -193,7 +199,7 @@ function UserForm({
           </div>
         )}
         <div>
-          <label className="block text-sm font-medium mb-1">姓名 *</label>
+          <label className="block text-sm font-medium mb-1">{renderRequiredLabel("姓名 *")}</label>
           <input name="name" defaultValue={user?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -208,7 +214,7 @@ function UserForm({
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1">角色 *</label>
+            <label className="block text-sm font-medium mb-1">{renderRequiredLabel("角色 *")}</label>
             <select name="roleType" defaultValue={user?.roleType ?? "MEMBER"} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
               {roleOptions.filter((r) => roleOptionsForForm.includes(r.value)).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
@@ -241,7 +247,7 @@ function DepartmentForm({ users, onClose }: { users: OrgUser[]; onClose: () => v
     <form action={async (fd) => { await createDepartment(fd); onClose(); }}>
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium mb-1">部门名称 *</label>
+          <label className="block text-sm font-medium mb-1">{renderRequiredLabel("部门名称 *")}</label>
           <input name="name" required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
         </div>
         <div>
@@ -293,7 +299,7 @@ function TeamForm({
       <div className="space-y-4">
         {canSelectDepartment && (
           <div>
-            <label className="block text-sm font-medium mb-1">所属部门 *</label>
+            <label className="block text-sm font-medium mb-1">{renderRequiredLabel("所属部门 *")}</label>
             <select
               value={selectedDepartmentOrgNodeId}
               onChange={(event) => setSelectedDepartmentOrgNodeId(event.target.value)}
@@ -308,7 +314,7 @@ function TeamForm({
           </div>
         )}
         <div>
-          <label className="block text-sm font-medium mb-1">小组名称 *</label>
+          <label className="block text-sm font-medium mb-1">{renderRequiredLabel("小组名称 *")}</label>
           <input name="name" defaultValue={team?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
         </div>
         <div>

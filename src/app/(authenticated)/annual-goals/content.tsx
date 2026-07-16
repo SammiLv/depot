@@ -20,6 +20,12 @@ function Button({ className = "", size = "md", ...props }: ComponentProps<typeof
   return <UiButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
 }
 
+function renderRequiredLabel(label: string) {
+  const trimmedLabel = label.trimEnd();
+  if (!trimmedLabel.endsWith("*")) return label;
+  return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
+}
+
 function getYearLabel(year: number) {
   return `${year} 年`;
 }
@@ -168,7 +174,7 @@ function SearchableMemberField({
 
   return (
     <div className={inline ? "flex items-start gap-3" : ""}>
-      <label className={`text-sm font-medium ${inline ? "shrink-0 w-20 mt-2" : "block mb-1"}`}>{label}</label>
+      <label className={`text-sm font-medium ${inline ? "shrink-0 w-24 mt-2 whitespace-nowrap" : "block mb-1"}`}>{label}</label>
       <div className="flex-1">
         <input type="hidden" name={name} value={selectedId} />
         <input
@@ -246,11 +252,11 @@ function PlanForm({ plan, data, onClose }: { plan?: Plan; data: Data; onClose: (
       {plan?.teamOrgNodeId && <input type="hidden" name="teamOrgNodeId" value={plan.teamOrgNodeId} />}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
-          <label className="text-sm font-medium shrink-0 w-20">年份 *</label>
+          <label className="text-sm font-medium shrink-0 w-20">{renderRequiredLabel("年份 *")}</label>
           <input name="year" type="number" defaultValue={plan?.year ?? data.selectedYear} required className="flex-1 h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
         </div>
         <div className="flex items-center gap-3">
-          <label className="text-sm font-medium shrink-0 w-20">所属部门 *</label>
+          <label className="text-sm font-medium shrink-0 w-20">{renderRequiredLabel("所属部门 *")}</label>
           <select name="departmentOrgNodeId" value={departmentOrgNodeId} onChange={(e) => setDepartmentOrgNodeId(e.target.value)} required className="flex-1 h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
             {data.scopeDepartments.map((d) => <option key={d.orgNodeId} value={d.orgNodeId}>{d.name}</option>)}
           </select>
@@ -359,7 +365,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
         {isTeamPlan && !metric ? (
           <>
             <div className="flex items-center gap-3">
-              <label className="text-sm font-medium shrink-0 w-20">指标项 *</label>
+              <label className="text-sm font-medium shrink-0 w-20">{renderRequiredLabel("指标项 *")}</label>
               <select
                 name={selectedSourceMetricId ? undefined : "parentMetricId"}
                 value={selectedParentMetricId}
@@ -391,7 +397,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
         ) : (
           <>
             <div className="flex items-center gap-3">
-              <label className="text-sm font-medium shrink-0 w-20">指标名称 *</label>
+              <label className="text-sm font-medium shrink-0 w-20">{renderRequiredLabel("指标名称 *")}</label>
               <div className="flex-1">
                 <input name="name" defaultValue={metric?.name ?? ""} required={!isTeamPlan} disabled={isTeamPlan} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.name && <div className="mt-1 text-xs text-destructive">{fieldErrors.name}</div>}
@@ -399,7 +405,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">目标值 *</label>
+                <label className="block text-sm font-medium mb-1">{renderRequiredLabel("目标值 *")}</label>
                 <input name="targetValue" type="number" step={getNumberStep(unitValue)} defaultValue={formatInputValue(metric?.targetValue, "0")} required={!isTeamPlan} disabled={isTeamPlan} onChange={(event) => !isTeamPlan && setUnitValue((event.currentTarget.form?.elements.namedItem("unit") as HTMLInputElement | null)?.value ?? unitValue)} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.targetValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.targetValue}</div>}
               </div>
@@ -409,7 +415,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
                 {fieldErrors.currentValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.currentValue}</div>}
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">单位 *</label>
+                <label className="block text-sm font-medium mb-1">{renderRequiredLabel("单位 *")}</label>
                 <input name="unit" defaultValue={metric?.unit ?? ""} required={!isTeamPlan} disabled={isTeamPlan} onChange={(event) => setUnitValue(event.currentTarget.value)} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.unit && <div className="mt-1 text-xs text-destructive">{fieldErrors.unit}</div>}
               </div>
@@ -428,7 +434,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
           />
         )}
         <div className="flex items-center gap-3">
-          <label className="text-sm font-medium shrink-0 w-20">权重 % *</label>
+          <label className="text-sm font-medium shrink-0 w-20">{renderRequiredLabel("权重 % *")}</label>
           <div className="flex-1">
             <input name="weight" type="number" step="0.1" defaultValue={formatInputValue(metric?.weight, "0")} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
             {fieldErrors.weight && <div className="mt-1 text-xs text-destructive">{fieldErrors.weight}</div>}
@@ -547,7 +553,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
       <div className="space-y-4">
         {!initialParent && !sourceMetric && (
           <div className="flex items-start gap-3">
-            <label className="text-sm font-medium shrink-0 w-20 mt-2">年度指标 *</label>
+            <label className="text-sm font-medium shrink-0 w-24 mt-2 whitespace-nowrap">{renderRequiredLabel("年度指标 *")}</label>
             <div className="flex-1">
               <select value={selectedParentId} onChange={(e) => setSelectedParentId(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
                 {availableMetrics.map((metric) => <option key={metric.id} value={metric.id}>{metric.name} · {formatValue(metric.targetValue)}{metric.unit}</option>)}
@@ -560,7 +566,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
         {parentMetric && (
           <>
             <div className="flex items-start gap-3">
-              <label className="text-sm font-medium shrink-0 w-20 mt-2">小组指标名称 *</label>
+              <label className="text-sm font-medium shrink-0 w-24 mt-2 whitespace-nowrap">{renderRequiredLabel("小组指标名称 *")}</label>
               <div className="flex-1">
                 <input name="name" defaultValue={sourceMetric?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
                 {fieldErrors.name && <div className="mt-1 text-xs text-destructive">{fieldErrors.name}</div>}
@@ -568,7 +574,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">目标值 *</label>
+                <label className="block text-sm font-medium mb-1">{renderRequiredLabel("目标值 *")}</label>
                 <input key={`source-target-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} name="targetValue" type="number" step={getNumberStep(displayUnit)} defaultValue={formatInputValue(sourceMetric?.targetValue)} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
                 {fieldErrors.targetValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.targetValue}</div>}
               </div>
@@ -578,7 +584,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
                 {fieldErrors.currentValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.currentValue}</div>}
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">单位 *</label>
+                <label className="block text-sm font-medium mb-1">{renderRequiredLabel("单位 *")}</label>
                 <input key={`source-unit-${parentMetric.id}-${sourceMetric?.id ?? "new"}`} value={displayUnit} readOnly disabled className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.unit && <div className="mt-1 text-xs text-destructive">{fieldErrors.unit}</div>}
               </div>
@@ -834,7 +840,7 @@ function QuarterTargetSetupForm({ plan, onClose }: { plan: Plan; onClose: () => 
     <form onSubmit={handleSubmit} noValidate>
       <div className="space-y-4">
         <div>
-          <label className="mb-2 block text-sm font-medium">拆解对象 *</label>
+          <label className="mb-2 block text-sm font-medium">{renderRequiredLabel("拆解对象 *")}</label>
           <select
             value={selectedKey}
             onChange={(event) => setSelectedKey(event.target.value)}
@@ -1131,7 +1137,7 @@ function QuarterTargetChooser({ plan, onSelect, onClose }: { plan: Plan; onSelec
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-medium mb-1">拆解对象 *</label>
+        <label className="block text-sm font-medium mb-1">{renderRequiredLabel("拆解对象 *")}</label>
         <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring">
           {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
         </select>
@@ -1758,7 +1764,7 @@ export function AnnualGoalsContent({ data }: Props) {
         )}
       </Card>
 
-      <Dialog open={!!planDialog} onClose={() => setPlanDialog(null)} title={planDialog === "new" ? "新建年度方案" : "编辑年度方案"}>
+      <Dialog open={!!planDialog} onClose={() => setPlanDialog(null)} title={planDialog === "new" ? "新建部门方案" : "编辑部门方案"}>
         {planDialog && <PlanForm plan={planDialog === "new" ? undefined : planDialog} data={data} onClose={() => { setPlanDialog(null); router.refresh(); }} />}
       </Dialog>
       <Dialog open={!!metricDialog} onClose={() => { setMetricDialog(null); router.refresh(); }} title={metricDialog?.metric ? "调整年度指标" : metricDialog?.plan.ownerType === "TEAM" ? "选择指标" : "新增年度指标"}>

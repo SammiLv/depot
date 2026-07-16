@@ -1,6 +1,5 @@
 import { prisma } from "@/server/db/prisma";
-import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
-import { getOwnerWhereByScope, getUserWhereByScope } from "@/server/permissions/data-scope";
+import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { OrgNodeType, ProjectStatus, RoleType, WorkStatus } from "@prisma/client";
 
 type DataScopeInput = {
@@ -184,11 +183,40 @@ function getTeamOrgNodeIdForRecord(orgNodeId: string | null | undefined, orgNode
   return node?.nodeType === "TEAM" ? node.id : null;
 }
 
+function getProjectManagementScopeWhere(currentUser: DataScopeInput, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
+  if (currentUser.roleType === "ADMIN") {
+    return { deletedAt: null };
+  }
+
+  if (departmentOrgNodeId) {
+    return { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] }, deletedAt: null };
+  }
+
+  return { ownerId: currentUser.id, deletedAt: null };
+}
+
+function getProjectManagementUserWhere(currentUser: DataScopeInput, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
+  if (currentUser.roleType === "ADMIN") {
+    return { deletedAt: null };
+  }
+
+  if (departmentOrgNodeId) {
+    return { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] }, isActive: true, deletedAt: null };
+  }
+
+  return { id: currentUser.id, isActive: true, deletedAt: null };
+}
+
 export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?: { selectedYear?: number; selectedQuarter?: number }) {
-  const ownerWhere = await getOwnerWhereByScope(currentUser);
+  const departmentOrgNodeId = currentUser.roleType === "ADMIN"
+    ? null
+    : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
   const scopedOrgNodeIds = currentUser.roleType === "ADMIN"
     ? null
-    : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
+    : departmentOrgNodeId
+      ? await getDescendantOrgNodeIds(departmentOrgNodeId)
+      : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
+  const ownerWhere = getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds);
 
   const [orgNodes, users, projects, works] = await Promise.all([
     prisma.orgNode.findMany({
@@ -199,7 +227,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       select: { id: true, name: true, nodeType: true, parentId: true },
     }),
     prisma.user.findMany({
-      where: { ...(await getUserWhereByScope(currentUser)), isActive: true },
+      where: getProjectManagementUserWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
       orderBy: [{ orgNodeId: "asc" }, { name: "asc" }],
       select: { id: true, name: true, orgNodeId: true },
     }),
