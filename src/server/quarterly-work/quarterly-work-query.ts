@@ -262,10 +262,12 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
 
   const ownerMap = new Map(users.map((user) => [user.id, user.name]));
   const teamNameMap = new Map(teams.map((team) => [team.orgNodeId, team.name]));
-  const scopedDepartments = departments.filter((department) =>
-    teams.some((team) => team.departmentOrgNodeId === department.orgNodeId)
-    || users.some((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId) === department.orgNodeId)
-  );
+  const scopedDepartments = currentUser.roleType === "ADMIN"
+    ? departments
+    : departments.filter((department) =>
+        teams.some((team) => team.departmentOrgNodeId === department.orgNodeId)
+        || users.some((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId) === department.orgNodeId)
+      );
   const defaultDepartmentOrgNodeId = activeWorks.map((work) => getDepartmentOrgNodeIdForRecord(work.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId))
     .find((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId))
     ?? projects.map((project) => getDepartmentOrgNodeIdForRecord(project.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId))

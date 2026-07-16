@@ -2,10 +2,16 @@
 set -euo pipefail
 
 MSG="${1:-}"
-if [[ -z "$MSG" ]]; then
-  echo "Usage: $0 <commit-message>"
-  exit 1
-fi
+case "$MSG" in
+  -h|--help)
+    echo "Usage: $0 <commit-message>"
+    exit 0
+    ;;
+  "")
+    echo "Usage: $0 <commit-message>"
+    exit 1
+    ;;
+esac
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$CURRENT_BRANCH" == "main" ]]; then

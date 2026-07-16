@@ -1569,97 +1569,109 @@ export function AnnualGoalsContent({ data }: Props) {
     </div>
   );
 
+  const emptyDepartmentPlanDetailView: PlanDetailView = {
+    ownerType: "DEPARTMENT",
+    metrics: [],
+    totalWeight: 0,
+    permissions: {
+      canEditPlan: false,
+      canEditMetrics: false,
+      canManageSources: false,
+      canManageQuarterTargets: false,
+      canUpdateQuarterProgress: false,
+      canUpdateWeeklyProgress: false,
+    },
+  };
+
   function handleSelectedYearChange(year: number) {
     router.push(`/annual-goals?year=${year}`);
   }
 
   return (
     <>
-      {(data.scopeDepartments.length > 0 || activeItem) ? (
-        <Card className="mb-6 !p-0 overflow-hidden">
-          <div className="px-5 pt-5 flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">指标管理</h1>
-              <p className="mt-2 text-sm text-muted-foreground">查看部门指标承接、拆解与执行进展</p>
-            </div>
-          </div>
+      <Card className="mb-6 !p-0 overflow-hidden">
+        <div className="px-5 pt-5">
+          <h1 className="text-3xl font-semibold tracking-tight">指标管理</h1>
+          <p className="mt-2 text-sm text-muted-foreground">查看部门指标承接、拆解与执行进展</p>
+        </div>
 
-          {data.scopeDepartments.length > 0 && (
-            <>
-              {data.showDepartmentNavigation && data.scopeDepartments.length > 0 && (
-                <div className="px-5 pt-4 flex flex-wrap items-end gap-8 text-sm shrink-0">
-                  {data.scopeDepartments.map((department) => (
-                    <button
-                      key={department.orgNodeId}
-                      type="button"
-                      onClick={() => setSelectedDepartmentOrgNodeId(department.orgNodeId)}
-                      className={`pb-3 border-b-2 transition ${
-                        selectedDepartmentOrgNodeId === department.orgNodeId
-                          ? "border-primary text-primary font-medium"
-                          : "border-transparent text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {department.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {filteredScopeItems.length > 0 && (
-                <div className="px-5 pt-3 pb-2 flex flex-wrap items-center gap-2">
-                  {filteredScopeItems.map((item) => (
-                    <button
-                      key={getScopeItemKey(item)}
-                      type="button"
-                      onClick={() => {
-                        setActiveItemKey(getScopeItemKey(item));
-                        if (item.type === "TEAM" && tab === "sources") {
-                          setTab("metrics");
-                        }
-                      }}
-                      className={`rounded-lg px-3 py-1.5 text-sm transition ${
-                        activeItem && getScopeItemKey(activeItem) === getScopeItemKey(item)
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card hover:bg-muted"
-                      }`}
-                    >
-                      {item.type === "DEPARTMENT" ? "全部" : item.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {activeItem && activePlanDetailView ? (
-            <div key={activePlan?.id ?? getScopeItemKey(activeItem)}>
-              {activePlan ? (
-                <div className="px-5 pt-1 pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="text-xs text-muted-foreground">完成度</div>
-                    <div className="text-2xl font-bold tabular-nums text-primary">{formatPercent(activePlan.weightedProgress)}%</div>
-                  <div className="ml-auto flex justify-end gap-3">
+        {(data.scopeDepartments.length > 0 || activeItem) ? (
+          <>
+            {data.scopeDepartments.length > 0 && (
+              <>
+                {data.showDepartmentNavigation && data.scopeDepartments.length > 0 && (
+                  <div className="px-5 pt-3 flex flex-wrap items-end gap-8 text-sm shrink-0">
+                    {data.scopeDepartments.map((department) => (
+                      <button
+                        key={department.orgNodeId}
+                        type="button"
+                        onClick={() => setSelectedDepartmentOrgNodeId(department.orgNodeId)}
+                        className={`pb-3 border-b-2 transition ${
+                          selectedDepartmentOrgNodeId === department.orgNodeId
+                            ? "border-primary text-primary font-medium"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {department.name}
+                      </button>
+                    ))}
                   </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="px-5 pt-1 pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="text-xs text-muted-foreground">完成度</div>
-                    <div className="text-2xl font-bold tabular-nums text-primary">0.0%</div>
-                  </div>
-                </div>
-              )}
+                )}
 
-              <div className="px-5 pb-3 pt-2">
-                <div className="flex flex-wrap items-center gap-4">
+                {filteredScopeItems.length > 0 && (
+                  <div className="px-5 pt-3 pb-2 flex flex-wrap items-center gap-2">
+                    {filteredScopeItems.map((item) => (
+                      <button
+                        key={getScopeItemKey(item)}
+                        type="button"
+                        onClick={() => {
+                          setActiveItemKey(getScopeItemKey(item));
+                          if (item.type === "TEAM" && tab === "sources") {
+                            setTab("metrics");
+                          }
+                        }}
+                        className={`rounded-lg px-3 py-1.5 text-sm transition ${
+                          activeItem && getScopeItemKey(activeItem) === getScopeItemKey(item)
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-card hover:bg-muted"
+                        }`}
+                      >
+                        {item.type === "DEPARTMENT" ? "全部" : item.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {activeItem && activePlanDetailView ? (
+              <div key={activePlan?.id ?? getScopeItemKey(activeItem)}>
+                {activePlan ? (
+                  <div className="px-5 pt-1 pb-0">
+                    <div className="flex items-center gap-3">
+                      <div className="text-xs text-muted-foreground">完成度</div>
+                      <div className="text-2xl font-bold tabular-nums text-primary">{formatPercent(activePlan.weightedProgress)}%</div>
+                    <div className="ml-auto flex justify-end gap-3">
+                    </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-5 pt-1 pb-0">
+                    <div className="flex items-center gap-3">
+                      <div className="text-xs text-muted-foreground">完成度</div>
+                      <div className="text-2xl font-bold tabular-nums text-primary">0.0%</div>
+                    </div>
+                  </div>
+                )}
+
+                <div className={`px-5 pb-3 flex flex-wrap items-center gap-4 ${data.showDepartmentNavigation ? "pt-2" : "pt-3"}`}>
                   <div className="inline-flex rounded-lg bg-muted p-1">
                     {activePlanTabs.map((currentTab) => (
                       <button
                         key={currentTab.key}
                         type="button"
                         onClick={() => setTab(currentTab.key)}
-                        className={`rounded-md px-4 py-2 text-sm transition ${tab === currentTab.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        className={`h-9 rounded-lg px-4 text-sm transition ${tab === currentTab.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       >
                         {currentTab.label}
                       </button>
@@ -1667,34 +1679,84 @@ export function AnnualGoalsContent({ data }: Props) {
                   </div>
                   {topTabActions}
                 </div>
-              </div>
 
-              <PlanDetailTabs
-                plan={activePlanDetailView}
-                tab={tab}
-                setTab={setTab}
-                onCreateMetric={() => activePlan && setMetricDialog({ plan: activePlan })}
-                onEditMetric={(metric) => activePlan && setMetricDialog({ plan: activePlan, metric })}
-                onSourceMetric={(parentMetric, sourceMetric) => activePlan && setSourceMetricDialog({ plan: activePlan, parentMetric, sourceMetric })}
-                onCreateSourceMetric={() => activePlan && setSourceMetricDialog({ plan: activePlan })}
-                onDeleteMetric={setDeleteMetric}
-                onDeleteSourceMetric={(metric, sourceMetric) => setDeleteSourceMetric({ metric, sourceMetric })}
-                onQuarterTarget={(metric, sourceMetric) => setQuarterTargetDialog({ metric, sourceMetric })}
-                onDeleteQuarterTargets={(metric, sourceMetric) => setDeleteQuarterTargets({ metric, sourceMetric })}
-                onQuarterProgress={(metric, sourceMetric) => setQuarterProgressDialog({ metric, sourceMetric })}
-                onWeeklyProgress={() => activePlan && setWeeklyProgressPlan(activePlan)}
-                onChooseQuarterTarget={() => activePlan && setQuarterTargetSetupPlan(activePlan)}
-              />
+                <PlanDetailTabs
+                  plan={activePlanDetailView}
+                  tab={tab}
+                  setTab={setTab}
+                  onCreateMetric={() => activePlan && setMetricDialog({ plan: activePlan })}
+                  onEditMetric={(metric) => activePlan && setMetricDialog({ plan: activePlan, metric })}
+                  onSourceMetric={(parentMetric, sourceMetric) => activePlan && setSourceMetricDialog({ plan: activePlan, parentMetric, sourceMetric })}
+                  onCreateSourceMetric={() => activePlan && setSourceMetricDialog({ plan: activePlan })}
+                  onDeleteMetric={setDeleteMetric}
+                  onDeleteSourceMetric={(metric, sourceMetric) => setDeleteSourceMetric({ metric, sourceMetric })}
+                  onQuarterTarget={(metric, sourceMetric) => setQuarterTargetDialog({ metric, sourceMetric })}
+                  onDeleteQuarterTargets={(metric, sourceMetric) => setDeleteQuarterTargets({ metric, sourceMetric })}
+                  onQuarterProgress={(metric, sourceMetric) => setQuarterProgressDialog({ metric, sourceMetric })}
+                  onWeeklyProgress={() => activePlan && setWeeklyProgressPlan(activePlan)}
+                  onChooseQuarterTarget={() => activePlan && setQuarterTargetSetupPlan(activePlan)}
+                />
+              </div>
+            ) : (
+              <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无可见组织</div>
+            )}
+          </>
+        ) : (
+          <div className="px-5 pb-5">
+            <div className="px-0 pb-3 pt-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="inline-flex rounded-lg bg-muted p-1">
+                  {[
+                    { key: "metrics" as const, label: "部门指标" },
+                    { key: "sources" as const, label: "小组指标" },
+                    { key: "quarters" as const, label: "季度指标" },
+                  ].map((currentTab) => (
+                    <button
+                      key={currentTab.key}
+                      type="button"
+                      onClick={() => setTab(currentTab.key)}
+                      className={`h-9 rounded-lg px-4 text-sm transition ${tab === currentTab.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {currentTab.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {tab === "metrics" ? <Button variant="outline" disabled><Plus className="w-4 h-4" />新增年度指标</Button> : null}
+                  <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                    <select
+                      value={String(data.selectedYear)}
+                      onChange={(event) => handleSelectedYearChange(Number.parseInt(event.target.value, 10))}
+                      className="h-full bg-transparent outline-none"
+                    >
+                      {data.availableYears.map((year) => (
+                        <option key={year} value={year}>{getYearLabel(year)}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="py-12 text-center text-sm text-muted-foreground">暂无可见组织</div>
-          )}
-        </Card>
-      ) : (
-        <Card>
-          <div className="py-12 text-center text-sm text-muted-foreground">暂无可见组织</div>
-        </Card>
-      )}
+
+            <PlanDetailTabs
+              plan={emptyDepartmentPlanDetailView}
+              tab={tab}
+              setTab={setTab}
+              onCreateMetric={() => {}}
+              onEditMetric={() => {}}
+              onSourceMetric={() => {}}
+              onCreateSourceMetric={() => {}}
+              onDeleteMetric={() => {}}
+              onDeleteSourceMetric={() => {}}
+              onQuarterTarget={() => {}}
+              onDeleteQuarterTargets={() => {}}
+              onQuarterProgress={() => {}}
+              onWeeklyProgress={() => {}}
+              onChooseQuarterTarget={() => {}}
+            />
+          </div>
+        )}
+      </Card>
 
       <Dialog open={!!planDialog} onClose={() => setPlanDialog(null)} title={planDialog === "new" ? "新建年度方案" : "编辑年度方案"}>
         {planDialog && <PlanForm plan={planDialog === "new" ? undefined : planDialog} data={data} onClose={() => { setPlanDialog(null); router.refresh(); }} />}

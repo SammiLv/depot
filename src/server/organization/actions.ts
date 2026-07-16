@@ -19,17 +19,8 @@ const kpiPermissionScopeByRole: Record<RoleType, OrgPermissionGrantScopeType> = 
   TEAM_LEADER: "NODE",
   MEMBER: "SELF",
 };
-const kpiPermissionLabels: Record<OrgPermissionAbilityKey, string> = {
-  VIEW_KPI: "查看 KPI",
-  INITIALIZE_KPI: "维护KPI",
-  VIEW_KPI_TEMPLATE: "查看 KPI 模板",
-  MANAGE_KPI_TEMPLATE: "维护 KPI 模板",
-  TOGGLE_KPI_TEMPLATE: "启用/禁用 KPI 模板",
-  SCORE_SELF: "自评",
-  SCORE_LEADER: "组长评分",
-  SCORE_MANAGER: "主管评分",
-  SCORE_FINAL: "终审",
-};
+const ROOT_ORG_NODE_ID = "org_root";
+
 
 async function requireOrgManager() {
   const user = await requireCurrentUser();
@@ -213,7 +204,96 @@ export async function updateFromDingTalk() {
   return result;
 }
 
-// ── User CRUD ──
+export async function createDepartment(formData: FormData) {
+  await requireAdmin();
+  const name = (formData.get("name") as string | null)?.trim() ?? "";
+  const managerId = ((formData.get("managerId") as string) || "").trim() || null;
+
+  if (!name) {
+    throw new Error("部门名称为必填项");
+  }
+
+  const duplicateDepartment = await prisma.orgNode.findFirst({
+    where: {
+      nodeType: "DEPARTMENT",
+      name,
+    },
+    select: { id: true },
+  });
+  if (duplicateDepartment) {
+    throw new Error("部门名称已存在");
+  }
+
+  await prisma.orgNode.upsert({
+    where: { id: ROOT_ORG_NODE_ID },
+    update: { dingtalkDeptId: "__org_root__", name: "组织根节点", nodeType: "ROOT", parentId: null },
+    create: { id: ROOT_ORG_NODE_ID, dingtalkDeptId: "__org_root__", name: "组织根节点", nodeType: "ROOT", parentId: null },
+  });
+
+  const departmentId = randomUUID();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgNode.create({
+      data: {
+        id: departmentId,
+        name,
+        nodeType: "DEPARTMENT",
+        parentId: ROOT_ORG_NODE_ID,
+      },
+    });
+
+    const allOrgNodes = await tx.orgNode.findMany({ select: { id: true, parentId: true } });
+    const nodeMap = new Map(allOrgNodes.map((node) => [node.id, node]));
+
+    await tx.orgClosure.deleteMany();
+
+    for (const node of allOrgNodes) {
+      await tx.orgClosure.create({
+        data: {
+          ancestorId: node.id,
+          descendantId: node.id,
+          depth: 0,
+        },
+      });
+
+      let ancestor = node.parentId ? nodeMap.get(node.parentId) ?? null : null;
+      let depth = 1;
+      while (ancestor) {
+        await tx.orgClosure.create({
+          data: {
+            ancestorId: ancestor.id,
+            descendantId: node.id,
+            depth,
+          },
+        });
+        ancestor = ancestor.parentId ? nodeMap.get(ancestor.parentId) ?? null : null;
+        depth += 1;
+      }
+    }
+  });
+
+  if (managerId) {
+    const manager = await prisma.user.findUnique({
+      where: { id: managerId },
+      select: { id: true, isActive: true, deletedAt: true, roleType: true },
+    });
+
+    if (!manager || !manager.isActive || manager.deletedAt || manager.roleType === "ADMIN") {
+      throw new Error("部门主管必须是有效非管理员成员");
+    }
+
+    await prisma.user.update({
+      where: { id: managerId },
+      data: {
+        orgNodeId: departmentId,
+        roleType: "DEPARTMENT_MANAGER",
+      },
+    });
+  }
+
+  revalidateOrganization();
+}
+
 
 export async function createUser(formData: FormData) {
   const currentUser = await requireOrgManager();
