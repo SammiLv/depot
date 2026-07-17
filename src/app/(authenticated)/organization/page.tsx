@@ -1,11 +1,50 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
-import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { getActivePermissionGrants } from "@/server/permissions/permission-query";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { getUserWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
+
+type OrgTeamPayload = {
+  orgNodeId: string;
+  departmentOrgNodeId: string;
+  parentOrgNodeId: string;
+  parentName: string;
+  name: string;
+  leaderId: string | null;
+  description: string | null;
+};
+
+export type OrganizationPersonNode = {
+  id: string;
+  nodeType: "PERSON";
+  name: string;
+  email: string | null;
+  mobile: string | null;
+  title: string | null;
+  roleType: "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
+  isActive: boolean;
+};
+
+export type OrganizationEntityNode = {
+  id: string;
+  nodeType: "DEPARTMENT" | "TEAM";
+  name: string;
+  parentOrgNodeId: string | null;
+  departmentOrgNodeId: string;
+  leaderId: string | null;
+  leaderName: string | null;
+  directMemberCount: number;
+  children: OrganizationHierarchyNode[];
+  team: OrgTeamPayload | null;
+};
+
+export type OrganizationHierarchyNode = OrganizationEntityNode | OrganizationPersonNode;
+
 
 const roleTypes = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
 
@@ -62,6 +101,11 @@ export default async function OrgPage({
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
   const departmentById = new Map(orgNodes.filter((node) => node.nodeType === "DEPARTMENT").map((node) => [node.id, node]));
+  const nearestDepartmentOrgNodeIdByNodeId = new Map<string, string | null>();
+
+  await Promise.all(orgNodes.map(async (node) => {
+    nearestDepartmentOrgNodeIdByNodeId.set(node.id, await findNearestDepartmentOrgNodeId(node.id));
+  }));
 
   const departments = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
@@ -79,23 +123,23 @@ export default async function OrgPage({
     .filter((node) => node.nodeType === "TEAM")
     .map((node) => {
       const leader = users.find((user) => user.roleType === "TEAM_LEADER" && user.orgNodeId === node.id) ?? null;
-      return node.parentId ? {
+      const departmentOrgNodeId = nearestDepartmentOrgNodeIdByNodeId.get(node.id) ?? null;
+      const parentNode = node.parentId ? orgNodeById.get(node.parentId) ?? null : null;
+      return departmentOrgNodeId && parentNode ? {
         orgNodeId: node.id,
-        departmentOrgNodeId: node.parentId,
+        departmentOrgNodeId,
+        parentOrgNodeId: parentNode.id,
+        parentName: parentNode.name,
         name: node.name,
         leaderId: leader?.id ?? null,
         description: null,
       } : null;
     })
-    .filter((team): team is { orgNodeId: string; departmentOrgNodeId: string; name: string; leaderId: string | null; description: null } => Boolean(team));
+    .filter((team): team is { orgNodeId: string; departmentOrgNodeId: string; parentOrgNodeId: string; parentName: string; name: string; leaderId: string | null; description: null } => Boolean(team));
 
   const mappedUsers = users.map((user) => {
     const orgNode = user.orgNodeId ? orgNodeById.get(user.orgNodeId) ?? null : null;
-    const departmentOrgNodeId = orgNode?.nodeType === "DEPARTMENT"
-      ? orgNode.id
-      : orgNode?.parentId && departmentById.has(orgNode.parentId)
-        ? orgNode.parentId
-        : null;
+    const departmentOrgNodeId = user.orgNodeId ? (nearestDepartmentOrgNodeIdByNodeId.get(user.orgNodeId) ?? null) : null;
     const teamOrgNodeId = orgNode?.nodeType === "TEAM" ? orgNode.id : null;
     return {
       id: user.id,
@@ -116,12 +160,25 @@ export default async function OrgPage({
     return { teamOrgNodeId: team.orgNodeId, count: teamUsers.length, leaderName: leader?.name };
   });
 
+  const teamParentOptions = [
+    ...departments.map((department) => ({
+      orgNodeId: department.orgNodeId,
+      name: department.name,
+      nodeType: "DEPARTMENT" as const,
+      departmentOrgNodeId: department.orgNodeId,
+    })),
+    ...teams.map((team) => ({
+      orgNodeId: team.orgNodeId,
+      name: team.name,
+      nodeType: "TEAM" as const,
+      departmentOrgNodeId: team.departmentOrgNodeId,
+    })),
+  ];
+
   const currentOrgNode = currentUser.orgNodeId ? orgNodeById.get(currentUser.orgNodeId) ?? null : null;
-  const currentDepartmentOrgNodeId = currentOrgNode?.nodeType === "DEPARTMENT"
-    ? currentOrgNode.id
-    : currentOrgNode?.parentId && departmentById.has(currentOrgNode.parentId)
-      ? currentOrgNode.parentId
-      : null;
+  const currentDepartmentOrgNodeId = currentUser.orgNodeId
+    ? (nearestDepartmentOrgNodeIdByNodeId.get(currentUser.orgNodeId) ?? null)
+    : null;
   const department = departments.find((item) => item.orgNodeId === currentDepartmentOrgNodeId) ?? departments[0] ?? null;
   const defaultScope = currentUser.roleType === "ADMIN"
     ? { scopeType: "SYSTEM" as const, departmentOrgNodeId: "" }
@@ -140,7 +197,7 @@ export default async function OrgPage({
     : { scopeType: "DEPARTMENT" as const, departmentOrgNodeId: requestedDepartmentId };
   const scopeOptions = currentUser.roleType === "ADMIN"
     ? [
-        { scopeType: "SYSTEM" as const, departmentOrgNodeId: "", label: "系统" },
+        { scopeType: "SYSTEM" as const, departmentOrgNodeId: "", label: "全部" },
         ...departments.map((item) => ({
           scopeType: "DEPARTMENT" as const,
           departmentOrgNodeId: item.orgNodeId,
@@ -253,14 +310,137 @@ export default async function OrgPage({
     ? departments.find((item) => item.orgNodeId === initialScope.departmentOrgNodeId) ?? null
     : null;
 
+  const leaderNameByTeamOrgNodeId = new Map(teamData.map((item) => [item.teamOrgNodeId, item.leaderName ?? null]));
+  const directMemberCountByOrgNodeId = new Map(teamData.map((item) => [item.teamOrgNodeId, item.count]));
+  const teamByOrgNodeId = new Map(teams.map((team) => [team.orgNodeId, team]));
+  const childrenByParentOrgNodeId = new Map<string, typeof teams>();
+  const usersByDepartmentOrgNodeId = new Map<string, typeof mappedUsers>();
+  const usersByTeamOrgNodeId = new Map<string, typeof mappedUsers>();
+
+  for (const team of teams) {
+    const list = childrenByParentOrgNodeId.get(team.parentOrgNodeId) ?? [];
+    list.push(team);
+    childrenByParentOrgNodeId.set(team.parentOrgNodeId, list);
+  }
+  for (const list of childrenByParentOrgNodeId.values()) {
+    list.sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
+  }
+
+  for (const user of mappedUsers) {
+    if (!user.departmentOrgNodeId) continue;
+    if (user.teamOrgNodeId) {
+      const list = usersByTeamOrgNodeId.get(user.teamOrgNodeId) ?? [];
+      list.push(user);
+      usersByTeamOrgNodeId.set(user.teamOrgNodeId, list);
+      continue;
+    }
+
+    const list = usersByDepartmentOrgNodeId.get(user.departmentOrgNodeId) ?? [];
+    list.push(user);
+    usersByDepartmentOrgNodeId.set(user.departmentOrgNodeId, list);
+  }
+  for (const list of usersByDepartmentOrgNodeId.values()) {
+    list.sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
+  }
+  for (const list of usersByTeamOrgNodeId.values()) {
+    list.sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
+  }
+
+  function buildPersonNode(user: (typeof mappedUsers)[number]): OrganizationPersonNode {
+    return {
+      id: user.id,
+      nodeType: "PERSON",
+      name: user.name,
+      email: user.email,
+      mobile: user.mobile,
+      title: user.title,
+      roleType: user.roleType,
+      departmentOrgNodeId: user.departmentOrgNodeId,
+      teamOrgNodeId: user.teamOrgNodeId,
+      isActive: user.isActive,
+    };
+  }
+
+  function buildOrganizationEntityNode(
+    node: { id: string; name: string; nodeType: "DEPARTMENT" | "TEAM"; parentId: string | null },
+    departmentOrgNodeId: string,
+  ): OrganizationEntityNode {
+    const childTeamNodes = (childrenByParentOrgNodeId.get(node.id) ?? []).map((childTeam) =>
+      buildOrganizationEntityNode(
+        {
+          id: childTeam.orgNodeId,
+          name: childTeam.name,
+          nodeType: "TEAM",
+          parentId: childTeam.parentOrgNodeId,
+        },
+        departmentOrgNodeId,
+      )
+    );
+    const personNodes = (node.nodeType === "DEPARTMENT"
+      ? (usersByDepartmentOrgNodeId.get(node.id) ?? [])
+      : (usersByTeamOrgNodeId.get(node.id) ?? [])
+    ).map(buildPersonNode);
+
+    return {
+      id: node.id,
+      nodeType: node.nodeType,
+      name: node.name,
+      parentOrgNodeId: node.parentId,
+      departmentOrgNodeId,
+      leaderId: node.nodeType === "TEAM" ? (teamByOrgNodeId.get(node.id)?.leaderId ?? null) : departments.find((item) => item.orgNodeId === node.id)?.managerId ?? null,
+      leaderName: node.nodeType === "TEAM" ? (leaderNameByTeamOrgNodeId.get(node.id) ?? null) : departments.find((item) => item.orgNodeId === node.id)?.managerName ?? null,
+      directMemberCount: node.nodeType === "TEAM"
+        ? (directMemberCountByOrgNodeId.get(node.id) ?? 0)
+        : mappedUsers.filter((user) => user.departmentOrgNodeId === departmentOrgNodeId).length,
+      children: [...childTeamNodes, ...personNodes],
+      team: node.nodeType === "TEAM" ? (teamByOrgNodeId.get(node.id) ?? null) : null,
+    };
+  }
+
+  const organizationHierarchyRoot = initialScope.scopeType === "SYSTEM"
+    ? {
+        id: "company-root",
+        nodeType: "DEPARTMENT" as const,
+        name: "锐竞信息",
+        parentOrgNodeId: null,
+        departmentOrgNodeId: "company-root",
+        leaderId: null,
+        leaderName: null,
+        directMemberCount: mappedUsers.length,
+        children: [
+          ...departments
+            .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"))
+            .map((item) => buildOrganizationEntityNode({
+              id: item.orgNodeId,
+              name: item.name,
+              nodeType: "DEPARTMENT",
+              parentId: "company-root",
+            }, item.orgNodeId)),
+          ...mappedUsers.filter((user) => !user.departmentOrgNodeId).map(buildPersonNode),
+        ],
+        team: null,
+      }
+    : selectedDepartment
+      ? buildOrganizationEntityNode(
+          {
+            id: selectedDepartment.orgNodeId,
+            name: selectedDepartment.name,
+            nodeType: "DEPARTMENT",
+            parentId: null,
+          },
+          selectedDepartment.orgNodeId,
+        )
+      : null;
+
   return (
     <OrgContent
       currentUser={{ id: currentUser.id, roleType: currentUser.roleType }}
       users={mappedUsers}
       teams={teams}
-      teamData={teamData}
       departments={departments}
+      teamParentOptions={teamParentOptions}
       department={selectedDepartment}
+      organizationHierarchyRoot={organizationHierarchyRoot}
       scopeOptions={scopeOptions}
       initialScope={initialScope}
       initialTab={requestedTab === "organization" || requestedTab === "permissions" ? requestedTab : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}

@@ -26,7 +26,7 @@ async function findTeamRecordByOrgNodeId(orgNodeId: string) {
     id: teamNode.id,
     orgNodeId: teamNode.id,
     name: teamNode.name,
-    departmentOrgNodeId: teamNode.parentId,
+    departmentOrgNodeId: await findNearestDepartmentOrgNodeId(teamNode.id),
   };
 }
 

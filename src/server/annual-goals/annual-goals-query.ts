@@ -203,6 +203,17 @@ function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
   const departmentNameByOrgNodeId = new Map<string, string>();
   const teamNameByOrgNodeId = new Map<string, string>();
 
+  function findNearestDepartmentOrgNodeIdForNode(nodeId: string) {
+    let currentNode = orgNodeById.get(nodeId) ?? null;
+    while (currentNode) {
+      if (currentNode.nodeType === "DEPARTMENT") {
+        return currentNode.id;
+      }
+      currentNode = currentNode.parentId ? orgNodeById.get(currentNode.parentId) ?? null : null;
+    }
+    return null;
+  }
+
   for (const node of orgNodes) {
     if (node.nodeType === "DEPARTMENT") {
       departmentNameByOrgNodeId.set(node.id, node.name);
@@ -215,9 +226,9 @@ function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
 
     teamNameByOrgNodeId.set(node.id, node.name);
 
-    const parentNode = node.parentId ? orgNodeById.get(node.parentId) ?? null : null;
-    if (parentNode?.nodeType === "DEPARTMENT") {
-      departmentOrgNodeIdByTeamOrgNodeId.set(node.id, parentNode.id);
+    const departmentOrgNodeId = findNearestDepartmentOrgNodeIdForNode(node.id);
+    if (departmentOrgNodeId) {
+      departmentOrgNodeIdByTeamOrgNodeId.set(node.id, departmentOrgNodeId);
     }
   }
 
@@ -445,12 +456,13 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   });
   const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
   const teams = orgNodes
-    .filter((node) => node.nodeType === "TEAM" && Boolean(node.parentId))
+    .filter((node) => node.nodeType === "TEAM")
     .map((node) => ({
       orgNodeId: node.id,
       name: node.name,
-      departmentOrgNodeId: node.parentId!,
+      departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null,
     }))
+    .filter((team): team is { orgNodeId: string; name: string; departmentOrgNodeId: string } => Boolean(team.departmentOrgNodeId))
     .sort((a, b) => compareTeamNames(a.name, b.name));
   const visibleDepartmentOrgNodeIds = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
