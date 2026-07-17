@@ -439,12 +439,40 @@ model AnnualGoalRevisionLog {
 }
 
 model Project {
+  id                String        @id @default(cuid())
+  title             String
+  productGoalId     String?
+  description       String?
+  expectedOutcome   String?
+  startQuarter      String?
+  endQuarter        String?
+  ownerId           String
+  orgNodeId         String?
+  status            ProjectStatus @default(NOT_STARTED)
+  completedAt       DateTime?
+  workloadPersonDay Float?
+  otherCost         String?
+  actualValue       String?
+  valueJudgement    String?
+  createdById       String
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  quarterlyWorks QuarterlyWork[]
+
+  @@index([productGoalId])
+  @@index([ownerId])
+  @@index([orgNodeId])
+  @@index([status])
+}
+
+model ProductGoal {
   id              String        @id @default(cuid())
   title           String
+  year            Int
   description     String?
   expectedOutcome String?
-  startQuarter    String?
-  endQuarter      String?
   ownerId         String
   orgNodeId       String?
   status          ProjectStatus @default(NOT_STARTED)
@@ -454,8 +482,7 @@ model Project {
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
 
-  quarterlyWorks QuarterlyWork[]
-
+  @@index([year])
   @@index([ownerId])
   @@index([orgNodeId])
   @@index([status])
@@ -466,6 +493,8 @@ model QuarterlyWork {
   projectId       String
   year            Int
   quarter         Int
+  startMonth      Int?
+  endMonth        Int?
   title           String
   description     String?
   workType        String?
@@ -524,21 +553,17 @@ model WeeklyWorkUpdate {
 }
 
 model RequirementValueTrack {
-  id              String    @id @default(cuid())
-  projectName     String
-  requirementName String
-  ownerId         String
-  background      String?
-  expectedValue   String
-  actualValue     String?
-  launchDate      DateTime?
-  isAchieved      Boolean?
-  reviewNote      String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                    String    @id @default(cuid())
+  projectId             String
+  trackingResult        String
+  followUpOptimization  String?
+  trackedAt             DateTime  @default(now())
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
 
-  @@index([ownerId])
+  @@index([projectId])
+  @@index([trackedAt])
 }
 
 model KpiTemplate {
