@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/prisma";
-import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissionScope } from "@/server/permissions/permission-resolver";
+import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissionCoverage, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
@@ -20,6 +20,8 @@ type ViewScopeSummary = {
   visibleDepartmentOrgNodeIds: string[];
   visibleTeamOrgNodeIds: string[];
 };
+
+type PermissionCoverage = Awaited<ReturnType<typeof resolvePermissionCoverage>>;
 
 type ResolvedScopeNodes = {
   scopedOrgNodes: OrgNodeSummary[];
@@ -116,11 +118,42 @@ type ApprovalStepSummary = {
   status: string;
 };
 
+function mergePermissionCoverages(coverages: PermissionCoverage[]): PermissionCoverage {
+  const availableCoverages = coverages.filter((coverage) => coverage.hasPermission);
+  if (availableCoverages.length === 0) {
+    return {
+      hasPermission: false,
+      hasAllAccess: false,
+      includesSelf: false,
+      orgNodeIds: [],
+    };
+  }
+
+  if (availableCoverages.some((coverage) => coverage.hasAllAccess)) {
+    return {
+      hasPermission: true,
+      hasAllAccess: true,
+      includesSelf: true,
+      orgNodeIds: [],
+    };
+  }
+
+  const includesSelf = availableCoverages.some((coverage) => coverage.includesSelf);
+  const orgNodeIds = [...new Set(availableCoverages.flatMap((coverage) => coverage.orgNodeIds))];
+
+  return {
+    hasPermission: true,
+    hasAllAccess: false,
+    includesSelf,
+    orgNodeIds,
+  };
+}
+
 async function buildViewScopeOrgNodeIds(
   currentUser: DataScopeInput,
-  viewKpiScope: Awaited<ReturnType<typeof resolvePermissionScope>>,
+  coverage: PermissionCoverage,
 ) {
-  if (!viewKpiScope) {
+  if (!coverage.hasPermission) {
     return { departmentAllTabOrgNodeIds: [], visibleTeamOrgNodeIds: [], visibleDepartmentOrgNodeIds: [] };
   }
 
@@ -129,27 +162,7 @@ async function buildViewScopeOrgNodeIds(
   });
   const relationships = buildOrgNodeRelationships(scopedOrgNodes);
 
-  const collectScopeNodeIds = (rootOrgNodeId: string | null | undefined) => {
-    if (!rootOrgNodeId) {
-      return [];
-    }
-    const descendantIds = relationships.descendantOrgNodeIdsByNodeId.get(rootOrgNodeId) ?? [];
-    return descendantIds.length > 0 ? descendantIds : [rootOrgNodeId];
-  };
-
-  const collectDepartmentIds = (nodeIds: string[]) => [...new Set(
-    nodeIds
-      .map((nodeId) => relationships.nearestDepartmentOrgNodeIdByNodeId.get(nodeId) ?? null)
-      .filter((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId))
-  )];
-
-  const collectTeamIds = (nodeIds: string[]) => [...new Set(
-    nodeIds
-      .map((nodeId) => relationships.nearestTeamOrgNodeIdByNodeId.get(nodeId) ?? null)
-      .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId))
-  )];
-
-  if (viewKpiScope.scopeType === "ALL") {
+  if (coverage.hasAllAccess) {
     const departmentAllTabOrgNodeIds = scopedOrgNodes
       .filter((orgNode) => orgNode.nodeType === "DEPARTMENT")
       .map((orgNode) => orgNode.id);
@@ -163,37 +176,52 @@ async function buildViewScopeOrgNodeIds(
     };
   }
 
-  const scopeRootOrgNodeId = viewKpiScope.scopeType === "SELF"
-    ? currentUser.orgNodeId ?? null
-    : viewKpiScope.orgNodeId ?? null;
-  const scopeNodeIds = collectScopeNodeIds(scopeRootOrgNodeId);
-  const visibleDepartmentOrgNodeIds = collectDepartmentIds(scopeNodeIds);
-  const visibleTeamOrgNodeIds = collectTeamIds(scopeNodeIds);
-  const departmentAllTabOrgNodeIds = viewKpiScope.scopeType === "SELF"
-    ? visibleDepartmentOrgNodeIds
-    : (scopeRootOrgNodeId && scopedOrgNodes.some((orgNode) => orgNode.id === scopeRootOrgNodeId && orgNode.nodeType === "DEPARTMENT")
-      ? [scopeRootOrgNodeId]
-      : visibleDepartmentOrgNodeIds);
+  const coveredNodeIds = new Set<string>(coverage.orgNodeIds);
+  if (coverage.includesSelf && currentUser.orgNodeId) {
+    coveredNodeIds.add(currentUser.orgNodeId);
+  }
+
+  const visibleDepartmentOrgNodeIds = [...new Set(
+    [...coveredNodeIds]
+      .map((nodeId) => relationships.nearestDepartmentOrgNodeIdByNodeId.get(nodeId) ?? null)
+      .filter((departmentOrgNodeId): departmentOrgNodeId is string => Boolean(departmentOrgNodeId))
+  )];
+
+  const visibleTeamOrgNodeIds = [...new Set(
+    [...coveredNodeIds]
+      .map((nodeId) => relationships.nearestTeamOrgNodeIdByNodeId.get(nodeId) ?? null)
+      .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId))
+  )];
 
   return {
-    departmentAllTabOrgNodeIds,
+    departmentAllTabOrgNodeIds: visibleDepartmentOrgNodeIds,
     visibleTeamOrgNodeIds,
     visibleDepartmentOrgNodeIds,
   };
 }
 
 async function resolveKpiViewScope(currentUser: DataScopeInput): Promise<ViewScopeSummary> {
-  const viewKpiScope = await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi);
-  const viewTemplateScope = await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpiTemplate);
-  const effectiveScope = viewKpiScope ?? viewTemplateScope;
-  const { departmentAllTabOrgNodeIds, visibleTeamOrgNodeIds, visibleDepartmentOrgNodeIds } = await buildViewScopeOrgNodeIds(currentUser, effectiveScope);
-  const hasGlobalViewKpiScope = effectiveScope?.scopeType === "ALL";
+  const [viewKpiCoverage, viewTemplateCoverage, manageKpiCoverage, manageTemplateCoverage, toggleTemplateCoverage] = await Promise.all([
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpiTemplate),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.initializeKpi),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageKpiTemplate),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.toggleKpiTemplate),
+  ]);
+  const effectiveCoverage = mergePermissionCoverages([
+    viewKpiCoverage,
+    viewTemplateCoverage,
+    manageKpiCoverage,
+    manageTemplateCoverage,
+    toggleTemplateCoverage,
+  ]);
+  const { departmentAllTabOrgNodeIds, visibleTeamOrgNodeIds, visibleDepartmentOrgNodeIds } = await buildViewScopeOrgNodeIds(currentUser, effectiveCoverage);
 
   return {
-    canViewKpi: Boolean(viewKpiScope),
-    canViewTemplate: Boolean(viewTemplateScope),
-    hasAnyViewPermission: Boolean(viewKpiScope || viewTemplateScope),
-    hasGlobalViewKpiScope,
+    canViewKpi: viewKpiCoverage.hasPermission,
+    canViewTemplate: viewTemplateCoverage.hasPermission,
+    hasAnyViewPermission: effectiveCoverage.hasPermission,
+    hasGlobalViewKpiScope: effectiveCoverage.hasAllAccess,
     departmentAllTabOrgNodeIds,
     visibleDepartmentOrgNodeIds,
     visibleTeamOrgNodeIds,
@@ -1184,7 +1212,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     departmentOptions: departments,
     departmentAllTabOrgNodeIds: viewScope.departmentAllTabOrgNodeIds,
     defaultDepartmentOrgNodeId,
-    canSelectAnyDepartment: currentUser.roleType === "ADMIN",
+    canSelectAnyDepartment: departments.length > 1,
     templateRows: templates.map((template) => ({
       id: template.id,
       name: template.name,

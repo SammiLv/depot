@@ -47,6 +47,11 @@ enum OrgPermissionGrantScopeType {
   ALL
 }
 
+enum OrgPermissionSubjectType {
+  ROLE
+  USER
+}
+
 enum AnnualMetricCalculationType {
   RATIO
   BOOLEAN
@@ -228,19 +233,24 @@ model RoleAnnualGoalPermission {
 }
 
 model OrgPermissionGrant {
-  id         String                      @id @default(cuid())
-  moduleKey  OrgPermissionModuleKey
-  abilityKey OrgPermissionAbilityKey
-  scopeType  OrgPermissionGrantScopeType
-  roleType   RoleType
-  orgNodeId  String?
-  isActive   Boolean                     @default(true)
-  createdAt  DateTime                    @default(now())
-  updatedAt  DateTime                    @updatedAt
+  id          String                   @id @default(cuid())
+  moduleKey   OrgPermissionModuleKey
+  abilityKey  OrgPermissionAbilityKey
+  scopeType   OrgPermissionGrantScopeType
+  subjectType OrgPermissionSubjectType @default(ROLE)
+  roleType    RoleType?
+  userId      String?
+  orgNodeId   String?
+  isActive    Boolean                  @default(true)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
 
-  @@index([moduleKey, abilityKey, roleType, isActive])
+  @@index([moduleKey, abilityKey, subjectType, roleType, isActive])
+  @@index([moduleKey, abilityKey, subjectType, userId, isActive])
+  @@index([subjectType, roleType])
+  @@index([subjectType, userId])
   @@index([orgNodeId])
-  @@unique([moduleKey, abilityKey, scopeType, roleType, orgNodeId])
+  @@unique([moduleKey, abilityKey, scopeType, subjectType, roleType, userId, orgNodeId])
 }
 
 model ApprovalInstance {
