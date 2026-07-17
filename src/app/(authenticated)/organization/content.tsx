@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
 import type { OrganizationEntityNode, OrganizationHierarchyNode, OrganizationPersonNode } from "./page";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
@@ -79,6 +79,17 @@ type ScopedKpiPermission = {
   cells: Record<RoleType, PermissionCellState>;
 };
 
+type KpiUserPermissionGrant = {
+  id: string;
+  userId: string;
+  userName: string;
+  abilityKey: string;
+  abilityName: string;
+  scopeType: "SELF" | "NODE" | "SUBTREE" | "ALL";
+  orgNodeId: string | null;
+  orgNodeName: string | null;
+};
+
 type PermissionScopeOption = {
   scopeType: PermissionScopeType;
   departmentOrgNodeId: string;
@@ -109,6 +120,7 @@ type Props = {
   menus: OrgMenu[];
   annualGoalPermissions: ScopedAnnualGoalPermission[];
   kpiPermissions: ScopedKpiPermission[];
+  kpiUserPermissionGrants: KpiUserPermissionGrant[];
   canManageUsers: boolean;
   canManageTeams: boolean;
   canManageRolePermissions: boolean;
@@ -141,16 +153,41 @@ function renderRequiredLabel(label: string) {
   return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
 }
 
+function getGrantScopeLabel(scopeType: KpiUserPermissionGrant["scopeType"]) {
+  switch (scopeType) {
+    case "NODE":
+      return "当前节点";
+    case "SUBTREE":
+      return "当前节点及下级";
+    case "ALL":
+      return "全部";
+    default:
+      return "本人";
+  }
+}
+
 // ── Dialog component ──
-function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  panelClassName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  panelClassName?: string;
+}) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
-        <div className="flex items-center justify-between mb-5">
+      <div className={`relative w-full max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl ${panelClassName ?? "max-w-lg"}`}>
+        <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted"><X className="w-4 h-4" /></button>
         </div>
         {children}
       </div>
@@ -386,6 +423,178 @@ function DeleteConfirm({ message, action, onClose }: { message: string; action: 
   );
 }
 
+function KpiUserPermissionGrantForm({
+  users,
+  teamParentOptions,
+  scopeType,
+  departmentOrgNodeId,
+  permissions,
+  onClose,
+}: {
+  users: OrgUser[];
+  teamParentOptions: TeamParentOption[];
+  scopeType: PermissionScopeType;
+  departmentOrgNodeId: string;
+  permissions: ScopedKpiPermission[];
+  onClose: () => void;
+}) {
+  const userOptions = users
+    .filter((user) => user.isActive && (scopeType === "SYSTEM" || user.departmentOrgNodeId === departmentOrgNodeId))
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"))
+    .map((user) => ({
+      id: user.id,
+      label: user.title ? `${user.name} · ${user.title}` : user.name,
+    }));
+  const abilityOptions = permissions.map((permission) => ({
+    id: permission.id,
+    label: permission.name,
+  }));
+  const nodeOptions = teamParentOptions
+    .filter((option) => scopeType === "SYSTEM" || option.departmentOrgNodeId === departmentOrgNodeId)
+    .map((option) => ({
+      id: option.orgNodeId,
+      label: `${option.name}${option.nodeType === "TEAM" ? " · 小组" : " · 部门"}`,
+    }));
+
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedAbilityKeys, setSelectedAbilityKeys] = useState<string[]>([]);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [grantScopeType, setGrantScopeType] = useState<"NODE" | "SUBTREE">("SUBTREE");
+  const [userSearch, setUserSearch] = useState("");
+  const [abilitySearch, setAbilitySearch] = useState("");
+  const [nodeSearch, setNodeSearch] = useState("");
+
+  const filteredUserOptions = userOptions.filter((option) =>
+    option.label.toLowerCase().includes(userSearch.trim().toLowerCase())
+  );
+  const filteredAbilityOptions = abilityOptions.filter((option) =>
+    option.label.toLowerCase().includes(abilitySearch.trim().toLowerCase())
+  );
+  const filteredNodeOptions = nodeOptions.filter((option) =>
+    option.label.toLowerCase().includes(nodeSearch.trim().toLowerCase())
+  );
+
+  function toggleSelection(value: string, selectedValues: string[], setSelectedValues: React.Dispatch<React.SetStateAction<string[]>>) {
+    setSelectedValues((current) => current.includes(value)
+      ? current.filter((item) => item !== value)
+      : [...current, value]);
+  }
+
+  return (
+    <form action={async (fd) => { await createKpiUserPermissionGrant(fd); onClose(); }} className="space-y-6">
+      <input type="hidden" name="scopeType" value={scopeType} />
+      <input type="hidden" name="departmentOrgNodeId" value={scopeType === "DEPARTMENT" ? departmentOrgNodeId : ""} />
+      <input type="hidden" name="grantScopeType" value={grantScopeType} />
+      {selectedUserIds.map((userId) => <input key={userId} type="hidden" name="userId" value={userId} />)}
+      {selectedAbilityKeys.map((abilityKey) => <input key={abilityKey} type="hidden" name="abilityKey" value={abilityKey} />)}
+      {selectedNodeIds.map((orgNodeId) => <input key={orgNodeId} type="hidden" name="orgNodeId" value={orgNodeId} />)}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">授权用户 *</label>
+          <input
+            value={userSearch}
+            onChange={(event) => setUserSearch(event.target.value)}
+            placeholder="搜索用户"
+            className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+          />
+          <div className="max-h-56 overflow-y-auto rounded-xl border border-border bg-background">
+            {filteredUserOptions.length ? filteredUserOptions.map((option) => {
+              const checked = selectedUserIds.includes(option.id);
+              return (
+                <label key={option.id} className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelection(option.id, selectedUserIds, setSelectedUserIds)}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                </label>
+              );
+            }) : <div className="px-3 py-6 text-sm text-muted-foreground">暂无可选用户</div>}
+          </div>
+          <div className="text-xs text-muted-foreground">已选 {selectedUserIds.length} 个用户</div>
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">能力项 *</label>
+          <input
+            value={abilitySearch}
+            onChange={(event) => setAbilitySearch(event.target.value)}
+            placeholder="搜索能力项"
+            className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+          />
+          <div className="max-h-56 overflow-y-auto rounded-xl border border-border bg-background">
+            {filteredAbilityOptions.length ? filteredAbilityOptions.map((option) => {
+              const checked = selectedAbilityKeys.includes(option.id);
+              return (
+                <label key={option.id} className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelection(option.id, selectedAbilityKeys, setSelectedAbilityKeys)}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                </label>
+              );
+            }) : <div className="px-3 py-6 text-sm text-muted-foreground">暂无可选能力项</div>}
+          </div>
+          <div className="text-xs text-muted-foreground">已选 {selectedAbilityKeys.length} 个能力项</div>
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <label className="block text-sm font-medium">授权节点 *</label>
+          <input
+            value={nodeSearch}
+            onChange={(event) => setNodeSearch(event.target.value)}
+            placeholder="搜索部门或小组"
+            className="block h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+          />
+          <div className="max-h-64 overflow-y-auto rounded-xl border border-border bg-background">
+            {filteredNodeOptions.length ? filteredNodeOptions.map((option) => {
+              const checked = selectedNodeIds.includes(option.id);
+              return (
+                <label key={option.id} className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelection(option.id, selectedNodeIds, setSelectedNodeIds)}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                </label>
+              );
+            }) : <div className="px-3 py-6 text-sm text-muted-foreground">暂无可选节点</div>}
+          </div>
+          <div className="text-xs text-muted-foreground">已选 {selectedNodeIds.length} 个节点</div>
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm font-medium">授权范围 *</label>
+          <select
+            value={grantScopeType}
+            onChange={(event) => setGrantScopeType(event.target.value as "NODE" | "SUBTREE")}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:border-ring"
+          >
+            <option value="NODE">当前节点</option>
+            <option value="SUBTREE">当前节点及下级</option>
+          </select>
+          <div className="mt-2 text-xs text-muted-foreground">所选范围会统一作用到当前已选节点集合。</div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button
+          type="submit"
+          disabled={selectedUserIds.length === 0 || selectedAbilityKeys.length === 0 || selectedNodeIds.length === 0}
+        >
+          新增授权
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogData; onClose: () => void }) {
   const action = data.kind === "menu"
     ? applyRoleMenuPermissionToAllDepartments
@@ -609,6 +818,7 @@ export function OrgContent({
   menus,
   annualGoalPermissions,
   kpiPermissions,
+  kpiUserPermissionGrants,
   canManageUsers,
   canManageTeams,
   canManageRolePermissions,
@@ -788,8 +998,8 @@ export function OrgContent({
 
   // Dialog states
   const [dialog, setDialog] = useState<{
-    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments";
-    data?: OrgUser | OrgTeam | ApplyAllDialogData;
+    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments" | "kpiUserPermission" | "deleteKpiUserPermissionGrant";
+    data?: OrgUser | OrgTeam | ApplyAllDialogData | KpiUserPermissionGrant;
   } | null>(null);
 
   return (
@@ -1114,7 +1324,7 @@ export function OrgContent({
               <div className="p-5">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h3 className="font-semibold">KPI 权限</h3>
+                    <h3 className="font-semibold">角色默认权限</h3>
                     {canManageRolePermissions && hasKpiPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的 KPI 权限调整</div>}
                   </div>
                   {canManageRolePermissions && (
@@ -1141,57 +1351,113 @@ export function OrgContent({
                     </thead>
                     <tbody>
                       {kpiPermissions.map((permission) => (
-                      <tr key={permission.id} className="border-t border-border">
-                        <td className="py-0 pr-4 align-middle">
-                          <div className="min-h-[72px] flex flex-col justify-center">
-                            <div className="font-medium break-words">{permission.name}</div>
-                            <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
-                          </div>
-                        </td>
-                        {permissionRoleOptions.map((role) => {
-                          const cell = draftKpiCells[`${role.value}:${permission.id}`];
-                          const enabled = cell?.allowed ?? false;
-                          const inherited = cell?.inherited;
-                          return (
-                            <td key={role.value} className="py-0 text-center align-middle">
-                              <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                        <tr key={permission.id} className="border-t border-border">
+                          <td className="py-0 pr-4 align-middle">
+                            <div className="min-h-[72px] flex flex-col justify-center">
+                              <div className="font-medium break-words">{permission.name}</div>
+                              <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
+                            </div>
+                          </td>
+                          {permissionRoleOptions.map((role) => {
+                            const cell = draftKpiCells[`${role.value}:${permission.id}`];
+                            const enabled = cell?.allowed ?? false;
+                            const inherited = cell?.inherited;
+                            return (
+                              <td key={role.value} className="py-0 text-center align-middle">
+                                <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                                  {canManageRolePermissions ? (
+                                    <button type="button" onClick={() => toggleDraftKpiPermission(role.value, permission)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : (
+                                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
+                                  )}
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDialog({
+                                        type: "applyAllDepartments",
+                                        data: {
+                                          kind: "kpi",
+                                          permissionId: permission.id,
+                                          permissionName: permission.name,
+                                          roleType: role.value,
+                                          roleLabel: role.label,
+                                          allowed: enabled,
+                                        },
+                                      })}
+                                      className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                      title="按当前系统值覆盖到全部部门"
+                                    >
+                                      <Wand2 className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-border bg-muted/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-medium">用户显式授权</h4>
+                      <div className="mt-1 text-xs text-muted-foreground">为具体用户追加跨节点查看或操作权限，不影响角色默认权限。</div>
+                    </div>
+                    {canManageRolePermissions ? (
+                      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "kpiUserPermission" })}>
+                        <Plus className="w-4 h-4" />新增授权
+                      </Button>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 overflow-x-auto">
+                    {kpiUserPermissionGrants.length ? (
+                      <table className="w-full min-w-[760px] table-fixed text-xs">
+                        <colgroup>
+                          <col className="w-[180px]" />
+                          <col className="w-[180px]" />
+                          <col className="w-[140px]" />
+                          <col className="w-[180px]" />
+                          <col className="w-[100px]" />
+                        </colgroup>
+                        <thead>
+                          <tr className="text-left text-muted-foreground">
+                            <th className="py-2 font-medium">用户</th>
+                            <th className="py-2 font-medium">能力项</th>
+                            <th className="py-2 font-medium">范围</th>
+                            <th className="py-2 font-medium">节点</th>
+                            <th className="py-2 font-medium text-right">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {kpiUserPermissionGrants.map((grant) => (
+                            <tr key={grant.id} className="border-t border-border">
+                              <td className="py-3 pr-4">{grant.userName}</td>
+                              <td className="py-3 pr-4">{grant.abilityName}</td>
+                              <td className="py-3 pr-4">{getGrantScopeLabel(grant.scopeType)}</td>
+                              <td className="py-3 pr-4">{grant.scopeType === "ALL" ? "全部" : (grant.orgNodeName ?? "—")}</td>
+                              <td className="py-3 text-right">
                                 {canManageRolePermissions ? (
-                                  <button type="button" onClick={() => toggleDraftKpiPermission(role.value, permission)} className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`} title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}>
-                                    {enabled && <Check className="w-3.5 h-3.5" />}
-                                  </button>
-                                ) : (
-                                  <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
-                                )}
-                                {isAdmin && selectedScope.scopeType === "SYSTEM" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setDialog({
-                                      type: "applyAllDepartments",
-                                      data: {
-                                        kind: "kpi",
-                                        permissionId: permission.id,
-                                        permissionName: permission.name,
-                                        roleType: role.value,
-                                        roleLabel: role.label,
-                                        allowed: enabled,
-                                      },
-                                    })}
-                                    className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
-                                    title="按当前系统值覆盖到全部部门"
-                                  >
-                                    <Wand2 className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                                  <button type="button" onClick={() => setDialog({ type: "deleteKpiUserPermissionGrant", data: grant })} className="text-destructive hover:underline">删除</button>
+                                ) : null}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                        当前范围暂无显式授权
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
             )}
           </>
         ) : (
@@ -1310,6 +1576,34 @@ export function OrgContent({
 
       <Dialog open={dialog?.type === "applyAllDepartments"} onClose={() => setDialog(null)} title="应用到全部部门">
         <ApplyAllDepartmentsConfirm data={dialog?.data as ApplyAllDialogData} onClose={() => setDialog(null)} />
+      </Dialog>
+
+      <Dialog
+        open={dialog?.type === "kpiUserPermission"}
+        onClose={() => setDialog(null)}
+        title="新增显式授权"
+        panelClassName="max-w-4xl"
+      >
+        <KpiUserPermissionGrantForm
+          users={users}
+          teamParentOptions={teamParentOptions}
+          scopeType={selectedScope.scopeType}
+          departmentOrgNodeId={selectedDepartmentOrgNodeId}
+          permissions={kpiPermissions}
+          onClose={() => setDialog(null)}
+        />
+      </Dialog>
+
+      <Dialog open={dialog?.type === "deleteKpiUserPermissionGrant"} onClose={() => setDialog(null)} title="删除显式授权">
+        <DeleteConfirm
+          message={`确定要删除成员 "${(dialog?.data as KpiUserPermissionGrant | undefined)?.userName ?? ""}" 的“${(dialog?.data as KpiUserPermissionGrant | undefined)?.abilityName ?? ""}”显式授权吗？`}
+          action={async () => {
+            const fd = new FormData();
+            fd.set("id", (dialog?.data as KpiUserPermissionGrant).id);
+            await deleteKpiUserPermissionGrant(fd);
+          }}
+          onClose={() => setDialog(null)}
+        />
       </Dialog>
 
       <Dialog open={dialog?.type === "deleteUser"} onClose={() => setDialog(null)} title="删除成员">

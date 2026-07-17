@@ -558,7 +558,7 @@ export async function getKpiTemplateDepartmentOptions() {
       name: department.name,
     } satisfies DepartmentOption)),
     defaultDepartmentOrgNodeId: departments[0]?.id ?? "",
-    canSelectAnyDepartment: allowedDepartmentIds === null,
+    canSelectAnyDepartment: departments.length > 1,
   };
 }
 

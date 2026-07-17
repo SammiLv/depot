@@ -2,7 +2,7 @@ import type { RoleType, AnnualGoalOwnerType, OrgNodeType } from "@prisma/client"
 import { prisma } from "@/server/db/prisma";
 import { getOwnerWhereByScope } from "@/server/permissions/data-scope";
 import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/role-labels";
-import { buildKpiWhereByPermission, resolvePermissionScope } from "@/server/permissions/permission-resolver";
+import { buildKpiWhereByPermission, resolvePermissionCoverage, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 import {
@@ -50,16 +50,16 @@ export async function getDashboardData(currentUser: CurrentUser) {
   const annualGoalCapabilities = await getAnnualGoalCapabilitiesForUser(currentUser);
   const [
     viewKpiWhere,
-    scoreSelfScope,
-    scoreLeaderScope,
-    scoreManagerScope,
-    scoreFinalScope,
+    scoreSelfCoverage,
+    scoreLeaderCoverage,
+    scoreManagerCoverage,
+    scoreFinalCoverage,
   ] = await Promise.all([
     buildKpiWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi),
-    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreSelf),
-    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreLeader),
-    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreManager),
-    resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreFinal),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreSelf),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreLeader),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreManager),
+    resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreFinal),
   ]);
 
   const [currentOrgNode, todoCount, latestTodos, latestNotifications, activePlans, quarterlyWorks, kpis] = await Promise.all([
@@ -256,10 +256,10 @@ export async function getDashboardData(currentUser: CurrentUser) {
     }
   }
 
-  const canScoreSelf = Boolean(scoreSelfScope);
-  const canScoreLeader = Boolean(scoreLeaderScope);
-  const canScoreManager = Boolean(scoreManagerScope);
-  const canScoreFinal = Boolean(scoreFinalScope);
+  const canScoreSelf = scoreSelfCoverage.hasPermission;
+  const canScoreLeader = scoreLeaderCoverage.hasPermission;
+  const canScoreManager = scoreManagerCoverage.hasPermission;
+  const canScoreFinal = scoreFinalCoverage.hasPermission;
 
   const actionableKpis = kpis.filter((kpi) => {
     if (canScoreSelf && kpi.userId === currentUser.id && (kpi.status === "DRAFT" || kpi.status === "PENDING_SELF_REVIEW")) {

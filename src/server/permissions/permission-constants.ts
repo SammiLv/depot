@@ -26,10 +26,20 @@ export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, num
 
 export const manageableRoleTypes: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
 
+export const kpiOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
+  kpiAbilityKeys.viewKpi,
+  kpiAbilityKeys.initializeKpi,
+  kpiAbilityKeys.viewKpiTemplate,
+  kpiAbilityKeys.manageKpiTemplate,
+  kpiAbilityKeys.toggleKpiTemplate,
+  kpiAbilityKeys.scoreSelf,
+];
+
 export const kpiDefaultPermissionGrants: Array<{
   moduleKey: OrgPermissionModuleKey;
   abilityKey: OrgPermissionAbilityKey;
   scopeType: OrgPermissionGrantScopeType;
+  subjectType: "ROLE";
   roleType: RoleType;
   orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
 }> = [
@@ -37,6 +47,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey,
     scopeType: "ALL" as const,
+    subjectType: "ROLE" as const,
     roleType: "ADMIN" as const,
     orgNodeSeedKey: null,
   })),
@@ -44,6 +55,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.viewKpi,
     scopeType: "SUBTREE",
+    subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",
     orgNodeSeedKey: "DEPARTMENT",
   },
@@ -51,6 +63,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.viewKpiTemplate,
     scopeType: "SUBTREE",
+    subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",
     orgNodeSeedKey: "DEPARTMENT",
   },
@@ -58,6 +71,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.manageKpiTemplate,
     scopeType: "SUBTREE",
+    subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",
     orgNodeSeedKey: "DEPARTMENT",
   },
@@ -65,6 +79,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.toggleKpiTemplate,
     scopeType: "SUBTREE",
+    subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",
     orgNodeSeedKey: "DEPARTMENT",
   },
@@ -72,6 +87,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.initializeKpi,
     scopeType: "SUBTREE",
+    subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",
     orgNodeSeedKey: "DEPARTMENT",
   },
@@ -79,6 +95,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.scoreManager,
     scopeType: "SUBTREE",
+    subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",
     orgNodeSeedKey: "DEPARTMENT",
   },
@@ -86,6 +103,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.viewKpi,
     scopeType: "NODE",
+    subjectType: "ROLE",
     roleType: "TEAM_LEADER",
     orgNodeSeedKey: "TEAM",
   },
@@ -93,6 +111,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.viewKpiTemplate,
     scopeType: "NODE",
+    subjectType: "ROLE",
     roleType: "TEAM_LEADER",
     orgNodeSeedKey: "TEAM",
   },
@@ -100,6 +119,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.scoreLeader,
     scopeType: "NODE",
+    subjectType: "ROLE",
     roleType: "TEAM_LEADER",
     orgNodeSeedKey: "TEAM",
   },
@@ -107,6 +127,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.viewKpi,
     scopeType: "SELF",
+    subjectType: "ROLE",
     roleType: "MEMBER",
     orgNodeSeedKey: "TEAM",
   },
@@ -114,6 +135,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.viewKpiTemplate,
     scopeType: "SELF",
+    subjectType: "ROLE",
     roleType: "MEMBER",
     orgNodeSeedKey: "TEAM",
   },
@@ -121,6 +143,7 @@ export const kpiDefaultPermissionGrants: Array<{
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.scoreSelf,
     scopeType: "SELF",
+    subjectType: "ROLE",
     roleType: "MEMBER",
     orgNodeSeedKey: "TEAM",
   },
