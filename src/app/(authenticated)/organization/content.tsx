@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
-import { Plus, Users, X, Check, RefreshCw, Wand2 } from "lucide-react";
+import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree } from "lucide-react";
 import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createUser, updateUser, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
+import type { OrganizationEntityNode, OrganizationHierarchyNode, OrganizationPersonNode } from "./page";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -24,9 +25,18 @@ type OrgUser = {
 type OrgTeam = {
   orgNodeId: string;
   departmentOrgNodeId: string;
+  parentOrgNodeId: string;
+  parentName: string;
   name: string;
   leaderId: string | null;
   description: string | null;
+};
+
+type TeamParentOption = {
+  orgNodeId: string;
+  name: string;
+  nodeType: "DEPARTMENT" | "TEAM";
+  departmentOrgNodeId: string;
 };
 
 type OrgDepartment = {
@@ -88,9 +98,10 @@ type Props = {
   currentUser: { id: string; roleType: RoleType };
   users: OrgUser[];
   teams: OrgTeam[];
-  teamData: { teamOrgNodeId: string; count: number; leaderName?: string }[];
   departments: OrgDepartment[];
+  teamParentOptions: TeamParentOption[];
   department: OrgDepartment | null;
+  organizationHierarchyRoot: OrganizationEntityNode | null;
   scopeOptions: PermissionScopeOption[];
   initialScope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
   initialTab: "organization" | "permissions";
@@ -123,8 +134,6 @@ const roleOptions: { value: RoleType; label: string }[] = [
 function getRoleLabel(roleType: RoleType) {
   return roleOptions.find((r) => r.value === roleType)?.label ?? roleType;
 }
-
-const toneCycle: Array<"primary" | "info" | "brand" | "success"> = ["primary", "info", "brand", "success"];
 
 function renderRequiredLabel(label: string) {
   const trimmedLabel = label.trimEnd();
@@ -271,6 +280,7 @@ function TeamForm({
   team,
   users,
   departments,
+  teamParentOptions,
   departmentOrgNodeId,
   canSelectDepartment,
   onClose,
@@ -278,6 +288,7 @@ function TeamForm({
   team?: OrgTeam;
   users: OrgUser[];
   departments: OrgDepartment[];
+  teamParentOptions: TeamParentOption[];
   departmentOrgNodeId: string;
   canSelectDepartment: boolean;
   onClose: () => void;
@@ -286,16 +297,27 @@ function TeamForm({
   const action = isEdit ? updateTeam : createTeam;
   const initialDepartmentOrgNodeId = team?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "";
   const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(initialDepartmentOrgNodeId);
+  const availableParentOptions = teamParentOptions.filter((option) => option.departmentOrgNodeId === selectedDepartmentOrgNodeId && option.orgNodeId !== team?.orgNodeId);
+  const [selectedParentOrgNodeId, setSelectedParentOrgNodeId] = useState(team?.parentOrgNodeId ?? availableParentOptions[0]?.orgNodeId ?? selectedDepartmentOrgNodeId);
   const availableUsers = users.filter((user) => user.isActive && user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
 
   useEffect(() => {
-    setSelectedDepartmentOrgNodeId(team?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "");
+    const nextDepartmentOrgNodeId = team?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "";
+    setSelectedDepartmentOrgNodeId(nextDepartmentOrgNodeId);
   }, [team?.departmentOrgNodeId, departmentOrgNodeId, departments]);
+
+  useEffect(() => {
+    const nextParentOptions = teamParentOptions.filter((option) => option.departmentOrgNodeId === selectedDepartmentOrgNodeId && option.orgNodeId !== team?.orgNodeId);
+    const nextParentOrgNodeId = team?.parentOrgNodeId && nextParentOptions.some((option) => option.orgNodeId === team.parentOrgNodeId)
+      ? team.parentOrgNodeId
+      : nextParentOptions[0]?.orgNodeId ?? selectedDepartmentOrgNodeId;
+    setSelectedParentOrgNodeId(nextParentOrgNodeId);
+  }, [team?.orgNodeId, team?.parentOrgNodeId, teamParentOptions, selectedDepartmentOrgNodeId]);
 
   return (
     <form action={async (fd) => { await action(fd); onClose(); }}>
       {isEdit && <input type="hidden" name="id" value={team.orgNodeId} />}
-      <input type="hidden" name="departmentOrgNodeId" value={selectedDepartmentOrgNodeId} />
+      <input type="hidden" name="parentOrgNodeId" value={selectedParentOrgNodeId} />
       <div className="space-y-4">
         {canSelectDepartment && (
           <div>
@@ -313,6 +335,20 @@ function TeamForm({
             </select>
           </div>
         )}
+        <div>
+          <label className="block text-sm font-medium mb-1">{renderRequiredLabel("上级节点 *")}</label>
+          <select
+            value={selectedParentOrgNodeId}
+            onChange={(event) => setSelectedParentOrgNodeId(event.target.value)}
+            required
+            className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring"
+          >
+            <option value="">请选择上级节点</option>
+            {availableParentOptions.map((option) => (
+              <option key={option.orgNodeId} value={option.orgNodeId}>{option.name}{option.nodeType === "TEAM" ? " · 小组" : " · 部门"}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="block text-sm font-medium mb-1">{renderRequiredLabel("小组名称 *")}</label>
           <input name="name" defaultValue={team?.name ?? ""} required className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
@@ -375,14 +411,197 @@ function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogDat
   );
 }
 
+function buildInitialExpandedState(root: OrganizationEntityNode | null) {
+  const nextState: Record<string, boolean> = {};
+  if (!root) return nextState;
+
+  nextState[root.id] = true;
+  for (const child of root.children) {
+    if (child.nodeType !== "PERSON") {
+      nextState[child.id] = true;
+    }
+  }
+
+  return nextState;
+}
+
+function flattenHierarchyRows(root: OrganizationEntityNode | null, expandedState?: Record<string, boolean>) {
+  const rows: Array<{ node: OrganizationHierarchyNode; depth: number }> = [];
+  if (!root) return rows;
+
+  function visit(node: OrganizationHierarchyNode, depth: number, parentExpanded: boolean) {
+    if (!parentExpanded) return;
+    rows.push({ node, depth });
+    if (node.nodeType === "PERSON") return;
+
+    const isExpanded = expandedState ? (expandedState[node.id] ?? false) : true;
+    node.children.forEach((child) => visit(child, depth + 1, isExpanded));
+  }
+
+  visit(root, 0, true);
+  return rows;
+}
+
+function OrganizationListRow({
+  node,
+  depth,
+  expandedState,
+  onToggle,
+  canManageTeams,
+  canManageUsers,
+  currentUserRoleType,
+  onEditTeam,
+  onDeleteTeam,
+  onEditUser,
+  onDeleteUser,
+}: {
+  node: OrganizationHierarchyNode;
+  depth: number;
+  expandedState: Record<string, boolean>;
+  onToggle: (nodeId: string) => void;
+  canManageTeams: boolean;
+  canManageUsers: boolean;
+  currentUserRoleType: RoleType;
+  onEditTeam: (team: OrgTeam) => void;
+  onDeleteTeam: (team: OrgTeam) => void;
+  onEditUser: (user: OrgUser) => void;
+  onDeleteUser: (user: OrgUser) => void;
+}) {
+  const isPerson = node.nodeType === "PERSON";
+  const canManagePerson = isPerson && canManageUsers && node.roleType !== "ADMIN" && !(currentUserRoleType === "DEPARTMENT_MANAGER" && !["TEAM_LEADER", "MEMBER"].includes(node.roleType));
+  const entityNode = isPerson ? null : node;
+  const isLeafTeam = entityNode?.nodeType === "TEAM" && !entityNode.children.some((child) => child.nodeType !== "PERSON");
+  const hasChildren = entityNode ? entityNode.children.length > 0 : false;
+  const isExpanded = entityNode ? (expandedState[entityNode.id] ?? false) : false;
+
+  return (
+    <div className="flex items-center gap-3 border-t border-border px-5 py-4 hover:bg-muted/20 transition">
+      <div style={{ width: `${depth * 28}px`, flexShrink: 0 }} />
+      {isPerson ? null : (
+        <button
+          type="button"
+          onClick={() => hasChildren ? onToggle(entityNode!.id) : undefined}
+          className={`flex h-8 w-8 items-center justify-center rounded-lg ${hasChildren ? "text-muted-foreground hover:bg-muted" : "text-transparent cursor-default"}`}
+          aria-label={hasChildren ? (isExpanded ? "收起节点" : "展开节点") : "无子节点"}
+        >
+          {hasChildren ? (isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : <ChevronRight className="w-4 h-4" />}
+        </button>
+      )}
+      {isPerson ? null : (
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          {entityNode?.nodeType === "DEPARTMENT" ? <Building2 className="w-5 h-5" /> : <FolderTree className="w-5 h-5" />}
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-semibold">{node.name}</span>
+          {isPerson ? <Badge tone={roleBadgeTone(node.roleType)}>{getRoleLabel(node.roleType)}</Badge> : <Badge tone={entityNode?.nodeType === "DEPARTMENT" ? "primary" : "info"}>{entityNode?.directMemberCount ?? 0} 人</Badge>}
+        </div>
+        {isPerson ? (
+          <div className="mt-1 text-xs text-muted-foreground">{node.title ?? "未设置职务"}</div>
+        ) : null}
+      </div>
+      {entityNode?.nodeType === "TEAM" && entityNode.team && canManageTeams ? (
+        <div className="flex shrink-0 items-center gap-2 text-xs">
+          <button type="button" onClick={() => onEditTeam(entityNode.team!)} className="text-primary hover:underline">编辑</button>
+          {isLeafTeam ? (
+            <button type="button" onClick={() => onDeleteTeam(entityNode.team!)} className="text-destructive hover:underline">删除</button>
+          ) : (
+            <span className="text-muted-foreground">请先处理下级小组</span>
+          )}
+        </div>
+      ) : null}
+      {isPerson && canManagePerson ? (
+        <div className="flex shrink-0 items-center gap-2 text-xs">
+          <button type="button" onClick={() => onEditUser(node as unknown as OrgUser)} className="text-primary hover:underline">编辑</button>
+          <button type="button" onClick={() => onDeleteUser(node as unknown as OrgUser)} className="text-destructive hover:underline">删除</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OrganizationMindMapNodeView({
+  node,
+  expandedState,
+  onToggle,
+}: {
+  node: OrganizationHierarchyNode;
+  expandedState: Record<string, boolean>;
+  onToggle: (nodeId: string) => void;
+}) {
+  if (node.nodeType === "PERSON") {
+    return (
+      <div className="flex min-w-[180px] max-w-[240px] items-center gap-2 px-2 py-1">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold">{node.name}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {node.title ? <span>{node.title}</span> : null}
+            <Badge tone={roleBadgeTone(node.roleType)}>{getRoleLabel(node.roleType)}</Badge>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isExpanded = expandedState[node.id] ?? false;
+  const hasChildren = node.children.length > 0;
+
+  return (
+    <div className="flex items-center gap-8 min-w-max">
+      <button
+        type="button"
+        onClick={() => hasChildren ? onToggle(node.id) : undefined}
+        className={`flex min-w-[280px] max-w-[340px] items-center gap-3 px-3 py-3 text-left transition ${hasChildren ? "hover:bg-muted/30 rounded-2xl" : "cursor-default"}`}
+        aria-label={hasChildren ? (isExpanded ? "收起节点" : "展开节点") : "无子节点"}
+      >
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${hasChildren ? "text-muted-foreground" : "text-transparent"}`}>
+          {hasChildren ? (isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : <ChevronRight className="w-4 h-4" />}
+        </div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary shrink-0">
+          {node.nodeType === "DEPARTMENT" ? <Building2 className="w-5 h-5" /> : <FolderTree className="w-5 h-5" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-base font-semibold">{node.name}</span>
+            <Badge tone={node.nodeType === "DEPARTMENT" ? "primary" : "info"}>{node.directMemberCount} 人</Badge>
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {node.nodeType === "DEPARTMENT" ? `${node.directMemberCount}人` : `${node.directMemberCount}人`}
+          </div>
+        </div>
+      </button>
+
+      {hasChildren && isExpanded ? (
+        <div className="relative pl-8">
+          <div className="absolute left-3 top-6 bottom-6 w-px bg-border/70" />
+          <div className="space-y-5">
+            {node.children.map((child) => (
+              <div key={child.id} className="relative flex items-center gap-8">
+                <div className="absolute -left-5 top-1/2 h-px w-5 bg-border/70" />
+                <OrganizationMindMapNodeView
+                  node={child}
+                  expandedState={expandedState}
+                  onToggle={onToggle}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Main content ──
 export function OrgContent({
   currentUser,
   users,
   teams,
-  teamData,
   departments,
+  teamParentOptions,
   department,
+  organizationHierarchyRoot,
   scopeOptions,
   initialScope,
   initialTab,
@@ -398,20 +617,21 @@ export function OrgContent({
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = currentUser.roleType === "ADMIN";
-  const countMap = new Map(teamData.map((t) => [t.teamOrgNodeId, t]));
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
   const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi">(initialPermissionSection);
+  const [organizationViewMode, setOrganizationViewMode] = useState<"list" | "tree">("tree");
+  const [expandedTreeNodes, setExpandedTreeNodes] = useState<Record<string, boolean>>(() => buildInitialExpandedState(organizationHierarchyRoot));
   const selectedScope = initialScope;
   const selectedDepartmentOrgNodeId = selectedScope.scopeType === "SYSTEM"
     ? ""
     : initialScope.departmentOrgNodeId || (departments[0]?.orgNodeId ?? department?.orgNodeId ?? "");
   const visibleTeams = selectedScope.scopeType === "SYSTEM"
-    ? []
+    ? teams
     : teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
   const visibleUsers = selectedScope.scopeType === "SYSTEM"
-    ? users.filter((user) => user.roleType === "ADMIN")
+    ? users
     : users.filter((user) => user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
   const permissionRoleOptions = selectedScope.scopeType === "SYSTEM"
     ? roleOptions
@@ -475,6 +695,19 @@ export function OrgContent({
     }
     setPermissionSection(initialPermissionSection);
   }, [initialPermissionSection, initialTab, initialScope.scopeType, initialScope.departmentOrgNodeId]);
+
+  useEffect(() => {
+    setExpandedTreeNodes(buildInitialExpandedState(organizationHierarchyRoot));
+  }, [organizationHierarchyRoot, selectedDepartmentOrgNodeId]);
+
+  const organizationListRows = flattenHierarchyRows(organizationHierarchyRoot, expandedTreeNodes);
+
+  function toggleTreeNode(orgNodeId: string) {
+    setExpandedTreeNodes((current) => ({
+      ...current,
+      [orgNodeId]: !current[orgNodeId],
+    }));
+  }
 
   function toggleDraftPermission(roleType: RoleType, menu: OrgMenu) {
     if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) return;
@@ -961,48 +1194,9 @@ export function OrgContent({
             </div>
             )}
           </>
-        ) : selectedScope.scopeType === "SYSTEM" ? (
-          <>
-            <div className="border-b border-border px-5 py-3 flex items-center justify-between">
-              <h3 className="font-semibold flex items-center gap-2"><Users className="w-4 h-4" />成员列表</h3>
-              <span className="text-xs text-muted-foreground">共 {visibleUsers.length} 人</span>
-            </div>
-            <table className="w-full">
-              <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-5 py-3 font-medium">姓名</th>
-                  <th className="px-5 py-3 font-medium">职务</th>
-                  <th className="px-5 py-3 font-medium">角色</th>
-                  <th className="px-5 py-3 font-medium text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleUsers.map((u) => (
-                  <tr key={u.id} className="border-t border-border hover:bg-muted/30 transition">
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full text-white text-xs flex items-center justify-center ${avatarColor(u.name)}`}>{u.name.charAt(0)}</div>
-                        <span className="text-sm font-medium">{u.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-sm text-muted-foreground">{u.title ?? "—"}</td>
-                    <td className="px-5 py-3"><Badge tone={roleBadgeTone(u.roleType)}>{getRoleLabel(u.roleType)}</Badge></td>
-                    <td className="px-5 py-3 text-right text-xs">
-                      {canManageUsers && (
-                        <div className="flex justify-end gap-2">
-                          <button onClick={() => setDialog({ type: "user", data: u })} className="text-primary hover:underline">编辑</button>
-                          <button onClick={() => setDialog({ type: "deleteUser", data: u })} className="text-destructive hover:underline">删除</button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
         ) : (
           <>
-            {department && (
+            {department && selectedScope.scopeType === "DEPARTMENT" ? (
               <div className="px-5 pt-2 pb-4">
                 <div className="w-full rounded-xl bg-muted/40 px-4 py-3 text-sm">
                   <div className="text-xs text-muted-foreground">{department.name}</div>
@@ -1019,83 +1213,70 @@ export function OrgContent({
                   )}
                 </div>
               </div>
-            )}
+            ) : null}
 
-            <div className="border-b border-border px-5 py-3 flex items-center justify-between">
-              <h3 className="font-semibold">组长列表</h3>
-              <span className="text-xs text-muted-foreground">共 {visibleTeams.length} 个小组</span>
+            <div className="border-b border-border px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold">组织架构</h3>
+                <div className="text-xs text-muted-foreground mt-1">共 {visibleTeams.length} 个小组 · {visibleUsers.length} 位成员</div>
+              </div>
+              <div className="inline-flex rounded-lg bg-muted p-1">
+                {[
+                  { key: "list" as const, label: "列表视图" },
+                  { key: "tree" as const, label: "树状视图" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setOrganizationViewMode(item.key)}
+                    className={`h-9 rounded-lg px-4 text-sm transition ${organizationViewMode === item.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-1 gap-4 p-5 lg:grid-cols-2 xl:grid-cols-4">
-              {visibleTeams.map((team, i) => {
-                const info = countMap.get(team.orgNodeId);
-                const tone = toneCycle[i % toneCycle.length];
-                return (
-                  <div key={team.orgNodeId} className="rounded-2xl border border-border bg-card p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="font-semibold">{team.name}</h4>
-                      <Badge tone={tone}>{info?.count ?? 0} 人</Badge>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className={`w-8 h-8 rounded-full text-white text-xs flex items-center justify-center ${avatarColor(info?.leaderName ?? team.name)}`}>
-                        {(info?.leaderName ?? team.name).charAt(0)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{info?.leaderName ?? "未指定"}</div>
-                        <div className="text-xs text-muted-foreground">组长</div>
-                      </div>
-                      {canManageTeams && (
-                        <div className="flex gap-1 shrink-0">
-                          <button onClick={() => setDialog({ type: "team", data: team })} className="text-xs text-muted-foreground hover:text-foreground px-1">编辑</button>
-                          <button onClick={() => setDialog({ type: "deleteTeam", data: team })} className="text-xs text-destructive hover:underline px-1">删除</button>
-                        </div>
-                      )}
-                    </div>
+
+            {organizationViewMode === "list" ? (
+              <div className="divide-y divide-border">
+                {organizationListRows.length ? (
+                  organizationListRows.map(({ node, depth }) => (
+                    <OrganizationListRow
+                      key={node.id}
+                      node={node}
+                      depth={depth}
+                      expandedState={expandedTreeNodes}
+                      onToggle={toggleTreeNode}
+                      canManageTeams={canManageTeams}
+                      canManageUsers={canManageUsers}
+                      currentUserRoleType={currentUser.roleType}
+                      onEditTeam={(team) => setDialog({ type: "team", data: team })}
+                      onDeleteTeam={(team) => setDialog({ type: "deleteTeam", data: team })}
+                      onEditUser={(user) => setDialog({ type: "user", data: user })}
+                      onDeleteUser={(user) => setDialog({ type: "deleteUser", data: user })}
+                    />
+                  ))
+                ) : (
+                  <div className="px-5 py-12 text-center text-sm text-muted-foreground">当前范围暂无组织节点</div>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto p-5">
+                {organizationHierarchyRoot ? (
+                  <div className="min-w-max pr-8">
+                    <OrganizationMindMapNodeView
+                      node={organizationHierarchyRoot}
+                      expandedState={expandedTreeNodes}
+                      onToggle={toggleTreeNode}
+                    />
                   </div>
-                );
-              })}
-            </div>
-
-            <div className="border-t border-border px-5 py-3 flex items-center justify-between">
-              <h3 className="font-semibold flex items-center gap-2"><Users className="w-4 h-4" />成员列表</h3>
-              <span className="text-xs text-muted-foreground">共 {visibleUsers.length} 人</span>
-            </div>
-            <table className="w-full">
-              <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-5 py-3 font-medium">姓名</th>
-                  <th className="px-5 py-3 font-medium">小组</th>
-                  <th className="px-5 py-3 font-medium">职务</th>
-                  <th className="px-5 py-3 font-medium">角色</th>
-                  <th className="px-5 py-3 font-medium text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleUsers.map((u) => {
-                  const teamName = u.teamOrgNodeId ? teams.find((t) => t.orgNodeId === u.teamOrgNodeId)?.name : null;
-                  return (
-                    <tr key={u.id} className="border-t border-border hover:bg-muted/30 transition">
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full text-white text-xs flex items-center justify-center ${avatarColor(u.name)}`}>{u.name.charAt(0)}</div>
-                          <span className="text-sm font-medium">{u.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-sm text-muted-foreground">{teamName ?? "—"}</td>
-                      <td className="px-5 py-3 text-sm text-muted-foreground">{u.title ?? "—"}</td>
-                      <td className="px-5 py-3"><Badge tone={roleBadgeTone(u.roleType)}>{getRoleLabel(u.roleType)}</Badge></td>
-                      <td className="px-5 py-3 text-right text-xs">
-                        {canManageUsers && u.roleType !== "ADMIN" && !(currentUser.roleType === "DEPARTMENT_MANAGER" && !["TEAM_LEADER", "MEMBER"].includes(u.roleType)) && (
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => setDialog({ type: "user", data: u })} className="text-primary hover:underline">编辑</button>
-                            <button onClick={() => setDialog({ type: "deleteUser", data: u })} className="text-destructive hover:underline">删除</button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                    当前范围暂无组织节点
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </Card>
@@ -1120,6 +1301,7 @@ export function OrgContent({
           team={dialog?.data as OrgTeam | undefined}
           users={users}
           departments={departments}
+          teamParentOptions={teamParentOptions}
           departmentOrgNodeId={selectedDepartmentOrgNodeId || departments[0]?.orgNodeId || ""}
           canSelectDepartment={isAdmin && selectedScope.scopeType === "SYSTEM"}
           onClose={() => setDialog(null)}

@@ -6,10 +6,10 @@ import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
 import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, getScopedAnnualGoalPermissionMatrix, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
-import { isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
+import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
 import { kpiAbilityKeys, manageableRoleTypes, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { getActivePermissionGrants } from "@/server/permissions/permission-query";
-import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, RoleType } from "@prisma/client";
+import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, Prisma, RoleType } from "@prisma/client";
 
 const managerEditableRoles: RoleType[] = ["TEAM_LEADER", "MEMBER"];
 const permissionRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
@@ -64,15 +64,46 @@ function assertManagerRole(roleType: RoleType) {
 }
 
 async function findDepartmentOrgNodeId(orgNodeId: string | null | undefined) {
-  if (!orgNodeId) return null;
-  const orgNode = await prisma.orgNode.findUnique({
-    where: { id: orgNodeId },
-    select: { id: true, nodeType: true, parentId: true },
+  return findNearestDepartmentOrgNodeId(orgNodeId);
+}
+
+async function ensureRootOrgNode(tx: Prisma.TransactionClient) {
+  await tx.orgNode.upsert({
+    where: { id: ROOT_ORG_NODE_ID },
+    update: { dingtalkDeptId: "__org_root__", name: "组织根节点", nodeType: "ROOT", parentId: null },
+    create: { id: ROOT_ORG_NODE_ID, dingtalkDeptId: "__org_root__", name: "组织根节点", nodeType: "ROOT", parentId: null },
   });
-  if (!orgNode) return null;
-  if (orgNode.nodeType === "DEPARTMENT") return orgNode.id;
-  if (orgNode.nodeType === "TEAM") return orgNode.parentId;
-  return null;
+}
+
+async function rebuildOrgClosures(tx: Prisma.TransactionClient) {
+  const allOrgNodes = await tx.orgNode.findMany({ select: { id: true, parentId: true } });
+  const nodeMap = new Map(allOrgNodes.map((node) => [node.id, node]));
+
+  await tx.orgClosure.deleteMany();
+
+  for (const node of allOrgNodes) {
+    await tx.orgClosure.create({
+      data: {
+        ancestorId: node.id,
+        descendantId: node.id,
+        depth: 0,
+      },
+    });
+
+    let ancestor = node.parentId ? nodeMap.get(node.parentId) ?? null : null;
+    let depth = 1;
+    while (ancestor) {
+      await tx.orgClosure.create({
+        data: {
+          ancestorId: ancestor.id,
+          descendantId: node.id,
+          depth,
+        },
+      });
+      ancestor = ancestor.parentId ? nodeMap.get(ancestor.parentId) ?? null : null;
+      depth += 1;
+    }
+  }
 }
 
 async function assertOrgNodeType(orgNodeId: string, nodeType: OrgNodeType) {
@@ -103,10 +134,25 @@ async function assertDepartmentExists(orgNodeId: string) {
 async function assertTeamInDepartment(teamOrgNodeId: string | null, departmentOrgNodeId: string) {
   if (!teamOrgNodeId) return null;
   const teamNode = await findTeamNode(teamOrgNodeId);
-  if (!teamNode || teamNode.parentId !== departmentOrgNodeId) {
+  const teamDepartmentOrgNodeId = await findDepartmentOrgNodeId(teamNode.id);
+  if (!teamNode || teamDepartmentOrgNodeId !== departmentOrgNodeId) {
     throw new Error("小组不属于当前部门");
   }
   return teamNode;
+}
+
+async function assertParentOrgNode(parentOrgNodeId: string, currentUser: Awaited<ReturnType<typeof requireOrgManager>>) {
+  const parentNode = await prisma.orgNode.findUnique({
+    where: { id: parentOrgNodeId },
+    select: { id: true, nodeType: true, parentId: true, name: true },
+  });
+
+  if (!parentNode || !["DEPARTMENT", "TEAM"].includes(parentNode.nodeType)) {
+    throw new Error("上级节点不存在");
+  }
+
+  await assertDepartmentManagerScope(currentUser, parentNode.id);
+  return parentNode;
 }
 
 async function assertDepartmentManagerScope(currentUser: Awaited<ReturnType<typeof requireOrgManager>>, targetOrgNodeId: string | null | undefined) {
@@ -233,6 +279,8 @@ export async function createDepartment(formData: FormData) {
   const departmentId = randomUUID();
 
   await prisma.$transaction(async (tx) => {
+    await ensureRootOrgNode(tx);
+
     await tx.orgNode.create({
       data: {
         id: departmentId,
@@ -242,34 +290,7 @@ export async function createDepartment(formData: FormData) {
       },
     });
 
-    const allOrgNodes = await tx.orgNode.findMany({ select: { id: true, parentId: true } });
-    const nodeMap = new Map(allOrgNodes.map((node) => [node.id, node]));
-
-    await tx.orgClosure.deleteMany();
-
-    for (const node of allOrgNodes) {
-      await tx.orgClosure.create({
-        data: {
-          ancestorId: node.id,
-          descendantId: node.id,
-          depth: 0,
-        },
-      });
-
-      let ancestor = node.parentId ? nodeMap.get(node.parentId) ?? null : null;
-      let depth = 1;
-      while (ancestor) {
-        await tx.orgClosure.create({
-          data: {
-            ancestorId: ancestor.id,
-            descendantId: node.id,
-            depth,
-          },
-        });
-        ancestor = ancestor.parentId ? nodeMap.get(ancestor.parentId) ?? null : null;
-        depth += 1;
-      }
-    }
+    await rebuildOrgClosures(tx);
   });
 
   if (managerId) {
@@ -394,17 +415,18 @@ export async function deleteUser(formData: FormData) {
 export async function createTeam(formData: FormData) {
   const currentUser = await requireOrgManager();
   const name = formData.get("name") as string;
-  const requestedDepartmentOrgNodeId = (formData.get("departmentOrgNodeId") as string) || null;
+  const requestedParentOrgNodeId = (formData.get("parentOrgNodeId") as string) || null;
   const leaderId = (formData.get("leaderId") as string) || null;
   const description = (formData.get("description") as string) || null;
-  const departmentOrgNodeId = currentUser.roleType === "ADMIN"
-    ? requestedDepartmentOrgNodeId
-    : await findDepartmentOrgNodeId(currentUser.orgNodeId);
+  void description;
 
   if (!name) throw new Error("小组名称为必填项");
-  if (!departmentOrgNodeId) throw new Error("请选择所属部门");
+  if (!requestedParentOrgNodeId) throw new Error("请选择上级节点");
 
-  const departmentNode = await assertDepartmentExists(departmentOrgNodeId);
+  const parentNode = await assertParentOrgNode(requestedParentOrgNodeId, currentUser);
+  const departmentOrgNodeId = await findDepartmentOrgNodeId(parentNode.id);
+  if (!departmentOrgNodeId) throw new Error("上级节点未绑定部门");
+
   const teamOrgNodeId = randomUUID();
 
   await prisma.$transaction(async (tx) => {
@@ -413,25 +435,11 @@ export async function createTeam(formData: FormData) {
         id: teamOrgNodeId,
         name: name.trim(),
         nodeType: "TEAM",
-        parentId: departmentNode.id,
+        parentId: parentNode.id,
       },
     });
 
-    const ancestorRows = await tx.orgClosure.findMany({
-      where: { descendantId: departmentNode.id },
-      select: { ancestorId: true, depth: true },
-    });
-
-    await tx.orgClosure.createMany({
-      data: [
-        { ancestorId: teamOrgNodeId, descendantId: teamOrgNodeId, depth: 0 },
-        ...ancestorRows.map((row) => ({
-          ancestorId: row.ancestorId,
-          descendantId: teamOrgNodeId,
-          depth: row.depth + 1,
-        })),
-      ],
-    });
+    await rebuildOrgClosures(tx);
   });
 
   await syncTeamLeader(teamOrgNodeId, leaderId, departmentOrgNodeId);
@@ -443,20 +451,42 @@ export async function updateTeam(formData: FormData) {
   const currentUser = await requireOrgManager();
   const id = formData.get("id") as string;
   const name = formData.get("name") as string;
+  const requestedParentOrgNodeId = (formData.get("parentOrgNodeId") as string) || null;
   const leaderId = (formData.get("leaderId") as string) || null;
 
   if (!id || !name) throw new Error("缺少必要参数");
 
   const teamNode = await findTeamNode(id);
   if (!teamNode) throw new Error("小组不存在");
-  if (!teamNode.parentId) throw new Error("小组未绑定所属部门");
-  await assertDepartmentManagerScope(currentUser, teamNode.parentId);
+  await assertDepartmentManagerScope(currentUser, teamNode.id);
 
-  await prisma.orgNode.update({
-    where: { id: teamNode.id },
-    data: { name: name.trim() },
+  let nextParentOrgNodeId = teamNode.parentId;
+  if (requestedParentOrgNodeId) {
+    const parentNode = await assertParentOrgNode(requestedParentOrgNodeId, currentUser);
+    if (parentNode.id === teamNode.id || await isOrgNodeInSubtree(parentNode.id, teamNode.id)) {
+      throw new Error("上级节点不能选择当前小组或其下级节点");
+    }
+    nextParentOrgNodeId = parentNode.id;
+  }
+
+  if (!nextParentOrgNodeId) {
+    throw new Error("小组缺少上级节点");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgNode.update({
+      where: { id: teamNode.id },
+      data: { name: name.trim(), parentId: nextParentOrgNodeId },
+    });
+
+    if (nextParentOrgNodeId !== teamNode.parentId) {
+      await rebuildOrgClosures(tx);
+    }
   });
-  await syncTeamLeader(id, leaderId, teamNode.parentId);
+
+  const departmentOrgNodeId = await findDepartmentOrgNodeId(nextParentOrgNodeId);
+  if (!departmentOrgNodeId) throw new Error("上级节点未绑定部门");
+  await syncTeamLeader(id, leaderId, departmentOrgNodeId);
 
   revalidateOrganization();
 }
@@ -468,15 +498,26 @@ export async function deleteTeam(formData: FormData) {
 
   const teamNode = await findTeamNode(id);
   if (!teamNode) throw new Error("小组不存在");
-  await assertDepartmentManagerScope(currentUser, teamNode.parentId);
+  await assertDepartmentManagerScope(currentUser, teamNode.id);
+
+  const departmentOrgNodeId = await findDepartmentOrgNodeId(teamNode.id);
+  if (!departmentOrgNodeId) throw new Error("小组未绑定部门");
+
+  const childTeamCount = await prisma.orgNode.count({
+    where: { parentId: teamNode.id, nodeType: "TEAM" },
+  });
+  if (childTeamCount > 0) {
+    throw new Error("请先处理下级小组后再删除当前小组");
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.user.updateMany({
       where: { orgNodeId: teamNode.id },
-      data: { orgNodeId: teamNode.parentId },
+      data: { orgNodeId: departmentOrgNodeId },
     });
     await tx.orgClosure.deleteMany({ where: { OR: [{ ancestorId: teamNode.id }, { descendantId: teamNode.id }] } });
     await tx.orgNode.delete({ where: { id: teamNode.id } });
+    await rebuildOrgClosures(tx);
   });
 
   revalidateOrganization();

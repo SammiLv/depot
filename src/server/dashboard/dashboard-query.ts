@@ -4,6 +4,7 @@ import { getOwnerWhereByScope } from "@/server/permissions/data-scope";
 import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/role-labels";
 import { buildKpiWhereByPermission, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
+import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilitiesForUser,
@@ -103,7 +104,8 @@ export async function getDashboardData(currentUser: CurrentUser) {
       })
     : [];
   const orgNodeById = new Map(relatedOrgNodes.map((node) => [node.id, node]));
-  const currentParentNode = currentOrgNode?.parentId ? orgNodeById.get(currentOrgNode.parentId) ?? null : null;
+  const currentDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
+  const currentDepartmentNode = currentDepartmentOrgNodeId ? orgNodeById.get(currentDepartmentOrgNodeId) ?? null : null;
 
   const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
   const visibleAnnualPlans = activePlans.filter((plan) =>
@@ -113,9 +115,16 @@ export async function getDashboardData(currentUser: CurrentUser) {
   function getPlanScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
     const ownerOrgNodeId = plan.ownerOrgNodeId;
     if (!ownerOrgNodeId) return null;
-    const ownerNode = orgNodeById.get(ownerOrgNodeId);
-    if (!ownerNode) return null;
-    return ownerNode.nodeType === "TEAM" ? ownerNode.parentId : ownerNode.id;
+
+    let ownerNode = orgNodeById.get(ownerOrgNodeId) ?? null;
+    while (ownerNode) {
+      if (ownerNode.nodeType === "DEPARTMENT") {
+        return ownerNode.id;
+      }
+      ownerNode = ownerNode.parentId ? orgNodeById.get(ownerNode.parentId) ?? null : null;
+    }
+
+    return null;
   }
 
   const visiblePlanMetricIds = Array.from(new Set(visibleAnnualPlans.flatMap((plan) => plan.metrics.map((metric) => metric.id))));
@@ -377,9 +386,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
       roleLabel: getRoleLabel(currentUser.roleType),
       dataScopeLabel: getDataScopeLabel(currentUser.roleType),
       title: currentUser.title,
-      departmentName: currentOrgNode?.nodeType === "TEAM"
-        ? currentParentNode?.name ?? "未设置部门"
-        : currentOrgNode?.name ?? "未设置部门",
+      departmentName: currentDepartmentNode?.name ?? (currentOrgNode?.nodeType === "DEPARTMENT" ? currentOrgNode.name : "未设置部门"),
       teamName: currentOrgNode?.nodeType === "TEAM"
         ? currentOrgNode.name
         : "未设置小组",
