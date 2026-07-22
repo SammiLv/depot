@@ -13,7 +13,7 @@
 #   bash scripts/depot-prod.sh restart             # 重启
 #   bash scripts/depot-prod.sh pull                # 拉代码+重建+重启
 #   bash scripts/depot-prod.sh status              # 查看运行状态
-#   bash scripts/depot-prod.sh config [--show-secret]  # 查看生效配置
+#   bash scripts/depot-prod.sh config              # 查看生效配置
 #   bash scripts/depot-prod.sh tail                # 实时跟踪日志
 #   bash scripts/depot-prod.sh help
 #
@@ -36,8 +36,8 @@
 #   - 日志追加到 logs/server.log（不刷终端）
 #   - PID 写入 logs/server.pid
 #   - Git Bash MSYS 路径转换已绕开
-#   - 防重复启动、防误杀、start 失败自动 tail 日志
-#   - 状态/配置展示时敏感字段自动脱敏
+#   - 防重复启动、仅清理本服务进程（不误杀其他 node）、start 失败自动 tail 日志
+#   - 状态/配置展示时不输出 AppKey 明文或片段
 # =============================================================================
 
 set -u
@@ -105,21 +105,29 @@ pid_alive() {
   [ -n "$pid" ] && MSYS_NO_PATHCONV=1 tasklist /FI "PID eq $pid" 2>/dev/null | grep -q "$pid"
 }
 
-# 取所有 node.exe 的 PID（这台机器只跑本服务，可以放心全杀）
-node_pids() {
-  tasklist 2>/dev/null | grep "node.exe" | awk '{print $2}' | sort -u
-}
+# 清理本服务残留进程：PID 文件记录的旧实例 + 目标端口监听者（不误杀其他 node）
+cleanup_depot_processes() {
+  local old_pid pids
 
-# 杀所有 node.exe 进程（仅适用于本机只跑本服务的场景）
-kill_all_node() {
-  local pids
-  pids=$(node_pids)
-  if [ -z "$pids" ]; then
-    return 0
+  if [ -f "$PID_FILE" ]; then
+    old_pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -n "$old_pid" ] && pid_alive "$old_pid"; then
+      log "结束 PID 文件记录的旧实例: $old_pid"
+      kill_pid "$old_pid" || true
+      sleep 1
+    fi
   fi
-  for p in $pids; do
-    kill_pid "$p" || true
-  done
+
+  pids="$(pid_listening_on_port)"
+  if [ -n "$pids" ]; then
+    log "清理端口 $PORT 上的监听进程..."
+    for old_pid in $pids; do
+      kill_pid "$old_pid" || true
+    done
+    sleep 1
+  fi
+
+  rm -f "$PID_FILE"
 }
 
 # 从 .env 读一个 key 的值（去掉首尾引号）
@@ -157,14 +165,20 @@ write_env_value() {
   fi
 }
 
-# 脱敏显示:前 6 字符 + ***
-mask_secret() {
+# 敏感配置状态（不输出任何密钥字符）
+secret_status() {
   local v="$1"
   if [ -z "$v" ]; then
-    echo "(空)"
+    echo "(未配置)"
   else
-    echo "${v:0:6}***(共 ${#v} 字符)"
+    echo "(已配置)"
   fi
+}
+
+# 是否为 AppKey 类敏感字段（禁止任何输出到终端/日志）
+is_app_key_field() {
+  local key="$1"
+  [[ "$key" == "DINGTALK_APP_KEY" || "$key" == "APP_KEY" ]]
 }
 
 # 探测 node.exe 路径,返回其所在目录(标准输出);找不到则 stderr 报错
@@ -213,10 +227,16 @@ depot-prod.sh — Depot 生产环境启动/控制程序
        bash scripts/depot-prod.sh restart
        bash scripts/depot-prod.sh stop
        bash scripts/depot-prod.sh status
-       bash scripts/depot-prod.sh config [--show-secret]
+       bash scripts/depot-prod.sh config
        bash scripts/depot-prod.sh tail
   3) 拉新代码（git pull + 重建 + 重启，一次完成）:
        bash scripts/depot-prod.sh pull
+  4) 推当前分支到 GitHub（自动处理镜像规则）:
+       bash scripts/depot-prod.sh push               # 推当前分支
+       bash scripts/depot-prod.sh push --branch=dev # 推指定分支
+  5) 代码提交（git add + commit 到本地）:
+       bash scripts/depot-prod.sh commit -m "fix: xxx"   # 提交 + 写 message
+       bash scripts/depot-prod.sh commit --message="fix: xxx"  # 同上(等号语法)
 
 init 选项（持久化到 .env）:
   --app-key=KEY    钉钉 AppKey
@@ -228,13 +248,19 @@ start / restart 选项（仅本次生效，临时覆盖）:
   --app-url=URL    临时覆盖 APP_URL
   --app-key=KEY    临时覆盖 AppKey
 
+push 选项:
+  --branch=NAME    推哪个分支（默认当前分支）
+
+commit 选项:
+  -m "MESSAGE"     commit message(必填)
+  --message=MSG    同上(等号语法)
+
 配置优先级: CLI 参数 > .env > 脚本默认
 
 示例:
-  bash scripts/depot-prod.sh init --app-key=elected --app-url=http://depot.rj-info.com
+  bash scripts/depot-prod.sh init --app-key=YOUR_KEY --app-url=http://depot.rj-info.com
   bash scripts/depot-prod.sh start
   bash scripts/depot-prod.sh config
-  bash scripts/depot-prod.sh config --show-secret
   bash scripts/depot-prod.sh restart --port=8080    # 临时换端口
 USAGE
 }
@@ -242,13 +268,12 @@ USAGE
 # ----- 命令实现 -----
 
 cmd_config() {
-  local show_secret="${SHOW_SECRET:-0}"
   if [ ! -f "$ENV_FILE" ]; then
     warn ".env 不存在: $ENV_FILE"
     warn "请先执行: bash scripts/depot-prod.sh init --app-key=xxx"
     return 1
   fi
-  log ".env 当前配置（敏感字段已脱敏，加 --show-secret 显示完整值）:"
+  log ".env 当前配置（AppKey 仅显示是否已配置，不输出任何密钥内容）:"
   while IFS='=' read -r key value; do
     # 跳过注释/空行
     [[ "$key" =~ ^[[:space:]]*# ]] && continue
@@ -258,13 +283,10 @@ cmd_config() {
     v="${v#\"}"
     v="${v%\'}"
     v="${v#\'}"
-    # 敏感字段脱敏（除非 --show-secret）
-    if [[ "$key" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then
-      if [ "$show_secret" = "1" ]; then
-        printf "  %s = %s\n" "$key" "$v"
-      else
-        printf "  %s = %s\n" "$key" "$(mask_secret "$v")"
-      fi
+    if is_app_key_field "$key"; then
+      printf "  %s = %s\n" "$key" "$(secret_status "$v")"
+    elif [[ "$key" =~ (SECRET|TOKEN|PASSWORD) ]]; then
+      printf "  %s = %s\n" "$key" "$(secret_status "$v")"
     else
       printf "  %s = %s\n" "$key" "$v"
     fi
@@ -283,12 +305,12 @@ cmd_init() {
   local cur_key cur_url
   cur_key=$(read_env_value "DINGTALK_APP_KEY")
   cur_url=$(read_env_value "APP_URL")
-  printf "  DINGTALK_APP_KEY = %s\n" "$(mask_secret "$cur_key")"
+  printf "  DINGTALK_APP_KEY = %s\n" "$(secret_status "$cur_key")"
   printf "  APP_URL         = %s\n" "${cur_url:-(未设置)}"
   echo ""
 
   log "=== 即将写入 ==="
-  [ -n "$DINGTALK_APP_KEY" ] && log "  DINGTALK_APP_KEY = $DINGTALK_APP_KEY"
+  [ -n "$DINGTALK_APP_KEY" ] && log "  DINGTALK_APP_KEY = (将更新)"
   [ -n "$APP_URL" ] && log "  APP_URL         = $APP_URL"
   echo ""
 
@@ -321,7 +343,7 @@ cmd_status() {
     ok "服务在运行"
     log "  端口 $PORT 监听 PID: $pids"
     log "  APP_URL:  $APP_URL"
-    log "  APP_KEY:  $(mask_secret "$DINGTALK_APP_KEY")"
+    log "  APP_KEY:  $(secret_status "$DINGTALK_APP_KEY")"
     if [ -f "$PID_FILE" ]; then
       log "  PID 文件: $PID_FILE (内容: $(cat "$PID_FILE" 2>/dev/null))"
     fi
@@ -335,16 +357,10 @@ cmd_status() {
 }
 
 cmd_start() {
-  # 0. 清理本机所有 node 进程（这台机器只跑本服务；80/8080 等所有实例都会被清掉）
-  #    这样 --port 临时覆盖 / restart 才是真正"清后启"
-  if [ -n "$(node_pids)" ]; then
-    log "清理本机残留 node 进程..."
-    kill_all_node
-    sleep 2
-  fi
-  rm -f "$PID_FILE"
+  # 0. 仅清理本服务：PID 文件旧实例 + 目标端口（不误杀其他 node 进程）
+  cleanup_depot_processes
 
-  # 1. 防重复（清理后端口仍占用 → 非 next start 进程占用）
+  # 1. 防重复（清理后端口仍占用 → 非本服务进程占用）
   if [ -n "$(pid_listening_on_port)" ]; then
     warn "端口 $PORT 清理后仍被占用（非 next start 进程？），请检查："
     pid_listening_on_port
@@ -355,7 +371,7 @@ cmd_start() {
 
   log "启动服务:"
   log "  HOSTNAME=$HOSTNAME_BIND  PORT=$PORT  APP_URL=$APP_URL"
-  log "  DINGTALK_APP_KEY=$(mask_secret "$DINGTALK_APP_KEY")"
+  log "  APP_KEY=$(secret_status "$DINGTALK_APP_KEY")"
   log "日志写入: $LOG_FILE"
 
   # 探测 node 路径(直接调 next 的 JS 入口,绕开 npx/npm/cmd 链)
@@ -380,6 +396,9 @@ cmd_start() {
     # 加 System32(npm/next 偶尔会调 cmd.exe 等系统工具)
     PATH="/c/Windows/System32:$node_dir:$PATH"
     export PATH
+    # CLI 临时覆盖优先于 .env 文件（export 后 Next.js 进程内生效）
+    export APP_URL="$APP_URL"
+    export DINGTALK_APP_KEY="$DINGTALK_APP_KEY"
     # 不套 nohup（nohup 会成为 $! 的进程，PID 不准）
     # 不套 setsid（Git Bash 没有这个命令）
     # Git Bash 下直接 & 即可：bash 退出时后台进程不会被 SIGHUP 杀掉（win32 子进程）
@@ -512,18 +531,40 @@ cmd_pull() {
   fi
   echo ""
 
-  # 5. 重新构建（短暂停机：先停服务 → 清 .next → build）
+  # 5. 重新构建（短暂停机；build 失败则回滚 .next 并恢复旧服务）
   log "=== 5/6 重新构建（短暂停机）==="
+  local was_running=0
+  if [ -n "$(pid_listening_on_port)" ]; then
+    was_running=1
+  fi
   log "  步骤 5a: 停止当前服务"
   cmd_stop || true
-  log "  步骤 5b: 清理旧构建产物 .next/"
-  rm -rf "$PROJECT_DIR/.next"
+  log "  步骤 5b: 备份旧构建产物 .next/ → .next.backup/"
+  rm -rf "$PROJECT_DIR/.next.backup"
+  if [ -d "$PROJECT_DIR/.next" ]; then
+    mv "$PROJECT_DIR/.next" "$PROJECT_DIR/.next.backup"
+  fi
   log "  步骤 5c: 执行 next build"
   if ! (cd "$PROJECT_DIR" && npm run build); then
     err "build 失败"
-    err "服务已停止，请排查后手动: bash scripts/depot-prod.sh start"
+    rm -rf "$PROJECT_DIR/.next"
+    if [ -d "$PROJECT_DIR/.next.backup" ]; then
+      mv "$PROJECT_DIR/.next.backup" "$PROJECT_DIR/.next"
+      ok "已回滚到备份的 .next/"
+    fi
+    if [ "$was_running" = "1" ]; then
+      warn "正在恢复旧版本服务..."
+      if cmd_start; then
+        ok "旧版本服务已恢复运行"
+      else
+        err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+      fi
+    else
+      warn "部署前服务未运行，请排查 build 错误后手动 start"
+    fi
     return 1
   fi
+  rm -rf "$PROJECT_DIR/.next.backup"
   echo ""
 
   # 6. 启动新版本
@@ -540,6 +581,157 @@ cmd_tail() {
   tail -n 50 -f "$LOG_FILE"
 }
 
+# 备份/恢复镜像规则的辅助函数
+push_mirror_backup() {
+  PUSH_MIRROR_BACKUP_FILE=$(mktemp)
+  git config --local --get-regexp "^url\..*\.insteadOf$" > "$PUSH_MIRROR_BACKUP_FILE" 2>/dev/null || true
+  while IFS= read -r rule; do
+    [ -z "$rule" ] && continue
+    local key="${rule%% *}"
+    git config --local --unset "$key" 2>/dev/null || true
+  done < "$PUSH_MIRROR_BACKUP_FILE"
+  PUSH_MIRROR_BACKUP_COUNT=$(wc -l < "$PUSH_MIRROR_BACKUP_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+}
+
+push_mirror_restore() {
+  if [ -z "$PUSH_MIRROR_BACKUP_FILE" ] || [ ! -f "$PUSH_MIRROR_BACKUP_FILE" ]; then
+    return 0
+  fi
+  while IFS= read -r rule; do
+    [ -z "$rule" ] && continue
+    local key="${rule%% *}"
+    local val="${rule#* }"
+    git config --local --add "$key" "$val" 2>/dev/null || true
+  done < "$PUSH_MIRROR_BACKUP_FILE"
+  rm -f "$PUSH_MIRROR_BACKUP_FILE" 2>/dev/null
+  PUSH_MIRROR_BACKUP_FILE=""
+}
+
+cmd_push() {
+  # 0/4 网络预检(关键:不通就告诉用户怎么开代理,不要瞎试)
+  log "=== 0/4 网络预检(必须可达 GitHub)==="
+  if ! curl -sI --connect-timeout 5 --max-time 10 https://github.com 2>/dev/null | grep -q "^HTTP"; then
+    err "GitHub 不可达,无法 push"
+    err ""
+    err "可能原因:"
+    err "  1. 公司网络封 GitHub(直连 + ghfast.top 镜像都只能读不能写)"
+    err "  2. 没启用代理 / VPN / FlClash 等"
+    err ""
+    err "建议:"
+    err "  - 启用 FlClash / VPN / 公司代理"
+    err "  - 在浏览器里手动访问 https://github.com 验证"
+    err "  - 通后再回来重试"
+    return 1
+  fi
+  ok "GitHub 可达"
+  echo ""
+
+  # 1/4 临时清掉镜像规则
+  log "=== 1/4 临时清掉镜像规则 ==="
+  PUSH_MIRROR_BACKUP_FILE=""
+  push_mirror_backup
+  if [ "${PUSH_MIRROR_BACKUP_COUNT:-0}" -gt 0 ]; then
+    ok "已临时清除 $PUSH_MIRROR_BACKUP_COUNT 条镜像规则"
+  else
+    log "无镜像规则,跳过"
+  fi
+  echo ""
+
+  # 2/4 实际 push
+  local branch="$PUSH_BRANCH"
+  if [ -z "$branch" ]; then
+    branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+  fi
+  log "=== 2/4 git push origin $branch ==="
+  log "(会用 Windows Credential Manager 缓存的 PAT;首次会弹 GitHub Token 框)"
+  local push_ok=0
+  (cd "$PROJECT_DIR" && git push origin "$branch") || push_ok=1
+
+  # 3/4 恢复镜像规则
+  echo ""
+  log "=== 3/4 恢复镜像规则 ==="
+  push_mirror_restore
+  ok "已恢复(以后 pull 自动走镜像)"
+  echo ""
+
+  # 4/4 总结
+  log "=== 4/4 总结 ==="
+  if [ "$push_ok" -ne 0 ]; then
+    err "git push 失败"
+    err ""
+    err "可能原因:"
+    err "  - 403:PAT 权限不够 → 检查 https://github.com/settings/tokens"
+    err "  - 404:仓库不存在 / 拼写错"
+    err "  - 401:PAT 无效 / 已过期"
+    err "  - 'could not read Username':WorkBuddy bash 无 tty 设备,需要用 cmd 跑"
+    return 1
+  fi
+  ok "push 成功"
+  (cd "$PROJECT_DIR" && git status -sb)
+  log ""
+  ok "镜像规则已恢复(后续 pull/fetch 自动走 ghfast.top 加速)"
+}
+
+cmd_commit() {
+  # 0/4 检查 git 用户配置
+  log "=== 0/4 检查 git 用户配置 ==="
+  local user_name user_email
+  user_name=$(cd "$PROJECT_DIR" && git config user.name 2>/dev/null)
+  user_email=$(cd "$PROJECT_DIR" && git config user.email 2>/dev/null)
+  if [ -z "$user_name" ] || [ -z "$user_email" ]; then
+    err "git 用户配置未设置"
+    err ""
+    err "请跑:"
+    err "  git config --global user.name  \"你的名字\""
+    err "  git config --global user.email \"你的邮箱\""
+    return 1
+  fi
+  log "user.name:  $user_name"
+  log "user.email: $user_email"
+  echo ""
+
+  # 1/4 预览要 commit 的内容
+  log "=== 1/4 要 commit 的内容 ==="
+  if [ -z "$(cd "$PROJECT_DIR" && git status --short)" ]; then
+    err "工作区干净,没有可提交的内容"
+    return 1
+  fi
+  (cd "$PROJECT_DIR" && git status --short)
+  echo ""
+  log "改动统计:"
+  (cd "$PROJECT_DIR" && git diff --stat HEAD 2>/dev/null | tail -5)
+  echo ""
+
+  # 2/4 接收 commit message
+  local msg="$COMMIT_MSG"
+  if [ -z "$msg" ]; then
+    err "请通过 -m \"你的 commit message\" 传 commit message"
+    err "示例: bash scripts/depot-prod.sh commit -m \"fix: xxx\""
+    return 1
+  fi
+  log "commit message: $msg"
+  echo ""
+
+  # 3/4 实际 commit
+  log "=== 3/4 提交 ==="
+  log "git add -A"
+  (cd "$PROJECT_DIR" && git add -A) || { err "git add 失败"; return 1; }
+  log "git commit -m \"$msg\""
+  if (cd "$PROJECT_DIR" && git commit -m "$msg"); then
+    ok "commit 成功"
+  else
+    err "git commit 失败"
+    return 1
+  fi
+  echo ""
+
+  # 4/4 总结
+  log "=== 4/4 总结 ==="
+  (cd "$PROJECT_DIR" && git log --oneline -3)
+  log ""
+  warn "改动还在本地仓库,跑 'bash scripts/depot-prod.sh push' 推上去"
+}
+
 # ----- 参数解析 -----
 parse_options() {
   while [[ $# -gt 0 ]]; do
@@ -548,7 +740,9 @@ parse_options() {
       --hostname=*)   HOSTNAME_BIND="${1#*=}"    ;;
       --app-url=*)    APP_URL="${1#*=}"          ;;
       --app-key=*)    DINGTALK_APP_KEY="${1#*=}" ;;
-      --show-secret)  SHOW_SECRET=1              ;;
+      --branch=*)     PUSH_BRANCH="${1#*=}"      ;;
+      -m)             COMMIT_MSG="$2"; shift    ;;
+      --message=*)    COMMIT_MSG="${1#*=}"      ;;
       -h|--help)      print_usage; exit 0        ;;
       *) err "未知选项: $1"; print_usage; exit 2 ;;
     esac
@@ -565,7 +759,8 @@ PORT="$DEFAULT_PORT"
 HOSTNAME_BIND="$DEFAULT_HOSTNAME"
 APP_URL=""
 DINGTALK_APP_KEY=""
-SHOW_SECRET=0
+PUSH_BRANCH=""
+COMMIT_MSG=""
 
 # 2. 用 .env 覆盖默认值（如果 .env 存在）
 if [ -f "$ENV_FILE" ]; then
@@ -588,6 +783,8 @@ case "$CMD" in
   stop)     cmd_stop     ;;
   restart)  cmd_restart  ;;
   pull)     cmd_pull     ;;
+  push)     cmd_push     ;;
+  commit)   cmd_commit   ;;
   status)   cmd_status   ;;
   config)   cmd_config   ;;
   tail)     cmd_tail     ;;
