@@ -354,7 +354,14 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
       await action(formData);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
+      if (err instanceof Error) {
+        const message = err.message.includes("Unique constraint failed") || err.message.includes("P2002")
+          ? "该指标已添加过，无需重复添加"
+          : err.message;
+        setError(message);
+        return;
+      }
+      setError("保存失败");
     }
   }
 

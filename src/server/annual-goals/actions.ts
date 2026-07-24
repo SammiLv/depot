@@ -9,10 +9,14 @@ import {
   getDescendantOrgNodeIds,
   findOrgNodeById,
 } from "@/server/organization/org-tree-utils";
-import type { AnnualGoalOwnerType, AnnualMetricCalculationType, Prisma, RiskStatus } from "@prisma/client";
+import { Prisma, type AnnualGoalOwnerType, type AnnualMetricCalculationType, type RiskStatus } from "@prisma/client";
 
 const calculationTypes = ["RATIO", "BOOLEAN", "MANUAL_SCORE"] as const;
 const riskStatuses = ["NORMAL", "SLIGHT_DELAY", "RISK", "COMPLETED"] as const;
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
 
 async function findTeamRecordByOrgNodeId(orgNodeId: string) {
   const teamNode = await prisma.orgNode.findUnique({
@@ -687,24 +691,61 @@ export async function createAnnualGoalMetric(formData: FormData) {
         departmentOrgNodeId: teamDepartmentOrgNodeId,
         ownerOrgNodeId: teamDepartmentOrgNodeId,
       });
-      await prisma.annualGoalMetric.create({
-        data: {
-          planId,
-          sourceMetricId,
-          metricCode: sourceMetric.metricCode,
-          name: sourceMetric.name,
-          description: sourceMetric.description,
-          targetValue: sourceMetric.targetValue,
-          currentValue: sourceMetric.currentValue,
-          unit: sourceMetric.unit,
-          weight,
-          calculationType: sourceMetric.calculationType,
-          riskStatus: sourceMetric.riskStatus,
-          responsibleUserId,
-          createdById: plan.createdById,
-          updatedById: context.user.id,
-        },
+
+      const existing = await prisma.annualGoalMetric.findFirst({
+        where: { planId, sourceMetricId },
       });
+
+      try {
+        if (existing) {
+          if (existing.deletedAt) {
+            await prisma.annualGoalMetric.update({
+              where: { id: existing.id },
+              data: {
+                deletedAt: null,
+                metricCode: sourceMetric.metricCode,
+                name: sourceMetric.name,
+                description: sourceMetric.description,
+                targetValue: sourceMetric.targetValue,
+                currentValue: sourceMetric.currentValue,
+                unit: sourceMetric.unit,
+                weight,
+                calculationType: sourceMetric.calculationType,
+                riskStatus: sourceMetric.riskStatus,
+                responsibleUserId,
+                updatedById: context.user.id,
+              },
+            });
+          } else {
+            throw new Error("该指标已添加过，无需重复添加");
+          }
+        } else {
+          await prisma.annualGoalMetric.create({
+            data: {
+              planId,
+              sourceMetricId,
+              metricCode: sourceMetric.metricCode,
+              name: sourceMetric.name,
+              description: sourceMetric.description,
+              targetValue: sourceMetric.targetValue,
+              currentValue: sourceMetric.currentValue,
+              unit: sourceMetric.unit,
+              weight,
+              calculationType: sourceMetric.calculationType,
+              riskStatus: sourceMetric.riskStatus,
+              responsibleUserId,
+              createdById: plan.createdById,
+              updatedById: context.user.id,
+            },
+          });
+        }
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new Error("该指标已添加过，无需重复添加");
+        }
+        throw error;
+      }
+
       revalidateAnnualGoals();
       return;
     }

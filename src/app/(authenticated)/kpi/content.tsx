@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, Progress, avatarColor } from "@/components/ui-kit";
-import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deletePersonalKpi } from "@/server/kpi/actions";
+import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deleteKpiTemplate, deletePersonalKpi } from "@/server/kpi/actions";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
 
@@ -74,6 +74,7 @@ function TemplateList({
   onView,
   onEdit,
   onToggleActive,
+  onDelete,
 }: {
   rows: TemplateRow[];
   canManageKpiTemplate: boolean;
@@ -81,6 +82,7 @@ function TemplateList({
   onView: (row: TemplateRow) => void;
   onEdit: (row: TemplateRow) => void;
   onToggleActive: (row: TemplateRow) => Promise<void>;
+  onDelete: (row: TemplateRow) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-2xl border border-border bg-card">
@@ -125,7 +127,7 @@ function TemplateList({
                     <button type="button" className="text-primary hover:underline" onClick={() => onView(row)}>查看</button>
                     {canManageKpiTemplate ? <button type="button" className="text-primary hover:underline" onClick={() => onEdit(row)}>编辑</button> : null}
                     {canToggleKpiTemplate ? <button type="button" className="text-primary hover:underline" onClick={() => void onToggleActive(row)}>{row.isActive ? "禁用" : "启用"}</button> : null}
-                    {canManageKpiTemplate ? <button type="button" className="text-destructive hover:underline" disabled>删除</button> : null}
+                    {canManageKpiTemplate ? <button type="button" className="text-destructive hover:underline" onClick={() => onDelete(row)}>删除</button> : null}
                   </div>
                 </td>
               </tr>
@@ -155,6 +157,30 @@ function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: Quarterl
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">确认删除成员「{row.userName}」的季度 KPI？删除后该成员本季度的 KPI 数据将被移除，且无法恢复。</p>
+      <div className="flex justify-end gap-3">
+        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
+      </div>
+    </div>
+  );
+}
+
+function TemplateDeleteConfirm({ row, onClose, onComplete }: { row: TemplateRow; onClose: () => void; onComplete: () => void }) {
+  async function handleDelete() {
+    try {
+      await deleteKpiTemplate(row.id);
+      onComplete();
+      onClose();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除 KPI 模板失败");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        确认删除模板「{row.name}」？删除后引用该模板的指标可能会受影响，且列表中将不再显示该模板。
+      </p>
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={onClose}>取消</Button>
         <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
@@ -1249,6 +1275,7 @@ export function KpiContent({ data }: Props) {
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
   const [deleteQuarterlyKpiRow, setDeleteQuarterlyKpiRow] = useState<QuarterlyKpiRow | null>(null);
+  const [deleteTemplateRow, setDeleteTemplateRow] = useState<TemplateRow | null>(null);
   const [templateDrawerMode, setTemplateDrawerMode] = useState<"view" | "edit" | null>(null);
   const quarterOptions = useMemo<QuarterOption[]>(
     () => [1, 2, 3, 4].map((quarter) => ({ value: quarter, label: `Q${quarter}` })),
@@ -1631,6 +1658,7 @@ export function KpiContent({ data }: Props) {
                   window.alert(error instanceof Error ? error.message : "切换模板状态失败");
                 }
               }}
+              onDelete={(row) => setDeleteTemplateRow(row)}
             />
           </div>
         )}
@@ -1714,6 +1742,23 @@ export function KpiContent({ data }: Props) {
             onClose={() => setDeleteQuarterlyKpiRow(null)}
             onComplete={() => {
               setDeleteQuarterlyKpiRow(null);
+              router.refresh();
+            }}
+          />
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        open={Boolean(deleteTemplateRow)}
+        onClose={() => setDeleteTemplateRow(null)}
+        title="删除 KPI 模板"
+      >
+        {deleteTemplateRow ? (
+          <TemplateDeleteConfirm
+            row={deleteTemplateRow}
+            onClose={() => setDeleteTemplateRow(null)}
+            onComplete={() => {
+              setDeleteTemplateRow(null);
               router.refresh();
             }}
           />

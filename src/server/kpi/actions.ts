@@ -153,6 +153,10 @@ type PersonalKpiDeleteSummary = {
   personalKpiId: string;
 };
 
+type TemplateDeleteSummary = {
+  templateId: string;
+};
+
 type TemplateImportRow = {
   itemName: string;
   score: number;
@@ -1224,6 +1228,44 @@ export async function toggleKpiTemplateActive(templateId: string): Promise<{ tem
   revalidatePath("/kpi");
   revalidatePath("/dashboard");
   return { templateId: updated.id, isActive: updated.isActive };
+}
+
+export async function deleteKpiTemplate(templateId: string): Promise<TemplateDeleteSummary> {
+  const context = await requireKpiTemplateEditor();
+  const template = await prisma.kpiTemplate.findFirst({
+    where: { id: templateId, deletedAt: null },
+    select: { id: true, departmentOrgNodeId: true },
+  });
+  if (!template) throw new Error("模板不存在或已删除");
+
+  const allowedDepartmentIds = await resolveAllowedDepartmentOrgNodeIds(context);
+  if (allowedDepartmentIds !== null && !allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
+    throw new Error("无权限删除该模板");
+  }
+
+  const deletedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.kpiTemplateItem.deleteMany({
+      where: { templateId },
+    });
+    await tx.kpiTemplateAssignment.updateMany({
+      where: { templateId, isActive: true },
+      data: { isActive: false },
+    });
+    await tx.kpiTemplate.update({
+      where: { id: templateId },
+      data: {
+        deletedAt,
+        isActive: false,
+        isLatest: false,
+        updatedById: context.currentUser.id,
+      },
+    });
+  });
+
+  revalidatePath("/kpi");
+  revalidatePath("/dashboard");
+  return { templateId };
 }
 
 export async function deletePersonalKpi(personalKpiId: string): Promise<PersonalKpiDeleteSummary> {
