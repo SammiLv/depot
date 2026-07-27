@@ -633,10 +633,18 @@ push_mirror_restore() {
   PUSH_MIRROR_BACKUP_FILE=""
 }
 
+# GitHub 是否可达（Git Bash 下 curl -sI | grep ^HTTP 会误判，改用 http_code）
+github_reachable() {
+  local code
+  code=$(curl -sS -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 15 https://github.com 2>/dev/null || echo "000")
+  [ "$code" != "000" ] && [ -n "$code" ]
+}
+
 cmd_push() {
   # 0/4 网络预检(关键:不通就告诉用户怎么开代理,不要瞎试)
   log "=== 0/4 网络预检(必须可达 GitHub)==="
-  if ! curl -sI --connect-timeout 5 --max-time 10 https://github.com 2>/dev/null | grep -q "^HTTP"; then
+  if ! github_reachable; then
     err "GitHub 不可达,无法 push"
     err ""
     err "可能原因:"
