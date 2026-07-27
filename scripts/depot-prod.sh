@@ -468,6 +468,21 @@ cmd_restart() {
   cmd_start
 }
 
+# pull 是否需要 npm install：node_modules 缺失，或本次 pull 改动了 package*.json
+pull_needs_npm_install() {
+  if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+    return 0
+  fi
+  if [ ! -d "$PROJECT_DIR/node_modules/next" ]; then
+    return 0
+  fi
+  if (cd "$PROJECT_DIR" && git diff --name-only ORIG_HEAD HEAD 2>/dev/null \
+    | grep -qE '^package(-lock)?\.json$'); then
+    return 0
+  fi
+  return 1
+}
+
 cmd_pull() {
   # 0. 工作区状态检查（有未提交改动就拒绝，避免覆盖本地修改）
   log "=== 0/6 检查工作区状态 ==="
@@ -498,11 +513,22 @@ cmd_pull() {
   fi
   echo ""
 
-  # 2. 装依赖（用国内镜像，避开 npmjs.org 限制）
-  log "=== 2/6 安装依赖（npm install）==="
-  if ! (cd "$PROJECT_DIR" && npm install --registry=https://registry.npmmirror.com); then
-    err "npm install 失败"
-    return 1
+  # 2. 装依赖（仅 node_modules 缺失或 package*.json 有变更时）
+  log "=== 2/6 检查/安装依赖（npm install）==="
+  if pull_needs_npm_install; then
+    if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+      log "node_modules 不存在，执行 npm install"
+    elif [ ! -d "$PROJECT_DIR/node_modules/next" ]; then
+      log "node_modules 不完整（缺少 next），执行 npm install"
+    else
+      log "package.json / package-lock.json 有变更，执行 npm install"
+    fi
+    if ! (cd "$PROJECT_DIR" && npm install --registry=https://registry.npmmirror.com); then
+      err "npm install 失败"
+      return 1
+    fi
+  else
+    ok "依赖未变且 node_modules 已存在，跳过 npm install"
   fi
   echo ""
 
