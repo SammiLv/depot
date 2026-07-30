@@ -5,11 +5,14 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
-import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, getScopedAnnualGoalPermissionMatrix, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
+import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
-import { kpiAbilityKeys, kpiOrdinaryPermissionAbilityKeys, manageableRoleTypes, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
-import { getActivePermissionGrants } from "@/server/permissions/permission-query";
+import { kpiOrdinaryPermissionAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, Prisma, RoleType } from "@prisma/client";
+import {
+  getKpiApprovalPolicyActiveScopeKey,
+  parseKpiApprovalPolicySteps,
+} from "@/server/kpi/approval-policy-admin";
 
 const managerEditableRoles: RoleType[] = ["TEAM_LEADER", "MEMBER"];
 const permissionRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
@@ -1129,3 +1132,140 @@ export async function applyKpiPermissionToAllDepartments(formData: FormData) {
   revalidateOrganization();
 }
 
+async function requireKpiApprovalPolicyEditor(policyId: string) {
+  const policy = await prisma.kpiApprovalPolicy.findUnique({ where: { id: policyId } });
+  if (!policy) throw new Error("审批策略不存在");
+  await requirePermissionEditor({
+    scopeType: policy.scopeType,
+    ...(policy.scopeType === "DEPARTMENT" ? { departmentOrgNodeId: policy.departmentOrgNodeId } : {}),
+  });
+  return policy;
+}
+
+async function assertSingleActiveKpiApprovalPolicy(
+  scopeType: "SYSTEM" | "DEPARTMENT",
+  departmentOrgNodeId: string,
+  excludeId?: string,
+) {
+  const conflict = await prisma.kpiApprovalPolicy.findFirst({
+    where: {
+      scopeType,
+      departmentOrgNodeId,
+      isActive: true,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true, name: true },
+  });
+  if (conflict) {
+    throw new Error(`当前范围已有启用策略“${conflict.name}”，请先停用后再启用新策略`);
+  }
+}
+
+async function validateExplicitApprovalUsers(
+  steps: ReturnType<typeof parseKpiApprovalPolicySteps>,
+  scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string },
+) {
+  const userIds = [...new Set(steps.flatMap((step) => step.resolverUserId ? [step.resolverUserId] : []))];
+  if (userIds.length === 0) return;
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds }, isActive: true, deletedAt: null },
+    select: { id: true, orgNodeId: true },
+  });
+  if (users.length !== userIds.length) throw new Error("部分指定审批人不存在或已失效");
+  if (scope.scopeType === "DEPARTMENT") {
+    for (const user of users) {
+      if (await findDepartmentOrgNodeId(user.orgNodeId) !== scope.departmentOrgNodeId) {
+        throw new Error("部门策略的指定审批人必须属于当前部门");
+      }
+    }
+  }
+}
+
+export async function saveKpiApprovalPolicy(formData: FormData) {
+  const scope = await resolvePermissionScope(formData);
+  await requirePermissionEditor(scope);
+  const id = String(formData.get("id") ?? "").trim() || null;
+  const name = String(formData.get("name") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const isActive = formData.get("isActive") === "true";
+  if (!name) throw new Error("审批策略名称不能为空");
+  if (name.length > 100) throw new Error("审批策略名称不能超过 100 个字符");
+  const steps = parseKpiApprovalPolicySteps(String(formData.get("steps") ?? "[]"));
+  await validateExplicitApprovalUsers(steps, scope);
+
+  if (id) {
+    const existing = await requireKpiApprovalPolicyEditor(id);
+    if (existing.scopeType !== scope.scopeType || existing.departmentOrgNodeId !== scope.departmentOrgNodeId) {
+      throw new Error("不能修改审批策略所属范围");
+    }
+  }
+  if (isActive) {
+    await assertSingleActiveKpiApprovalPolicy(scope.scopeType, scope.departmentOrgNodeId, id ?? undefined);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const activeScopeKey = getKpiApprovalPolicyActiveScopeKey(
+      scope.scopeType,
+      scope.departmentOrgNodeId,
+      isActive,
+    );
+    const policy = id
+      ? await tx.kpiApprovalPolicy.update({
+          where: { id },
+          data: { name, description, isActive, activeScopeKey },
+        })
+      : await tx.kpiApprovalPolicy.create({
+          data: {
+            scopeType: scope.scopeType,
+            departmentOrgNodeId: scope.departmentOrgNodeId,
+            name,
+            description,
+            isActive,
+            activeScopeKey,
+          },
+        });
+    await tx.kpiApprovalPolicyStep.deleteMany({ where: { policyId: policy.id } });
+    await tx.kpiApprovalPolicyStep.createMany({
+      data: steps.map((step, index) => ({
+        policyId: policy.id,
+        stepOrder: index + 1,
+        ...step,
+      })),
+    });
+  });
+  revalidateOrganization();
+}
+
+export async function toggleKpiApprovalPolicy(formData: FormData) {
+  const id = String(formData.get("id") ?? "").trim();
+  const policy = await requireKpiApprovalPolicyEditor(id);
+  if (!policy.isActive) {
+    await assertSingleActiveKpiApprovalPolicy(policy.scopeType, policy.departmentOrgNodeId, policy.id);
+  }
+  await prisma.kpiApprovalPolicy.update({
+    where: { id },
+    data: {
+      isActive: !policy.isActive,
+      activeScopeKey: getKpiApprovalPolicyActiveScopeKey(
+        policy.scopeType,
+        policy.departmentOrgNodeId,
+        !policy.isActive,
+      ),
+    },
+  });
+  revalidateOrganization();
+}
+
+export async function deleteKpiApprovalPolicy(formData: FormData) {
+  const id = String(formData.get("id") ?? "").trim();
+  await requireKpiApprovalPolicyEditor(id);
+  const usageCount = await prisma.personalKpi.count({ where: { approvalPolicyId: id } });
+  if (usageCount > 0) {
+    throw new Error("该审批策略已生成 KPI 单据，只能停用，不能删除");
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.kpiApprovalPolicyStep.deleteMany({ where: { policyId: id } });
+    await tx.kpiApprovalPolicy.delete({ where: { id } });
+  });
+  revalidateOrganization();
+}

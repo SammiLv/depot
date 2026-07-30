@@ -57,6 +57,14 @@ export async function getDashboardData(currentUser: CurrentUser) {
     resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreManager),
     resolvePermissionCoverage(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreFinal),
   ]);
+  const assignedApprovalSteps = await prisma.personalKpiApprovalStep.findMany({
+    where: {
+      approverId: currentUser.id,
+      status: "PENDING",
+    },
+    select: { personalKpiId: true },
+  });
+  const assignedPersonalKpiIds = [...new Set(assignedApprovalSteps.map((step) => step.personalKpiId))];
 
   const [currentOrgNode, todoCount, latestTodos, latestNotifications, activePlans, quarterlyWorks, kpis] = await Promise.all([
     currentUser.orgNodeId
@@ -83,7 +91,13 @@ export async function getDashboardData(currentUser: CurrentUser) {
     }).then((plans) => plans.filter((plan) => Boolean(plan.departmentOrgNodeId))),
     prisma.quarterlyWork.findMany({ where: await getOwnerWhereByScope(currentUser) }),
     prisma.personalKpi.findMany({
-      where: viewKpiWhere,
+      where: {
+        deletedAt: null,
+        OR: [
+          viewKpiWhere,
+          ...(assignedPersonalKpiIds.length ? [{ id: { in: assignedPersonalKpiIds } }] : []),
+        ],
+      },
       select: { id: true, status: true, userId: true },
     }),
   ]);
@@ -235,16 +249,20 @@ export async function getDashboardData(currentUser: CurrentUser) {
     const activeStep = activeApprovalStepByKpiId.get(kpi.id);
     const hasApprovalChain = hasApprovalChainByKpiId.get(kpi.id) ?? false;
 
+    if (hasApprovalChain) {
+      return activeStep?.approverId === currentUser.id;
+    }
+
     if (canScoreLeader && kpi.status === "PENDING_LEADER_SCORE") {
-      return !hasApprovalChain || activeStep?.approverId === currentUser.id;
+      return true;
     }
 
     if (canScoreManager && kpi.status === "PENDING_MANAGER_SCORE") {
-      return !hasApprovalChain || activeStep?.approverId === currentUser.id;
+      return true;
     }
 
     if (canScoreFinal && kpi.status === "PENDING_FINAL_REVIEW") {
-      return !hasApprovalChain || activeStep?.approverId === currentUser.id;
+      return true;
     }
 
     return false;
