@@ -541,18 +541,14 @@ cmd_pull() {
   echo ""
 
   # 4. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
-  #    必须在 db/ 子目录跑，prisma.config.ts 才会被正确加载
-  #    但 prisma.config.ts 按 cwd 解析数据库路径，从 db/ 跑会生成嵌套的 db/db/dev.db
-  #    应用实际连的是 db/dev.db（Prisma 客户端走 resolveDatabaseUrl 的解析逻辑）
-  #    所以嵌套 db/db/dev.db 是空的垃圾，migrate 跑完要清掉
   log "=== 4/6 应用数据库迁移（migrate deploy）==="
-  if ! (cd "$PROJECT_DIR/db" && npx prisma migrate deploy); then
+  if ! (cd "$PROJECT_DIR" && npx prisma migrate deploy --config db/prisma.config.ts); then
     err "migrate deploy 失败"
     return 1
   fi
-  # 清理嵌套产生的空 db/db/ 目录
+  # 兼容旧版误生成的嵌套库目录
   if [ -d "$PROJECT_DIR/db/db" ]; then
-    warn "清理嵌套的 db/db/ 目录（migrate 产生的空库，应用实际连的是 db/dev.db）"
+    warn "清理嵌套的 db/db/ 目录"
     rm -rf "$PROJECT_DIR/db/db"
   fi
   echo ""

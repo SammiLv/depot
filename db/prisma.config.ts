@@ -3,10 +3,14 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const DB_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(DB_DIR, "..");
 
 function resolveDatabaseUrl() {
   if (!process.env.DATABASE_URL || process.env.DATABASE_URL === "file:./dev.db") {
-    return `file:${path.resolve(process.cwd(), "db/dev.db")}`;
+    return `file:${path.join(PROJECT_ROOT, "db", "dev.db")}`;
   }
 
   if (process.env.DATABASE_URL.startsWith("file:")) {
@@ -14,7 +18,7 @@ function resolveDatabaseUrl() {
     if (path.isAbsolute(rawPath)) {
       return process.env.DATABASE_URL;
     }
-    return `file:${path.resolve(process.cwd(), rawPath)}`;
+    return `file:${path.resolve(PROJECT_ROOT, rawPath)}`;
   }
 
   return process.env.DATABASE_URL;

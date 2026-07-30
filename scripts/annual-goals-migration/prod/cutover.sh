@@ -177,8 +177,8 @@ run_prisma_generate() {
 
 run_prisma_deploy() {
   prepare_toolchain || return 1
-  log "执行 prisma migrate deploy..."
-  if ! (cd "$PROJECT_DIR/db" && npx prisma migrate deploy); then
+  log "执行 prisma migrate deploy（目标: db/dev.db）..."
+  if ! (cd "$PROJECT_DIR" && npx prisma migrate deploy --config db/prisma.config.ts); then
     err "migrate deploy 失败"
     return 1
   fi
