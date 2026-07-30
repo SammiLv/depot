@@ -418,7 +418,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
   const activeWhere = await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities);
 
-  const plans = await prisma.annualGoalPlan.findMany({
+  const plans = (await prisma.annualGoalPlan.findMany({
     where: activeWhere,
     orderBy: [{ year: "desc" }, { createdAt: "desc" }],
     include: {
@@ -427,7 +427,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
         orderBy: { createdAt: "desc" },
       },
     },
-  });
+  })).filter((plan) => Boolean(plan.departmentOrgNodeId));
   const currentYear = new Date().getFullYear();
   const availableYears = Array.from(new Set([...plans.map((plan) => plan.year), currentYear])).sort((a, b) => b - a);
   const resolvedSelectedYear = availableYears.includes(selectedYear ?? Number.NaN)
@@ -446,10 +446,13 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   if (departmentAncestorOrgNodeId) {
     scopedOrgNodeIdSet.add(departmentAncestorOrgNodeId);
   }
+  const scopedOrgNodeIdsForQuery = Array.from(scopedOrgNodeIdSet).filter(Boolean);
   const orgNodes = await prisma.orgNode.findMany({
     where: currentUser.roleType === "ADMIN"
       ? { nodeType: { in: ["DEPARTMENT", "TEAM"] } }
-      : { id: { in: Array.from(scopedOrgNodeIdSet) }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
+      : scopedOrgNodeIdsForQuery.length
+        ? { id: { in: scopedOrgNodeIdsForQuery }, nodeType: { in: ["DEPARTMENT", "TEAM"] } }
+        : { id: "__no_org_node__" },
     orderBy: [{ nodeType: "asc" }, { name: "asc" }],
     select: { id: true, name: true, nodeType: true, parentId: true },
   });
@@ -470,7 +473,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     ...visibleDepartmentOrgNodeIds,
     ...teams.map((team) => team.departmentOrgNodeId),
     ...plans.map((plan) => plan.departmentOrgNodeId),
-  ]));
+  ].filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))));
   const scopeDepartments: ScopeDepartment[] = scopedDepartmentOrgNodeIds.map((orgNodeId) => ({
     orgNodeId,
     name: departmentNameByOrgNodeId.get(orgNodeId) ?? "部门",
@@ -484,7 +487,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   const scopedUsersOrgNodeIds = Array.from(new Set([
     ...scopedDepartmentOrgNodeIds,
     ...scopedTeamOrgNodeIds,
-  ]));
+  ].filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))));
 
   const allPlans = plans;
   const metricIds = allPlans.flatMap((p) => p.metrics.map((m) => m.id));

@@ -122,11 +122,24 @@ migration_held() {
 
 hold_later_migrations() {
   mkdir -p "$HOLD_DIR"
-  local name moved=0
+  local name moved=0 failed=0
   for name in "$MIGRATION_INDEXES" "$MIGRATION_CLEANUP"; do
     if migration_present "$name"; then
-      log "暂存迁移目录: $name → $HOLD_DIR/"
-      mv "$MIGRATIONS_DIR/$name" "$HOLD_DIR/"
+      if migration_held "$name"; then
+        log "暂存区已有 $name，删除 migrations/ 内副本"
+        rm -rf "$MIGRATIONS_DIR/$name" || {
+          err "无法删除 migrations/ 内 $name"
+          failed=1
+          continue
+        }
+      else
+        log "暂存迁移目录: $name → $HOLD_DIR/"
+        if ! mv "$MIGRATIONS_DIR/$name" "$HOLD_DIR/"; then
+          err "暂存失败: $name"
+          failed=1
+          continue
+        fi
+      fi
       moved=1
     elif migration_held "$name"; then
       log "已在暂存区: $name"
@@ -134,6 +147,14 @@ hold_later_migrations() {
       warn "找不到迁移目录: $name"
     fi
   done
+  if [ "$failed" = "1" ]; then
+    err "Phase 2/3 未完全移出 migrations/，已中止（避免误 apply）"
+    return 1
+  fi
+  if migration_present "$MIGRATION_INDEXES" || migration_present "$MIGRATION_CLEANUP"; then
+    err "Phase 2/3 仍在 migrations/ 内，已中止"
+    return 1
+  fi
   if [ "$moved" = "1" ]; then
     ok "Phase 2/3 迁移已移出 migrations/（apply 时不会被执行）"
   fi
@@ -275,7 +296,7 @@ cmd_pre_migrate() {
   fi
   confirm_or_abort "预迁移将：暂存 Phase2/3 → apply Phase1（加法迁移，旧应用仍可运行）→ dry-run" || return 1
 
-  hold_later_migrations
+  hold_later_migrations || return 1
   run_prisma_generate || return 1
   run_prisma_deploy || return 1
   cmd_dry_run
@@ -290,7 +311,7 @@ cmd_cutover() {
   confirm_or_abort "正式切换将：停服 → 备份 → 数据 apply → Phase2/3 迁移 → build → 启服。年度指标模块会短暂不可用。" || return 1
 
   log "=== 1/8 暂存 Phase 2/3 迁移 ==="
-  hold_later_migrations
+  hold_later_migrations || return 1
 
   log "=== 2/8 停止服务 ==="
   bash "$DEPOT_PROD" stop || return 1

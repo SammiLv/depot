@@ -80,7 +80,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
       where: await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities),
       include: { metrics: { where: { deletedAt: null } } },
       orderBy: [{ year: "desc" }, { createdAt: "desc" }],
-    }),
+    }).then((plans) => plans.filter((plan) => Boolean(plan.departmentOrgNodeId))),
     prisma.quarterlyWork.findMany({ where: await getOwnerWhereByScope(currentUser) }),
     prisma.personalKpi.findMany({
       where: viewKpiWhere,
@@ -92,7 +92,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
     ...(currentOrgNode ? [currentOrgNode.id] : []),
     ...(currentOrgNode?.parentId ? [currentOrgNode.parentId] : []),
     ...activePlans.map((plan) => plan.departmentOrgNodeId),
-  ]));
+  ].filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))));
   const relatedOrgNodes = relatedOrgNodeIds.length
     ? await prisma.orgNode.findMany({
         where: { id: { in: relatedOrgNodeIds } },
