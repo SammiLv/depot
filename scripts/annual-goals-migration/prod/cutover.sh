@@ -86,7 +86,28 @@ ensure_node_path() {
       return 0
     fi
   done
+  if [ -d "/c/nvm/versions/node" ]; then
+    local nvm_node
+    nvm_node=$(ls -1d /c/nvm/versions/node/v* 2>/dev/null | tail -1)
+    if [ -n "$nvm_node" ] && { [ -x "$nvm_node/node.exe" ] || [ -x "$nvm_node/node" ]; }; then
+      echo "$nvm_node"
+      return 0
+    fi
+  fi
   return 1
+}
+
+prepare_toolchain() {
+  local node_dir
+  node_dir=$(ensure_node_path) || {
+    err "找不到 node.exe（Git Bash 默认 PATH 不含 npm）"
+    err "请确认 Node 已安装，或手动执行："
+    err '  export PATH="/c/Program Files/nodejs:$PATH"'
+    err '  export PATH="/c/Users/rj/.workbuddy/binaries/node/versions/22.22.2:$PATH"'
+    return 1
+  }
+  export PATH="/c/Windows/System32:$node_dir:$PATH"
+  log "node 路径: $node_dir/node (已加入 PATH)"
 }
 
 migration_present() {
@@ -149,11 +170,13 @@ cleanup_nested_db_dir() {
 }
 
 run_prisma_generate() {
+  prepare_toolchain || return 1
   log "重新生成 Prisma Client..."
   (cd "$PROJECT_DIR" && npm run prisma:generate) || return 1
 }
 
 run_prisma_deploy() {
+  prepare_toolchain || return 1
   log "执行 prisma migrate deploy..."
   if ! (cd "$PROJECT_DIR/db" && npx prisma migrate deploy); then
     err "migrate deploy 失败"
@@ -166,12 +189,7 @@ run_prisma_deploy() {
 run_tsx() {
   local script_path="$1"
   shift
-  local node_dir
-  node_dir=$(ensure_node_path) || {
-    err "找不到 node.exe"
-    return 1
-  }
-  export PATH="/c/Windows/System32:$node_dir:$PATH"
+  prepare_toolchain || return 1
   (cd "$PROJECT_DIR" && npx tsx "$script_path" "$@")
 }
 
@@ -307,6 +325,7 @@ cmd_cutover() {
 
   if [ "$SKIP_BUILD" != "1" ]; then
     log "=== 8/8 构建应用 ==="
+    prepare_toolchain || return 1
     if ! (cd "$PROJECT_DIR" && npm run build); then
       err "build 失败，服务仍处于停止状态"
       warn "可用 rollback 恢复数据库后排查"
