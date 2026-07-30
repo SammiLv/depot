@@ -5,6 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualGoalPlanStatus, PrismaClient } from "@prisma/client";
+import { getLegacyMetric, getLegacyPlan, loadLegacyMetricsById, loadLegacyPlansById, mapLegacyPlanStatus } from "./legacy-plan";
 
 type Mode = "dry-run" | "apply";
 
@@ -62,12 +63,6 @@ function resolveDatabaseUrl() {
   }
   const rawPath = configured.slice("file:".length);
   return path.isAbsolute(rawPath) ? configured : `file:${path.resolve(process.cwd(), rawPath)}`;
-}
-
-function mapPlanStatus(plan: { isActive: boolean; approvalStatus: string }): AnnualGoalPlanStatus {
-  if (!plan.isActive) return AnnualGoalPlanStatus.CLOSED;
-  if (plan.approvalStatus === "APPROVED") return AnnualGoalPlanStatus.ACTIVE;
-  return AnnualGoalPlanStatus.DRAFT;
 }
 
 function sameNullable(left: string | null, right: string | null) {
@@ -134,19 +129,25 @@ async function main() {
   ]);
 
   const diagnostics: Diagnostic[] = [];
+  const legacyById = loadLegacyPlansById();
+  const legacyMetricById = loadLegacyMetricsById();
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
   const sourceById = new Map(sources.map((source) => [source.id, source]));
-  const departmentPlans = plans.filter((plan) => plan.ownerType === "DEPARTMENT");
-  const teamPlans = plans.filter((plan) => plan.ownerType === "TEAM");
-  const departmentPlanUpdates = departmentPlans.map((plan) => ({
-    id: plan.id,
-    departmentOrgNodeId: plan.ownerOrgNodeId,
-    status: mapPlanStatus(plan),
-  }));
+  const departmentPlans = plans.filter((plan) => getLegacyPlan(legacyById, plan.id)?.ownerType === "DEPARTMENT");
+  const teamPlans = plans.filter((plan) => getLegacyPlan(legacyById, plan.id)?.ownerType === "TEAM");
+  const departmentPlanUpdates = departmentPlans.map((plan) => {
+    const legacy = getLegacyPlan(legacyById, plan.id)!;
+    return {
+      id: plan.id,
+      departmentOrgNodeId: legacy.ownerOrgNodeId,
+      status: mapLegacyPlanStatus(legacy) as AnnualGoalPlanStatus,
+    };
+  });
 
   for (const plan of departmentPlans) {
-    const owner = plan.ownerOrgNodeId ? orgNodeById.get(plan.ownerOrgNodeId) : null;
-    if (!plan.ownerOrgNodeId || !owner || owner.nodeType !== "DEPARTMENT") {
+    const legacy = getLegacyPlan(legacyById, plan.id)!;
+    const owner = legacy.ownerOrgNodeId ? orgNodeById.get(legacy.ownerOrgNodeId) : null;
+    if (!legacy.ownerOrgNodeId || !owner || owner.nodeType !== "DEPARTMENT") {
       diagnostics.push({
         severity: "ERROR",
         kind: "INVALID_DEPARTMENT_PLAN_OWNER",
@@ -180,17 +181,18 @@ async function main() {
   let assignmentsToRestore = 0;
 
   for (const plan of teamPlans) {
-    const team = plan.ownerOrgNodeId ? orgNodeById.get(plan.ownerOrgNodeId) : null;
+    const legacy = getLegacyPlan(legacyById, plan.id)!;
+    const team = legacy.ownerOrgNodeId ? orgNodeById.get(legacy.ownerOrgNodeId) : null;
     const departmentOrgNodeId =
-      plan.ownerOrgNodeId && team?.nodeType === "TEAM" ? findDepartmentOrgNodeId(plan.ownerOrgNodeId) : null;
+      legacy.ownerOrgNodeId && team?.nodeType === "TEAM" ? findDepartmentOrgNodeId(legacy.ownerOrgNodeId) : null;
 
-    if (!plan.ownerOrgNodeId || !team || team.nodeType !== "TEAM" || !departmentOrgNodeId) {
+    if (!legacy.ownerOrgNodeId || !team || team.nodeType !== "TEAM" || !departmentOrgNodeId) {
       diagnostics.push({
         severity: "INFO",
         kind: "SKIPPED_ORPHAN_TEAM_PLAN",
         planId: plan.id,
         planName: plan.name,
-        teamOrgNodeId: plan.ownerOrgNodeId,
+        teamOrgNodeId: legacy.ownerOrgNodeId,
         teamName: team?.name ?? null,
         metricId: null,
         metricCode: null,
@@ -205,16 +207,20 @@ async function main() {
     for (const metric of plan.metrics) {
       let targetType: "METRIC" | "SOURCE";
       let targetId: string;
+      const legacyMetric = getLegacyMetric(legacyMetricById, metric.id);
+      const linkedSourceMetricId = legacyMetric?.sourceMetricId ?? null;
 
-      if (metric.sourceMetricId) {
-        const source = sourceById.get(metric.sourceMetricId);
+      if (linkedSourceMetricId) {
+        const source = sourceById.get(linkedSourceMetricId);
         const sourcePlan = source?.parentMetric.plan;
-        const sourceDepartmentOrgNodeId = sourcePlan?.departmentOrgNodeId ?? sourcePlan?.ownerOrgNodeId;
+        const sourceLegacy = getLegacyPlan(legacyById, sourcePlan?.id);
+        const sourceDepartmentOrgNodeId =
+          sourceLegacy?.departmentOrgNodeId ?? sourceLegacy?.ownerOrgNodeId ?? null;
         if (
           !source ||
           !sourcePlan ||
           sourcePlan.deletedAt ||
-          sourcePlan.ownerType !== "DEPARTMENT" ||
+          sourceLegacy?.ownerType !== "DEPARTMENT" ||
           sourcePlan.year !== plan.year ||
           sourceDepartmentOrgNodeId !== departmentOrgNodeId
         ) {
@@ -229,7 +235,7 @@ async function main() {
             metricCode: metric.metricCode,
             metricName: metric.name,
             targetType: "SOURCE",
-            targetId: metric.sourceMetricId,
+            targetId: linkedSourceMetricId,
             detail: "sourceMetricId 不属于该小组所在部门的同年度有效部门方案",
           });
           continue;
@@ -237,11 +243,13 @@ async function main() {
         targetType = "SOURCE";
         targetId = source.id;
       } else {
-        const matchingPlans = departmentPlans.filter(
-          (departmentPlan) =>
+        const matchingPlans = departmentPlans.filter((departmentPlan) => {
+          const departmentLegacy = getLegacyPlan(legacyById, departmentPlan.id)!;
+          return (
             departmentPlan.year === plan.year &&
-            (departmentPlan.departmentOrgNodeId ?? departmentPlan.ownerOrgNodeId) === departmentOrgNodeId
-        );
+            (departmentLegacy.departmentOrgNodeId ?? departmentLegacy.ownerOrgNodeId) === departmentOrgNodeId
+          );
+        });
         const matchingMetrics = matchingPlans.flatMap((departmentPlan) =>
           departmentPlan.metrics.filter(
             (departmentMetric) =>

@@ -5,6 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
+import { getLegacyMetric, getLegacyPlan, loadLegacyMetricsById, loadLegacyPlansById } from "./legacy-plan";
 
 type Mode = "dry-run" | "apply";
 type TargetKind = "METRIC" | "SOURCE";
@@ -174,12 +175,19 @@ async function main() {
   ]);
 
   const diagnostics: Diagnostic[] = [];
+  const legacyById = loadLegacyPlansById();
+  const legacyMetricById = loadLegacyMetricsById();
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
   const metricById = new Map(metrics.map((metric) => [metric.id, metric]));
   const sourceById = new Map(sources.map((source) => [source.id, source]));
-  const activeDepartmentMetrics = metrics.filter(
-    (metric) => !metric.deletedAt && !metric.plan.deletedAt && metric.plan.ownerType === "DEPARTMENT"
-  );
+  const activeDepartmentMetrics = metrics.filter((metric) => {
+    const legacy = getLegacyPlan(legacyById, metric.planId);
+    return (
+      !metric.deletedAt &&
+      !metric.plan.deletedAt &&
+      legacy?.ownerType === "DEPARTMENT"
+    );
+  });
 
   function findDepartmentOrgNodeId(teamOrgNodeId: string) {
     let current = orgNodeById.get(teamOrgNodeId);
@@ -194,12 +202,13 @@ async function main() {
 
   function resolveSourceTarget(sourceMetricId: string): Target | null {
     const source = sourceById.get(sourceMetricId);
+    const sourcePlanLegacy = getLegacyPlan(legacyById, source?.parentMetric.planId);
     if (
       !source ||
       source.deletedAt ||
       source.parentMetric.deletedAt ||
       source.parentMetric.plan.deletedAt ||
-      source.parentMetric.plan.ownerType !== "DEPARTMENT"
+      sourcePlanLegacy?.ownerType !== "DEPARTMENT"
     ) {
       return null;
     }
@@ -229,12 +238,22 @@ async function main() {
       return { target: null, error: "metricId 未指向有效指标" };
     }
     if (metric.sourceMetricId) {
+      const target = resolveSourceTarget(metric.sourceMetricId);
       return {
-        target: resolveSourceTarget(metric.sourceMetricId),
-        error: "TEAM 指标的 sourceMetricId 未指向有效部门元指标",
+        target,
+        error: target ? null : "TEAM 指标的 sourceMetricId 未指向有效部门元指标",
       };
     }
-    if (metric.plan.ownerType === "DEPARTMENT") {
+    const legacyMetric = getLegacyMetric(legacyMetricById, metric.id);
+    if (legacyMetric?.sourceMetricId) {
+      const target = resolveSourceTarget(legacyMetric.sourceMetricId);
+      return {
+        target,
+        error: target ? null : "TEAM 指标的 sourceMetricId 未指向有效部门元指标",
+      };
+    }
+    const planLegacy = getLegacyPlan(legacyById, metric.planId);
+    if (planLegacy?.ownerType === "DEPARTMENT") {
       return {
         target: {
           kind: "METRIC",
@@ -245,20 +264,24 @@ async function main() {
         error: null,
       };
     }
-    if (metric.plan.ownerType !== "TEAM" || !metric.plan.ownerOrgNodeId) {
+    if (planLegacy?.ownerType !== "TEAM" || !planLegacy.ownerOrgNodeId) {
       return { target: null, error: "季度指标不属于有效部门或小组方案" };
     }
 
-    const departmentOrgNodeId = findDepartmentOrgNodeId(metric.plan.ownerOrgNodeId);
+    const departmentOrgNodeId = findDepartmentOrgNodeId(planLegacy.ownerOrgNodeId);
     if (!departmentOrgNodeId) {
       return { target: null, error: "TEAM 方案无法定位所属部门" };
     }
     const matches = activeDepartmentMetrics.filter(
-      (departmentMetric) =>
-        departmentMetric.plan.year === metric.plan.year &&
-        (departmentMetric.plan.departmentOrgNodeId ?? departmentMetric.plan.ownerOrgNodeId) ===
-          departmentOrgNodeId &&
-        departmentMetric.metricCode === metric.metricCode
+      (departmentMetric) => {
+        const departmentPlanLegacy = getLegacyPlan(legacyById, departmentMetric.planId);
+        return (
+          departmentMetric.plan.year === metric.plan.year &&
+          (departmentPlanLegacy?.departmentOrgNodeId ?? departmentPlanLegacy?.ownerOrgNodeId) ===
+            departmentOrgNodeId &&
+          departmentMetric.metricCode === metric.metricCode
+        );
+      }
     );
     if (matches.length !== 1) {
       return {
