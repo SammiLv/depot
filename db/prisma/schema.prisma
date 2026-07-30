@@ -126,6 +126,13 @@ enum KpiTemplateAssignmentTargetType {
   ROLE
 }
 
+enum KpiApprovalResolverType {
+  TEAM_LEADER
+  DEPARTMENT_MANAGER
+  ADMIN
+  EXPLICIT_USER
+}
+
 model User {
   id                   String    @id @default(cuid())
   dingtalkUserId       String?   @unique
@@ -233,24 +240,24 @@ model RoleAnnualGoalPermission {
 }
 
 model OrgPermissionGrant {
-  id          String                   @id @default(cuid())
+  id          String                      @id @default(cuid())
   moduleKey   OrgPermissionModuleKey
   abilityKey  OrgPermissionAbilityKey
   scopeType   OrgPermissionGrantScopeType
-  subjectType OrgPermissionSubjectType @default(ROLE)
+  subjectType OrgPermissionSubjectType    @default(ROLE)
   roleType    RoleType?
   userId      String?
   orgNodeId   String?
-  isActive    Boolean                  @default(true)
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
+  isActive    Boolean                     @default(true)
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
 
+  @@unique([moduleKey, abilityKey, scopeType, subjectType, roleType, userId, orgNodeId])
   @@index([moduleKey, abilityKey, subjectType, roleType, isActive])
   @@index([moduleKey, abilityKey, subjectType, userId, isActive])
   @@index([subjectType, roleType])
   @@index([subjectType, userId])
   @@index([orgNodeId])
-  @@unique([moduleKey, abilityKey, scopeType, subjectType, roleType, userId, orgNodeId])
 }
 
 model ApprovalInstance {
@@ -591,6 +598,41 @@ model KpiTemplateAssignment {
   @@index([isActive])
 }
 
+model KpiApprovalPolicy {
+  id                  String              @id @default(cuid())
+  scopeType           PermissionScopeType @default(SYSTEM)
+  departmentOrgNodeId String              @default("")
+  name                String
+  description         String?
+  isActive            Boolean             @default(true)
+  activeScopeKey      String?             @unique
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@unique([scopeType, departmentOrgNodeId, name])
+  @@index([scopeType, departmentOrgNodeId, isActive])
+}
+
+model KpiApprovalPolicyStep {
+  id                      String                  @id @default(cuid())
+  policyId                String
+  stepOrder               Int
+  label                   String
+  ancestorDepth           Int?
+  resolverType            KpiApprovalResolverType
+  resolverUserId          String?
+  skipIfSelf              Boolean                 @default(true)
+  skipIfDuplicateApprover Boolean                 @default(true)
+  allowSkipWhenNoApprover Boolean                 @default(false)
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+
+  @@unique([policyId, stepOrder])
+  @@index([policyId])
+  @@index([resolverType])
+  @@index([resolverUserId])
+}
+
 model KpiTemplateItem {
   id              String   @id @default(cuid())
   templateId      String
@@ -608,33 +650,38 @@ model KpiTemplateItem {
 }
 
 model PersonalKpi {
-  id              String    @id @default(cuid())
-  year            Int
-  quarter         Int
-  userId          String
-  orgNodeId       String?
-  templateId      String?
-  templateVersion Int?
-  status          KpiStatus @default(DRAFT)
-  selfScore       Float?
-  leaderScore     Float?
-  managerScore    Float?
-  finalScore      Float?
-  selfComment     String?
-  leaderComment   String?
-  managerComment  String?
-  submittedAt     DateTime?
-  completedAt     DateTime?
-  initializedAt   DateTime?
-  initializedById String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                                String               @id @default(cuid())
+  year                              Int
+  quarter                           Int
+  userId                            String
+  orgNodeId                         String?
+  templateId                        String?
+  templateVersion                   Int?
+  approvalPolicyId                  String?
+  approvalPolicyName                String?
+  approvalPolicyScopeType           PermissionScopeType?
+  approvalPolicyDepartmentOrgNodeId String?
+  status                            KpiStatus            @default(DRAFT)
+  selfScore                         Float?
+  leaderScore                       Float?
+  managerScore                      Float?
+  finalScore                        Float?
+  selfComment                       String?
+  leaderComment                     String?
+  managerComment                    String?
+  submittedAt                       DateTime?
+  completedAt                       DateTime?
+  initializedAt                     DateTime?
+  initializedById                   String?
+  createdAt                         DateTime             @default(now())
+  updatedAt                         DateTime             @updatedAt
+  deletedAt                         DateTime?
 
   @@unique([year, quarter, userId])
   @@index([year, quarter])
   @@index([userId])
   @@index([orgNodeId])
+  @@index([approvalPolicyId])
 }
 
 model PersonalKpiItem {
@@ -667,6 +714,20 @@ model PersonalKpiItem {
   @@index([relatedWorkId])
 }
 
+model PersonalKpiItemStepScore {
+  id                String   @id @default(cuid())
+  personalKpiItemId String
+  approvalStepId    String
+  score             Float    @default(0)
+  comment           String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([personalKpiItemId, approvalStepId])
+  @@index([approvalStepId])
+  @@index([personalKpiItemId])
+}
+
 model PersonalKpiActionLog {
   id            String   @id @default(cuid())
   personalKpiId String
@@ -681,16 +742,25 @@ model PersonalKpiActionLog {
 }
 
 model PersonalKpiApprovalStep {
-  id            String   @id @default(cuid())
-  personalKpiId String
-  stepOrder     Int
-  stageKey      String
-  approverId    String
-  status        String   @default("PENDING")
-  completedAt   DateTime?
-  createdAt     DateTime @default(now())
+  id             String                   @id @default(cuid())
+  personalKpiId  String
+  policyStepId   String?
+  stepOrder      Int
+  stageKey       String
+  stepLabel      String?
+  ancestorDepth  Int?
+  resolverType   KpiApprovalResolverType?
+  resolverUserId String?
+  orgNodeId      String?
+  approverId     String
+  status         String                   @default("PENDING")
+  comment        String?
+  actedAt        DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime                 @default(now())
 
   @@index([personalKpiId, stepOrder])
+  @@index([policyStepId])
   @@index([approverId, status])
 }
 
