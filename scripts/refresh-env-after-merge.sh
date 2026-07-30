@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 START_SCRIPT="${1:-}"
-NODE_ENV="${NODE_ENV:-production}"
+NODE_ENV="${NODE_ENV:-}"
 
 cd "$ROOT_DIR"
 
@@ -33,6 +33,21 @@ if [[ ! "$START_SCRIPT" =~ ^(dev|start): ]]; then
   echo "Only dev:* and start:* scripts are allowed."
   echo
   print_usage
+  exit 1
+fi
+
+if [[ -z "$NODE_ENV" ]]; then
+  if [[ "$START_SCRIPT" == dev:* ]]; then
+    NODE_ENV="development"
+  else
+    NODE_ENV="production"
+  fi
+fi
+
+if [[ "$NODE_ENV" == "production" || "$START_SCRIPT" == start:* ]]; then
+  echo "Refusing to run refresh-env-after-merge.sh in production mode."
+  echo "This development helper uses prisma db push --accept-data-loss."
+  echo "Use the reviewed production migration workflow instead."
   exit 1
 fi
 
