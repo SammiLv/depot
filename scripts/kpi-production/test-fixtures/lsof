@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+# The orchestration test database has no live application handles.
+exit 1
