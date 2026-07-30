@@ -2,15 +2,26 @@
 
 import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
-import type { KpiStatus, KpiTemplate, KpiTemplateAssignment, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
+import type { KpiStatus, KpiTemplate, KpiTemplateAssignment, OrgNodeType, OrgPermissionAbilityKey, Prisma, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { buildKpiWhereByPermission, buildUserWhereByPermission, resolveAuthorizedOrgNodeIds, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
-import { findNearestDepartmentOrgNodeId, getDescendantOrgNodes } from "@/server/organization/org-tree-utils";
-import { resolveApprovalChain } from "@/server/kpi/approval-chain";
+import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
+import {
+  buildPersonalKpiApprovalPolicyData,
+  buildPersonalKpiApprovalStepData,
+  resolveKpiApprovalSnapshot,
+  type KpiApprovalSnapshot,
+} from "@/server/kpi/approval-snapshot";
+import {
+  getEditableStageFromApprovalStep,
+  getLegacyNextKpiStatus,
+  isSelfReviewStatus,
+  type KpiEditableStage,
+} from "@/server/kpi/approval-workflow";
+import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
 
-const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"] as const;
 const assignmentPriority: Record<"USER" | "ORG_NODE" | "ROLE", number> = {
   USER: 3,
   ORG_NODE: 2,
@@ -97,6 +108,7 @@ type PersonalKpiSnapshotInput = {
   orgNodeId: string | null;
   initializerId: string;
   template: TemplateSummary;
+  approvalSnapshot: KpiApprovalSnapshot;
   items: Array<{
     id: string;
     name: string;
@@ -867,6 +879,7 @@ async function createPersonalKpiSnapshot(
       orgNodeId: input.orgNodeId,
       templateId: input.template.id,
       templateVersion: input.template.version,
+      ...buildPersonalKpiApprovalPolicyData(input.approvalSnapshot),
       status: "DRAFT",
       initializedAt: new Date(),
       initializedById: input.initializerId,
@@ -888,15 +901,9 @@ async function createPersonalKpiSnapshot(
     });
   }
 
-  const chain = await resolveApprovalChain(input.userId, input.orgNodeId);
-  if (chain.length > 0) {
+  if (input.approvalSnapshot.steps.length > 0) {
     await tx.personalKpiApprovalStep.createMany({
-      data: chain.map((step) => ({
-        personalKpiId: createdKpi.id,
-        stepOrder: step.stepOrder,
-        stageKey: step.stageKey,
-        approverId: step.approverId,
-      })),
+      data: buildPersonalKpiApprovalStepData(createdKpi.id, input.approvalSnapshot),
     });
   }
 
@@ -1247,6 +1254,17 @@ export async function deletePersonalKpi(personalKpiId: string): Promise<Personal
   }
 
   await prisma.$transaction(async (tx) => {
+    const itemIds = (await tx.personalKpiItem.findMany({
+      where: { personalKpiId },
+      select: { id: true },
+    })).map((item) => item.id);
+    if (itemIds.length > 0) {
+      await tx.personalKpiItemStepScore.deleteMany({
+        where: { personalKpiItemId: { in: itemIds } },
+      });
+    }
+    await tx.personalKpiApprovalStep.deleteMany({ where: { personalKpiId } });
+    await tx.personalKpiActionLog.deleteMany({ where: { personalKpiId } });
     await tx.personalKpiItem.deleteMany({
       where: { personalKpiId },
     });
@@ -1261,7 +1279,6 @@ export async function deletePersonalKpi(personalKpiId: string): Promise<Personal
   return { personalKpiId };
 }
 
-type KpiEditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL";
 type KpiScoringAction = "save" | "submit" | "approve" | "reject";
 
 type SummaryFields = {
@@ -1279,32 +1296,7 @@ type KpiActionLogInput = {
   remark?: string | null;
 };
 
-function getKpiEditableStage(status: KpiStatus): KpiEditableStage | null {
-  if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") return "SELF";
-  if (status === "PENDING_LEADER_SCORE") return "LEADER";
-  if (status === "PENDING_MANAGER_SCORE") return "MANAGER";
-  if (status === "PENDING_FINAL_REVIEW") return "FINAL";
-  return null;
-}
-
-function getNextKpiStage(status: KpiStatus): KpiStatus {
-  if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") return "PENDING_LEADER_SCORE";
-  if (status === "PENDING_LEADER_SCORE") return "PENDING_MANAGER_SCORE";
-  if (status === "PENDING_MANAGER_SCORE") return "PENDING_FINAL_REVIEW";
-  if (status === "PENDING_FINAL_REVIEW") return "COMPLETED";
-  throw new Error("当前阶段不能继续流转");
-}
-
-function getPreviousKpiStage(status: KpiStatus): KpiStatus {
-  if (status === "PENDING_LEADER_SCORE") return "PENDING_SELF_REVIEW";
-  if (status === "PENDING_MANAGER_SCORE") return "PENDING_LEADER_SCORE";
-  if (status === "PENDING_FINAL_REVIEW") return "PENDING_MANAGER_SCORE";
-  throw new Error("当前阶段不能退回");
-}
-
-function assertKpiScoringActionAllowed(status: KpiStatus, action: KpiScoringAction) {
-  const editableStage = getKpiEditableStage(status);
-  if (!editableStage) throw new Error("当前 KPI 阶段不支持评分操作");
+function assertKpiScoringActionAllowed(editableStage: KpiEditableStage, action: KpiScoringAction) {
   if (action === "submit" && editableStage !== "SELF") throw new Error("当前阶段不能提交");
   if (action === "approve" && editableStage === "SELF") throw new Error("当前阶段不能审核通过");
   if (action === "reject" && editableStage === "SELF") throw new Error("当前阶段不能退回");
@@ -1345,7 +1337,7 @@ function parseRejectRemark(formData: FormData) {
   return requiredString(formData.get("rejectRemark"), "退回原因");
 }
 
-async function createPersonalKpiActionLog(tx: any, input: KpiActionLogInput) {
+async function createPersonalKpiActionLog(tx: Prisma.TransactionClient, input: KpiActionLogInput) {
   await tx.personalKpiActionLog.create({
     data: {
       personalKpiId: input.personalKpiId,
@@ -1370,6 +1362,16 @@ function getKpiActionLogLabel(editableStage: KpiEditableStage, action: KpiScorin
     return "主管评";
   }
   return "终审";
+}
+
+function getApprovalStepComment(editableStage: KpiEditableStage, summary: SummaryFields) {
+  if (editableStage === "LEADER" || editableStage === "MANAGER") {
+    return serializeStructuredSummary("表扬", summary.praise, "机会", summary.opportunity);
+  }
+  if (editableStage === "FINAL") {
+    return `考勤分：${summary.attendanceScore}`;
+  }
+  return null;
 }
 
 function calculatePenaltyTotal(values: Array<number | null | undefined>) {
@@ -1423,11 +1425,31 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       throw new Error("季度 KPI 不存在或无权限操作");
     }
 
-    assertKpiScoringActionAllowed(personalKpi.status, action);
-    const editableStage = getKpiEditableStage(personalKpi.status);
+    const approvalStepCount = await tx.personalKpiApprovalStep.count({ where: { personalKpiId } });
+    const hasApprovalChain = approvalStepCount > 0;
+    const currentApprovalStep = !isSelfReviewStatus(personalKpi.status) && hasApprovalChain
+      ? await tx.personalKpiApprovalStep.findFirst({
+          where: { personalKpiId, status: "PENDING" },
+          orderBy: { stepOrder: "asc" },
+        })
+      : null;
+    const editableStage = isSelfReviewStatus(personalKpi.status)
+      ? "SELF"
+      : hasApprovalChain
+        ? getEditableStageFromApprovalStep(currentApprovalStep?.stageKey)
+        : getEditableStageFromApprovalStep(
+            personalKpi.status === "PENDING_LEADER_SCORE"
+              ? "LEADER"
+              : personalKpi.status === "PENDING_MANAGER_SCORE"
+                ? "MANAGER"
+                : personalKpi.status === "PENDING_FINAL_REVIEW"
+                  ? "FINAL"
+                  : null
+          );
     if (!editableStage) {
       throw new Error("当前 KPI 阶段不支持评分操作");
     }
+    assertKpiScoringActionAllowed(editableStage, action);
 
     const scoringAbilityKey = getScoringAbilityKey(editableStage);
     if (!scoringAbilityKey) {
@@ -1436,31 +1458,27 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
     if (action !== "save" && action !== "reject") {
       assertRequiredScoringSummary(editableStage, summary);
     }
-    const where = await buildKpiWhereByPermission(
-      currentUser,
-      orgPermissionModuleKeys.kpi,
-      scoringAbilityKey,
-    );
-    const authorizedKpi = await tx.personalKpi.findFirst({
-      where: {
-        ...where,
-        id: personalKpiId,
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    if (!authorizedKpi) {
-      throw new Error("季度 KPI 不存在或无权限操作");
-    }
-
-    const currentApprovalStep = editableStage !== "SELF"
-      ? await tx.personalKpiApprovalStep.findFirst({
-          where: { personalKpiId, status: "PENDING" },
-          orderBy: { stepOrder: "asc" },
-        })
-      : null;
-    if (currentApprovalStep && currentApprovalStep.approverId !== currentUser.id) {
-      throw new Error("你不是当前阶段的审批人");
+    if (editableStage !== "SELF" && hasApprovalChain) {
+      if (!currentApprovalStep || currentApprovalStep.approverId !== currentUser.id) {
+        throw new Error("你不是当前阶段的审批人");
+      }
+    } else {
+      const where = await buildKpiWhereByPermission(
+        currentUser,
+        orgPermissionModuleKeys.kpi,
+        scoringAbilityKey,
+      );
+      const authorizedKpi = await tx.personalKpi.findFirst({
+        where: {
+          ...where,
+          id: personalKpiId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (!authorizedKpi) {
+        throw new Error("季度 KPI 不存在或无权限操作");
+      }
     }
 
     const itemIds = formData.getAll("itemId").map((value, index) => requiredString(value, `指标项${index + 1}`));
@@ -1483,6 +1501,24 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         } else {
           await tx.personalKpiItem.update({ where: { id: itemId }, data: { managerScore: scoreValue } });
         }
+        if (currentApprovalStep && editableStage !== "SELF") {
+          await tx.personalKpiItemStepScore.upsert({
+            where: {
+              personalKpiItemId_approvalStepId: {
+                personalKpiItemId: itemId,
+                approvalStepId: currentApprovalStep.id,
+              },
+            },
+            create: {
+              personalKpiItemId: itemId,
+              approvalStepId: currentApprovalStep.id,
+              score: scoreValue,
+            },
+            update: {
+              score: scoreValue,
+            },
+          });
+        }
       }
     }
 
@@ -1499,45 +1535,26 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       ? personalKpi.finalScore - personalKpi.managerScore
       : 0;
     const attendanceScore = editableStage === "FINAL" ? summary.attendanceScore : currentAttendanceScore;
-    const stageKeyToStatus: Record<string, KpiStatus> = {
-      LEADER: "PENDING_LEADER_SCORE",
-      MANAGER: "PENDING_MANAGER_SCORE",
-      FINAL: "PENDING_FINAL_REVIEW",
-    };
-
     let nextStatus: KpiStatus;
     if (action === "save") {
       nextStatus = personalKpi.status;
     } else if (action === "reject") {
-      if (currentApprovalStep) {
-        await tx.personalKpiApprovalStep.update({
-          where: { id: currentApprovalStep.id },
-          data: { status: "REJECTED", completedAt: new Date() },
-        });
-      }
-      nextStatus = "PENDING_SELF_REVIEW";
+      nextStatus = await transitionKpiApprovalChain(tx, {
+        personalKpiId,
+        action,
+        currentStep: currentApprovalStep,
+        comment: rejectRemark,
+      });
     } else {
-      const hasChain = (await tx.personalKpiApprovalStep.count({ where: { personalKpiId } })) > 0;
-      if (!hasChain) {
-        nextStatus = getNextKpiStage(personalKpi.status);
+      if (!hasApprovalChain) {
+        nextStatus = getLegacyNextKpiStatus(personalKpi.status);
       } else {
-        if (currentApprovalStep) {
-          await tx.personalKpiApprovalStep.update({
-            where: { id: currentApprovalStep.id },
-            data: { status: "COMPLETED", completedAt: new Date() },
-          });
-        }
-        const nextStep = await tx.personalKpiApprovalStep.findFirst({
-          where: { personalKpiId, status: { in: ["PENDING", "REJECTED"] } },
-          orderBy: { stepOrder: "asc" },
+        nextStatus = await transitionKpiApprovalChain(tx, {
+          personalKpiId,
+          action,
+          currentStep: currentApprovalStep,
+          comment: getApprovalStepComment(editableStage, summary),
         });
-        if (nextStep?.status === "REJECTED") {
-          await tx.personalKpiApprovalStep.update({
-            where: { id: nextStep.id },
-            data: { status: "PENDING", completedAt: null },
-          });
-        }
-        nextStatus = nextStep ? (stageKeyToStatus[nextStep.stageKey] ?? "COMPLETED") : "COMPLETED";
       }
     }
 
@@ -1660,9 +1677,28 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
 
     const items = templateItemsByTemplateId.get(resolved.templateId) ?? [];
     const deletedExistingKpiId = deletedExistingKpiByUserId.get(user.id) ?? null;
+    const approvalSnapshot = await resolveKpiApprovalSnapshot({
+      subjectUserId: user.id,
+      subjectOrgNodeId: user.orgNodeId,
+    });
 
     await prisma.$transaction(async (tx) => {
       if (deletedExistingKpiId) {
+        const deletedItemIds = (await tx.personalKpiItem.findMany({
+          where: { personalKpiId: deletedExistingKpiId },
+          select: { id: true },
+        })).map((item) => item.id);
+        if (deletedItemIds.length > 0) {
+          await tx.personalKpiItemStepScore.deleteMany({
+            where: { personalKpiItemId: { in: deletedItemIds } },
+          });
+        }
+        await tx.personalKpiApprovalStep.deleteMany({
+          where: { personalKpiId: deletedExistingKpiId },
+        });
+        await tx.personalKpiActionLog.deleteMany({
+          where: { personalKpiId: deletedExistingKpiId },
+        });
         await tx.personalKpiItem.deleteMany({
           where: { personalKpiId: deletedExistingKpiId },
         });
@@ -1678,6 +1714,7 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
         orgNodeId: user.orgNodeId,
         initializerId: context.currentUser.id,
         template: resolved.template,
+        approvalSnapshot,
         items,
       });
     });

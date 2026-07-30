@@ -30,10 +30,12 @@ type Props = {
       count: number;
       active: boolean;
       completed: boolean;
+      approverName: string | null;
     }>;
     approvalSteps: Array<{
       stepOrder: number;
       stageKey: string;
+      stepLabel: string | null;
       approverName: string;
       status: string;
     }>;
@@ -350,15 +352,12 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
           <div>
             <h3 className="mb-4 text-lg font-semibold">KPI流程进度条</h3>
-            <div className="grid gap-x-6 gap-y-3 md:grid-cols-5">
+            <div
+              className="grid gap-x-6 gap-y-3"
+              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
+            >
               {data.stages.map((stage) => {
                 const progressWidth = stage.completed ? "100%" : stage.active ? "50%" : "0%";
-                const approvalStep = data.approvalSteps.find((step) => {
-                  if (stage.key === "PENDING_LEADER_SCORE") return step.stageKey === "LEADER";
-                  if (stage.key === "PENDING_MANAGER_SCORE") return step.stageKey === "MANAGER";
-                  if (stage.key === "PENDING_FINAL_REVIEW") return step.stageKey === "FINAL";
-                  return false;
-                });
                 return (
                   <div key={stage.key} className="min-w-0">
                     <div className="h-2 rounded-full bg-muted">
@@ -368,9 +367,9 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                     <div className="mt-1 text-xs text-muted-foreground">
                       {stage.active ? "当前阶段" : stage.completed ? "已完成" : "未开始"}
                     </div>
-                    {approvalStep ? (
+                    {stage.approverName ? (
                       <div className="mt-1 text-xs text-muted-foreground">
-                        审批人：{approvalStep.approverName}
+                        {stage.key === "SELF_REVIEW" ? "处理人" : "审批人"}：{stage.approverName}
                       </div>
                     ) : null}
                   </div>

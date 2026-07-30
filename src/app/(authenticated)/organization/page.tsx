@@ -510,6 +510,29 @@ export default async function OrgPage({
         )
       : null;
 
+  const approvalPolicyRows = await prisma.kpiApprovalPolicy.findMany({
+    where: initialScope.scopeType === "SYSTEM"
+      ? { scopeType: "SYSTEM", departmentOrgNodeId: "" }
+      : {
+          OR: [
+            { scopeType: "DEPARTMENT", departmentOrgNodeId: initialScope.departmentOrgNodeId },
+            { scopeType: "SYSTEM", departmentOrgNodeId: "" },
+          ],
+        },
+    orderBy: [{ scopeType: "desc" }, { isActive: "desc" }, { createdAt: "asc" }],
+  });
+  const approvalPolicySteps = approvalPolicyRows.length
+    ? await prisma.kpiApprovalPolicyStep.findMany({
+        where: { policyId: { in: approvalPolicyRows.map((policy) => policy.id) } },
+        orderBy: [{ policyId: "asc" }, { stepOrder: "asc" }],
+      })
+    : [];
+  const kpiApprovalPolicies = approvalPolicyRows.map((policy) => ({
+    ...policy,
+    inherited: initialScope.scopeType === "DEPARTMENT" && policy.scopeType === "SYSTEM",
+    steps: approvalPolicySteps.filter((step) => step.policyId === policy.id),
+  }));
+
   return (
     <OrgContent
       currentUser={{ id: currentUser.id, roleType: currentUser.roleType }}
@@ -522,11 +545,12 @@ export default async function OrgPage({
       scopeOptions={scopeOptions}
       initialScope={initialScope}
       initialTab={requestedTab === "organization" || requestedTab === "permissions" ? requestedTab : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
-      initialPermissionSection={requestedSection === "annual-goal" || requestedSection === "kpi" || requestedSection === "menu" ? requestedSection : "menu"}
+      initialPermissionSection={requestedSection === "annual-goal" || requestedSection === "kpi" || requestedSection === "approval-policy" || requestedSection === "menu" ? requestedSection : "menu"}
       menus={roleMenuMatrix}
       annualGoalPermissions={annualGoalMatrix}
       kpiPermissions={kpiPermissions}
       kpiUserPermissionGrants={kpiUserPermissionGrants}
+      kpiApprovalPolicies={kpiApprovalPolicies}
       canManageUsers={canManageUsers}
       canManageTeams={canManageTeams}
       canManageRolePermissions={canManageRolePermissions}

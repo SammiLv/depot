@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy } from "@/server/organization/actions";
 import type { OrganizationEntityNode, OrganizationHierarchyNode, OrganizationPersonNode } from "./page";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
@@ -90,6 +90,26 @@ type KpiUserPermissionGrant = {
   orgNodeName: string | null;
 };
 
+type KpiApprovalPolicy = {
+  id: string;
+  scopeType: PermissionScopeType;
+  departmentOrgNodeId: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  inherited: boolean;
+  steps: Array<{
+    id: string;
+    label: string;
+    ancestorDepth: number | null;
+    resolverType: "TEAM_LEADER" | "DEPARTMENT_MANAGER" | "ADMIN" | "EXPLICIT_USER";
+    resolverUserId: string | null;
+    skipIfSelf: boolean;
+    skipIfDuplicateApprover: boolean;
+    allowSkipWhenNoApprover: boolean;
+  }>;
+};
+
 type PermissionScopeOption = {
   scopeType: PermissionScopeType;
   departmentOrgNodeId: string;
@@ -116,11 +136,12 @@ type Props = {
   scopeOptions: PermissionScopeOption[];
   initialScope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
   initialTab: "organization" | "permissions";
-  initialPermissionSection: "menu" | "annual-goal" | "kpi";
+  initialPermissionSection: "menu" | "annual-goal" | "kpi" | "approval-policy";
   menus: OrgMenu[];
   annualGoalPermissions: ScopedAnnualGoalPermission[];
   kpiPermissions: ScopedKpiPermission[];
   kpiUserPermissionGrants: KpiUserPermissionGrant[];
+  kpiApprovalPolicies: KpiApprovalPolicy[];
   canManageUsers: boolean;
   canManageTeams: boolean;
   canManageRolePermissions: boolean;
@@ -802,6 +823,104 @@ function OrganizationMindMapNodeView({
   );
 }
 
+function KpiApprovalPolicyForm({
+  policy,
+  scope,
+  users,
+  onClose,
+}: {
+  policy?: KpiApprovalPolicy;
+  scope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
+  users: OrgUser[];
+  onClose: () => void;
+}) {
+  const [steps, setSteps] = useState<Array<Omit<KpiApprovalPolicy["steps"][number], "id">>>(() => policy?.steps.map((step) => ({ ...step })) ?? [{
+    label: "直属组长",
+    ancestorDepth: null as number | null,
+    resolverType: "TEAM_LEADER" as const,
+    resolverUserId: null as string | null,
+    skipIfSelf: true,
+    skipIfDuplicateApprover: true,
+    allowSkipWhenNoApprover: false,
+  }]);
+
+  return (
+    <form action={async (formData) => { await saveKpiApprovalPolicy(formData); onClose(); }} className="space-y-4">
+      <input type="hidden" name="id" value={policy?.id ?? ""} />
+      <input type="hidden" name="scopeType" value={scope.scopeType} />
+      <input type="hidden" name="departmentOrgNodeId" value={scope.departmentOrgNodeId} />
+      <input type="hidden" name="steps" value={JSON.stringify(steps)} />
+      <div>
+        <label className="mb-1 block text-sm font-medium">策略名称</label>
+        <input name="name" required defaultValue={policy?.name ?? ""} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" />
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-medium">说明</label>
+        <textarea name="description" defaultValue={policy?.description ?? ""} className="min-h-20 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" />
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="isActive" value="true" defaultChecked={policy?.isActive ?? false} />
+        保存后立即启用
+      </label>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="font-medium">审批步骤</div>
+          <Button type="button" variant="outline" className="h-8" onClick={() => setSteps((rows) => [...rows, {
+            label: `审批步骤 ${rows.length + 1}`,
+            ancestorDepth: null,
+            resolverType: "TEAM_LEADER",
+            resolverUserId: null,
+            skipIfSelf: true,
+            skipIfDuplicateApprover: true,
+            allowSkipWhenNoApprover: false,
+          }])}><Plus className="h-3.5 w-3.5" />增加步骤</Button>
+        </div>
+        {steps.map((step, index) => (
+          <div key={index} className="rounded-xl border border-border p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-medium">第 {index + 1} 步</span>
+              {steps.length > 1 ? <button type="button" className="text-xs text-destructive" onClick={() => setSteps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>删除</button> : null}
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <input value={step.label} onChange={(event) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, label: event.target.value } : row))} className="h-9 rounded-lg border border-border bg-background px-3 text-sm" placeholder="步骤名称" />
+              <select value={step.resolverType} onChange={(event) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, resolverType: event.target.value as KpiApprovalPolicy["steps"][number]["resolverType"], resolverUserId: null } : row))} className="h-9 rounded-lg border border-border bg-background px-2 text-sm">
+                <option value="TEAM_LEADER">组长</option>
+                <option value="DEPARTMENT_MANAGER">部门主管</option>
+                <option value="ADMIN">管理员</option>
+                <option value="EXPLICIT_USER">指定用户</option>
+              </select>
+              {step.resolverType === "EXPLICIT_USER" ? (
+                <select value={step.resolverUserId ?? ""} onChange={(event) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, resolverUserId: event.target.value || null } : row))} className="h-9 rounded-lg border border-border bg-background px-2 text-sm">
+                  <option value="">选择审批人</option>
+                  {users.filter((user) => scope.scopeType === "SYSTEM" || user.departmentOrgNodeId === scope.departmentOrgNodeId).map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
+                </select>
+              ) : (
+                <input type="number" min={0} value={step.ancestorDepth ?? ""} onChange={(event) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ancestorDepth: event.target.value === "" ? null : Number(event.target.value) } : row))} className="h-9 rounded-lg border border-border bg-background px-3 text-sm" placeholder="祖先层级（可空）" />
+              )}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-4 text-xs">
+              {[
+                ["skipIfSelf", "跳过本人"],
+                ["skipIfDuplicateApprover", "去重审批人"],
+                ["allowSkipWhenNoApprover", "无人时允许跳过"],
+              ].map(([field, label]) => (
+                <label key={field} className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={Boolean(step[field as keyof typeof step])} onChange={(event) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: event.target.checked } : row))} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="submit">保存策略</Button>
+      </div>
+    </form>
+  );
+}
+
 // ── Main content ──
 export function OrgContent({
   currentUser,
@@ -819,6 +938,7 @@ export function OrgContent({
   annualGoalPermissions,
   kpiPermissions,
   kpiUserPermissionGrants,
+  kpiApprovalPolicies,
   canManageUsers,
   canManageTeams,
   canManageRolePermissions,
@@ -830,7 +950,7 @@ export function OrgContent({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
-  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi">(initialPermissionSection);
+  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi" | "approval-policy">(initialPermissionSection);
   const [organizationViewMode, setOrganizationViewMode] = useState<"list" | "tree">("tree");
   const [expandedTreeNodes, setExpandedTreeNodes] = useState<Record<string, boolean>>(() => buildInitialExpandedState(organizationHierarchyRoot));
   const selectedScope = initialScope;
@@ -998,8 +1118,8 @@ export function OrgContent({
 
   // Dialog states
   const [dialog, setDialog] = useState<{
-    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments" | "kpiUserPermission" | "deleteKpiUserPermissionGrant";
-    data?: OrgUser | OrgTeam | ApplyAllDialogData | KpiUserPermissionGrant;
+    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments" | "kpiUserPermission" | "deleteKpiUserPermissionGrant" | "kpiApprovalPolicy" | "deleteKpiApprovalPolicy";
+    data?: OrgUser | OrgTeam | ApplyAllDialogData | KpiUserPermissionGrant | KpiApprovalPolicy;
   } | null>(null);
 
   return (
@@ -1129,6 +1249,7 @@ export function OrgContent({
                   { key: "menu", label: "菜单权限" },
                   { key: "annual-goal", label: "年度指标权限" },
                   { key: "kpi", label: "KPI 权限" },
+                  { key: "approval-policy", label: "KPI 审批策略" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -1137,7 +1258,7 @@ export function OrgContent({
                       const nextParams = new URLSearchParams(searchParams.toString());
                       nextParams.set("tab", "permissions");
                       nextParams.set("section", item.key);
-                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi");
+                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi" | "approval-policy");
                       if (selectedScope.scopeType === "SYSTEM") {
                         nextParams.delete("department");
                       }
@@ -1320,7 +1441,7 @@ export function OrgContent({
                   </table>
                 </div>
               </div>
-            ) : (
+            ) : permissionSection === "kpi" ? (
               <div className="p-5">
                 <div className="flex items-center justify-between mb-3">
                   <div>
@@ -1456,6 +1577,56 @@ export function OrgContent({
                       </div>
                     )}
                   </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-5">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">KPI 审批策略</h3>
+                    <div className="mt-1 text-xs text-muted-foreground">部门策略优先于系统策略；每个范围同一时间只能启用一套策略。</div>
+                  </div>
+                  {canManageRolePermissions ? (
+                    <Button type="button" className="h-9 rounded-lg" onClick={() => setDialog({ type: "kpiApprovalPolicy" })}>
+                      <Plus className="h-4 w-4" />新增策略
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="space-y-3">
+                  {kpiApprovalPolicies.length ? kpiApprovalPolicies.map((policy) => (
+                    <div key={policy.id} className={`rounded-xl border p-4 ${policy.inherited ? "border-dashed border-border bg-muted/20" : "border-border"}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{policy.name}</span>
+                            <Badge tone={policy.isActive ? "success" : "default"}>{policy.isActive ? "已启用" : "已停用"}</Badge>
+                            {policy.inherited ? <Badge tone="info">系统继承</Badge> : null}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">{policy.description || "暂无说明"}</div>
+                        </div>
+                        {!policy.inherited && canManageRolePermissions ? (
+                          <div className="flex gap-3 text-xs">
+                            <button type="button" className="hover:underline" onClick={() => setDialog({ type: "kpiApprovalPolicy", data: policy })}>编辑</button>
+                            <form action={toggleKpiApprovalPolicy}>
+                              <input type="hidden" name="id" value={policy.id} />
+                              <button type="submit" className="hover:underline">{policy.isActive ? "停用" : "启用"}</button>
+                            </form>
+                            <button type="button" className="text-destructive hover:underline" onClick={() => setDialog({ type: "deleteKpiApprovalPolicy", data: policy })}>删除</button>
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {policy.steps.map((step, index) => (
+                          <div key={step.id} className="rounded-lg bg-muted px-3 py-2 text-xs">
+                            <span className="font-medium">{index + 1}. {step.label}</span>
+                            <span className="ml-2 text-muted-foreground">{step.resolverType}{step.ancestorDepth === null ? "" : ` · depth ${step.ancestorDepth}`}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">当前范围暂无审批策略，将继续使用兼容审批链。</div>
+                  )}
                 </div>
               </div>
             )}
@@ -1601,6 +1772,32 @@ export function OrgContent({
             const fd = new FormData();
             fd.set("id", (dialog?.data as KpiUserPermissionGrant).id);
             await deleteKpiUserPermissionGrant(fd);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      </Dialog>
+
+      <Dialog
+        open={dialog?.type === "kpiApprovalPolicy"}
+        onClose={() => setDialog(null)}
+        title={dialog?.data ? "编辑 KPI 审批策略" : "新增 KPI 审批策略"}
+        panelClassName="max-w-4xl"
+      >
+        <KpiApprovalPolicyForm
+          policy={dialog?.data as KpiApprovalPolicy | undefined}
+          scope={selectedScope}
+          users={users}
+          onClose={() => setDialog(null)}
+        />
+      </Dialog>
+
+      <Dialog open={dialog?.type === "deleteKpiApprovalPolicy"} onClose={() => setDialog(null)} title="删除审批策略">
+        <DeleteConfirm
+          message={`确定要删除审批策略“${(dialog?.data as KpiApprovalPolicy | undefined)?.name ?? ""}”吗？已生成 KPI 单据的策略不能删除。`}
+          action={async () => {
+            const fd = new FormData();
+            fd.set("id", (dialog?.data as KpiApprovalPolicy).id);
+            await deleteKpiApprovalPolicy(fd);
           }}
           onClose={() => setDialog(null)}
         />

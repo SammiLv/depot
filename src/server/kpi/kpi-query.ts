@@ -3,6 +3,11 @@ import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissio
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
+import {
+  getEditableStageFromApprovalStep,
+  getKpiStatusForApprovalStep,
+  isSelfReviewStatus,
+} from "@/server/kpi/approval-workflow";
 
 
 type DataScopeInput = {
@@ -114,6 +119,7 @@ type KpiPageData = {
 type ApprovalStepSummary = {
   stepOrder: number;
   stageKey: string;
+  stepLabel: string | null;
   approverName: string;
   status: string;
 };
@@ -536,11 +542,17 @@ function getScoringAbilityKey(stage: "SELF" | "LEADER" | "MANAGER" | "FINAL" | n
 
 export async function getPersonalKpiDetail(currentUser: DataScopeInput, personalKpiId: string) {
   const where = await buildKpiWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi);
-  const personalKpi = await prisma.personalKpi.findFirst({
+  const assignedApprovalStep = await prisma.personalKpiApprovalStep.findFirst({
     where: {
-      ...where,
-      id: personalKpiId,
+      personalKpiId,
+      approverId: currentUser.id,
     },
+    select: { id: true },
+  });
+  const personalKpi = await prisma.personalKpi.findFirst({
+    where: assignedApprovalStep
+      ? { id: personalKpiId, deletedAt: null }
+      : { ...where, id: personalKpiId },
     select: {
       id: true,
       year: true,
@@ -599,7 +611,16 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     prisma.personalKpiApprovalStep.findMany({
       where: { personalKpiId: personalKpi.id },
       orderBy: { stepOrder: "asc" },
-      select: { stepOrder: true, stageKey: true, approverId: true, status: true },
+      select: {
+        id: true,
+        stepOrder: true,
+        stageKey: true,
+        stepLabel: true,
+        approverId: true,
+        status: true,
+        comment: true,
+        actedAt: true,
+      },
     }),
     prisma.user.findMany({
       where: {
@@ -635,16 +656,6 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const teamName = teamOrgNodeId ? (orgNodeMap.get(teamOrgNodeId)?.name ?? "—") : "—";
   const departmentName = departmentOrgNodeId ? (orgNodeMap.get(departmentOrgNodeId)?.name ?? "—") : "—";
   const tone = getKpiTone(personalKpi.status);
-  const completedStageIndex = stageOrder.includes(personalKpi.status)
-    ? stageOrder.indexOf(personalKpi.status)
-    : 0;
-  const stages = stageOrder.map((stage, index) => ({
-    key: stage,
-    label: stageLabels[stage] ?? stage,
-    count: index <= completedStageIndex ? 1 : 0,
-    active: index === completedStageIndex,
-    completed: index < completedStageIndex,
-  }));
   const scoreTotal = items.reduce((sum, item) => sum + item.score, 0);
   const selfPenaltyTotal = items.reduce((sum, item) => sum + Math.abs(Math.min(item.selfScore ?? 0, 0)), 0);
   const leaderPenaltyTotal = items.reduce((sum, item) => sum + Math.abs(Math.min(item.leaderScore ?? 0, 0)), 0);
@@ -656,16 +667,72 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     ? personalKpi.finalScore - personalKpi.managerScore
     : 0;
   const finalTotal = managerTotal + attendanceScore;
-  const editableStage = getEditableStage(personalKpi.status);
   const hasApprovalChain = approvalSteps.length > 0;
   const currentApprovalStep = approvalSteps.find((step) => step.status === "PENDING") ?? null;
+  const selfReviewActive = isSelfReviewStatus(personalKpi.status);
+  const editableStage = isSelfReviewStatus(personalKpi.status)
+    ? "SELF"
+    : hasApprovalChain
+      ? getEditableStageFromApprovalStep(currentApprovalStep?.stageKey)
+      : getEditableStage(personalKpi.status);
   const scoringAbilityKey = getScoringAbilityKey(editableStage);
   const hasStagePermission = scoringAbilityKey
     ? Boolean(await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, scoringAbilityKey))
     : false;
   const canScore = editableStage === "SELF"
     ? hasStagePermission && currentUser.id === personalKpi.userId
-    : hasStagePermission && (!hasApprovalChain || currentApprovalStep?.approverId === currentUser.id);
+    : hasApprovalChain
+      ? currentApprovalStep?.approverId === currentUser.id
+      : hasStagePermission;
+  const currentStepScores = currentApprovalStep
+    ? await prisma.personalKpiItemStepScore.findMany({
+        where: { approvalStepId: currentApprovalStep.id },
+        select: { personalKpiItemId: true, score: true },
+      })
+    : [];
+  const currentStepScoreByItemId = new Map(
+    currentStepScores.map((stepScore) => [stepScore.personalKpiItemId, stepScore.score] as const)
+  );
+  const stages = hasApprovalChain
+    ? [
+        {
+          key: "SELF_REVIEW",
+          label: "自评",
+          count: 1,
+          active: selfReviewActive,
+          completed: !selfReviewActive,
+          approverName: user?.name ?? "—",
+        },
+        ...approvalSteps.map((step) => ({
+          key: `APPROVAL_STEP_${step.stepOrder}`,
+          label: step.stepLabel || stageLabels[getKpiStatusForApprovalStep(step.stageKey)] || `审批步骤 ${step.stepOrder}`,
+          count: step.status === "WAITING" ? 0 : 1,
+          active: !selfReviewActive && step.status === "PENDING",
+          completed: step.status === "COMPLETED",
+          approverName: actorNameById.get(step.approverId) ?? "—",
+        })),
+        {
+          key: "COMPLETED",
+          label: "已完成",
+          count: personalKpi.status === "COMPLETED" ? 1 : 0,
+          active: personalKpi.status === "COMPLETED",
+          completed: false,
+          approverName: null,
+        },
+      ]
+    : (() => {
+        const completedStageIndex = stageOrder.includes(personalKpi.status)
+          ? stageOrder.indexOf(personalKpi.status)
+          : 0;
+        return stageOrder.map((stage, index) => ({
+          key: stage,
+          label: stageLabels[stage] ?? stage,
+          count: index <= completedStageIndex ? 1 : 0,
+          active: index === completedStageIndex,
+          completed: index < completedStageIndex,
+          approverName: null,
+        }));
+      })();
   const selfSummary = parseStructuredSummary(personalKpi.selfComment, "季度工作任务总结", "季度工作能力总结");
   const leaderSummary = parseStructuredSummary(personalKpi.leaderComment, "表扬", "机会");
   const managerSummary = parseStructuredSummary(personalKpi.managerComment, "表扬", "机会");
@@ -675,7 +742,9 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     year: personalKpi.year,
     quarter: personalKpi.quarter,
     stageKey: personalKpi.status,
-    status: stageLabels[personalKpi.status] ?? personalKpi.status,
+    status: !selfReviewActive && currentApprovalStep?.stepLabel
+      ? currentApprovalStep.stepLabel
+      : stageLabels[personalKpi.status] ?? personalKpi.status,
     tone,
     editableStage,
     availableActions: {
@@ -699,8 +768,12 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       targetDetail: item.target || "",
       score: item.score,
       selfScore: item.selfScore ?? 0,
-      leaderScore: item.leaderScore ?? 0,
-      managerScore: item.managerScore ?? 0,
+      leaderScore: editableStage === "LEADER"
+        ? currentStepScoreByItemId.get(item.id) ?? item.leaderScore ?? 0
+        : item.leaderScore ?? 0,
+      managerScore: editableStage === "MANAGER"
+        ? currentStepScoreByItemId.get(item.id) ?? item.managerScore ?? 0
+        : item.managerScore ?? 0,
     })),
     totals: {
       scoreTotal,
@@ -740,6 +813,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     approvalSteps: approvalSteps.map((step) => ({
       stepOrder: step.stepOrder,
       stageKey: step.stageKey,
+      stepLabel: step.stepLabel,
       approverName: actorNameById.get(step.approverId) ?? "—",
       status: step.status,
     } satisfies ApprovalStepSummary)),
@@ -820,8 +894,16 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const canViewRows = viewScope.canViewKpi;
   const canViewTemplates = viewScope.canViewTemplate;
   const canAccessTemplateList = canViewTemplates || Boolean(manageTemplateScope) || Boolean(toggleTemplateScope);
+  const assignedApprovalRows = await prisma.personalKpiApprovalStep.findMany({
+    where: {
+      approverId: currentUser.id,
+      status: "PENDING",
+    },
+    select: { personalKpiId: true },
+  });
+  const assignedPersonalKpiIds = [...new Set(assignedApprovalRows.map((row) => row.personalKpiId))];
 
-  if (!viewScope.hasAnyViewPermission && !canAccessTemplateList) {
+  if (!viewScope.hasAnyViewPermission && !canAccessTemplateList && assignedPersonalKpiIds.length === 0) {
     return buildEmptyKpiPageData(
       year,
       quarter,
@@ -869,18 +951,20 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     : { id: { in: [] } };
   const rowUserWhere = canViewRows
     ? await buildUserWhereByPermission(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.viewKpi)
-    : { id: { in: [] } };
+    : null;
 
-  const kpis = canViewRows
-    ? await prisma.personalKpi.findMany({
-        where: {
-          ...where,
-          year,
-          quarter,
-        },
-        orderBy: [{ createdAt: "desc" }],
-      })
-    : [];
+  const kpis = await prisma.personalKpi.findMany({
+    where: {
+      year,
+      quarter,
+      deletedAt: null,
+      OR: [
+        ...(canViewRows ? [where] : []),
+        ...(assignedPersonalKpiIds.length ? [{ id: { in: assignedPersonalKpiIds } }] : []),
+      ],
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
 
   const kpiIds = kpis.map((k) => k.id);
   const allItems = kpiIds.length
@@ -890,7 +974,14 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     ? await prisma.personalKpiApprovalStep.findMany({
         where: { personalKpiId: { in: kpiIds } },
         orderBy: [{ stepOrder: "asc" }],
-        select: { personalKpiId: true, approverId: true, status: true, stepOrder: true },
+        select: {
+          personalKpiId: true,
+          approverId: true,
+          status: true,
+          stepOrder: true,
+          stageKey: true,
+          stepLabel: true,
+        },
       })
     : [];
   const activeApprovalStepByKpiId = new Map<string, typeof approvalStepRows[number]>();
@@ -911,7 +1002,9 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
 
   const users = await prisma.user.findMany({
     where: {
-      ...rowUserWhere,
+      ...(rowUserWhere
+        ? { OR: [rowUserWhere, { id: { in: kpis.map((kpi) => kpi.userId) } }] }
+        : { id: { in: kpis.map((kpi) => kpi.userId) } }),
       isActive: true,
     },
     select: { id: true, name: true, orgNodeId: true, roleType: true },
@@ -960,21 +1053,25 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       teamName: teamOrgNodeId ? (orgNodeMap.get(teamOrgNodeId)?.name ?? "—") : "—",
       itemCount: items.length,
       stageKey: personalKpi.status,
-      status: getKpiListStageLabel(personalKpi.status),
+      status: activeApprovalStepByKpiId.get(personalKpi.id)?.stepLabel
+        || getKpiListStageLabel(personalKpi.status),
       tone: getKpiTone(personalKpi.status),
       progress,
       score: `${personalKpi.finalScore ?? personalKpi.managerScore ?? personalKpi.leaderScore ?? personalKpi.selfScore ?? 0}`,
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && (personalKpi.status === "DRAFT" || personalKpi.status === "PENDING_SELF_REVIEW"),
-        canLeaderScore: canScoreLeader
-          && personalKpi.status === "PENDING_LEADER_SCORE"
-          && (!hasApprovalChainByKpiId.get(personalKpi.id) || activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id),
-        canManagerScore: canScoreManager
-          && personalKpi.status === "PENDING_MANAGER_SCORE"
-          && (!hasApprovalChainByKpiId.get(personalKpi.id) || activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id),
-        canFinalReview: canScoreFinal
-          && personalKpi.status === "PENDING_FINAL_REVIEW"
-          && (!hasApprovalChainByKpiId.get(personalKpi.id) || activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id),
+        canLeaderScore: hasApprovalChainByKpiId.get(personalKpi.id)
+          ? activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
+            && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "LEADER"
+          : canScoreLeader && personalKpi.status === "PENDING_LEADER_SCORE",
+        canManagerScore: hasApprovalChainByKpiId.get(personalKpi.id)
+          ? activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
+            && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "MANAGER"
+          : canScoreManager && personalKpi.status === "PENDING_MANAGER_SCORE",
+        canFinalReview: hasApprovalChainByKpiId.get(personalKpi.id)
+          ? activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
+            && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "FINAL"
+          : canScoreFinal && personalKpi.status === "PENDING_FINAL_REVIEW",
       },
     }];
   });
