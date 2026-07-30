@@ -1,0 +1,5 @@
+"severity","kind","normalizedKey","targetName","canonicalQuarterTargetId","duplicateQuarterTargetId","year","quarter","canonicalCurrentValue","duplicateCurrentValue","detail"
+"INFO","RESOLVED_KEEP_AUTHORITY","SOURCE:cmqekxf7w002ca6yr4bekug9o:2026:Q1","C 端产品","cmqj12e0k005478yrfcom72vn","cmrkdj6250000mjyrrb0uim6f","2026","1","2187","2165","按已确认裁决保留部门权威值并软删 TEAM 行"
+"INFO","RESOLVED_KEEP_AUTHORITY","SOURCE:cmqekxf7w002ca6yr4bekug9o:2026:Q2","C 端产品","cmqj12e0k005578yrck0hntu2","cmrkdj6250001mjyrotn0votl","2026","2","2619","2836","按已确认裁决保留部门权威值并软删 TEAM 行"
+"INFO","MERGE_IDENTICAL_DUPLICATE","SOURCE:cmqekxf7w002ca6yr4bekug9o:2026:Q3","C 端产品","cmqj12e0k005678yrvwjca0xj","cmrkdj6250002mjyrzbwbozf5","2026","3","0","0","季度定义和值一致，保留权威行并软删重复行"
+"INFO","MERGE_IDENTICAL_DUPLICATE","SOURCE:cmqekxf7w002ca6yr4bekug9o:2026:Q4","C 端产品","cmqj12e0k005778yr56whrtqp","cmrkdj6250003mjyrlbuhzvv5","2026","4","0","0","季度定义和值一致，保留权威行并软删重复行"

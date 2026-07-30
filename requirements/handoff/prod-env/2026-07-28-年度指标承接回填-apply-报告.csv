@@ -1,0 +1,4 @@
+"severity","kind","planId","planName","teamOrgNodeId","teamName","metricId","metricCode","metricName","targetType","targetId","detail"
+"INFO","SKIPPED_ORPHAN_TEAM_PLAN","cmqekxf80002fa6yr768b99nq","采购组 2026 年度业绩指标","df9935cd-78ec-421a-b397-d1ca16df0f74","","","","","","","已按业务确认跳过 ORPHAN 方案，包含 1 条有效指标"
+"INFO","SKIPPED_ORPHAN_TEAM_PLAN","cmqekxf81002ia6yrvb9uju99","B端组 2026 年度业绩指标","49d100ee-bf26-410c-ad05-0e7467c99c68","","","","","","","已按业务确认跳过 ORPHAN 方案，包含 0 条有效指标"
+"INFO","SKIPPED_ORPHAN_TEAM_PLAN","cmqekxf84002la6yrm5g2zwbi","C端组 2026 年度业绩指标","793a28db-9a9a-4b27-963a-f7832ab6245f","","","","","","","已按业务确认跳过 ORPHAN 方案，包含 1 条有效指标"
