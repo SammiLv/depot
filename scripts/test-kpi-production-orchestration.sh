@@ -10,7 +10,65 @@ run_id="automated-rehearsal"
 fixture_bin="$project_dir/scripts/kpi-production/test-fixtures"
 
 mkdir -p "$backup_root"
-sqlite3 "$project_dir/db/dev.db" ".backup '$database_path'"
+sqlite3 "$database_path" "VACUUM;"
+DATABASE_URL="file:$database_path" npx prisma migrate deploy --config db/prisma.config.ts
+sqlite3 "$database_path" <<'SQL'
+DELETE FROM "_prisma_migrations"
+WHERE "migration_name" IN (
+  '20260717160000_add_org_permission_grant',
+  '20260717170000_org_permission_subject_type',
+  '20260720000100_add_kpi_approval_policy',
+  '20260720000200_add_kpi_approval_policy_step',
+  '20260727000100_extend_personal_kpi_approval_snapshot',
+  '20260727000200_add_personal_kpi_item_step_score'
+);
+
+INSERT INTO "OrgNode" (
+  "id", "name", "nodeType", "parentId", "createdAt", "updatedAt"
+) VALUES (
+  'org-preserved', '必须保留的组织', 'DEPARTMENT', NULL,
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+INSERT INTO "User" (
+  "id", "name", "orgNodeId", "roleType", "isActive", "createdAt", "updatedAt"
+) VALUES (
+  'user-preserved', '必须保留的用户', 'org-preserved', 'MEMBER', true,
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+INSERT INTO "OrgPermissionGrant" (
+  "id", "moduleKey", "abilityKey", "scopeType", "subjectType",
+  "roleType", "userId", "orgNodeId", "isActive", "createdAt", "updatedAt"
+) VALUES (
+  'grant-kpi-reset', 'KPI', 'VIEW_KPI', 'SELF', 'ROLE',
+  'MEMBER', NULL, 'org-preserved', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+INSERT INTO "KpiTemplate" (
+  "id", "templateKey", "departmentOrgNodeId", "name", "status",
+  "version", "isLatest", "isActive", "createdById", "createdAt", "updatedAt"
+) VALUES (
+  'template-reset', 'template-reset', 'org-preserved', '待清理模板', 'APPROVED',
+  1, true, true, 'user-preserved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+INSERT INTO "KpiTemplateItem" (
+  "id", "templateId", "name", "score", "weight", "createdAt", "updatedAt"
+) VALUES (
+  'template-item-reset', 'template-reset', '待清理模板项', 100, 100,
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+INSERT INTO "PersonalKpi" (
+  "id", "year", "quarter", "userId", "orgNodeId", "templateId",
+  "status", "createdAt", "updatedAt"
+) VALUES (
+  'personal-kpi-reset', 2026, 3, 'user-preserved', 'org-preserved',
+  'template-reset', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+INSERT INTO "PersonalKpiItem" (
+  "id", "personalKpiId", "name", "score", "weight", "createdAt", "updatedAt"
+) VALUES (
+  'personal-kpi-item-reset', 'personal-kpi-reset', '待清理个人指标', 100, 100,
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+SQL
 
 {
   printf 'KPI_PROD_DB="%s"\n' "$database_path"
