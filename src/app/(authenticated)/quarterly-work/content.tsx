@@ -423,6 +423,8 @@ function ProjectEditForm({
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
+  const workloadRequired = projectStatus === "COMPLETED";
 
   const quarterOptions = useMemo(() => {
     const now = new Date();
@@ -522,11 +524,12 @@ function ProjectEditForm({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="工作量(人天)" align="center">
+        <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
           <input
             name="workloadPersonDay"
             type="number"
             step="0.1"
+            required={workloadRequired}
             defaultValue={item.workloadPersonDay ?? ""}
             placeholder="请输入工作量"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
@@ -545,7 +548,8 @@ function ProjectEditForm({
           <select
             name="status"
             required
-            defaultValue={item.status}
+            value={projectStatus}
+            onChange={(event) => setProjectStatus(event.target.value as ProjectStatus)}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {editableProjectStatuses.map((option) => (
