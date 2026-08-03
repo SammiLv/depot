@@ -1836,11 +1836,12 @@ export function QuarterlyWorkContent({ data }: Props) {
             </>
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
+                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
                   <div>任务名称</div>
                   <div>所属项目</div>
                   <div>负责人</div>
                   <div>任务周期</div>
+                  <div>剩余/超期</div>
                   <div>任务目标</div>
                   <div>任务状态</div>
                   <div>创建时间</div>
@@ -1850,11 +1851,14 @@ export function QuarterlyWorkContent({ data }: Props) {
                 <div className="divide-y divide-border">
                   {visibleColumns.flatMap((column) => column.items).length ? (
                     visibleColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
                         <div className="text-muted-foreground">{formatMonthRange(item.startMonth, item.endMonth)}</div>
+                        <div className={item.remainingWeeksLabel?.startsWith("超期") ? "text-destructive" : "text-muted-foreground"}>
+                          {item.remainingWeeksLabel ?? "—"}
+                        </div>
                         <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.description || "—"}</div>
                         <div className="text-muted-foreground">{columnTitleByStatus[item.status]}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
