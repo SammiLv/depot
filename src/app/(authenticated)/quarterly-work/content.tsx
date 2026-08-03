@@ -60,6 +60,52 @@ const projectTitleByStatus: Record<ProjectStatus, string> = {
 const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 
+type MemberOption = Props["data"]["memberOptions"][number];
+type MemberPickerOption = MemberOption & { label: string };
+
+function memberBelongsToDepartment(
+  member: MemberOption,
+  departmentTab: string,
+  teamDepartmentMap: Map<string, string>,
+) {
+  if (member.departmentOrgNodeId) {
+    return member.departmentOrgNodeId === departmentTab;
+  }
+  return Boolean(member.teamOrgNodeId && teamDepartmentMap.get(member.teamOrgNodeId) === departmentTab);
+}
+
+function buildMemberPickerOptions(members: MemberOption[]): MemberPickerOption[] {
+  return members.map((member) => ({
+    ...member,
+    label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
+  }));
+}
+
+function resolveMemberOptionsForForm(
+  allMembers: MemberOption[],
+  departmentTab: string,
+  teamDepartmentMap: Map<string, string>,
+  currentOwnerId?: string | null,
+) {
+  const filtered = allMembers.filter((member) => memberBelongsToDepartment(member, departmentTab, teamDepartmentMap));
+  if (currentOwnerId && !filtered.some((member) => member.id === currentOwnerId)) {
+    const current = allMembers.find((member) => member.id === currentOwnerId);
+    if (current) {
+      return buildMemberPickerOptions([...filtered, current]);
+    }
+  }
+  return buildMemberPickerOptions(filtered);
+}
+
+function resolveDefaultOwnerId(memberOptions: MemberPickerOption[], ...preferredOwnerIds: Array<string | null | undefined>) {
+  for (const preferredOwnerId of preferredOwnerIds) {
+    if (preferredOwnerId && memberOptions.some((member) => member.id === preferredOwnerId)) {
+      return preferredOwnerId;
+    }
+  }
+  return memberOptions[0]?.id ?? "";
+}
+
 function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   if (!open) return null;
 
@@ -211,6 +257,8 @@ function QuarterlyWorkForm({
   status,
   item,
   defaultProjectId,
+  departmentOrgNodeId,
+  memberOptions,
   onClose,
   onSuccess,
 }: {
@@ -219,16 +267,11 @@ function QuarterlyWorkForm({
   status: ColumnStatus;
   item?: BoardItem;
   defaultProjectId?: string;
+  departmentOrgNodeId: string;
+  memberOptions: MemberPickerOption[];
   onClose: () => void;
   onSuccess: FormSuccessHandler;
 }) {
-  const memberOptions = useMemo(
-    () => data.memberOptions.map((member) => ({
-      ...member,
-      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
-    })),
-    [data.memberOptions]
-  );
   const monthOptions = useMemo(
     () => Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: `${index + 1}月` })),
     []
@@ -266,15 +309,15 @@ function QuarterlyWorkForm({
 
   return (
     <form action={submitAction}>
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
       <div className="space-y-4">
         <FormRow label="所属项目" align="center">
           <select
             name="projectId"
             defaultValue={selectedProjectId}
-            disabled={mode === "edit"}
             onChange={(event) => setSelectedProjectId(event.target.value)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {data.projectOptions.map((project) => (
               <option key={project.id} value={project.id}>{project.title}</option>
@@ -282,9 +325,9 @@ function QuarterlyWorkForm({
           </select>
         </FormRow>
         <FormRow label="项目预期收益 *">
-          <input type="hidden" name="expectedOutcome" value={item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? ""} />
+          <input type="hidden" name="expectedOutcome" value={selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? ""} />
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
-            <div className="whitespace-pre-wrap break-words">{item?.expectedOutcome ?? selectedProject?.expectedOutcome ?? "-"}</div>
+            <div className="whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? "-"}</div>
           </div>
         </FormRow>
         <FormRow label="任务名称 *" align="center">
@@ -300,7 +343,12 @@ function QuarterlyWorkForm({
           <MemberPicker
             name="ownerId"
             options={memberOptions}
-            defaultValue={item?.ownerId ?? selectedProject?.ownerId ?? data.currentUserId ?? memberOptions[0]?.id ?? ""}
+            defaultValue={resolveDefaultOwnerId(
+              memberOptions,
+              item?.ownerId,
+              selectedProject?.ownerId,
+              data.currentUserId,
+            )}
           />
         </FormRow>
         <FormRow label="任务周期" align="center">
@@ -359,14 +407,21 @@ function QuarterlyWorkForm({
   );
 }
 
-function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: ProjectBoardItem; onClose: () => void }) {
-  const memberOptions = useMemo(
-    () => data.memberOptions.map((member) => ({
-      ...member,
-      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
-    })),
-    [data.memberOptions]
-  );
+function ProjectEditForm({
+  data,
+  item,
+  productGoalOptions,
+  departmentOrgNodeId,
+  memberOptions,
+  onClose,
+}: {
+  data: Props["data"];
+  item: ProjectBoardItem;
+  productGoalOptions: Array<{ id: string; title: string; year: number }>;
+  departmentOrgNodeId: string;
+  memberOptions: MemberPickerOption[];
+  onClose: () => void;
+}) {
   const [errorMessage, setErrorMessage] = useState("");
 
   const quarterOptions = useMemo(() => {
@@ -395,6 +450,7 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
       }
     }}>
       <input type="hidden" name="projectId" value={item.id} />
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <div className="space-y-4">
         <FormRow label="项目名称 *" align="center">
           <input
@@ -404,11 +460,23 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
+        <FormRow label="产品目标" align="center">
+          <select
+            name="productGoalId"
+            defaultValue={item.productGoalId ?? ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="">请选择产品目标</option>
+            {productGoalOptions.map((goal) => (
+              <option key={goal.id} value={goal.id}>{goal.year} · {goal.title}</option>
+            ))}
+          </select>
+        </FormRow>
         <FormRow label="负责人 *" align="center">
           <MemberPicker
             name="ownerId"
             options={memberOptions}
-            defaultValue={item.ownerId}
+            defaultValue={resolveDefaultOwnerId(memberOptions, item.ownerId)}
           />
         </FormRow>
         <FormRow label="规划周期" align="center">
@@ -505,14 +573,23 @@ function ProjectEditForm({ data, item, onClose }: { data: Props["data"]; item: P
   );
 }
 
-function ProjectCreateForm({ data, defaultStatus, defaultProductGoalId, onClose }: { data: Props["data"]; defaultStatus?: ProjectStatus; defaultProductGoalId?: string; onClose: () => void }) {
-  const memberOptions = useMemo(
-    () => data.memberOptions.map((member) => ({
-      ...member,
-      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
-    })),
-    [data.memberOptions]
-  );
+function ProjectCreateForm({
+  data,
+  productGoalOptions,
+  departmentOrgNodeId,
+  memberOptions,
+  defaultStatus,
+  defaultProductGoalId,
+  onClose,
+}: {
+  data: Props["data"];
+  productGoalOptions: Array<{ id: string; title: string; year: number }>;
+  departmentOrgNodeId: string;
+  memberOptions: MemberPickerOption[];
+  defaultStatus?: ProjectStatus;
+  defaultProductGoalId?: string;
+  onClose: () => void;
+}) {
   const [errorMessage, setErrorMessage] = useState("");
 
   const quarterOptions = useMemo(() => {
@@ -559,6 +636,7 @@ function ProjectCreateForm({ data, defaultStatus, defaultProductGoalId, onClose 
         setErrorMessage(error instanceof Error ? error.message : "创建项目失败");
       }
     }}>
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <div className="space-y-4">
         <FormRow label="项目名称 *" align="center">
           <input
@@ -575,7 +653,7 @@ function ProjectCreateForm({ data, defaultStatus, defaultProductGoalId, onClose 
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             <option value="">请选择产品目标</option>
-            {data.productGoalOptions.map((goal) => (
+            {productGoalOptions.map((goal) => (
               <option key={goal.id} value={goal.id}>{goal.year} · {goal.title}</option>
             ))}
           </select>
@@ -584,7 +662,7 @@ function ProjectCreateForm({ data, defaultStatus, defaultProductGoalId, onClose 
           <MemberPicker
             name="ownerId"
             options={memberOptions}
-            defaultValue={data.currentUserId ?? memberOptions[0]?.id ?? ""}
+            defaultValue={resolveDefaultOwnerId(memberOptions, data.currentUserId)}
           />
         </FormRow>
         <FormRow label="规划周期 *" align="center">
@@ -709,15 +787,17 @@ function formatMonthRange(startMonth: number | null | undefined, endMonth: numbe
   return "—";
 }
 
-function ProductGoalCreateForm({ data, onClose }: { data: Props["data"]; onClose: () => void }) {
-  const memberOptions = useMemo(
-    () => data.memberOptions.map((member) => ({
-      ...member,
-      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
-    })),
-    [data.memberOptions]
-  );
-
+function ProductGoalCreateForm({
+  data,
+  departmentOrgNodeId,
+  memberOptions,
+  onClose,
+}: {
+  data: Props["data"];
+  departmentOrgNodeId: string;
+  memberOptions: MemberPickerOption[];
+  onClose: () => void;
+}) {
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
     return [currentYear, currentYear + 1, currentYear + 2];
@@ -728,6 +808,7 @@ function ProductGoalCreateForm({ data, onClose }: { data: Props["data"]; onClose
       await createProductGoal(fd);
       onClose();
     }}>
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <div className="space-y-4">
         <FormRow label="产品目标名称 *" align="center">
           <input
@@ -741,7 +822,7 @@ function ProductGoalCreateForm({ data, onClose }: { data: Props["data"]; onClose
           <MemberPicker
             name="ownerId"
             options={memberOptions}
-            defaultValue={data.currentUserId ?? memberOptions[0]?.id ?? ""}
+            defaultValue={resolveDefaultOwnerId(memberOptions, data.currentUserId)}
           />
         </FormRow>
         <FormRow label="年份 *" align="center">
@@ -962,14 +1043,19 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
   );
 }
 
-function ProductGoalEditForm({ item, data, onClose }: { item: Props["data"]["productGoalColumns"][number]["items"][number]; data: Props["data"]; onClose: () => void }) {
-  const memberOptions = useMemo(
-    () => data.memberOptions.map((member) => ({
-      ...member,
-      label: member.teamName ? `${member.name} · ${member.teamName}` : member.name,
-    })),
-    [data.memberOptions]
-  );
+function ProductGoalEditForm({
+  item,
+  data,
+  departmentOrgNodeId,
+  memberOptions,
+  onClose,
+}: {
+  item: Props["data"]["productGoalColumns"][number]["items"][number];
+  data: Props["data"];
+  departmentOrgNodeId: string;
+  memberOptions: MemberPickerOption[];
+  onClose: () => void;
+}) {
   const [errorMessage, setErrorMessage] = useState("");
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -989,6 +1075,7 @@ function ProductGoalEditForm({ item, data, onClose }: { item: Props["data"]["pro
       }
     }}>
       <input type="hidden" name="productGoalId" value={item.id} />
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <div className="space-y-4">
         <FormRow label="产品目标名称 *" align="center">
           <input
@@ -1002,7 +1089,7 @@ function ProductGoalEditForm({ item, data, onClose }: { item: Props["data"]["pro
           <MemberPicker
             name="ownerId"
             options={memberOptions}
-            defaultValue={item.ownerId}
+            defaultValue={resolveDefaultOwnerId(memberOptions, item.ownerId)}
           />
         </FormRow>
         <FormRow label="年份 *" align="center">
@@ -1251,6 +1338,23 @@ export function QuarterlyWorkContent({ data }: Props) {
     })),
     [data.productGoalColumns, belongsToSelectedDepartment, teamTab]
   );
+  const visibleProductGoalOptions = useMemo(
+    () => visibleProductGoalColumns.flatMap((column) => column.items).map((item) => ({
+      id: item.id,
+      title: item.title,
+      year: item.year,
+    })),
+    [visibleProductGoalColumns]
+  );
+  const getProductGoalOptionsForForm = (currentProductGoalId?: string | null) => {
+    if (!currentProductGoalId || visibleProductGoalOptions.some((goal) => goal.id === currentProductGoalId)) {
+      return visibleProductGoalOptions;
+    }
+    const currentGoal = data.productGoalOptions.find((goal) => goal.id === currentProductGoalId);
+    return currentGoal ? [...visibleProductGoalOptions, currentGoal] : visibleProductGoalOptions;
+  };
+  const getMemberOptionsForForm = (preserveOwnerId?: string | null) =>
+    resolveMemberOptionsForForm(data.memberOptions, departmentTab, teamDepartmentMap, preserveOwnerId);
   const visibleReminders = useMemo(
     () => data.updateReminders.filter((reminder) => {
       const teamOrgNodeId = allItems.find((item) => item.id === reminder.id)?.teamOrgNodeId ?? null;
@@ -1904,6 +2008,8 @@ export function QuarterlyWorkContent({ data }: Props) {
             mode="create"
             status={createDialog.status}
             defaultProjectId={createDialog.projectId}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm()}
             onClose={() => setCreateDialog(null)}
             onSuccess={handleFormSuccess}
           />
@@ -1917,17 +2023,22 @@ export function QuarterlyWorkContent({ data }: Props) {
             mode="edit"
             status={editDialog.item.status}
             item={editDialog.item}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm(editDialog.item.ownerId)}
             onClose={() => setEditDialog(null)}
             onSuccess={handleFormSuccess}
           />
         )}
       </Dialog>
 
-      <Dialog open={!!projectDialog} onClose={() => setProjectDialog(null)} title={projectDialog ? `编辑${projectDialog.title}项目` : "编辑项目"}>
+      <Dialog open={!!projectDialog} onClose={() => setProjectDialog(null)} title="编辑项目">
         {projectDialog && (
           <ProjectEditForm
             data={data}
             item={projectDialog.item}
+            productGoalOptions={getProductGoalOptionsForForm(projectDialog.item.productGoalId)}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm(projectDialog.item.ownerId)}
             onClose={() => setProjectDialog(null)}
           />
         )}
@@ -1937,6 +2048,8 @@ export function QuarterlyWorkContent({ data }: Props) {
         {createProductGoalDialog ? (
           <ProductGoalCreateForm
             data={data}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm()}
             onClose={() => setCreateProductGoalDialog(false)}
           />
         ) : null}
@@ -1947,6 +2060,8 @@ export function QuarterlyWorkContent({ data }: Props) {
           <ProductGoalEditForm
             item={productGoalDialog}
             data={data}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm(productGoalDialog.ownerId)}
             onClose={() => setProductGoalDialog(null)}
           />
         ) : null}
@@ -2020,6 +2135,9 @@ export function QuarterlyWorkContent({ data }: Props) {
         {createProjectDialog && (
           <ProjectCreateForm
             data={data}
+            productGoalOptions={visibleProductGoalOptions}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm()}
             defaultStatus={createProjectDialog}
             defaultProductGoalId={createProjectProductGoalId ?? undefined}
             onClose={() => {

@@ -143,24 +143,51 @@ async function getProjectManagementDepartmentScope(currentUser: Awaited<ReturnTy
   return { departmentOrgNodeId, scopedOrgNodeIds };
 }
 
-async function findEditableOwner(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, ownerId: string) {
-  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+async function assertDepartmentOrgNodeAccessible(
+  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>,
+  departmentOrgNodeId: string,
+) {
+  const department = await prisma.orgNode.findFirst({
+    where: { id: departmentOrgNodeId, nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+  if (!department) throw new Error("部门不存在");
+
+  if (currentUser.roleType === "ADMIN") {
+    return;
+  }
+
+  const { departmentOrgNodeId: userDepartmentOrgNodeId } = await getProjectManagementDepartmentScope(currentUser);
+  if (userDepartmentOrgNodeId !== departmentOrgNodeId) {
+    throw new Error("无权在该部门选择负责人");
+  }
+}
+
+async function findEditableOwner(
+  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>,
+  ownerId: string,
+  departmentOrgNodeId: string,
+) {
+  await assertDepartmentOrgNodeAccessible(currentUser, departmentOrgNodeId);
+  const scopedOrgNodeIds = await getDescendantOrgNodeIds(departmentOrgNodeId);
   const owner = await prisma.user.findFirst({
     where: {
       id: ownerId,
       isActive: true,
       deletedAt: null,
-      ...(currentUser.roleType === "ADMIN"
-        ? {}
-        : departmentOrgNodeId
-          ? { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] } }
-          : { id: currentUser.id }),
+      orgNodeId: { in: scopedOrgNodeIds },
     },
     select: { id: true, orgNodeId: true },
   });
 
   if (!owner) throw new Error("负责人不在当前部门范围内");
   return owner;
+}
+
+function parseDepartmentOrgNodeId(value: FormDataEntryValue | null) {
+  const departmentOrgNodeId = String(value ?? "").trim();
+  if (!departmentOrgNodeId) throw new Error("部门范围无效");
+  return departmentOrgNodeId;
 }
 
 async function findEditableProject(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, projectId: string) {
@@ -235,6 +262,7 @@ export async function createQuarterlyWork(formData: FormData) {
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const now = new Date();
   const year = now.getFullYear();
   const periodStartMonth = startMonth ?? (now.getMonth() + 1);
@@ -243,7 +271,7 @@ export async function createQuarterlyWork(formData: FormData) {
     throw new Error("起始月份不能晚于结束月份");
   }
   const quarter = Math.floor((periodStartMonth - 1) / 3) + 1;
-  const owner = await findEditableOwner(currentUser, ownerId);
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const project = await ensureProjectForWork({
     currentUser,
     projectId,
@@ -287,12 +315,14 @@ export async function updateQuarterlyWork(formData: FormData) {
   const status = parseStatus(formData.get("status"));
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
-  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const projectId = parseProjectId(formData.get("projectId"));
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
+  const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const existingWork = await prisma.quarterlyWork.findFirst({
     where: {
       id: workId,
-      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+      ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
     },
     select: { id: true, status: true, projectId: true, startMonth: true },
   });
@@ -302,17 +332,28 @@ export async function updateQuarterlyWork(formData: FormData) {
   assertEditableStatus(existingWork.status);
   assertEditableStatus(status);
 
-  const owner = await findEditableOwner(currentUser, ownerId);
+  const project = await prisma.project.findFirst({
+    where: {
+      id: projectId,
+      ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
+    },
+    select: { id: true },
+  });
+  if (!project) throw new Error("项目不存在或无权限选择");
+
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const periodStartMonth = startMonth ?? existingWork.startMonth ?? 1;
   const periodEndMonth = endMonth ?? periodStartMonth;
   if (periodStartMonth > periodEndMonth) {
     throw new Error("起始月份不能晚于结束月份");
   }
   const quarter = Math.floor((periodStartMonth - 1) / 3) + 1;
+  const previousProjectId = existingWork.projectId;
 
   await prisma.quarterlyWork.update({
     where: { id: workId },
     data: {
+      projectId: project.id,
       title,
       description,
       expectedOutcome,
@@ -326,7 +367,10 @@ export async function updateQuarterlyWork(formData: FormData) {
     },
   });
 
-  await syncProjectStatusFromWork(existingWork.projectId, status);
+  await syncProjectStatusFromWork(project.id, status);
+  if (previousProjectId !== project.id) {
+    await syncProjectStatusFromWork(previousProjectId, status);
+  }
 
   revalidateQuarterlyWork();
 }
@@ -375,13 +419,14 @@ export async function createProject(formData: FormData) {
   const title = requiredString(formData.get("title"), "项目名称");
   const productGoalId = parseOptionalId(formData.get("productGoalId"));
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const description = requiredString(formData.get("description"), "项目描述");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "预期收益");
   const status = parseProjectStatus(formData.get("status") ?? "NOT_STARTED");
   const startQuarter = parseRequiredQuarter(formData.get("startQuarter"), "起始季度");
   const endQuarter = parseRequiredQuarter(formData.get("endQuarter"), "结束季度");
   assertQuarterRange(startQuarter, endQuarter);
-  const owner = await findEditableOwner(currentUser, ownerId);
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
 
   if (productGoalId) {
     const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -418,11 +463,12 @@ export async function createProductGoal(formData: FormData) {
   const currentUser = await requireQuarterlyWorkEditor();
   const title = requiredString(formData.get("title"), "产品目标名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const year = parseRequiredYear(formData.get("year"), "年份");
   const description = requiredString(formData.get("description"), "产品目标描述");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "预期收益");
   const status = parseProjectStatus(formData.get("status") ?? "NOT_STARTED");
-  const owner = await findEditableOwner(currentUser, ownerId);
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
 
   await prisma.productGoal.create({
     data: {
@@ -446,22 +492,23 @@ export async function updateProductGoal(formData: FormData) {
   const productGoalId = requiredString(formData.get("productGoalId"), "产品目标");
   const title = requiredString(formData.get("title"), "产品目标名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const year = parseRequiredYear(formData.get("year"), "年份");
   const description = requiredString(formData.get("description"), "产品目标描述");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "预期收益");
   const status = parseProjectStatus(formData.get("status"));
-  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const productGoal = await prisma.productGoal.findFirst({
     where: {
       id: productGoalId,
-      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+      ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
     },
     select: { id: true },
   });
   if (!productGoal) throw new Error("产品目标不存在或无权限编辑");
 
-  const owner = await findEditableOwner(currentUser, ownerId);
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
 
   await prisma.productGoal.update({
     where: { id: productGoal.id },
@@ -696,7 +743,9 @@ export async function updateProject(formData: FormData) {
   const currentUser = await requireQuarterlyWorkEditor();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const title = requiredString(formData.get("title"), "项目名称");
+  const productGoalId = parseOptionalId(formData.get("productGoalId"));
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const status = parseProjectStatus(formData.get("status"));
   const description = (formData.get("description") as string)?.trim() || null;
   const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
@@ -704,25 +753,37 @@ export async function updateProject(formData: FormData) {
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
   const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
-  const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   if (status === "COMPLETED" && workloadPersonDay === null) {
     throw new Error("项目状态为已完成时，工作量(人天)为必填项");
   }
 
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds) },
+    where: { id: projectId, ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds) },
     select: { id: true },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
 
-  const owner = await findEditableOwner(currentUser, ownerId);
+  if (productGoalId) {
+    const productGoal = await prisma.productGoal.findFirst({
+      where: {
+        id: productGoalId,
+        ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
+      },
+      select: { id: true },
+    });
+    if (!productGoal) throw new Error("产品目标不存在或无权限选择");
+  }
+
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
       where: { id: project.id },
       data: {
         title,
+        productGoalId,
         description,
         expectedOutcome,
         workloadPersonDay,

@@ -688,11 +688,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     })),
     memberOptions: users.map((user) => {
       const teamOrgNodeId = getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById);
+      const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
       return {
         id: user.id,
         name: user.name,
         teamOrgNodeId,
         teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
+        departmentOrgNodeId,
       };
     }),
     valueTrackItems: valueTracks.map((track) => {
