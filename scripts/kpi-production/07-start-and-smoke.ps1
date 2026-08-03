@@ -10,13 +10,9 @@ $ErrorActionPreference = "Stop"
 Initialize-KpiProduction -RunId $RunId
 Assert-KpiRunDirectory
 Assert-KpiMarker "06-verification.ok"
-Assert-KpiPm2Service
-$pm2 = Get-KpiNativeCommand "pm2"
 
 Write-Host "Step 07: start the new production service"
-Invoke-KpiNativeCommand `
-    -FilePath $pm2 `
-    -ArgumentList @("restart", $script:KpiPm2ServiceName, "--update-env")
+Start-KpiProductionService
 
 $loginStatus = 0
 for ($attempt = 1; $attempt -le 30; $attempt++) {

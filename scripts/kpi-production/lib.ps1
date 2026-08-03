@@ -32,16 +32,23 @@ function Invoke-KpiNativeCommand {
         [switch]$Append
     )
 
-    if ([string]::IsNullOrWhiteSpace($LogPath)) {
-        & $FilePath @ArgumentList
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        if ([string]::IsNullOrWhiteSpace($LogPath)) {
+            & $FilePath @ArgumentList
+        }
+        elseif ($Append) {
+            & $FilePath @ArgumentList 2>&1 |
+                Tee-Object -FilePath $LogPath -Append
+        }
+        else {
+            & $FilePath @ArgumentList 2>&1 |
+                Tee-Object -FilePath $LogPath
+        }
     }
-    elseif ($Append) {
-        & $FilePath @ArgumentList 2>&1 |
-            Tee-Object -FilePath $LogPath -Append
-    }
-    else {
-        & $FilePath @ArgumentList 2>&1 |
-            Tee-Object -FilePath $LogPath
+    finally {
+        $ErrorActionPreference = $previousErrorAction
     }
 
     if ($LASTEXITCODE -ne 0) {
@@ -57,6 +64,29 @@ function Invoke-KpiNativeCommand {
 function ConvertTo-KpiNormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
     return [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/").ToLowerInvariant()
+}
+
+function Get-KpiDepotProdBash {
+    foreach ($candidate in @(
+        "C:\Program Files\Git\bin\bash.exe",
+        "C:\Program Files (x86)\Git\bin\bash.exe"
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    Stop-KpiMigration "Git Bash not found; depot-prod.sh requires bash.exe"
+}
+
+function Resolve-KpiServiceMode {
+    if ($env:KPI_SERVICE_MODE -eq "pm2" -or $env:KPI_SERVICE_MODE -eq "depot-prod") {
+        return $env:KPI_SERVICE_MODE
+    }
+    $pm2 = Get-Command "pm2" -ErrorAction SilentlyContinue
+    if ($null -ne $pm2) {
+        return "pm2"
+    }
+    return "depot-prod"
 }
 
 function Resolve-KpiPm2ServiceName {
@@ -144,12 +174,19 @@ function Initialize-KpiProduction {
     $script:KpiAppUrl = if (
         [string]::IsNullOrWhiteSpace($env:KPI_APP_URL)
     ) {
-        "http://depot.rj-info.com:80"
+        "http://depot.rj-info.com"
     }
     else {
         $env:KPI_APP_URL.TrimEnd("/")
     }
-    $script:KpiPm2ServiceName = Resolve-KpiPm2ServiceName
+    $script:KpiServiceMode = Resolve-KpiServiceMode
+    $script:KpiPm2ServiceName = if ($script:KpiServiceMode -eq "pm2") {
+        Resolve-KpiPm2ServiceName
+    }
+    else {
+        "depot-prod"
+    }
+    $script:KpiDepotProdScript = Join-Path $script:KpiProjectDir "scripts\depot-prod.sh"
 
     if (-not (Test-Path -LiteralPath $script:KpiProdDb -PathType Leaf)) {
         Stop-KpiMigration "Production database not found: $script:KpiProdDb"
@@ -208,11 +245,46 @@ function Write-KpiMarker {
 }
 
 function Assert-KpiPm2Service {
+    if ($script:KpiServiceMode -ne "pm2") {
+        return
+    }
     $pm2 = Get-KpiNativeCommand "pm2"
     & $pm2 describe $script:KpiPm2ServiceName *> $null
     if ($LASTEXITCODE -ne 0) {
         Stop-KpiMigration "PM2 service not found: $script:KpiPm2ServiceName"
     }
+}
+
+function Stop-KpiProductionService {
+    if ($script:KpiServiceMode -eq "pm2") {
+        Assert-KpiPm2Service
+        $pm2 = Get-KpiNativeCommand "pm2"
+        Invoke-KpiNativeCommand `
+            -FilePath $pm2 `
+            -ArgumentList @("stop", $script:KpiPm2ServiceName)
+        return
+    }
+
+    $bash = Get-KpiDepotProdBash
+    Invoke-KpiNativeCommand `
+        -FilePath $bash `
+        -ArgumentList @($script:KpiDepotProdScript, "stop")
+}
+
+function Start-KpiProductionService {
+    if ($script:KpiServiceMode -eq "pm2") {
+        Assert-KpiPm2Service
+        $pm2 = Get-KpiNativeCommand "pm2"
+        Invoke-KpiNativeCommand `
+            -FilePath $pm2 `
+            -ArgumentList @("restart", $script:KpiPm2ServiceName, "--update-env")
+        return
+    }
+
+    $bash = Get-KpiDepotProdBash
+    Invoke-KpiNativeCommand `
+        -FilePath $bash `
+        -ArgumentList @($script:KpiDepotProdScript, "start")
 }
 
 function Test-KpiFileUnlocked {
@@ -286,6 +358,7 @@ function Write-KpiRunSummary {
     Write-Host "Project: $script:KpiProjectDir"
     Write-Host "Database: $script:KpiProdDb"
     Write-Host "Backup directory: $script:KpiRunDir"
-    Write-Host "PM2 service: $script:KpiPm2ServiceName"
+    Write-Host "Service mode: $script:KpiServiceMode"
+    Write-Host "Service name: $script:KpiPm2ServiceName"
     Write-Host "Application URL: $script:KpiAppUrl"
 }

@@ -10,13 +10,9 @@ $ErrorActionPreference = "Stop"
 Initialize-KpiProduction -RunId $RunId
 Assert-KpiRunDirectory
 Assert-KpiMarker "01-preflight.ok"
-Assert-KpiPm2Service
-$pm2 = Get-KpiNativeCommand "pm2"
 
 Write-Host "Step 02: stop production writes before modifying build artifacts or data"
-Invoke-KpiNativeCommand `
-    -FilePath $pm2 `
-    -ArgumentList @("stop", $script:KpiPm2ServiceName)
+Stop-KpiProductionService
 Wait-KpiDatabaseRelease
 
 Write-KpiMarker "02-service-stopped.ok"

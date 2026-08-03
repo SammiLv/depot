@@ -332,16 +332,16 @@ export async function updateQuarterlyWork(formData: FormData) {
   assertEditableStatus(existingWork.status);
   assertEditableStatus(status);
 
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
-    },
-    select: { id: true },
-  });
-  if (!project) throw new Error("项目不存在或无权限选择");
-
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
+  const project = await ensureProjectForWork({
+    currentUser,
+    projectId,
+    title,
+    description,
+    expectedOutcome,
+    owner,
+    workStatus: status,
+  });
   const periodStartMonth = startMonth ?? existingWork.startMonth ?? 1;
   const periodEndMonth = endMonth ?? periodStartMonth;
   if (periodStartMonth > periodEndMonth) {

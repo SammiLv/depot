@@ -21,7 +21,12 @@ if (-not (Test-Path -LiteralPath $currentNext -PathType Container)) {
     )
 }
 if (Test-Path -LiteralPath $script:KpiPreviousNext) {
-    Stop-KpiMigration "Previous .next backup already exists: $script:KpiPreviousNext"
+    if (-not (Test-Path -LiteralPath (Join-Path $script:KpiRunDir "03-build.ok"))) {
+        Write-Host "Step 03: previous build attempt left rollback backup; resuming"
+    }
+    else {
+        Stop-KpiMigration "Previous .next backup already exists: $script:KpiPreviousNext"
+    }
 }
 $prismaRollbackDirectories = @(
     @{
@@ -40,16 +45,28 @@ foreach ($directory in $prismaRollbackDirectories) {
         Stop-KpiMigration "Existing $($directory.Label) not found: $($directory.Source)"
     }
     if (Test-Path -LiteralPath $directory.Backup) {
+        if (-not (Test-Path -LiteralPath (Join-Path $script:KpiRunDir "03-build.ok"))) {
+            continue
+        }
         Stop-KpiMigration "Previous $($directory.Label) backup already exists: $($directory.Backup)"
     }
 }
 
-Write-Host "Step 03: preserve the currently running .next build for rollback"
-Copy-Item `
-    -LiteralPath $currentNext `
-    -Destination $script:KpiPreviousNext `
-    -Recurse
+if (Test-Path -LiteralPath $script:KpiPreviousNext) {
+    Write-Host "Step 03: rollback backup already present, continuing build"
+}
+else {
+    Write-Host "Step 03: preserve the currently running .next build for rollback"
+    Copy-Item `
+        -LiteralPath $currentNext `
+        -Destination $script:KpiPreviousNext `
+        -Recurse
+}
 foreach ($directory in $prismaRollbackDirectories) {
+    if (Test-Path -LiteralPath $directory.Backup) {
+        Write-Host "Step 03: rollback backup already present for $($directory.Label)"
+        continue
+    }
     Write-Host "Step 03: preserve $($directory.Label) for rollback"
     Copy-Item `
         -LiteralPath $directory.Source `
