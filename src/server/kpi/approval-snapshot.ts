@@ -1,4 +1,8 @@
-import type { KpiApprovalResolverType, PermissionScopeType } from "@prisma/client";
+import type {
+  KpiApprovalNodeMode,
+  KpiApprovalResolverType,
+  PermissionScopeType,
+} from "@prisma/client";
 import { resolveApprovalChain } from "@/server/kpi/approval-chain";
 import {
   resolveApplicableKpiApprovalPolicy,
@@ -14,6 +18,8 @@ export type KpiApprovalSnapshotStep = {
   approverId: string;
   policyStepId: string | null;
   stepLabel: string | null;
+  nodeMode: KpiApprovalNodeMode | null;
+  configuredOrgNodeId: string | null;
   ancestorDepth: number | null;
   resolverType: KpiApprovalResolverType | null;
   resolverUserId: string | null;
@@ -25,6 +31,7 @@ export type KpiApprovalSnapshot = {
   policyName: string | null;
   policyScopeType: PermissionScopeType | null;
   policyDepartmentOrgNodeId: string | null;
+  policyScopeOrgNodeId: string | null;
   steps: KpiApprovalSnapshotStep[];
 };
 
@@ -63,12 +70,15 @@ export function buildConfiguredKpiApprovalSnapshot(
     policyName: policy.name,
     policyScopeType: policy.scopeType,
     policyDepartmentOrgNodeId: policy.departmentOrgNodeId,
+    policyScopeOrgNodeId: policy.matchedScopeOrgNodeId,
     steps: steps.map((step) => ({
       stepOrder: step.stepOrder,
       stageKey: getCompatibilityStageKey(step.resolverType),
       approverId: step.approverId,
       policyStepId: step.policyStepId,
       stepLabel: step.stepLabel,
+      nodeMode: step.nodeMode,
+      configuredOrgNodeId: step.configuredOrgNodeId,
       ancestorDepth: step.ancestorDepth,
       resolverType: step.resolverType,
       resolverUserId: step.resolverUserId,
@@ -83,6 +93,7 @@ export function buildPersonalKpiApprovalPolicyData(snapshot: KpiApprovalSnapshot
     approvalPolicyName: snapshot.policyName,
     approvalPolicyScopeType: snapshot.policyScopeType,
     approvalPolicyDepartmentOrgNodeId: snapshot.policyDepartmentOrgNodeId,
+    approvalPolicyScopeOrgNodeId: snapshot.policyScopeOrgNodeId,
   };
 }
 
@@ -96,6 +107,8 @@ export function buildPersonalKpiApprovalStepData(
     stepOrder: step.stepOrder,
     stageKey: step.stageKey,
     stepLabel: step.stepLabel,
+    nodeMode: step.nodeMode,
+    configuredOrgNodeId: step.configuredOrgNodeId,
     ancestorDepth: step.ancestorDepth,
     resolverType: step.resolverType,
     resolverUserId: step.resolverUserId,
@@ -127,10 +140,13 @@ export async function resolveKpiApprovalSnapshot(
     policyName: null,
     policyScopeType: null,
     policyDepartmentOrgNodeId: null,
+    policyScopeOrgNodeId: null,
     steps: legacySteps.map((step) => ({
       ...step,
       policyStepId: null,
       stepLabel: null,
+      nodeMode: null,
+      configuredOrgNodeId: null,
       ancestorDepth: null,
       resolverType: null,
       resolverUserId: null,
