@@ -128,7 +128,10 @@ export default async function OrgPage({
   ]);
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
-  const rootOrgNode = await prisma.orgNode.findFirst({
+  const rootOrgNode = await prisma.orgNode.findUnique({
+    where: { id: "org_root" },
+    select: { id: true, name: true, nodeType: true, parentId: true },
+  }) ?? await prisma.orgNode.findFirst({
     where: { nodeType: "ROOT" },
     select: { id: true, name: true, nodeType: true, parentId: true },
   });

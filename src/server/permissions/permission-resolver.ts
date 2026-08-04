@@ -21,6 +21,7 @@ type MatchedPermissionGrant = PermissionGrantRow & {
 export type ResolvedPermissionCoverage = {
   hasPermission: boolean;
   hasAllAccess: boolean;
+  hasSubtreeAccess: boolean;
   includesSelf: boolean;
   orgNodeIds: string[];
 };
@@ -43,7 +44,7 @@ function matchesRoleGrant(
     return true;
   }
   if (!grant.orgNodeId) {
-    return true;
+    return false;
   }
   if (!currentUser.orgNodeId) {
     return false;
@@ -156,6 +157,7 @@ export async function resolvePermissionCoverage(
     return {
       hasPermission: false,
       hasAllAccess: false,
+      hasSubtreeAccess: false,
       includesSelf: false,
       orgNodeIds: [],
     };
@@ -165,12 +167,14 @@ export async function resolvePermissionCoverage(
     return {
       hasPermission: true,
       hasAllAccess: true,
+      hasSubtreeAccess: true,
       includesSelf: true,
       orgNodeIds: [],
     };
   }
 
   const includesSelf = matched.some((grant) => grant.scopeType === "SELF");
+  const hasSubtreeAccess = matched.some((grant) => grant.scopeType === "SUBTREE");
   const directOrgNodeIds = new Set<string>();
   const subtreeRootOrgNodeIds = [...new Set(
     matched
@@ -178,12 +182,28 @@ export async function resolvePermissionCoverage(
       .map((grant) => grant.effectiveOrgNodeId)
       .filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
   )];
+  const [ancestorOrgNodeIds, descendantOrgNodeIds] = await Promise.all([
+    getAncestorOrgNodeIds(currentUser.orgNodeId ?? null),
+    getDescendantOrgNodeIds(currentUser.orgNodeId ?? null),
+  ]);
+  const ancestorOrgNodeIdSet = new Set(ancestorOrgNodeIds);
+  const descendantOrgNodeIdSet = new Set(descendantOrgNodeIds);
 
-  matched
-    .filter((grant) => grant.scopeType === "SELF" || grant.scopeType === "NODE")
-    .map((grant) => grant.effectiveOrgNodeId)
-    .filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
-    .forEach((orgNodeId) => directOrgNodeIds.add(orgNodeId));
+  for (const grant of matched.filter((item) => item.scopeType === "NODE")) {
+    const orgNodeId = grant.effectiveOrgNodeId;
+    if (!orgNodeId) continue;
+    if (orgNodeId === currentUser.orgNodeId) {
+      directOrgNodeIds.add(orgNodeId);
+      continue;
+    }
+    if (currentUser.orgNodeId && ancestorOrgNodeIdSet.has(orgNodeId)) {
+      directOrgNodeIds.add(currentUser.orgNodeId);
+      continue;
+    }
+    if (descendantOrgNodeIdSet.has(orgNodeId)) {
+      directOrgNodeIds.add(orgNodeId);
+    }
+  }
 
   const subtreeOrgNodeIds = await Promise.all(subtreeRootOrgNodeIds.map((orgNodeId) => getDescendantOrgNodeIds(orgNodeId)));
   subtreeOrgNodeIds.flat().forEach((orgNodeId) => directOrgNodeIds.add(orgNodeId));
@@ -191,6 +211,7 @@ export async function resolvePermissionCoverage(
   return {
     hasPermission: true,
     hasAllAccess: false,
+    hasSubtreeAccess,
     includesSelf,
     orgNodeIds: [...directOrgNodeIds],
   };

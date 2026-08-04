@@ -598,10 +598,6 @@ function parseTemplateScopeTargets(
   const dedupedTeamIds = [...new Set(selectedTeamIds)];
   const dedupedMemberIds = [...new Set(filteredMemberIds)];
 
-  if (dedupedTeamIds.length === 0 && dedupedMemberIds.length === 0) {
-    throw new Error("请至少选择一个适用范围");
-  }
-
   return [
     ...dedupedTeamIds.map((teamId) => ({
       targetType: "ORG_NODE" as const,
