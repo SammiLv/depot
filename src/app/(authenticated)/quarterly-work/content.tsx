@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
-import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
+import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
+import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2 } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
@@ -36,6 +37,7 @@ type ProjectDialogState = {
 
 type ValueTrackDialogState = Props["data"]["valueTrackItems"][number] | null;
 type ValueTrackDeleteState = Props["data"]["valueTrackItems"][number] | null;
+type ValueOverviewDialogState = Props["data"]["valueOverviewItems"][number] | null;
 type ProductGoalDialogState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
 type ProductGoalDeleteState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
 type ProjectDeleteState = Props["data"]["projectColumns"][number]["items"][number] | null;
@@ -59,6 +61,15 @@ const projectTitleByStatus: Record<ProjectStatus, string> = {
 
 const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
+const valueJudgementOptions = ["未观测", "观测中", "不达预期", "已达预期"] as const;
+const valueOverviewCardColumns = [
+  { key: "未观测", label: "未观测", tone: "default" as const },
+  { key: "观测中", label: "观测中", tone: "primary" as const },
+  { key: "不达预期", label: "不达预期", tone: "warning" as const },
+  { key: "已达预期", label: "已达预期", tone: "success" as const },
+] as const;
+const projectListGridClass =
+  "grid-cols-[minmax(0,1.05fr)_minmax(0,0.78fr)_minmax(0,0.52fr)_minmax(0,0.58fr)_minmax(0,1.08fr)_minmax(0,0.46fr)_minmax(0,0.48fr)_minmax(0,0.56fr)_minmax(0,0.56fr)_minmax(88px,0.62fr)]";
 
 type MemberOption = Props["data"]["memberOptions"][number];
 type MemberPickerOption = MemberOption & { label: string };
@@ -778,6 +789,24 @@ function formatQuarterRange(startQuarter: string | null | undefined, endQuarter:
   return "—";
 }
 
+function ProjectQuarterRangeLabel({
+  startQuarter,
+  endQuarter,
+}: {
+  startQuarter: string | null;
+  endQuarter: string | null;
+}) {
+  if (startQuarter && endQuarter) {
+    return (
+      <div className="min-w-0 leading-snug text-muted-foreground">
+        <div className="break-words">{startQuarter}</div>
+        <div className="break-words">~ {endQuarter}</div>
+      </div>
+    );
+  }
+  return <div className="min-w-0 break-words text-muted-foreground">{formatQuarterRange(startQuarter, endQuarter)}</div>;
+}
+
 function formatMonthRange(startMonth: number | null | undefined, endMonth: number | null | undefined) {
   if (startMonth && endMonth) {
     return `${startMonth}月 ~ ${endMonth}月`;
@@ -946,9 +975,9 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
             defaultValue="观测中"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
-            <option value="不达预期">不达预期</option>
-            <option value="观测中">观测中</option>
-            <option value="已达预期">已达预期</option>
+            {valueJudgementOptions.filter((option) => option !== "未观测").map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
           </select>
         </FormRow>
         <FormRow label="后续优化">
@@ -965,6 +994,99 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
         <Button type="submit" className="rounded-lg">
           <Plus className="h-4 w-4" />
           创建
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ValueOverviewEditForm({
+  item,
+  onClose,
+}: {
+  item: Props["data"]["valueOverviewItems"][number];
+  onClose: () => void;
+}) {
+  const [errorMessage, setErrorMessage] = useState("");
+
+  return (
+    <form onSubmit={async (event) => {
+      event.preventDefault();
+      const formData = new FormData(event.currentTarget);
+      try {
+        setErrorMessage("");
+        await updateProjectValue(formData);
+        onClose();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "保存项目价值失败");
+      }
+    }}>
+      <input type="hidden" name="projectId" value={item.id} />
+      <div className="space-y-4">
+        <FormRow label="项目名称" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.title}</div>
+        </FormRow>
+        <FormRow label="负责人" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.owner}</div>
+        </FormRow>
+        <FormRow label="完成时间" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(item.completedAt)}</div>
+        </FormRow>
+        <FormRow label="预期收益">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
+        </FormRow>
+        <FormRow label="工作量(人天) *" align="center">
+          <input
+            name="workloadPersonDay"
+            type="number"
+            step="0.1"
+            min="0"
+            required
+            defaultValue={item.workloadPersonDay ?? ""}
+            placeholder="请输入工作量(人天)"
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        <FormRow label="其他成本">
+          <textarea
+            name="otherCost"
+            rows={2}
+            defaultValue={item.otherCost ?? ""}
+            placeholder="请输入其他成本"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        <FormRow label="实际收益">
+          <textarea
+            name="actualValue"
+            rows={2}
+            defaultValue={item.actualValue ?? ""}
+            placeholder="请输入实际收益"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        <FormRow label="价值判断 *" align="center">
+          <select
+            name="valueJudgement"
+            defaultValue={item.valueJudgement}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            {valueJudgementOptions.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </FormRow>
+        {errorMessage ? (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-6 flex justify-end gap-3">
+        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">
+          <Pencil className="h-4 w-4" />
+          保存
         </Button>
       </div>
     </form>
@@ -1003,12 +1125,12 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
         <FormRow label="价值判断 *" align="center">
           <select
             name="valueJudgement"
-            defaultValue={item.valueJudgement ?? "观测中"}
+            defaultValue={item.valueJudgement === "未观测" ? "观测中" : item.valueJudgement}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
-            <option value="不达预期">不达预期</option>
-            <option value="观测中">观测中</option>
-            <option value="已达预期">已达预期</option>
+            {valueJudgementOptions.filter((option) => option !== "未观测").map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
           </select>
         </FormRow>
         <FormRow label="跟踪结果描述 *">
@@ -1273,6 +1395,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [createValueTrackProjectId, setCreateValueTrackProjectId] = useState<string | null>(null);
   const [valueTrackDialog, setValueTrackDialog] = useState<ValueTrackDialogState>(null);
   const [valueTrackDeleteDialog, setValueTrackDeleteDialog] = useState<ValueTrackDeleteState>(null);
+  const [valueOverviewDialog, setValueOverviewDialog] = useState<ValueOverviewDialogState>(null);
   const [productGoalDialog, setProductGoalDialog] = useState<ProductGoalDialogState>(null);
   const [productGoalDeleteDialog, setProductGoalDeleteDialog] = useState<ProductGoalDeleteState>(null);
   const [projectDeleteDialog, setProjectDeleteDialog] = useState<ProjectDeleteState>(null);
@@ -1341,6 +1464,18 @@ export function QuarterlyWorkContent({ data }: Props) {
       }),
     })),
     [data.productGoalColumns, belongsToSelectedDepartment, teamTab]
+  );
+  const visibleValueOverviewItems = useMemo(
+    () => data.valueOverviewItems.filter((item) =>
+      matchesDepartmentAndTeamScope(item, departmentTab, teamTab, teamDepartmentMap),
+    ),
+    [data.valueOverviewItems, departmentTab, teamTab, teamDepartmentMap]
+  );
+  const visibleValueTrackItems = useMemo(
+    () => data.valueTrackItems.filter((item) =>
+      matchesDepartmentAndTeamScope(item, departmentTab, teamTab, teamDepartmentMap),
+    ),
+    [data.valueTrackItems, departmentTab, teamTab, teamDepartmentMap]
   );
   const visibleProductGoalOptions = useMemo(
     () => visibleProductGoalColumns.flatMap((column) => column.items).map((item) => ({
@@ -1683,39 +1818,33 @@ export function QuarterlyWorkContent({ data }: Props) {
               ))}
             </div>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1.2fr_110px_1fr_1fr_0.9fr_0.9fr_1fr_1fr_140px] gap-4 text-xs text-muted-foreground">
-                  <div>项目名称</div>
-                  <div>所属产品目标</div>
-                  <div>负责人</div>
-                  <div>规划周期</div>
-                  <div>预期收益</div>
-                  <div>工作量(人天)</div>
-                  <div>其他成本</div>
-                  <div>实际收益</div>
-                  <div>价值判断</div>
-                  <div>项目状态</div>
-                  <div>创建时间</div>
-                  <div>完成时间</div>
-                  <div className="text-right">操作</div>
+              <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div className={`px-4 py-3 border-b border-border bg-muted/30 grid ${projectListGridClass} gap-x-2 gap-y-3 text-xs text-muted-foreground`}>
+                  <div className="min-w-0">项目名称</div>
+                  <div className="min-w-0">所属产品目标</div>
+                  <div className="min-w-0">负责人</div>
+                  <div className="min-w-0">规划周期</div>
+                  <div className="min-w-0">预期收益</div>
+                  <div className="min-w-0">工作量(人天)</div>
+                  <div className="min-w-0">项目状态</div>
+                  <div className="min-w-0">创建时间</div>
+                  <div className="min-w-0">完成时间</div>
+                  <div className="min-w-0 text-right">操作</div>
                 </div>
                 <div className="divide-y divide-border">
                   {visibleProjectColumns.flatMap((column) => column.items).length ? (
                     visibleProjectColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1.2fr_110px_1fr_1fr_0.9fr_0.9fr_1fr_1fr_140px] gap-4 items-start text-sm hover:bg-muted/20 transition">
-                        <div className="font-medium text-foreground break-words">{item.title}</div>
-                        <div className="text-muted-foreground break-words">{item.productGoalTitle || "—"}</div>
-                        <div className="text-muted-foreground break-words">{item.owner}</div>
-                        <div className="text-muted-foreground">{formatQuarterRange(item.startQuarter, item.endQuarter)}</div>
-                        <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
-                        <div className="text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
-                        <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.otherCost || "—"}</div>
-                        <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.actualValue || "—"}</div>
-                        <div className="text-muted-foreground">{item.valueJudgement || "—"}</div>
-                        <div className="text-muted-foreground">{projectTitleByStatus[item.status]}</div>
-                        <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
-                        <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
-                        <div className="text-right">
+                      <div key={item.id} className={`px-4 py-4 grid ${projectListGridClass} gap-x-2 gap-y-3 items-start text-sm hover:bg-muted/20 transition`}>
+                        <div className="min-w-0 font-medium text-foreground break-words">{item.title}</div>
+                        <div className="min-w-0 text-muted-foreground break-words">{item.productGoalTitle || "—"}</div>
+                        <div className="min-w-0 text-muted-foreground break-words">{item.owner}</div>
+                        <ProjectQuarterRangeLabel startQuarter={item.startQuarter} endQuarter={item.endQuarter} />
+                        <div className="min-w-0 text-muted-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
+                        <div className="min-w-0 text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
+                        <div className="min-w-0 break-words text-muted-foreground">{projectTitleByStatus[item.status]}</div>
+                        <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
+                        <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
+                        <div className="min-w-0 text-right">
                           <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
                             <button
                               type="button"
@@ -1733,24 +1862,12 @@ export function QuarterlyWorkContent({ data }: Props) {
                             >
                               删除
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCreateValueTrackProjectId(item.id);
-                                setCreateValueTrackDialog(true);
-                              }}
-                              disabled={item.status !== "COMPLETED"}
-                              className="text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline"
-                              aria-label={`为${item.title}新增价值跟踪`}
-                            >
-                              价值跟踪
-                            </button>
                           </div>
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无项目数据</div>
+                    <div className="px-4 py-12 text-center text-sm text-muted-foreground">暂无项目数据</div>
                   )}
                 </div>
               </div>
@@ -1896,13 +2013,9 @@ export function QuarterlyWorkContent({ data }: Props) {
               </div>
             )
           ) : viewMode === "card" ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {[
-                { key: "观测中", label: "观测中", tone: "default" as const },
-                { key: "不达预期", label: "不达预期", tone: "warning" as const },
-                { key: "已达预期", label: "已达预期", tone: "success" as const },
-              ].map((column) => {
-                const items = data.valueTrackItems.filter((item) => item.valueJudgement === column.key);
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {valueOverviewCardColumns.map((column) => {
+                const items = visibleValueOverviewItems.filter((item) => item.valueJudgement === column.key);
                 return (
                   <div key={column.key} className="min-h-[320px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
                     <div className="mb-3 flex items-center justify-between px-1">
@@ -1913,44 +2026,57 @@ export function QuarterlyWorkContent({ data }: Props) {
                     </div>
                     <div className="space-y-2">
                       {items.length ? (
-                        items.map((item: Props["data"]["valueTrackItems"][number]) => (
-                          <div key={item.id} className="rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium leading-snug">{item.projectTitle}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">{item.owner} · {formatTrackedAtLabel(item.trackedAt)}</div>
+                        items.map((item: Props["data"]["valueOverviewItems"][number]) => (
+                            <div key={item.id} className="rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-medium leading-snug">{item.title}</div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {item.owner} · {formatDateTimeLabel(item.completedAt)}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCreateValueTrackProjectId(item.id);
+                                      setCreateValueTrackDialog(true);
+                                    }}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                    aria-label={`为${item.title}新增价值跟踪`}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setValueOverviewDialog(item)}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                    aria-label={`编辑${item.title}的项目价值`}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => setValueTrackDialog(item)}
-                                  className="rounded-md p-1 hover:bg-background hover:text-foreground"
-                                  aria-label={`编辑${item.projectTitle}的价值跟踪`}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setValueTrackDeleteDialog(item)}
-                                  className="rounded-md p-1 hover:bg-background hover:text-destructive"
-                                  aria-label={`删除${item.projectTitle}的价值跟踪`}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
+                              <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                                <div>
+                                  <span className="text-[11px]">工作量(人天)：</span>
+                                  <span className="text-foreground">{item.workloadPersonDay ?? "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[11px]">其他成本：</span>
+                                  <span className="text-foreground whitespace-pre-wrap break-words">{item.otherCost || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[11px]">预期收益：</span>
+                                  <span className="text-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[11px]">实际收益：</span>
+                                  <span className="text-foreground whitespace-pre-wrap break-words">{item.actualValue || "—"}</span>
+                                </div>
                               </div>
                             </div>
-                            <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-                              <div>
-                                <span className="text-[11px]">跟踪结果：</span>
-                                <span className="text-foreground whitespace-pre-wrap break-words">{item.trackingResult}</span>
-                              </div>
-                              <div>
-                                <span className="text-[11px]">后续优化：</span>
-                                <span className="text-foreground whitespace-pre-wrap break-words">{item.followUpOptimization || "—"}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))
+                          ))
                       ) : (
                         <div className="py-8 text-center text-xs text-muted-foreground">暂无</div>
                       )}
@@ -1960,49 +2086,114 @@ export function QuarterlyWorkContent({ data }: Props) {
               })}
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-              <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_1fr_1.6fr_1.6fr_120px] gap-4 text-xs text-muted-foreground">
-                <div>项目</div>
-                <div>负责人</div>
-                <div>跟踪时间</div>
-                <div>跟踪结果</div>
-                <div>后续优化</div>
-                <div className="text-right">操作</div>
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-3 text-sm font-medium text-foreground">需求价值概览</h3>
+                <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+                  <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.9fr_0.9fr_1fr_140px] gap-4 text-xs text-muted-foreground">
+                    <div>项目名称</div>
+                    <div>负责人</div>
+                    <div>工作量(人天)</div>
+                    <div>其他成本</div>
+                    <div>预期收益</div>
+                    <div>实际收益</div>
+                    <div>价值判断</div>
+                    <div>项目状态</div>
+                    <div>完成时间</div>
+                    <div className="text-right">操作</div>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {visibleValueOverviewItems.length ? (
+                      visibleValueOverviewItems.map((item: Props["data"]["valueOverviewItems"][number]) => (
+                          <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.9fr_0.9fr_1fr_140px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                            <div className="font-medium text-foreground break-words">{item.title}</div>
+                            <div className="text-muted-foreground break-words">{item.owner}</div>
+                            <div className="text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
+                            <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.otherCost || "—"}</div>
+                            <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
+                            <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.actualValue || "—"}</div>
+                            <div className="text-muted-foreground">{item.valueJudgement}</div>
+                            <div className="text-muted-foreground">{projectTitleByStatus[item.status]}</div>
+                            <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
+                            <div className="text-right">
+                              <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                                <button
+                                  type="button"
+                                  onClick={() => setValueOverviewDialog(item)}
+                                  className="text-primary hover:underline"
+                                  aria-label={`编辑${item.title}的项目价值`}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCreateValueTrackProjectId(item.id);
+                                    setCreateValueTrackDialog(true);
+                                  }}
+                                  className="text-primary hover:underline"
+                                  aria-label={`为${item.title}新增价值跟踪`}
+                                >
+                                  新增跟踪
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                      ))
+                    ) : (
+                      <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无需求价值概览数据</div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="divide-y divide-border">
-                {data.valueTrackItems.length ? (
-                  data.valueTrackItems.map((item: Props["data"]["valueTrackItems"][number]) => (
-                    <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_1fr_1.6fr_1.6fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
-                      <div className="font-medium text-foreground break-words">{item.projectTitle}</div>
-                      <div className="text-muted-foreground break-words">{item.owner}</div>
-                      <div className="text-muted-foreground">{formatTrackedAtLabel(item.trackedAt)}</div>
-                      <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.trackingResult}</div>
-                      <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.followUpOptimization || "—"}</div>
-                      <div className="text-right">
-                        <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                          <button
-                            type="button"
-                            onClick={() => setValueTrackDialog(item)}
-                            className="text-primary hover:underline"
-                            aria-label={`编辑${item.projectTitle}的价值跟踪`}
-                          >
-                            编辑
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setValueTrackDeleteDialog(item)}
-                            className="text-destructive hover:underline"
-                            aria-label={`删除${item.projectTitle}的价值跟踪`}
-                          >
-                            删除
-                          </button>
+
+              <div>
+                <h3 className="mb-3 text-sm font-medium text-foreground">价值跟踪日志</h3>
+                <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+                  <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_1fr_1.6fr_1.6fr_120px] gap-4 text-xs text-muted-foreground">
+                    <div>项目</div>
+                    <div>负责人</div>
+                    <div>跟踪时间</div>
+                    <div>跟踪结果</div>
+                    <div>后续优化</div>
+                    <div className="text-right">操作</div>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {visibleValueTrackItems.length ? (
+                      visibleValueTrackItems.map((item: Props["data"]["valueTrackItems"][number]) => (
+                        <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_1fr_1.6fr_1.6fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                          <div className="font-medium text-foreground break-words">{item.projectTitle}</div>
+                          <div className="text-muted-foreground break-words">{item.owner}</div>
+                          <div className="text-muted-foreground">{formatTrackedAtLabel(item.trackedAt)}</div>
+                          <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.trackingResult}</div>
+                          <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.followUpOptimization || "—"}</div>
+                          <div className="text-right">
+                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                              <button
+                                type="button"
+                                onClick={() => setValueTrackDialog(item)}
+                                className="text-primary hover:underline"
+                                aria-label={`编辑${item.projectTitle}的价值跟踪`}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setValueTrackDeleteDialog(item)}
+                                className="text-destructive hover:underline"
+                                aria-label={`删除${item.projectTitle}的价值跟踪`}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无需求价值跟踪数据</div>
-                )}
+                      ))
+                    ) : (
+                      <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无价值跟踪日志数据</div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -2096,6 +2287,15 @@ export function QuarterlyWorkContent({ data }: Props) {
               setCreateValueTrackDialog(false);
               setCreateValueTrackProjectId(null);
             }}
+          />
+        ) : null}
+      </Dialog>
+
+      <Dialog open={!!valueOverviewDialog} onClose={() => setValueOverviewDialog(null)} title="编辑项目价值">
+        {valueOverviewDialog ? (
+          <ValueOverviewEditForm
+            item={valueOverviewDialog}
+            onClose={() => setValueOverviewDialog(null)}
           />
         ) : null}
       </Dialog>

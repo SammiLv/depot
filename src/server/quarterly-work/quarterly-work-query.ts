@@ -1,5 +1,10 @@
 import { prisma } from "@/server/db/prisma";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import {
+  isCompletedProjectVisibleInPeriod,
+  isValueTrackVisibleInPeriod,
+  type ActivePeriod,
+} from "@/server/quarterly-work/quarterly-work-period-filters";
 import type { OrgNodeType, ProjectStatus, RoleType, WorkStatus } from "@prisma/client";
 
 type DataScopeInput = {
@@ -102,6 +107,37 @@ type ProjectColumnData = {
   tone: "default" | "primary" | "warning" | "success";
   status: ProjectStatus;
   items: ProjectBoardItem[];
+};
+
+type ValueOverviewItem = {
+  id: string;
+  title: string;
+  ownerId: string;
+  owner: string;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
+  workloadPersonDay: number | null;
+  otherCost: string | null;
+  expectedOutcome: string | null;
+  actualValue: string | null;
+  valueJudgement: string;
+  status: ProjectStatus;
+  completedAt: Date | null;
+};
+
+type ValueTrackItem = {
+  id: string;
+  projectId: string;
+  projectTitle: string;
+  ownerId: string;
+  owner: string;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
+  trackedAt: Date;
+  trackingResult: string;
+  followUpOptimization: string | null;
+  actualValue: string | null;
+  valueJudgement: string;
 };
 
 const asciiLetterPattern = /^[A-Za-z]$/;
@@ -568,6 +604,32 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     };
   };
 
+  const getProjectOrgAffiliation = (project: (typeof projects)[number]) => {
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(project.orgNodeId, orgNodeById);
+    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(project.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
+    return { teamOrgNodeId, departmentOrgNodeId };
+  };
+
+  const toValueOverviewItem = (project: (typeof projects)[number]): ValueOverviewItem => {
+    const { teamOrgNodeId, departmentOrgNodeId } = getProjectOrgAffiliation(project);
+
+    return {
+      id: project.id,
+      title: project.title,
+      ownerId: project.ownerId,
+      owner: ownerMap.get(project.ownerId) ?? "—",
+      departmentOrgNodeId,
+      teamOrgNodeId,
+      workloadPersonDay: project.workloadPersonDay,
+      otherCost: project.otherCost,
+      expectedOutcome: project.expectedOutcome,
+      actualValue: project.actualValue,
+      valueJudgement: project.valueJudgement ?? "未观测",
+      status: project.status,
+      completedAt: project.completedAt,
+    };
+  };
+
   const notStarted = activeWorks.filter((work) => work.status === "NOT_STARTED");
   const inProgress = activeWorks.filter((work) => work.status === "IN_PROGRESS" && !isWorkOverdue(work));
   const delayed = activeWorks.filter((work) => {
@@ -601,6 +663,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     return now.getTime() > endDate.getTime();
   };
   const getProjectCompletedOverdueQuarter = (project: (typeof projects)[number]) => getQuarterByDate(project.completedAt) ?? parseQuarterCode(project.endQuarter ?? project.startQuarter)?.quarter ?? null;
+  const activePeriod: ActivePeriod = { year: activeYear, quarter: activeQuarter };
+  const isCompletedProjectInActivePeriod = (project: (typeof projects)[number]) =>
+    isCompletedProjectVisibleInPeriod(project, activePeriod, isProjectOverdue(project));
   const delayedProjects = projects.filter((project) => isProjectOverdue(project));
 
   const projectColumns: ProjectColumnData[] = [
@@ -638,7 +703,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       title: "已完成",
       tone: "success",
       status: "COMPLETED",
-      items: projects.filter((project) => project.status === "COMPLETED" && !isProjectOverdue(project) && (allQuarterSelected ? (project.completedAt?.getFullYear() ?? activeYear) === activeYear : getQuarterByDate(project.completedAt) === activeQuarter && (project.completedAt?.getFullYear() ?? activeYear) === activeYear)).map(toProjectBoardItem),
+      items: projects.filter(isCompletedProjectInActivePeriod).map(toProjectBoardItem),
     },
   ];
 
@@ -697,18 +762,31 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         departmentOrgNodeId,
       };
     }),
-    valueTrackItems: valueTracks.map((track) => {
+    valueOverviewItems: projects
+      .filter(isCompletedProjectInActivePeriod)
+      .sort((left, right) => (right.completedAt?.getTime() ?? 0) - (left.completedAt?.getTime() ?? 0))
+      .map(toValueOverviewItem),
+    valueTrackItems: valueTracks
+      .filter((track) => isValueTrackVisibleInPeriod(track, activePeriod))
+      .map((track): ValueTrackItem => {
       const project = projects.find((item) => item.id === track.projectId) ?? null;
+      const { teamOrgNodeId, departmentOrgNodeId } = project
+        ? getProjectOrgAffiliation(project)
+        : { teamOrgNodeId: null, departmentOrgNodeId: null };
+
       return {
         id: track.id,
         projectId: track.projectId,
         projectTitle: project?.title ?? "—",
+        ownerId: project?.ownerId ?? "",
         owner: project ? ownerMap.get(project.ownerId) ?? "—" : "—",
+        departmentOrgNodeId,
+        teamOrgNodeId,
         trackedAt: track.trackedAt,
         trackingResult: track.trackingResult,
         followUpOptimization: track.followUpOptimization,
         actualValue: project?.actualValue ?? null,
-        valueJudgement: project?.valueJudgement ?? "观测中",
+        valueJudgement: project?.valueJudgement ?? "未观测",
       };
     }),
     productGoalOptions: productGoals.map((goal) => ({
