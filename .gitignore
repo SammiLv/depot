@@ -57,9 +57,14 @@ prototyes/**/tsconfig.tsbuildinfo
 *.db-wal
 *.db-shm
 db/dev.db.backup-*
+db/dev.db.bak-*
 
 # prototype workspace
 prototyes/**/.workspace
 
 # kpi import test files
 kpi-*.xlsx
+
+# WorkBuddy 工作区与运行时日志（不应入库）
+.workbuddy/
+logs/

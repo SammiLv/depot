@@ -13,9 +13,10 @@ enum RoleType {
   MEMBER
 }
 
-enum AnnualGoalOwnerType {
-  DEPARTMENT
-  TEAM
+enum AnnualGoalPlanStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
 }
 
 enum PermissionScopeType {
@@ -302,33 +303,23 @@ model ApprovalTask {
 }
 
 model AnnualGoalPlan {
-  id                String              @id @default(cuid())
-  year              Int
-  name              String
-  description       String?
-  ownerType         AnnualGoalOwnerType
-  ownerOrgNodeId    String?
-  parentPlanId      String?
-  version           Int                 @default(1)
-  isActive          Boolean             @default(true)
-  approvalStatus    ApprovalStatus      @default(DRAFT)
-  effectiveFrom     DateTime?
-  effectiveTo       DateTime?
-  approvedAt        DateTime?
-  revisionReason    String?
-  revisedFromPlanId String?
-  createdById       String
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  deletedAt         DateTime?
+  id                  String               @id @default(cuid())
+  year                Int
+  name                String
+  description         String?
+  departmentOrgNodeId String
+  status              AnnualGoalPlanStatus @default(DRAFT)
+  createdById         String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  deletedAt           DateTime?
 
   metrics AnnualGoalMetric[]
 
   @@index([year])
-  @@index([ownerType])
-  @@index([ownerOrgNodeId])
-  @@index([parentPlanId])
-  @@index([isActive])
+  @@index([departmentOrgNodeId, year])
+  @@index([status])
+  @@index([deletedAt])
 }
 
 model AnnualGoalMetricSource {
@@ -351,8 +342,8 @@ model AnnualGoalMetricSource {
   updatedAt         DateTime                    @updatedAt
   deletedAt         DateTime?
 
-  parentMetric AnnualGoalMetric   @relation("AnnualGoalMetricSources", fields: [parentMetricId], references: [id])
-  metrics      AnnualGoalMetric[]
+  parentMetric AnnualGoalMetric             @relation("AnnualGoalMetricSources", fields: [parentMetricId], references: [id])
+  assignments  AnnualGoalMetricAssignment[]
 
   @@index([parentMetricId])
   @@index([riskStatus])
@@ -360,10 +351,33 @@ model AnnualGoalMetricSource {
   @@index([deletedAt])
 }
 
+model AnnualGoalMetricAssignment {
+  id                String    @id @default(cuid())
+  teamOrgNodeId     String
+  metricId          String?
+  sourceMetricId    String?
+  weight            Float
+  responsibleUserId String?
+  sortOrder         Int       @default(0)
+  createdById       String
+  updatedById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  metric       AnnualGoalMetric?       @relation(fields: [metricId], references: [id])
+  sourceMetric AnnualGoalMetricSource? @relation(fields: [sourceMetricId], references: [id])
+
+  @@index([teamOrgNodeId])
+  @@index([metricId])
+  @@index([sourceMetricId])
+  @@index([responsibleUserId])
+  @@index([deletedAt])
+}
+
 model AnnualGoalMetric {
   id                String                      @id @default(cuid())
   planId            String
-  sourceMetricId    String?
   metricCode        String
   name              String
   description       String?
@@ -383,21 +397,20 @@ model AnnualGoalMetric {
   updatedAt         DateTime                    @updatedAt
   deletedAt         DateTime?
 
-  plan          AnnualGoalPlan           @relation(fields: [planId], references: [id])
-  sourceMetric  AnnualGoalMetricSource?  @relation(fields: [sourceMetricId], references: [id])
-  sourceMetrics AnnualGoalMetricSource[] @relation("AnnualGoalMetricSources")
+  plan          AnnualGoalPlan               @relation(fields: [planId], references: [id])
+  sourceMetrics AnnualGoalMetricSource[]     @relation("AnnualGoalMetricSources")
+  assignments   AnnualGoalMetricAssignment[]
 
-  @@unique([planId, sourceMetricId])
   @@index([planId])
-  @@index([sourceMetricId])
   @@index([metricCode])
   @@index([riskStatus])
   @@index([responsibleUserId])
+  @@index([deletedAt])
 }
 
 model AnnualGoalQuarterTarget {
   id                String     @id @default(cuid())
-  metricId          String
+  metricId          String?
   sourceMetricId    String?
   year              Int
   quarter           Int
@@ -441,26 +454,41 @@ model AnnualGoalProgress {
   @@index([updaterId])
 }
 
-model AnnualGoalRevisionLog {
-  id             String   @id @default(cuid())
-  oldPlanId      String
-  newPlanId      String
-  revisionReason String
-  revisedById    String
-  revisedAt      DateTime @default(now())
+model Project {
+  id                String        @id @default(cuid())
+  title             String
+  productGoalId     String?
+  description       String?
+  expectedOutcome   String?
+  startQuarter      String?
+  endQuarter        String?
+  ownerId           String
+  orgNodeId         String?
+  status            ProjectStatus @default(NOT_STARTED)
+  completedAt       DateTime?
+  workloadPersonDay Float?
+  otherCost         String?
+  actualValue       String?
+  valueJudgement    String?
+  createdById       String
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
 
-  @@index([oldPlanId])
-  @@index([newPlanId])
-  @@index([revisedById])
+  quarterlyWorks QuarterlyWork[]
+
+  @@index([productGoalId])
+  @@index([ownerId])
+  @@index([orgNodeId])
+  @@index([status])
 }
 
-model Project {
+model ProductGoal {
   id              String        @id @default(cuid())
   title           String
+  year            Int
   description     String?
   expectedOutcome String?
-  startQuarter    String?
-  endQuarter      String?
   ownerId         String
   orgNodeId       String?
   status          ProjectStatus @default(NOT_STARTED)
@@ -470,8 +498,7 @@ model Project {
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
 
-  quarterlyWorks QuarterlyWork[]
-
+  @@index([year])
   @@index([ownerId])
   @@index([orgNodeId])
   @@index([status])
@@ -482,6 +509,8 @@ model QuarterlyWork {
   projectId       String
   year            Int
   quarter         Int
+  startMonth      Int?
+  endMonth        Int?
   title           String
   description     String?
   workType        String?
@@ -540,21 +569,17 @@ model WeeklyWorkUpdate {
 }
 
 model RequirementValueTrack {
-  id              String    @id @default(cuid())
-  projectName     String
-  requirementName String
-  ownerId         String
-  background      String?
-  expectedValue   String
-  actualValue     String?
-  launchDate      DateTime?
-  isAchieved      Boolean?
-  reviewNote      String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                    String    @id @default(cuid())
+  projectId             String
+  trackingResult        String
+  followUpOptimization  String?
+  trackedAt             DateTime  @default(now())
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
 
-  @@index([ownerId])
+  @@index([projectId])
+  @@index([trackedAt])
 }
 
 model KpiTemplate {

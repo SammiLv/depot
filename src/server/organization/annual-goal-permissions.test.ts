@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { RoleType } from "@prisma/client";
 import {
   getAnnualGoalCapabilities,
+  getAnnualGoalAssignmentPermissions,
   getAnnualGoalPlanPermissions,
 } from "@/server/organization/annual-goal-permissions";
 
@@ -257,4 +258,50 @@ test("admin with team view+edit can edit team plans without department/team ids"
   assert.equal(permissions.canViewPlan, true);
   assert.equal(permissions.canEditTeamPlan, true);
   assert.equal(permissions.canManageQuarterTargets, true);
+});
+
+test("assignment permissions require team scope and become read-only when closed", () => {
+  const capabilities = getAnnualGoalCapabilities(
+    "TEAM_LEADER",
+    createPermissionMap("TEAM_LEADER", [
+      "annualGoal.viewTeamPlans",
+      "annualGoal.editTeamPlans",
+      "annualGoal.updateProgress",
+    ]),
+  );
+  const context = {
+    deptScopeIds: new Set(["org_team_team-a"]),
+    teamScopeIds: new Set(["org_team_team-a"]),
+    deptAncestorId: null,
+  };
+
+  const active = getAnnualGoalAssignmentPermissions(
+    { roleType: "TEAM_LEADER", orgNodeId: "org_team_team-a" },
+    capabilities,
+    "org_team_team-a",
+    "ACTIVE",
+    context,
+  );
+  const sibling = getAnnualGoalAssignmentPermissions(
+    { roleType: "TEAM_LEADER", orgNodeId: "org_team_team-a" },
+    capabilities,
+    "org_team_team-b",
+    "ACTIVE",
+    context,
+  );
+  const closed = getAnnualGoalAssignmentPermissions(
+    { roleType: "TEAM_LEADER", orgNodeId: "org_team_team-a" },
+    capabilities,
+    "org_team_team-a",
+    "CLOSED",
+    context,
+  );
+
+  assert.equal(active.canViewPlan, true);
+  assert.equal(active.canEditMetrics, true);
+  assert.equal(active.canUpdateQuarterProgress, true);
+  assert.equal(sibling.canViewPlan, false);
+  assert.equal(closed.canViewPlan, true);
+  assert.equal(closed.canEditMetrics, false);
+  assert.equal(closed.canUpdateQuarterProgress, false);
 });

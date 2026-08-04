@@ -4,11 +4,14 @@ import {
   buildOrgScopeContext,
   getAnnualGoalCapabilities,
   getAnnualGoalPermissionMapForUser,
+  getAnnualGoalAssignmentPermissions,
   getAnnualGoalPlanPermissions,
   getAnnualGoalPlanWhere,
   type OrgScopeContext,
 } from "@/server/organization/annual-goal-permissions";
-import type { AnnualGoalOwnerType, AnnualMetricCalculationType, ApprovalStatus, OrgNodeType, RiskStatus, RoleType } from "@prisma/client";
+import type { AnnualMetricCalculationType, OrgNodeType, RiskStatus, RoleType } from "@prisma/client";
+
+type AnnualGoalViewOwnerType = "DEPARTMENT" | "TEAM";
 
 type DataScopeInput = {
   id: string;
@@ -64,11 +67,14 @@ type MetricSourceData = {
   updatedAt: Date;
   adjustedAt: Date | null;
   progressUpdatedAt: Date | null;
-  quarterTargets: { id: string; metricId: string; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdBy: ActorSummary | null; updatedBy: ActorSummary | null; createdAt: Date; updatedAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
+  quarterTargets: { id: string; metricId: string | null; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdBy: ActorSummary | null; updatedBy: ActorSummary | null; createdAt: Date; updatedAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
 };
 
 type MetricData = {
   id: string;
+  authorityMetricId: string;
+  assignmentId: string | null;
+  teamOrgNodeId: string | null;
   sourceMetricId: string | null;
   metricCode: string;
   name: string;
@@ -93,7 +99,7 @@ type MetricData = {
   updatedAt: Date;
   adjustedAt: Date | null;
   progressUpdatedAt: Date | null;
-  quarterTargets: { id: string; metricId: string; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdBy: ActorSummary | null; updatedBy: ActorSummary | null; createdAt: Date; updatedAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
+  quarterTargets: { id: string; metricId: string | null; sourceMetricId: string | null; quarter: number; targetValue: number; currentValue: number; weeklyIncrement: number; createdBy: ActorSummary | null; updatedBy: ActorSummary | null; createdAt: Date; updatedAt: Date; adjustedAt: Date | null; progressUpdatedAt: Date | null }[];
   sources: MetricSourceData[];
 };
 
@@ -108,19 +114,16 @@ type PlanPermissionFlags = {
 
 type PlanData = {
   id: string;
+  authorityPlanId: string;
   year: number;
   name: string;
   description: string | null;
-  ownerType: AnnualGoalOwnerType;
+  ownerType: AnnualGoalViewOwnerType;
   ownerName: string;
   departmentOrgNodeId: string | null;
   scopeDepartmentOrgNodeId: string | null;
   teamOrgNodeId: string | null;
   ownerOrgNodeId: string | null;
-  version: string;
-  isActive: boolean;
-  approvalStatus: ApprovalStatus;
-  revisionReason: string | null;
   weightedProgress: number;
   metrics: MetricData[];
   totalWeight: number;
@@ -170,7 +173,6 @@ type AnnualGoalsResult = {
     planCount: number;
     metricCount: number;
     riskCount: number;
-    revisionCount: number;
     overallWeightedProgress: number;
   };
 };
@@ -201,7 +203,6 @@ function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
   const departmentOrgNodeIdByTeamOrgNodeId = new Map<string, string>();
   const departmentNameByOrgNodeId = new Map<string, string>();
-  const teamNameByOrgNodeId = new Map<string, string>();
 
   function findNearestDepartmentOrgNodeIdForNode(nodeId: string) {
     let currentNode = orgNodeById.get(nodeId) ?? null;
@@ -224,15 +225,13 @@ function buildDepartmentAndTeamMaps(orgNodes: OrgNodeSummary[]) {
       continue;
     }
 
-    teamNameByOrgNodeId.set(node.id, node.name);
-
     const departmentOrgNodeId = findNearestDepartmentOrgNodeIdForNode(node.id);
     if (departmentOrgNodeId) {
       departmentOrgNodeIdByTeamOrgNodeId.set(node.id, departmentOrgNodeId);
     }
   }
 
-  return { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId };
+  return { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId };
 }
 
 function getDepartmentOrgNodeIdForRecord(
@@ -370,7 +369,7 @@ function compareTeamNames(a: string, b: string) {
   return zhPinyinCollator.compare(aMeta.normalizedName, bMeta.normalizedName);
 }
 
-function comparePlans(a: { ownerType: AnnualGoalOwnerType; ownerName: string; year: number; createdAt: Date }, b: { ownerType: AnnualGoalOwnerType; ownerName: string; year: number; createdAt: Date }) {
+function comparePlans(a: { ownerType: AnnualGoalViewOwnerType; ownerName: string; year: number; createdAt: Date }, b: { ownerType: AnnualGoalViewOwnerType; ownerName: string; year: number; createdAt: Date }) {
   if (a.ownerType !== b.ownerType) {
     return a.ownerType === "DEPARTMENT" ? -1 : 1;
   }
@@ -389,7 +388,7 @@ function comparePlans(a: { ownerType: AnnualGoalOwnerType; ownerName: string; ye
 
 function getPlanPermissions(
   currentUser: DataScopeInput,
-  plan: { ownerType: AnnualGoalOwnerType; ownerOrgNodeId?: string | null; deletedAt: Date | null },
+  plan: { ownerType: AnnualGoalViewOwnerType; ownerOrgNodeId?: string | null; deletedAt: Date | null },
   capabilities: {
     canEditDepartmentPlans: boolean;
     canEditTeamPlans: boolean;
@@ -419,16 +418,16 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
   const activeWhere = await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities);
 
-  const plans = await prisma.annualGoalPlan.findMany({
+  const plans = (await prisma.annualGoalPlan.findMany({
     where: activeWhere,
-    orderBy: [{ ownerType: "asc" }, { year: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ year: "desc" }, { createdAt: "desc" }],
     include: {
       metrics: {
         where: { deletedAt: null },
         orderBy: { createdAt: "desc" },
       },
     },
-  });
+  })).filter((plan) => Boolean(plan.departmentOrgNodeId));
   const currentYear = new Date().getFullYear();
   const availableYears = Array.from(new Set([...plans.map((plan) => plan.year), currentYear])).sort((a, b) => b - a);
   const resolvedSelectedYear = availableYears.includes(selectedYear ?? Number.NaN)
@@ -447,14 +446,17 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   if (departmentAncestorOrgNodeId) {
     scopedOrgNodeIdSet.add(departmentAncestorOrgNodeId);
   }
+  const scopedOrgNodeIdsForQuery = Array.from(scopedOrgNodeIdSet).filter(Boolean);
   const orgNodes = await prisma.orgNode.findMany({
     where: currentUser.roleType === "ADMIN"
       ? { nodeType: { in: ["DEPARTMENT", "TEAM"] } }
-      : { id: { in: Array.from(scopedOrgNodeIdSet) }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
+      : scopedOrgNodeIdsForQuery.length
+        ? { id: { in: scopedOrgNodeIdsForQuery }, nodeType: { in: ["DEPARTMENT", "TEAM"] } }
+        : { id: "__no_org_node__" },
     orderBy: [{ nodeType: "asc" }, { name: "asc" }],
     select: { id: true, name: true, nodeType: true, parentId: true },
   });
-  const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId, teamNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
+  const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
   const teams = orgNodes
     .filter((node) => node.nodeType === "TEAM")
     .map((node) => ({
@@ -470,84 +472,72 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   const scopedDepartmentOrgNodeIds = Array.from(new Set([
     ...visibleDepartmentOrgNodeIds,
     ...teams.map((team) => team.departmentOrgNodeId),
-    ...plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
-  ]));
+    ...plans.map((plan) => plan.departmentOrgNodeId),
+  ].filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))));
   const scopeDepartments: ScopeDepartment[] = scopedDepartmentOrgNodeIds.map((orgNodeId) => ({
     orgNodeId,
     name: departmentNameByOrgNodeId.get(orgNodeId) ?? "部门",
   }));
-  const defaultDepartmentOrgNodeId = selectedYearPlans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).find((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
-    ?? plans.map((plan) => getPlanScopeDepartmentOrgNodeId(plan)).find((orgNodeId): orgNodeId is string => Boolean(orgNodeId))
+  const defaultDepartmentOrgNodeId = selectedYearPlans[0]?.departmentOrgNodeId
+    ?? plans[0]?.departmentOrgNodeId
     ?? teams[0]?.departmentOrgNodeId
     ?? scopeDepartments[0]?.orgNodeId
     ?? null;
-  const scopedTeamOrgNodeIds = Array.from(new Set([
-    ...teams.map((team) => team.orgNodeId),
-    ...plans.map((plan) => getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById)).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)),
-  ]));
+  const scopedTeamOrgNodeIds = teams.map((team) => team.orgNodeId);
   const scopedUsersOrgNodeIds = Array.from(new Set([
     ...scopedDepartmentOrgNodeIds,
     ...scopedTeamOrgNodeIds,
-  ]));
+  ].filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId))));
 
-  // Get quarter targets and source metadata for all metrics.
-  // Team plans inherit quarter targets from the selected department metric/source metric.
   const allPlans = plans;
   const metricIds = allPlans.flatMap((p) => p.metrics.map((m) => m.id));
-  const teamMetrics = allPlans.filter((p) => p.ownerType === "TEAM").flatMap((p) => p.metrics.map((m) => ({ plan: p, metric: m })));
-  const selectedSourceMetricIds = Array.from(new Set(teamMetrics.flatMap(({ metric }) => metric.sourceMetricId ? [metric.sourceMetricId] : [])));
-  const selectedParentMetricCodes = Array.from(new Set(teamMetrics.flatMap(({ metric }) => metric.sourceMetricId ? [] : [metric.metricCode])));
 
-  const [baseQuarterTargets, metricSources, selectedDepartmentMetrics] = await Promise.all([
+  const [baseQuarterTargets, metricSources] = await Promise.all([
     metricIds.length
       ? prisma.annualGoalQuarterTarget.findMany({
           where: { metricId: { in: metricIds }, deletedAt: null },
           orderBy: { quarter: "asc" },
         })
       : [],
-    metricIds.length || selectedSourceMetricIds.length
+    metricIds.length
       ? prisma.annualGoalMetricSource.findMany({
           where: {
             deletedAt: null,
-            OR: [
-              ...(metricIds.length ? [{ parentMetricId: { in: metricIds } }] : []),
-              ...(selectedSourceMetricIds.length ? [{ id: { in: selectedSourceMetricIds } }] : []),
-            ],
+            parentMetricId: { in: metricIds },
           },
           orderBy: { createdAt: "asc" },
         })
       : [],
-    selectedParentMetricCodes.length
-      ? prisma.annualGoalMetric.findMany({
-          where: {
-            metricCode: { in: selectedParentMetricCodes },
-            deletedAt: null,
-            plan: { ownerType: "DEPARTMENT", deletedAt: null },
-          },
-          include: { plan: true },
-        })
-      : [],
   ]);
 
-  const inheritedMetricIds = new Set<string>();
-  const selectedSourceMetricIdSet = new Set(selectedSourceMetricIds);
-  for (const source of metricSources) {
-    if (selectedSourceMetricIdSet.has(source.id)) inheritedMetricIds.add(source.parentMetricId);
-  }
-  for (const metric of selectedDepartmentMetrics) inheritedMetricIds.add(metric.id);
-  const missingInheritedMetricIds = Array.from(inheritedMetricIds).filter((id) => !metricIds.includes(id));
-  const inheritedQuarterTargets = missingInheritedMetricIds.length
+  const sourceMetricIds = metricSources.map((source) => source.id);
+  const sourceQuarterTargets = sourceMetricIds.length
     ? await prisma.annualGoalQuarterTarget.findMany({
-        where: { metricId: { in: missingInheritedMetricIds }, deletedAt: null },
+        where: {
+          deletedAt: null,
+          metricId: null,
+          sourceMetricId: { in: sourceMetricIds },
+        },
         orderBy: { quarter: "asc" },
       })
     : [];
-  const quarterTargets = [...baseQuarterTargets, ...inheritedQuarterTargets];
+  const quarterTargets = [...baseQuarterTargets, ...sourceQuarterTargets];
+  const assignments = teams.length
+    ? await prisma.annualGoalMetricAssignment.findMany({
+        where: { teamOrgNodeId: { in: teams.map((team) => team.orgNodeId) }, deletedAt: null },
+        include: {
+          metric: { include: { plan: true } },
+          sourceMetric: { include: { parentMetric: { include: { plan: true } } } },
+        },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      })
+    : [];
   const creatorUpdaterUserIds = Array.from(new Set([
     ...plans.map((plan) => plan.createdById),
     ...allPlans.flatMap((plan) => plan.metrics.flatMap((metric) => [metric.createdById, metric.updatedById].filter((userId): userId is string => Boolean(userId)))),
     ...metricSources.flatMap((source) => [source.createdById, source.updatedById].filter((userId): userId is string => Boolean(userId))),
     ...quarterTargets.flatMap((target) => [target.createdById, target.updatedById].filter((userId): userId is string => Boolean(userId))),
+    ...assignments.flatMap((assignment) => [assignment.createdById, assignment.updatedById, assignment.responsibleUserId].filter((userId): userId is string => Boolean(userId))),
   ]));
   const scopedUsers = scopedUsersOrgNodeIds.length || creatorUpdaterUserIds.length
     ? await prisma.user.findMany({
@@ -563,7 +553,6 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
         select: { id: true, name: true, title: true, orgNodeId: true },
       })
     : [];
-  const sourceById = new Map(metricSources.map((source) => [source.id, source]));
   const userById = new Map(scopedUsers.map((user) => [user.id, user]));
   const memberOptionsByDepartment = Object.fromEntries(
     scopedDepartmentOrgNodeIds.map((departmentOrgNodeId) => [
@@ -581,21 +570,19 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
         .map((user) => mapMemberOption(user, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );
-  function getPlanScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
-    return getDepartmentOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
+  function getPlanScopeDepartmentOrgNodeId(plan: { departmentOrgNodeId: string }) {
+    return plan.departmentOrgNodeId;
   }
-
-  const departmentMetricByPlan = new Map(selectedDepartmentMetrics.map((metric) => [`${getPlanScopeDepartmentOrgNodeId(metric.plan)}:${metric.plan.year}:${metric.metricCode}`, metric]));
 
   const targetsByMetric = new Map<string, typeof quarterTargets>();
   const targetsBySourceMetric = new Map<string, typeof quarterTargets>();
   for (const qt of quarterTargets) {
     if (qt.sourceMetricId) {
-      const key = `${qt.metricId}:${qt.sourceMetricId}`;
+      const key = qt.sourceMetricId;
       const list = targetsBySourceMetric.get(key) ?? [];
       list.push(qt);
       targetsBySourceMetric.set(key, list);
-    } else {
+    } else if (qt.metricId) {
       const list = targetsByMetric.get(qt.metricId) ?? [];
       list.push(qt);
       targetsByMetric.set(qt.metricId, list);
@@ -609,22 +596,16 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     sourcesByParentMetric.set(source.parentMetricId, list);
   }
 
-  function getMetricScopeDepartmentOrgNodeId(plan: { ownerOrgNodeId?: string | null }) {
+  function getMetricScopeDepartmentOrgNodeId(plan: { departmentOrgNodeId: string }) {
     return getPlanScopeDepartmentOrgNodeId(plan);
   }
 
-  function getMetricQuarterTargets(plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number]) {
-    if (plan.ownerType === "TEAM") {
-      const inheritedMetric = departmentMetricByPlan.get(`${getPlanScopeDepartmentOrgNodeId(plan)}:${plan.year}:${metric.metricCode}`);
-      if (inheritedMetric) {
-        return targetsByMetric.get(inheritedMetric.id) ?? [];
-      }
-    }
+  function getMetricQuarterTargets(_plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number]) {
     return targetsByMetric.get(metric.id) ?? [];
   }
 
-  function getSourceCurrentValue(parentMetricId: string, source: (typeof metricSources)[number]) {
-    const sourceQuarterTargets = targetsBySourceMetric.get(`${parentMetricId}:${source.id}`) ?? [];
+  function getSourceCurrentValue(_parentMetricId: string, source: (typeof metricSources)[number]) {
+    const sourceQuarterTargets = targetsBySourceMetric.get(source.id) ?? [];
     return sourceQuarterTargets.length > 0
       ? sumValues(sourceQuarterTargets, (target) => target.currentValue)
       : roundValue(source.currentValue);
@@ -634,9 +615,9 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     return roundValue(metric.targetValue);
   }
 
-  function getMetricCurrentValue(plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number], sources: typeof metricSources, qTargets: typeof quarterTargets) {
+  function getMetricCurrentValue(_plan: (typeof allPlans)[number], metric: (typeof allPlans)[number]["metrics"][number], sources: typeof metricSources, qTargets: typeof quarterTargets) {
     if (qTargets.length > 0) return sumValues(qTargets, (target) => target.currentValue);
-    if (plan.ownerType === "DEPARTMENT" && sources.length > 0) {
+    if (sources.length > 0) {
       return sumValues(sources, (source) => getSourceCurrentValue(metric.id, source));
     }
     return roundValue(metric.currentValue);
@@ -663,7 +644,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
       const progress = targetValue > 0 ? (currentValue / targetValue) * 100 : 0;
       return {
         id: m.id,
-        sourceMetricId: m.sourceMetricId,
+        authorityMetricId: m.id,
+        assignmentId: null,
+        teamOrgNodeId: null,
+        sourceMetricId: null,
         metricCode: m.metricCode,
         name: m.name,
         description: m.description,
@@ -703,7 +687,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
           progressUpdatedAt: qt.progressUpdatedAt,
         })),
         sources: (sourcesByParentMetric.get(m.id) ?? []).map((source) => {
-          const sourceQuarterTargets = targetsBySourceMetric.get(`${m.id}:${source.id}`) ?? [];
+          const sourceQuarterTargets = targetsBySourceMetric.get(source.id) ?? [];
           const sourceCurrentValue = getSourceCurrentValue(m.id, source);
           const sourceProgress = source.targetValue > 0 ? (sourceCurrentValue / source.targetValue) * 100 : 0;
           return {
@@ -748,27 +732,37 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     });
 
     const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
-    const departmentName = scopeDepartmentOrgNodeId ? departmentNameByOrgNodeId.get(scopeDepartmentOrgNodeId) : null;
-    const teamOrgNodeId = getTeamOrgNodeIdForRecord(plan.ownerOrgNodeId, orgNodeById);
-    const teamName = teamOrgNodeId ? teamNameByOrgNodeId.get(teamOrgNodeId) : null;
+    const departmentName = departmentNameByOrgNodeId.get(scopeDepartmentOrgNodeId);
 
-    const permissions = getPlanPermissions(currentUser, plan, annualGoalCapabilities, scopeContext);
+    const basePermissions = getPlanPermissions(currentUser, {
+      ownerType: "DEPARTMENT",
+      ownerOrgNodeId: plan.departmentOrgNodeId,
+      deletedAt: plan.deletedAt,
+    }, annualGoalCapabilities, scopeContext);
+    const permissions = plan.status === "CLOSED"
+      ? {
+          ...basePermissions,
+          canEditPlan: false,
+          canEditMetrics: false,
+          canManageSources: false,
+          canManageQuarterTargets: false,
+          canUpdateQuarterProgress: false,
+          canUpdateWeeklyProgress: false,
+        }
+      : basePermissions;
 
     return {
       id: plan.id,
+      authorityPlanId: plan.id,
       year: plan.year,
       name: plan.name,
       description: plan.description,
-      ownerType: plan.ownerType,
-      ownerName: plan.ownerType === "DEPARTMENT" ? departmentName ?? "部门" : teamName ?? "小组",
+      ownerType: "DEPARTMENT",
+      ownerName: departmentName ?? "部门",
       departmentOrgNodeId: scopeDepartmentOrgNodeId,
       scopeDepartmentOrgNodeId,
-      teamOrgNodeId,
-      ownerOrgNodeId: plan.ownerOrgNodeId ?? null,
-      version: `v${plan.version}`,
-      isActive: plan.isActive,
-      approvalStatus: plan.approvalStatus,
-      revisionReason: plan.revisionReason,
+      teamOrgNodeId: null,
+      ownerOrgNodeId: plan.departmentOrgNodeId,
       weightedProgress: roundPercent(weightedProgress),
       metrics: metricsData,
       totalWeight: roundPercent(totalWeight),
@@ -778,59 +772,121 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     };
   }
 
-  // Compute linked team IDs for department plans (team plans with same department + year)
   const linkedTeamOrgNodeIdsByDeptPlan = new Map<string, string[]>();
-  for (const plan of selectedYearPlans) {
-    const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
-    if (plan.ownerType === "DEPARTMENT" && scopeDepartmentOrgNodeId) {
-      linkedTeamOrgNodeIdsByDeptPlan.set(
-        plan.id,
-        selectedYearPlans
-          .filter((p) => p.ownerType === "TEAM" && getPlanScopeDepartmentOrgNodeId(p) === scopeDepartmentOrgNodeId && p.year === plan.year)
-          .map((p) => getTeamOrgNodeIdForRecord(p.ownerOrgNodeId, orgNodeById))
-          .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId)),
-      );
-    }
+  for (const assignment of assignments) {
+    const authorityPlan = assignment.sourceMetric?.parentMetric.plan ?? assignment.metric?.plan;
+    if (!authorityPlan || authorityPlan.deletedAt || authorityPlan.year !== resolvedSelectedYear) continue;
+    const teamIds = linkedTeamOrgNodeIdsByDeptPlan.get(authorityPlan.id) ?? [];
+    if (!teamIds.includes(assignment.teamOrgNodeId)) teamIds.push(assignment.teamOrgNodeId);
+    linkedTeamOrgNodeIdsByDeptPlan.set(authorityPlan.id, teamIds);
   }
 
-  const plansWithProgress = selectedYearPlans.map((p) => {
+  const departmentPlansWithProgress = selectedYearPlans.map((p) => {
     const mapped = mapPlan(p);
-    if (p.ownerType === "DEPARTMENT") {
-      mapped.linkedTeamOrgNodeIds = linkedTeamOrgNodeIdsByDeptPlan.get(p.id) ?? [];
-    }
+    mapped.linkedTeamOrgNodeIds = linkedTeamOrgNodeIdsByDeptPlan.get(p.id) ?? [];
     return mapped;
-  }).sort(comparePlans);
-  const availableParentMetrics = plansWithProgress
-    .filter((p) => p.ownerType === "DEPARTMENT")
-    .flatMap((p) => p.metrics);
+  });
+  const departmentPlanDataById = new Map(departmentPlansWithProgress.map((plan) => [plan.id, plan]));
+  const virtualTeamPlans: PlanData[] = teams.flatMap((team) => {
+    const teamAssignments = assignments.filter((assignment) => {
+      if (assignment.teamOrgNodeId !== team.orgNodeId) return false;
+      const authorityPlan = assignment.sourceMetric?.parentMetric.plan ?? assignment.metric?.plan;
+      return authorityPlan?.year === resolvedSelectedYear && !authorityPlan.deletedAt;
+    });
+    if (teamAssignments.length === 0) return [];
+    const authorityPlanRecord = teamAssignments[0].sourceMetric?.parentMetric.plan ?? teamAssignments[0].metric?.plan;
+    if (!authorityPlanRecord) return [];
+    const authorityPlan = departmentPlanDataById.get(authorityPlanRecord.id);
+    if (!authorityPlan) return [];
+    const permissions = getAnnualGoalAssignmentPermissions(
+      currentUser,
+      annualGoalCapabilities,
+      team.orgNodeId,
+      authorityPlanRecord.status,
+      scopeContext,
+    );
+    if (!permissions.canViewPlan) return [];
+    const metrics = teamAssignments.flatMap((assignment): MetricData[] => {
+      const authorityMetric = assignment.sourceMetric?.parentMetric ?? assignment.metric;
+      const mappedAuthorityMetric = authorityPlan.metrics.find((metric) => metric.id === authorityMetric?.id);
+      if (!mappedAuthorityMetric || !authorityMetric) return [];
+      const source = assignment.sourceMetricId
+        ? mappedAuthorityMetric.sources.find((item) => item.id === assignment.sourceMetricId)
+        : null;
+      const subject = source ?? mappedAuthorityMetric;
+      return [{
+        ...mappedAuthorityMetric,
+        id: `assignment:${assignment.id}`,
+        authorityMetricId: authorityMetric.id,
+        assignmentId: assignment.id,
+        teamOrgNodeId: team.orgNodeId,
+        sourceMetricId: source?.id ?? null,
+        metricCode: subject.metricCode,
+        name: subject.name,
+        description: subject.description,
+        responsibleUserId: assignment.responsibleUserId,
+        responsibleUser: mapResponsibleUser(assignment.responsibleUserId ? userById.get(assignment.responsibleUserId) : null),
+        rawTargetValue: subject.targetValue,
+        targetValue: subject.targetValue,
+        currentValue: subject.currentValue,
+        unit: subject.unit,
+        weight: assignment.weight,
+        calculationType: subject.calculationType,
+        riskStatus: subject.riskStatus,
+        sortOrder: assignment.sortOrder,
+        progress: subject.progress,
+        tone: subject.tone,
+        createdBy: mapActor(userById.get(assignment.createdById)),
+        updatedBy: mapActor(assignment.updatedById ? userById.get(assignment.updatedById) : null),
+        createdAt: assignment.createdAt,
+        updatedAt: assignment.updatedAt,
+        adjustedAt: null,
+        progressUpdatedAt: subject.progressUpdatedAt,
+        quarterTargets: subject.quarterTargets,
+        sources: [],
+      }];
+    });
+    const totalWeight = sumValues(metrics, (metric) => metric.weight);
+    const weightedProgress = totalWeight > 0
+      ? roundPercent(metrics.reduce((sum, metric) => sum + metric.progress * metric.weight, 0) / totalWeight)
+      : 0;
+    return [{
+      ...authorityPlan,
+      id: `team:${team.orgNodeId}:${authorityPlan.id}`,
+      authorityPlanId: authorityPlan.id,
+      name: `${team.name} ${authorityPlan.year} 年度指标承接`,
+      ownerType: "TEAM",
+      ownerName: team.name,
+      teamOrgNodeId: team.orgNodeId,
+      ownerOrgNodeId: team.orgNodeId,
+      metrics,
+      totalWeight,
+      weightedProgress,
+      permissions,
+      linkedTeamOrgNodeIds: [team.orgNodeId],
+    }];
+  });
+  const plansWithProgress = [
+    ...(annualGoalCapabilities.canViewDepartmentPlans ? departmentPlansWithProgress : []),
+    ...virtualTeamPlans,
+  ].sort(comparePlans);
+  const availableParentMetrics = departmentPlansWithProgress.flatMap((p) => p.metrics);
   const availableSourceMetrics = availableParentMetrics.flatMap((m) => m.sources);
 
   // Summary stats
-  const totalMetrics = selectedYearPlans.reduce((s, p) => s + p.metrics.length, 0);
-  const riskCount = selectedYearPlans.reduce(
-    (s, p) => s + p.metrics.filter((m) => m.riskStatus === "RISK").length,
+  const summaryPlans = annualGoalCapabilities.canViewDepartmentPlans
+    ? departmentPlansWithProgress
+    : virtualTeamPlans;
+  const totalMetrics = summaryPlans.reduce((sum, plan) => sum + plan.metrics.length, 0);
+  const riskCount = summaryPlans.reduce(
+    (sum, plan) => sum + plan.metrics.filter((metric) => metric.riskStatus === "RISK").length,
     0
   );
-  const revisionCount = selectedYearPlans.filter((p) => p.revisionReason).length;
-
-  // Overall weighted progress only counts department-owned annual performance metrics.
-  let overallWeightedProgress = 0;
-  const departmentMetrics = selectedYearPlans
-    .filter((p) => p.ownerType === "DEPARTMENT")
-    .flatMap((p) => p.metrics.map((m) => ({ plan: p, metric: m })));
-  const overallTotalWeight = departmentMetrics.reduce((s, { metric }) => s + metric.weight, 0);
-  if (overallTotalWeight > 0) {
-    overallWeightedProgress = roundPercent(
-      departmentMetrics.reduce((s, { plan, metric }) => {
-        const sources = sourcesByParentMetric.get(metric.id) ?? [];
-        const qTargets = getMetricQuarterTargets(plan, metric);
-        const targetValue = getMetricTargetValue(plan, metric);
-        const currentValue = getMetricCurrentValue(plan, metric, sources, qTargets);
-        const progress = targetValue > 0 ? (currentValue / targetValue) * metric.weight : 0;
-        return s + progress;
-      }, 0) / overallTotalWeight * 100
-    );
-  }
+  const summaryMetrics = summaryPlans.flatMap((plan) => plan.metrics);
+  const overallTotalWeight = summaryMetrics.reduce((sum, metric) => sum + metric.weight, 0);
+  const overallWeightedProgress = overallTotalWeight > 0
+    ? roundPercent(summaryMetrics.reduce((sum, metric) => sum + metric.progress * metric.weight, 0) / overallTotalWeight)
+    : 0;
 
   const canManage = annualGoalCapabilities.canEditDepartmentPlans || annualGoalCapabilities.canEditTeamPlans;
   const canManageDepartmentPlans = annualGoalCapabilities.canEditDepartmentPlans;
@@ -882,10 +938,9 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     },
     defaultDepartmentOrgNodeId,
     summary: {
-      planCount: selectedYearPlans.length,
+      planCount: summaryPlans.length,
       metricCount: totalMetrics,
       riskCount,
-      revisionCount,
       overallWeightedProgress,
     },
   };

@@ -1,4 +1,4 @@
-import type { AnnualGoalOwnerType, PermissionScopeType, RoleType } from "@prisma/client";
+import type { PermissionScopeType, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 
@@ -26,7 +26,7 @@ export type AnnualGoalScopeUser = {
 };
 
 export type AnnualGoalPlanScope = {
-  ownerType: AnnualGoalOwnerType;
+  ownerType: "DEPARTMENT" | "TEAM";
   ownerOrgNodeId?: string | null;
   deletedAt?: Date | null;
 };
@@ -197,8 +197,6 @@ export async function buildOrgScopeContext(
     }
   }
 
-  const ownScopeIds = new Set(teamIds);
-
   return { deptScopeIds, teamScopeIds, deptAncestorId };
 }
 
@@ -278,6 +276,34 @@ export function getAnnualGoalPlanPermissions(
     canManageQuarterTargets: canEditDepartmentPlan || canEditTeamPlan,
     canUpdateQuarterProgress: canEditDepartmentPlan || canUpdateTeamProgress,
     canUpdateWeeklyProgress: canEditDepartmentPlan || canUpdateTeamProgress,
+  };
+}
+
+export function getAnnualGoalAssignmentPermissions(
+  user: AnnualGoalScopeUser,
+  capabilities: AnnualGoalCapabilities,
+  teamOrgNodeId: string,
+  authorityStatus: "DRAFT" | "ACTIVE" | "CLOSED",
+  context?: OrgScopeContext | null,
+): AnnualGoalPlanPermissions {
+  const permissions = getAnnualGoalPlanPermissions(
+    user,
+    capabilities,
+    { ownerType: "TEAM", ownerOrgNodeId: teamOrgNodeId, deletedAt: null },
+    context,
+  );
+  if (authorityStatus !== "CLOSED") return permissions;
+  return {
+    ...permissions,
+    canEditDepartmentPlan: false,
+    canEditTeamPlan: false,
+    canUpdateTeamProgress: false,
+    canEditPlan: false,
+    canEditMetrics: false,
+    canManageSources: false,
+    canManageQuarterTargets: false,
+    canUpdateQuarterProgress: false,
+    canUpdateWeeklyProgress: false,
   };
 }
 
@@ -481,10 +507,7 @@ export async function getAnnualGoalPlanWhere(
   if (user.roleType === "ADMIN") {
     return {
       deletedAt: null,
-      OR: [
-        ...(capabilities.canViewDepartmentPlans ? [{ ownerType: "DEPARTMENT" as const }] : []),
-        ...(capabilities.canViewTeamPlans ? [{ ownerType: "TEAM" as const }] : []),
-      ],
+      ...(capabilities.canViewDepartmentPlans || capabilities.canViewTeamPlans ? {} : { id: "__no_annual_plan__" }),
     };
   }
 
@@ -492,33 +515,21 @@ export async function getAnnualGoalPlanWhere(
     return { id: "__no_annual_plan__", deletedAt: null };
   }
 
-  let scopeIds: string[];
-  if (canAccessDepartmentPlans(capabilities)) {
-    const deptAncestorId = await findNearestDeptAncestor(user.orgNodeId);
-    scopeIds = await getDescendantOrgNodeIds(deptAncestorId ?? user.orgNodeId);
-  } else {
-    scopeIds = await getDescendantOrgNodeIds(user.orgNodeId);
-  }
+  const deptAncestorId = await findNearestDeptAncestor(user.orgNodeId);
+  const scopeIds = deptAncestorId ? [deptAncestorId] : [];
 
   if (scopeIds.length === 0) {
     return { id: "__no_annual_plan__", deletedAt: null };
   }
 
-  const or: Array<Record<string, unknown>> = [];
-
-  if (canAccessDepartmentPlans(capabilities)) {
-    or.push({ ownerType: "DEPARTMENT", ownerOrgNodeId: { in: scopeIds } });
-  }
-
-  if (canAccessTeamPlans(capabilities)) {
-    or.push({ ownerType: "TEAM", ownerOrgNodeId: { in: scopeIds } });
-  }
-
-  if (or.length === 0) {
+  if (!canAccessDepartmentPlans(capabilities) && !canAccessTeamPlans(capabilities)) {
     return { id: "__no_annual_plan__", deletedAt: null };
   }
 
-  return { deletedAt: null, ...(or.length === 1 ? or[0] : { OR: or }) };
+  return {
+    deletedAt: null,
+    departmentOrgNodeId: { in: scopeIds },
+  };
 }
 
 export async function getAnnualGoalTeamWhere(

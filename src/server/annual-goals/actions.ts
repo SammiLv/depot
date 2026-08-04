@@ -9,7 +9,7 @@ import {
   getDescendantOrgNodeIds,
   findOrgNodeById,
 } from "@/server/organization/org-tree-utils";
-import type { AnnualGoalOwnerType, AnnualMetricCalculationType, Prisma, RiskStatus } from "@prisma/client";
+import { Prisma, type AnnualMetricCalculationType, type RiskStatus } from "@prisma/client";
 
 const calculationTypes = ["RATIO", "BOOLEAN", "MANUAL_SCORE"] as const;
 const riskStatuses = ["NORMAL", "SLIGHT_DELAY", "RISK", "COMPLETED"] as const;
@@ -50,7 +50,7 @@ async function getAnnualGoalActionContext() {
 
 function getScopedPlanPermissions(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
-  plan: { ownerType: AnnualGoalOwnerType; departmentOrgNodeId: string | null; teamOrgNodeId: string | null; ownerOrgNodeId?: string | null; deletedAt?: Date | null }
+  plan: { ownerType: "DEPARTMENT" | "TEAM"; departmentOrgNodeId: string | null; teamOrgNodeId: string | null; ownerOrgNodeId?: string | null; deletedAt?: Date | null }
 ) {
   return getAnnualGoalPlanPermissions(context.user, context.capabilities, {
     ownerType: plan.ownerType,
@@ -130,6 +130,10 @@ function numberFromForm(value: FormDataEntryValue | null, fieldName: string) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+function roundValue(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function optionalString(value: FormDataEntryValue | null) {
   const s = (value as string | null)?.trim();
   return s || null;
@@ -189,45 +193,11 @@ async function resolveTeamResponsibleUserId(
   return resolveResponsibleUserId(responsibleUserId, scope, "负责人必须为本小组成员");
 }
 
-async function resolveScopedTeams(ownerOrgNodeId: string | null) {
-  if (!ownerOrgNodeId) return [];
-
-  const scopedOrgNodeIds = new Set(await getDescendantOrgNodeIds(ownerOrgNodeId));
-  if (scopedOrgNodeIds.size === 0) return [];
-
-  const teams = await Promise.all(Array.from(scopedOrgNodeIds).map((orgNodeId) => findTeamRecordByOrgNodeId(orgNodeId)));
-  return teams.filter((team): team is { id: string; name: string; departmentOrgNodeId: string | null; orgNodeId: string } => Boolean(team && team.departmentOrgNodeId));
-}
-
-async function resolveScopedTeamPlanIds(scope: {
-  ownerOrgNodeId?: string | null;
-  year: number;
-  includeDeleted?: boolean;
-}) {
-  const ownerOrgScopeIds = scope.ownerOrgNodeId
-    ? await getDescendantOrgNodeIds(scope.ownerOrgNodeId)
-    : [];
-
-  if (ownerOrgScopeIds.length === 0) {
-    return [];
-  }
-
-  return prisma.annualGoalPlan.findMany({
-    where: {
-      ownerType: "TEAM",
-      year: scope.year,
-      ...(scope.includeDeleted ? {} : { deletedAt: null }),
-      ownerOrgNodeId: { in: ownerOrgScopeIds },
-    },
-    select: { id: true, ownerOrgNodeId: true },
-  });
-}
-
 function isSameDepartmentScope(
-  left: { ownerOrgNodeId?: string | null },
-  right: { ownerOrgNodeId?: string | null },
+  left: { departmentOrgNodeId?: string | null; ownerOrgNodeId?: string | null },
+  right: { departmentOrgNodeId?: string | null; ownerOrgNodeId?: string | null },
 ) {
-  return left.ownerOrgNodeId === right.ownerOrgNodeId;
+  return (left.departmentOrgNodeId ?? left.ownerOrgNodeId) === (right.departmentOrgNodeId ?? right.ownerOrgNodeId);
 }
 
 function buildAnnualGoalPlanName(ownerName: string, year: number) {
@@ -238,49 +208,34 @@ async function resolveOwner(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
   formData: FormData
 ) {
-  const ownerType = formData.get("ownerType") as AnnualGoalOwnerType;
   const requestedDepartmentOrgNodeId = (formData.get("departmentOrgNodeId") as string) || null;
-  const requestedTeamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
-
-  if (ownerType !== "DEPARTMENT" && ownerType !== "TEAM") throw new Error("请选择方案归属");
-
-  if (ownerType === "DEPARTMENT") {
-    const ownerOrgNodeId = requestedDepartmentOrgNodeId || await findNearestDepartmentOrgNodeId(context.user.orgNodeId);
-    if (!ownerOrgNodeId) throw new Error("请选择所属部门");
-    const departmentNode = await findOrgNodeById(ownerOrgNodeId);
-    if (!departmentNode || departmentNode.nodeType !== "DEPARTMENT") throw new Error("所属部门无效");
-    if (!canEditDepartmentScope(context, { departmentOrgNodeId: ownerOrgNodeId, ownerOrgNodeId })) throw new Error("无权维护该部门方案");
-    return { ownerType, departmentOrgNodeId: ownerOrgNodeId, teamOrgNodeId: null, ownerOrgNodeId, ownerName: departmentNode.name };
-  }
-
-  const ownerOrgNodeId = requestedTeamOrgNodeId;
-  if (!ownerOrgNodeId) throw new Error("请选择所属小组");
-  const team = await findTeamRecordByOrgNodeId(ownerOrgNodeId);
-  if (!team || !team.departmentOrgNodeId) throw new Error("小组不存在");
-  if (!canEditTeamScope(context, { teamOrgNodeId: ownerOrgNodeId, departmentOrgNodeId: team.departmentOrgNodeId, ownerOrgNodeId })) throw new Error("无权维护该部门小组方案");
-  return { ownerType, departmentOrgNodeId: team.departmentOrgNodeId, teamOrgNodeId: ownerOrgNodeId, ownerOrgNodeId, ownerName: team.name };
+  const ownerOrgNodeId = requestedDepartmentOrgNodeId || await findNearestDepartmentOrgNodeId(context.user.orgNodeId);
+  if (!ownerOrgNodeId) throw new Error("请选择所属部门");
+  const departmentNode = await findOrgNodeById(ownerOrgNodeId);
+  if (!departmentNode || departmentNode.nodeType !== "DEPARTMENT") throw new Error("所属部门无效");
+  if (!canEditDepartmentScope(context, { departmentOrgNodeId: ownerOrgNodeId, ownerOrgNodeId })) throw new Error("无权维护该部门方案");
+  return { departmentOrgNodeId: ownerOrgNodeId, ownerOrgNodeId, ownerName: departmentNode.name };
 }
 
 async function assertPlanEditable(planId: string) {
   const context = await getAnnualGoalActionContext();
   const plan = await prisma.annualGoalPlan.findUnique({ where: { id: planId } });
   if (!plan || plan.deletedAt) throw new Error("年度方案不存在");
+  if (plan.status === "CLOSED") throw new Error("年度方案已关闭");
 
-  if (plan.ownerType === "DEPARTMENT" && canEditDepartmentScope(context, { departmentOrgNodeId: plan.ownerOrgNodeId, ownerOrgNodeId: plan.ownerOrgNodeId })) {
-    return { context, plan };
-  }
-
-  if (plan.ownerType === "TEAM" && canEditTeamScope(context, { teamOrgNodeId: plan.ownerOrgNodeId, departmentOrgNodeId: plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(plan.ownerOrgNodeId) : null, ownerOrgNodeId: plan.ownerOrgNodeId })) {
+  const departmentOrgNodeId = plan.departmentOrgNodeId;
+  if (canEditDepartmentScope(context, { departmentOrgNodeId, ownerOrgNodeId: departmentOrgNodeId })) {
     return { context, plan };
   }
 
   throw new Error("无权维护该年度方案");
 }
 
-async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: string | null) {
+async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: string | null, requestedTeamOrgNodeId?: string | null) {
   const context = await getAnnualGoalActionContext();
   const metric = await prisma.annualGoalMetric.findUnique({ where: { id: metricId }, include: { plan: true } });
   if (!metric || metric.deletedAt || metric.plan.deletedAt) throw new Error("指标项不存在");
+  if (metric.plan.status === "CLOSED") throw new Error("年度方案已关闭");
 
   const sourceMetric = sourceMetricId
     ? await prisma.annualGoalMetricSource.findUnique({ where: { id: sourceMetricId }, include: { parentMetric: { include: { plan: true } } } })
@@ -289,18 +244,13 @@ async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: 
     throw new Error("元指标不存在");
   }
 
-  const departmentPlan = sourceMetric?.parentMetric.plan ?? metric.plan;
-  if (sourceMetric && sourceMetric.parentMetricId !== metricId) {
-    const selectedTeamMetric = await prisma.annualGoalMetric.findFirst({
-      where: { id: metricId, sourceMetricId, deletedAt: null, plan: { deletedAt: null } },
-      include: { plan: true },
-    });
-    if (!selectedTeamMetric) throw new Error("元指标不存在");
-  }
+  if (sourceMetric && sourceMetric.parentMetricId !== metricId) throw new Error("元指标不存在");
+  const departmentPlan = metric.plan;
+  const departmentOrgNodeId = departmentPlan.departmentOrgNodeId;
 
   if (canUpdateDepartmentProgressScope(context, {
-    departmentOrgNodeId: departmentPlan.ownerOrgNodeId,
-    ownerOrgNodeId: departmentPlan.ownerOrgNodeId,
+    departmentOrgNodeId,
+    ownerOrgNodeId: departmentOrgNodeId,
   })) {
     return { context, metric, sourceMetric };
   }
@@ -309,45 +259,80 @@ async function assertQuarterProgressUpdatable(metricId: string, sourceMetricId: 
     throw new Error("无权更新该季度指标");
   }
 
-  if (metric.plan.ownerType === "TEAM" && canUpdateTeamProgressScope(context, {
-    teamOrgNodeId: metric.plan.ownerOrgNodeId,
-    departmentOrgNodeId: metric.plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(metric.plan.ownerOrgNodeId) : null,
-    ownerOrgNodeId: metric.plan.ownerOrgNodeId,
-  })) {
-    return { context, metric, sourceMetric };
-  }
-
-  if (metric.plan.ownerType === "DEPARTMENT") {
-    throw new Error("无权更新该季度指标");
-  }
-
   const currentUserOrgNode = await findOrgNodeById(context.user.orgNodeId);
-  const currentUserTeamId = currentUserOrgNode?.nodeType === "TEAM" ? currentUserOrgNode.id : null;
+  const currentUserTeamId = requestedTeamOrgNodeId
+    ?? (currentUserOrgNode?.nodeType === "TEAM" ? currentUserOrgNode.id : null);
   if (currentUserTeamId) {
-    const teamPlan = await prisma.annualGoalPlan.findFirst({
+    const assignment = await prisma.annualGoalMetricAssignment.findFirst({
       where: {
-        ownerType: "TEAM",
-        ownerOrgNodeId: currentUserTeamId,
-        year: departmentPlan.year,
+        teamOrgNodeId: currentUserTeamId,
         deletedAt: null,
-        metrics: {
-          some: sourceMetricId
-            ? { sourceMetricId, deletedAt: null }
-            : { sourceMetricId: null, metricCode: metric.metricCode, deletedAt: null },
-        },
+        ...(sourceMetricId ? { sourceMetricId, metricId: null } : { metricId, sourceMetricId: null }),
       },
       select: { id: true },
     });
-    if (teamPlan) return { context, metric, sourceMetric };
+    if (assignment && canUpdateTeamProgressScope(context, {
+      teamOrgNodeId: currentUserTeamId,
+      departmentOrgNodeId,
+      ownerOrgNodeId: currentUserTeamId,
+    })) return { context, metric, sourceMetric };
   }
 
   throw new Error("无权更新该季度指标");
 }
 
+async function assertQuarterTargetsManageable(metricId: string, sourceMetricId: string | null, teamOrgNodeId: string | null) {
+  const context = await getAnnualGoalActionContext();
+  const metric = await prisma.annualGoalMetric.findUnique({ where: { id: metricId }, include: { plan: true } });
+  if (!metric || metric.deletedAt || metric.plan.deletedAt) throw new Error("指标项不存在");
+  if (metric.plan.status === "CLOSED") throw new Error("年度方案已关闭");
+  if (sourceMetricId) {
+    const source = await prisma.annualGoalMetricSource.findFirst({
+      where: { id: sourceMetricId, parentMetricId: metricId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!source) throw new Error("元指标不存在");
+  }
+  const departmentOrgNodeId = metric.plan.departmentOrgNodeId;
+  if (canEditDepartmentScope(context, { departmentOrgNodeId, ownerOrgNodeId: departmentOrgNodeId })) {
+    return { context, metric };
+  }
+  if (!teamOrgNodeId || !canEditTeamScope(context, { teamOrgNodeId, departmentOrgNodeId, ownerOrgNodeId: teamOrgNodeId })) {
+    throw new Error("无权维护该季度指标");
+  }
+  const assignment = await prisma.annualGoalMetricAssignment.findFirst({
+    where: {
+      teamOrgNodeId,
+      deletedAt: null,
+      ...(sourceMetricId ? { metricId: null, sourceMetricId } : { metricId, sourceMetricId: null }),
+    },
+    select: { id: true },
+  });
+  if (!assignment) throw new Error("小组尚未承接该指标");
+  return { context, metric };
+}
+
+async function syncParentMetricFromSources(
+  tx: Prisma.TransactionClient,
+  metricId: string,
+  updatedAt: Date,
+  updatedById?: string,
+) {
+  const sources = await tx.annualGoalMetricSource.findMany({
+    where: { parentMetricId: metricId, deletedAt: null },
+    select: { currentValue: true },
+  });
+  const currentValue = Math.round((sources.reduce((sum, source) => sum + source.currentValue, 0) + Number.EPSILON) * 100) / 100;
+  await tx.annualGoalMetric.update({
+    where: { id: metricId },
+    data: { currentValue, progressUpdatedAt: updatedAt, ...(updatedById ? { updatedById } : {}) },
+  });
+}
+
 async function syncAnnualGoalCurrentValues(tx: Prisma.TransactionClient, metricId: string, sourceMetricId: string | null, updatedAt: Date, updatedById?: string) {
   if (sourceMetricId) {
     const sourceCurrent = await tx.annualGoalQuarterTarget.aggregate({
-      where: { metricId, sourceMetricId, deletedAt: null },
+      where: { metricId: null, sourceMetricId, deletedAt: null },
       _sum: { currentValue: true },
     });
     await tx.annualGoalMetricSource.update({
@@ -369,13 +354,11 @@ async function syncAnnualGoalCurrentValues(tx: Prisma.TransactionClient, metricI
     return;
   }
 
-  const sources = await tx.annualGoalMetricSource.findMany({
+  const sourceCount = await tx.annualGoalMetricSource.count({
     where: { parentMetricId: metricId, deletedAt: null },
-    select: { currentValue: true },
   });
-  if (sources.length > 0) {
-    const currentValue = Math.round((sources.reduce((sum, source) => sum + source.currentValue, 0) + Number.EPSILON) * 100) / 100;
-    await tx.annualGoalMetric.update({ where: { id: metricId }, data: { currentValue, progressUpdatedAt: updatedAt, ...(updatedById ? { updatedById } : {}) } });
+  if (sourceCount > 0) {
+    await syncParentMetricFromSources(tx, metricId, updatedAt, updatedById);
   }
 }
 
@@ -398,10 +381,7 @@ async function assertSourceMetricAvailable(
   });
   if (!sourceMetric || sourceMetric.deletedAt) throw new Error("指标元数据不存在");
   if (sourceMetric.parentMetric.deletedAt || sourceMetric.parentMetric.plan.deletedAt) throw new Error("指标元数据不可用");
-  if (
-    sourceMetric.parentMetric.plan.ownerType !== "DEPARTMENT"
-    || !isSameDepartmentScope(sourceMetric.parentMetric.plan, scope)
-  ) {
+  if (!isSameDepartmentScope(sourceMetric.parentMetric.plan, scope)) {
     throw new Error("只能选择本部门指标下的最细指标项");
   }
 
@@ -410,6 +390,12 @@ async function assertSourceMetricAvailable(
 
 const sourceMetricTargetLimitMessage = "同一指标项下的所有元指标的目标数额总额不得大于指标项的目标总额，请重新填写。";
 const quarterTargetLimitMessage = "季度指标的目标数额总额不得大于对应指标项/元指标的目标总额，请重新填写。";
+
+function authorityQuarterWhere(metricId: string, sourceMetricId: string | null) {
+  return sourceMetricId
+    ? { metricId: null, sourceMetricId }
+    : { metricId, sourceMetricId: null };
+}
 
 async function assertSourceMetricTargetWithinLimit(parentMetricId: string, targetValue: number, sourceMetricId?: string) {
   const parentMetric = await prisma.annualGoalMetric.findUnique({
@@ -452,7 +438,7 @@ async function assertQuarterTargetsWithinLimit(metricId: string, sourceMetricId:
 }
 
 async function generateMetricCode(year: number) {
-  const count = await prisma.annualGoalMetric.count({ where: { sourceMetricId: null } });
+  const count = await prisma.annualGoalMetric.count();
   return `AG-${year}-${String(count + 1).padStart(3, "0")}`;
 }
 
@@ -461,12 +447,12 @@ async function generateSourceMetricCode(year: number) {
   return `AGM-${year}-${String(count + 1).padStart(3, "0")}`;
 }
 
-async function assertAnnualGoalPlanYearUnique(ownerOrgNodeId: string, year: number, excludePlanId?: string) {
+async function assertAnnualGoalPlanYearUnique(departmentOrgNodeId: string, year: number, excludePlanId?: string) {
   const existingPlan = await prisma.annualGoalPlan.findFirst({
     where: {
-      ownerOrgNodeId,
       year,
       deletedAt: null,
+      departmentOrgNodeId,
       ...(excludePlanId ? { id: { not: excludePlanId } } : {}),
     },
     select: { id: true },
@@ -481,59 +467,23 @@ export async function createAnnualGoalPlan(formData: FormData) {
   const context = await requireAnnualGoalDepartmentEditor();
   const year = numberFromForm(formData.get("year"), "年份");
   const description = optionalString(formData.get("description"));
-  const ownerType = formData.get("ownerType") as AnnualGoalOwnerType;
-
-  if (ownerType !== "DEPARTMENT" && ownerType !== "TEAM") throw new Error("请选择方案归属");
 
   if (!year || year < 2000 || year > 2100) throw new Error("年份不正确");
 
-  const { departmentOrgNodeId, teamOrgNodeId, ownerOrgNodeId, ownerName } = await resolveOwner(context, formData);
+  const { departmentOrgNodeId, ownerName } = await resolveOwner(context, formData);
   const name = buildAnnualGoalPlanName(ownerName, year);
 
-  await assertAnnualGoalPlanYearUnique(ownerOrgNodeId, year);
-
-  const teamOrgNodeIds = ownerType === "DEPARTMENT"
-    ? (await resolveScopedTeams(ownerOrgNodeId)).map((team) => team.orgNodeId)
-    : [];
-  const uniqueTeamOrgNodeIds = Array.from(new Set(teamOrgNodeIds));
-
-  if (ownerType === "DEPARTMENT" && uniqueTeamOrgNodeIds.length > 0) {
-    await Promise.all(uniqueTeamOrgNodeIds.map((teamOrgNodeId) => assertAnnualGoalPlanYearUnique(teamOrgNodeId, year)));
-  }
+  await assertAnnualGoalPlanYearUnique(departmentOrgNodeId, year);
 
   await prisma.annualGoalPlan.create({
     data: {
       year,
       name,
       description,
-      ownerType,
+      departmentOrgNodeId,
       createdById: context.user.id,
-      ownerOrgNodeId,
     },
   });
-
-  if (ownerType === "DEPARTMENT") {
-    if (uniqueTeamOrgNodeIds.length > 0) {
-      const teams = await resolveScopedTeams(ownerOrgNodeId);
-
-      if (teams.length > 0) {
-        await prisma.$transaction(
-          teams.map((team) =>
-            prisma.annualGoalPlan.create({
-              data: {
-                year,
-                name: buildAnnualGoalPlanName(team.name, year),
-                description: null,
-                ownerType: "TEAM",
-                createdById: context.user.id,
-                ownerOrgNodeId: team.orgNodeId,
-              },
-            })
-          )
-        );
-      }
-    }
-  }
 
   revalidateAnnualGoals();
 }
@@ -544,53 +494,17 @@ export async function updateAnnualGoalPlan(formData: FormData) {
   const { context } = await assertPlanEditable(id);
   const year = numberFromForm(formData.get("year"), "年份");
   const description = optionalString(formData.get("description"));
-  const { ownerType, departmentOrgNodeId, teamOrgNodeId, ownerOrgNodeId, ownerName } = await resolveOwner(context, formData);
+  const { departmentOrgNodeId, ownerName } = await resolveOwner(context, formData);
   const name = buildAnnualGoalPlanName(ownerName, year);
 
-  await assertAnnualGoalPlanYearUnique(ownerOrgNodeId, year, id);
+  await assertAnnualGoalPlanYearUnique(departmentOrgNodeId, year, id);
 
   if (!year || year < 2000 || year > 2100) throw new Error("年份不正确");
 
   await prisma.annualGoalPlan.update({
     where: { id },
-    data: { year, name, description, ownerType, ownerOrgNodeId },
+    data: { year, name, description, departmentOrgNodeId },
   });
-
-  if (ownerType === "DEPARTMENT") {
-    const teams = await resolveScopedTeams(ownerOrgNodeId);
-    const teamOrgNodeIds = teams.map((team) => team.orgNodeId);
-    const existingTeamPlans = await resolveScopedTeamPlanIds({
-      ownerOrgNodeId,
-      year,
-    });
-
-    const existingTeamOrgNodeIds = new Set(existingTeamPlans.map((p) => p.ownerOrgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)));
-    const toRemove = existingTeamPlans.filter((p) => p.ownerOrgNodeId && !teamOrgNodeIds.includes(p.ownerOrgNodeId));
-    if (toRemove.length > 0) {
-      await prisma.annualGoalPlan.deleteMany({
-        where: { id: { in: toRemove.map((p) => p.id) } },
-      });
-    }
-
-    const toAdd = teams.filter((team) => !existingTeamOrgNodeIds.has(team.orgNodeId));
-    if (toAdd.length > 0) {
-      await Promise.all(toAdd.map((team) => assertAnnualGoalPlanYearUnique(team.orgNodeId, year)));
-      await prisma.$transaction(
-        toAdd.map((team) =>
-          prisma.annualGoalPlan.create({
-            data: {
-              year,
-              name: buildAnnualGoalPlanName(team.name, year),
-              description: null,
-              ownerType: "TEAM",
-              createdById: context.user.id,
-              ownerOrgNodeId: team.orgNodeId,
-            },
-          })
-        )
-      );
-    }
-  }
 
   revalidateAnnualGoals();
 }
@@ -599,48 +513,24 @@ export async function deleteAnnualGoalPlan(formData: FormData) {
   const id = formData.get("id") as string;
   if (!id) throw new Error("缺少方案 ID");
 
-  const { plan } = await assertPlanEditable(id);
-  if (plan.ownerType !== "DEPARTMENT") throw new Error("仅部门方案支持删除");
+  await assertPlanEditable(id);
 
   const deletedAt = new Date();
   await prisma.$transaction(async (tx) => {
     await tx.annualGoalPlan.update({
       where: { id },
-      data: { isActive: false, deletedAt },
+      data: { deletedAt },
     });
 
     const metrics = await tx.annualGoalMetric.findMany({
       where: { planId: id, deletedAt: null },
-      select: { id: true, metricCode: true },
+      select: { id: true },
     });
 
     if (metrics.length === 0) return;
 
     const metricIds = metrics.map((metric) => metric.id);
-    const metricCodes = Array.from(new Set(metrics.map((metric) => metric.metricCode)));
-    const teamPlanIds = (await resolveScopedTeamPlanIds({
-      ownerOrgNodeId: plan.ownerOrgNodeId,
-      year: plan.year,
-    })).map((teamPlan) => teamPlan.id);
-    const teamMetrics = teamPlanIds.length > 0
-      ? await tx.annualGoalMetric.findMany({
-          where: {
-            deletedAt: null,
-            planId: { in: teamPlanIds },
-            OR: [
-              { sourceMetric: { parentMetricId: { in: metricIds } } },
-              { sourceMetricId: null, metricCode: { in: metricCodes } },
-            ],
-          },
-          select: { id: true },
-        })
-      : [];
-    const teamMetricIds = teamMetrics.map((metric) => metric.id);
-
     await tx.annualGoalMetric.updateMany({ where: { id: { in: metricIds }, deletedAt: null }, data: { deletedAt } });
-    if (teamMetricIds.length > 0) {
-      await tx.annualGoalMetric.updateMany({ where: { id: { in: teamMetricIds }, deletedAt: null }, data: { deletedAt } });
-    }
 
     const sourceMetricIds = (await tx.annualGoalMetricSource.findMany({
       where: { parentMetricId: { in: metricIds }, deletedAt: null },
@@ -652,9 +542,16 @@ export async function deleteAnnualGoalPlan(formData: FormData) {
     if (sourceMetricIds.length > 0) {
       await tx.annualGoalQuarterTarget.updateMany({ where: { sourceMetricId: { in: sourceMetricIds }, deletedAt: null }, data: { deletedAt } });
     }
-    if (teamMetricIds.length > 0) {
-      await tx.annualGoalQuarterTarget.updateMany({ where: { metricId: { in: teamMetricIds }, deletedAt: null }, data: { deletedAt } });
-    }
+    await tx.annualGoalMetricAssignment.updateMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { metricId: { in: metricIds } },
+          ...(sourceMetricIds.length ? [{ sourceMetricId: { in: sourceMetricIds } }] : []),
+        ],
+      },
+      data: { deletedAt },
+    });
   });
 
   revalidateAnnualGoals();
@@ -663,81 +560,75 @@ export async function deleteAnnualGoalPlan(formData: FormData) {
 export async function createAnnualGoalMetric(formData: FormData) {
   const planId = formData.get("planId") as string;
   if (!planId) throw new Error("缺少方案 ID");
-  const { context, plan } = await assertPlanEditable(planId);
-
   const sourceMetricId = (formData.get("sourceMetricId") as string) || null;
   const parentMetricId = (formData.get("parentMetricId") as string) || null;
+  const teamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
   const responsibleUserIdInput = (formData.get("responsibleUserId") as string) || null;
   const weight = numberFromForm(formData.get("weight"), "权重");
+  const { context, plan } = teamOrgNodeId
+    ? {
+        context: await getAnnualGoalActionContext(),
+        plan: await prisma.annualGoalPlan.findUnique({ where: { id: planId } }),
+      }
+    : await assertPlanEditable(planId);
+  if (!plan || plan.deletedAt) throw new Error("年度方案不存在");
+  if (plan.status === "CLOSED") throw new Error("年度方案已关闭");
 
   if (weight < 0) throw new Error("数值不能小于 0");
-  await assertWeightWithinLimit(planId, weight);
 
-  if (plan.ownerType === "TEAM") {
+  if (teamOrgNodeId) {
     if (!!sourceMetricId === !!parentMetricId) throw new Error("请选择一个指标项或元指标");
-    const teamDepartmentOrgNodeId = plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(plan.ownerOrgNodeId) : null;
+    const team = await findTeamRecordByOrgNodeId(teamOrgNodeId);
+    const planDepartmentOrgNodeId = plan.departmentOrgNodeId;
+    if (!team || team.departmentOrgNodeId !== planDepartmentOrgNodeId) throw new Error("只能承接本部门指标");
+    if (!canEditTeamScope(context, {
+      teamOrgNodeId,
+      departmentOrgNodeId: team.departmentOrgNodeId,
+      ownerOrgNodeId: teamOrgNodeId,
+    })) throw new Error("无权维护该小组承接");
     const responsibleUserId = await resolveTeamResponsibleUserId(responsibleUserIdInput, {
-      departmentOrgNodeId: teamDepartmentOrgNodeId,
-      teamOrgNodeId: plan.ownerOrgNodeId,
-      ownerOrgNodeId: plan.ownerOrgNodeId,
+      departmentOrgNodeId: team.departmentOrgNodeId,
+      teamOrgNodeId,
+      ownerOrgNodeId: teamOrgNodeId,
     });
-
     if (sourceMetricId) {
-      const sourceMetric = await assertSourceMetricAvailable(sourceMetricId, {
-        departmentOrgNodeId: teamDepartmentOrgNodeId,
-        ownerOrgNodeId: teamDepartmentOrgNodeId,
+      const source = await assertSourceMetricAvailable(sourceMetricId, {
+        departmentOrgNodeId: planDepartmentOrgNodeId,
+        ownerOrgNodeId: planDepartmentOrgNodeId,
       });
-      await prisma.annualGoalMetric.create({
-        data: {
-          planId,
-          sourceMetricId,
-          metricCode: sourceMetric.metricCode,
-          name: sourceMetric.name,
-          description: sourceMetric.description,
-          targetValue: sourceMetric.targetValue,
-          currentValue: sourceMetric.currentValue,
-          unit: sourceMetric.unit,
-          weight,
-          calculationType: sourceMetric.calculationType,
-          riskStatus: sourceMetric.riskStatus,
-          responsibleUserId,
-          createdById: plan.createdById,
-          updatedById: context.user.id,
-        },
+      if (source.parentMetric.planId !== planId) throw new Error("元指标不属于当前年度方案");
+    } else {
+      const metric = await prisma.annualGoalMetric.findFirst({
+        where: { id: parentMetricId!, planId, deletedAt: null },
+        select: { id: true },
       });
-      revalidateAnnualGoals();
-      return;
+      if (!metric) throw new Error("指标项不存在");
     }
-
-    if (!parentMetricId) throw new Error("请选择指标项或元指标");
-    const parentMetric = await prisma.annualGoalMetric.findUnique({ where: { id: parentMetricId }, include: { plan: true } });
-    if (!parentMetric || parentMetric.deletedAt || parentMetric.plan.deletedAt) throw new Error("指标项不存在");
-    if (
-      parentMetric.plan.ownerType !== "DEPARTMENT"
-      || parentMetric.plan.ownerOrgNodeId !== teamDepartmentOrgNodeId
-    ) throw new Error("只能选择本部门指标项");
-
-    await prisma.annualGoalMetric.create({
-      data: {
-        planId,
-        metricCode: parentMetric.metricCode,
-        name: parentMetric.name,
-        description: parentMetric.description,
-        targetValue: parentMetric.targetValue,
-        currentValue: parentMetric.currentValue,
-        unit: parentMetric.unit,
-        weight,
-        calculationType: parentMetric.calculationType,
-        riskStatus: parentMetric.riskStatus,
-        responsibleUserId,
-        createdById: parentMetric.createdById,
-        updatedById: context.user.id,
-      },
+    const activeAssignments = await prisma.annualGoalMetricAssignment.findMany({
+      where: { teamOrgNodeId, deletedAt: null },
+      select: { weight: true },
     });
+    if (roundValue(activeAssignments.reduce((sum, item) => sum + item.weight, 0) + weight) > 100) {
+      throw new Error("指标权重合计不能超过 100%");
+    }
+    const authority = sourceMetricId ? { metricId: null, sourceMetricId } : { metricId: parentMetricId, sourceMetricId: null };
+    const existing = await prisma.annualGoalMetricAssignment.findFirst({ where: { teamOrgNodeId, ...authority } });
+    if (existing && !existing.deletedAt) throw new Error("该指标已添加过，无需重复添加");
+    if (existing) {
+      await prisma.annualGoalMetricAssignment.update({
+        where: { id: existing.id },
+        data: { ...authority, weight, responsibleUserId, deletedAt: null, updatedById: context.user.id },
+      });
+    } else {
+      await prisma.annualGoalMetricAssignment.create({
+        data: { teamOrgNodeId, ...authority, weight, responsibleUserId, createdById: context.user.id },
+      });
+    }
     revalidateAnnualGoals();
     return;
   }
 
+  await assertWeightWithinLimit(planId, weight);
   const name = (formData.get("name") as string)?.trim();
   const description = optionalString(formData.get("description"));
   const targetValue = numberFromForm(formData.get("targetValue"), "目标值");
@@ -760,6 +651,50 @@ export async function createAnnualGoalMetric(formData: FormData) {
 }
 
 export async function updateAnnualGoalMetric(formData: FormData) {
+  const assignmentId = (formData.get("assignmentId") as string) || null;
+  if (assignmentId) {
+    const context = await getAnnualGoalActionContext();
+    const assignment = await prisma.annualGoalMetricAssignment.findUnique({
+      where: { id: assignmentId },
+      include: {
+        metric: { include: { plan: true } },
+        sourceMetric: { include: { parentMetric: { include: { plan: true } } } },
+      },
+    });
+    const authorityPlan = assignment?.sourceMetric?.parentMetric.plan ?? assignment?.metric?.plan;
+    if (!assignment || assignment.deletedAt || !authorityPlan || authorityPlan.deletedAt) throw new Error("小组承接不存在");
+    if (authorityPlan.status === "CLOSED") throw new Error("年度方案已关闭");
+    const departmentOrgNodeId = authorityPlan.departmentOrgNodeId;
+    if (!canEditTeamScope(context, { teamOrgNodeId: assignment.teamOrgNodeId, departmentOrgNodeId, ownerOrgNodeId: assignment.teamOrgNodeId })) {
+      throw new Error("无权维护该小组承接");
+    }
+    const weight = numberFromForm(formData.get("weight"), "权重");
+    if (weight < 0) throw new Error("数值不能小于 0");
+    const responsibleUserId = await resolveTeamResponsibleUserId((formData.get("responsibleUserId") as string) || null, {
+      departmentOrgNodeId,
+      teamOrgNodeId: assignment.teamOrgNodeId,
+      ownerOrgNodeId: assignment.teamOrgNodeId,
+    });
+    const siblings = await prisma.annualGoalMetricAssignment.findMany({
+      where: { teamOrgNodeId: assignment.teamOrgNodeId, deletedAt: null, id: { not: assignmentId } },
+      select: { weight: true },
+    });
+    if (roundValue(siblings.reduce((sum, item) => sum + item.weight, 0) + weight) > 100) {
+      throw new Error("指标权重合计不能超过 100%");
+    }
+    await prisma.annualGoalMetricAssignment.update({
+      where: { id: assignmentId },
+      data: {
+        weight,
+        responsibleUserId,
+        sortOrder: formData.get("sortOrder") === null ? assignment.sortOrder : numberFromForm(formData.get("sortOrder"), "排序"),
+        updatedById: context.user.id,
+      },
+    });
+    revalidateAnnualGoals();
+    return;
+  }
+
   const id = formData.get("id") as string;
   if (!id) throw new Error("缺少指标 ID");
 
@@ -767,23 +702,11 @@ export async function updateAnnualGoalMetric(formData: FormData) {
   if (!metric || metric.deletedAt) throw new Error("指标不存在");
   const { context } = await assertPlanEditable(metric.planId);
 
-  const responsibleUserIdInput = (formData.get("responsibleUserId") as string) || null;
   const weight = numberFromForm(formData.get("weight"), "权重");
   if (weight < 0) throw new Error("数值不能小于 0");
   await assertWeightWithinLimit(metric.planId, weight, id);
 
   const adjustedAt = new Date();
-
-  if (metric.plan.ownerType === "TEAM") {
-    const responsibleUserId = await resolveTeamResponsibleUserId(responsibleUserIdInput, {
-      departmentOrgNodeId: metric.plan.ownerOrgNodeId ? await findNearestDepartmentOrgNodeId(metric.plan.ownerOrgNodeId) : null,
-      teamOrgNodeId: metric.plan.ownerOrgNodeId,
-      ownerOrgNodeId: metric.plan.ownerOrgNodeId,
-    });
-    await prisma.annualGoalMetric.update({ where: { id }, data: { responsibleUserId, weight, adjustedAt, updatedById: context.user.id } });
-    revalidateAnnualGoals();
-    return;
-  }
 
   const name = (formData.get("name") as string)?.trim();
   const description = optionalString(formData.get("description"));
@@ -798,61 +721,9 @@ export async function updateAnnualGoalMetric(formData: FormData) {
   if (!calculationTypes.includes(calculationType as (typeof calculationTypes)[number])) throw new Error("计算方式不正确");
   if (!riskStatuses.includes(riskStatus as (typeof riskStatuses)[number])) throw new Error("风险状态不正确");
 
-  await prisma.$transaction(async (tx) => {
-    await tx.annualGoalMetric.update({
-      where: { id },
-      data: { name, description, targetValue, currentValue, unit, weight, calculationType, riskStatus, adjustedAt, updatedById: context.user.id },
-    });
-    if (metric.sourceMetricId) {
-      await tx.annualGoalMetricSource.update({
-        where: { id: metric.sourceMetricId },
-        data: { name, description, targetValue, currentValue, unit, calculationType, riskStatus, updatedById: context.user.id },
-      });
-      const siblingMetrics = await tx.annualGoalMetric.findMany({
-        where: { sourceMetricId: metric.sourceMetricId, id: { not: id } },
-        select: { id: true },
-      });
-      await tx.annualGoalMetric.updateMany({
-        where: { sourceMetricId: metric.sourceMetricId, id: { not: id } },
-        data: { name, description, targetValue, currentValue, unit, calculationType, riskStatus, updatedById: context.user.id },
-      });
-      await tx.annualGoalQuarterTarget.updateMany({
-        where: { metricId: { in: [id, ...siblingMetrics.map((item) => item.id)] }, deletedAt: null },
-        data: { updatedById: context.user.id },
-      });
-      return;
-    }
-
-    const childSources = await tx.annualGoalMetricSource.findMany({
-      where: { parentMetricId: id, deletedAt: null },
-      select: { id: true },
-    });
-    if (childSources.length === 0) return;
-
-    const childSourceIds = childSources.map((source) => source.id);
-    const linkedMetrics = await tx.annualGoalMetric.findMany({
-      where: { sourceMetricId: { in: childSourceIds }, deletedAt: null },
-      select: { id: true },
-    });
-
-    await tx.annualGoalMetricSource.updateMany({
-      where: { parentMetricId: id, deletedAt: null },
-      data: { unit, updatedById: context.user.id },
-    });
-    await tx.annualGoalMetric.updateMany({
-      where: { sourceMetricId: { in: childSourceIds }, deletedAt: null },
-      data: { unit, updatedById: context.user.id },
-    });
-    await tx.annualGoalQuarterTarget.updateMany({
-      where: {
-        OR: [
-          { metricId: { in: linkedMetrics.map((item) => item.id) } },
-          { sourceMetricId: { in: childSourceIds } },
-        ],
-        deletedAt: null,
-      },
-      data: { updatedById: context.user.id },
-    });
+  await prisma.annualGoalMetric.update({
+    where: { id },
+    data: { name, description, targetValue, currentValue, unit, weight, calculationType, riskStatus, adjustedAt, updatedById: context.user.id },
   });
 
   revalidateAnnualGoals();
@@ -864,10 +735,11 @@ export async function createAnnualGoalMetricSource(formData: FormData) {
   const context = await requireAnnualGoalDepartmentEditor();
 
   const parentMetric = await prisma.annualGoalMetric.findUnique({ where: { id: parentMetricId }, include: { plan: true } });
-  if (!parentMetric || parentMetric.deletedAt || parentMetric.plan.deletedAt || parentMetric.plan.ownerType !== "DEPARTMENT") {
+  if (!parentMetric || parentMetric.deletedAt || parentMetric.plan.deletedAt) {
     throw new Error("部门指标不存在");
   }
-  if (!canEditDepartmentScope(context, { departmentOrgNodeId: parentMetric.plan.ownerOrgNodeId, ownerOrgNodeId: parentMetric.plan.ownerOrgNodeId })) {
+  if (parentMetric.plan.status === "CLOSED") throw new Error("年度方案已关闭");
+  if (!canEditDepartmentScope(context, { departmentOrgNodeId: parentMetric.plan.departmentOrgNodeId, ownerOrgNodeId: parentMetric.plan.departmentOrgNodeId })) {
     throw new Error("无权维护该部门指标元数据");
   }
 
@@ -879,8 +751,8 @@ export async function createAnnualGoalMetricSource(formData: FormData) {
   const calculationType = formData.get("calculationType") as AnnualMetricCalculationType;
   const riskStatus = formData.get("riskStatus") as RiskStatus;
   const responsibleUserId = await resolveDepartmentResponsibleUserId((formData.get("responsibleUserId") as string) || null, {
-    departmentOrgNodeId: parentMetric.plan.ownerOrgNodeId,
-    ownerOrgNodeId: parentMetric.plan.ownerOrgNodeId,
+    departmentOrgNodeId: parentMetric.plan.departmentOrgNodeId,
+    ownerOrgNodeId: parentMetric.plan.departmentOrgNodeId,
   });
 
   if (!name || !unit) throw new Error("指标名称和单位为必填项");
@@ -890,8 +762,12 @@ export async function createAnnualGoalMetricSource(formData: FormData) {
   await assertSourceMetricTargetWithinLimit(parentMetricId, targetValue);
 
   const metricCode = await generateSourceMetricCode(parentMetric.plan.year);
-  await prisma.annualGoalMetricSource.create({
-    data: { parentMetricId, metricCode, name, description, targetValue, currentValue, unit, calculationType, riskStatus, responsibleUserId, createdById: context.user.id },
+  const updatedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.annualGoalMetricSource.create({
+      data: { parentMetricId, metricCode, name, description, targetValue, currentValue, unit, calculationType, riskStatus, responsibleUserId, createdById: context.user.id },
+    });
+    await syncParentMetricFromSources(tx, parentMetricId, updatedAt, context.user.id);
   });
 
   revalidateAnnualGoals();
@@ -906,7 +782,8 @@ export async function updateAnnualGoalMetricSource(formData: FormData) {
   if (!sourceMetric || sourceMetric.deletedAt || sourceMetric.parentMetric.deletedAt || sourceMetric.parentMetric.plan.deletedAt) {
     throw new Error("元指标不存在");
   }
-  if (!canEditDepartmentScope(context, { departmentOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId, ownerOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId })) {
+  if (sourceMetric.parentMetric.plan.status === "CLOSED") throw new Error("年度方案已关闭");
+  if (!canEditDepartmentScope(context, { departmentOrgNodeId: sourceMetric.parentMetric.plan.departmentOrgNodeId, ownerOrgNodeId: sourceMetric.parentMetric.plan.departmentOrgNodeId })) {
     throw new Error("无权维护该元指标");
   }
 
@@ -920,8 +797,8 @@ export async function updateAnnualGoalMetricSource(formData: FormData) {
   const calculationType = formData.get("calculationType") as AnnualMetricCalculationType;
   const riskStatus = formData.get("riskStatus") as RiskStatus;
   const responsibleUserId = await resolveDepartmentResponsibleUserId((formData.get("responsibleUserId") as string) || null, {
-    departmentOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId,
-    ownerOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId,
+    departmentOrgNodeId: sourceMetric.parentMetric.plan.departmentOrgNodeId,
+    ownerOrgNodeId: sourceMetric.parentMetric.plan.departmentOrgNodeId,
   });
 
   if (!name || !unit) throw new Error("元指标名称和单位为必填项");
@@ -935,26 +812,9 @@ export async function updateAnnualGoalMetricSource(formData: FormData) {
   await prisma.$transaction(async (tx) => {
     await tx.annualGoalMetricSource.update({
       where: { id },
-      data: { name, description, targetValue, currentValue, unit, calculationType, riskStatus, responsibleUserId, adjustedAt, updatedById: context.user.id },
+      data: { name, description, targetValue: normalizedTargetValue, currentValue: normalizedCurrentValue, unit: sourceMetric.unit, calculationType, riskStatus, responsibleUserId, adjustedAt, updatedById: context.user.id },
     });
-    await tx.annualGoalMetric.updateMany({
-      where: { sourceMetricId: id, deletedAt: null },
-      data: {
-        name,
-        description,
-        targetValue: normalizedTargetValue,
-        currentValue: normalizedCurrentValue,
-        unit,
-        calculationType,
-        riskStatus,
-        adjustedAt,
-        updatedById: context.user.id,
-      },
-    });
-    await tx.annualGoalQuarterTarget.updateMany({
-      where: { sourceMetricId: id, deletedAt: null },
-      data: { updatedById: context.user.id },
-    });
+    await syncParentMetricFromSources(tx, sourceMetric.parentMetricId, adjustedAt, context.user.id);
   });
 
   revalidateAnnualGoals();
@@ -969,21 +829,48 @@ export async function deleteAnnualGoalMetricSource(formData: FormData) {
   if (!sourceMetric || sourceMetric.deletedAt || sourceMetric.parentMetric.deletedAt || sourceMetric.parentMetric.plan.deletedAt) {
     throw new Error("元指标不存在");
   }
-  if (!canEditDepartmentScope(context, { departmentOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId, ownerOrgNodeId: sourceMetric.parentMetric.plan.ownerOrgNodeId })) {
+  if (sourceMetric.parentMetric.plan.status === "CLOSED") throw new Error("年度方案已关闭");
+  if (!canEditDepartmentScope(context, { departmentOrgNodeId: sourceMetric.parentMetric.plan.departmentOrgNodeId, ownerOrgNodeId: sourceMetric.parentMetric.plan.departmentOrgNodeId })) {
     throw new Error("无权删除该元指标");
   }
 
   const deletedAt = new Date();
   await prisma.$transaction(async (tx) => {
     await tx.annualGoalMetricSource.update({ where: { id }, data: { deletedAt } });
-    await tx.annualGoalMetric.updateMany({ where: { sourceMetricId: id, deletedAt: null }, data: { deletedAt } });
+    await tx.annualGoalMetricAssignment.updateMany({ where: { sourceMetricId: id, deletedAt: null }, data: { deletedAt, updatedById: context.user.id } });
     await tx.annualGoalQuarterTarget.updateMany({ where: { sourceMetricId: id, deletedAt: null }, data: { deletedAt } });
+    await syncParentMetricFromSources(tx, sourceMetric.parentMetricId, deletedAt, context.user.id);
   });
 
   revalidateAnnualGoals();
 }
 
 export async function deleteAnnualGoalMetric(formData: FormData) {
+  const assignmentId = (formData.get("assignmentId") as string) || null;
+  if (assignmentId) {
+    const context = await getAnnualGoalActionContext();
+    const assignment = await prisma.annualGoalMetricAssignment.findUnique({
+      where: { id: assignmentId },
+      include: {
+        metric: { include: { plan: true } },
+        sourceMetric: { include: { parentMetric: { include: { plan: true } } } },
+      },
+    });
+    const plan = assignment?.sourceMetric?.parentMetric.plan ?? assignment?.metric?.plan;
+    if (!assignment || assignment.deletedAt || !plan || plan.deletedAt) throw new Error("小组承接不存在");
+    if (plan.status === "CLOSED") throw new Error("年度方案已关闭");
+    const departmentOrgNodeId = plan.departmentOrgNodeId;
+    if (!canEditTeamScope(context, { teamOrgNodeId: assignment.teamOrgNodeId, departmentOrgNodeId, ownerOrgNodeId: assignment.teamOrgNodeId })) {
+      throw new Error("无权维护该小组承接");
+    }
+    await prisma.annualGoalMetricAssignment.update({
+      where: { id: assignmentId },
+      data: { deletedAt: new Date(), updatedById: context.user.id },
+    });
+    revalidateAnnualGoals();
+    return;
+  }
+
   const id = formData.get("id") as string;
   if (!id) throw new Error("缺少指标 ID");
 
@@ -991,18 +878,18 @@ export async function deleteAnnualGoalMetric(formData: FormData) {
   if (!metric || metric.deletedAt) throw new Error("指标不存在");
   const { context } = await assertPlanEditable(metric.planId);
 
-  if (metric.plan.ownerType === "TEAM") {
-    await prisma.annualGoalMetric.update({ where: { id }, data: { deletedAt: new Date(), updatedById: context.user.id } });
-    revalidateAnnualGoals();
-    return;
-  }
-
+  const deletedAt = new Date();
   await prisma.$transaction(async (tx) => {
-    await tx.annualGoalMetric.update({ where: { id }, data: { deletedAt: new Date() } });
-    await tx.annualGoalMetricSource.updateMany({ where: { parentMetricId: id }, data: { deletedAt: new Date() } });
-    await tx.annualGoalMetric.updateMany({
-      where: { sourceMetric: { parentMetricId: id }, id: { not: id } },
-      data: { deletedAt: new Date() },
+    const sourceIds = (await tx.annualGoalMetricSource.findMany({ where: { parentMetricId: id, deletedAt: null }, select: { id: true } })).map((item) => item.id);
+    await tx.annualGoalMetric.update({ where: { id }, data: { deletedAt } });
+    await tx.annualGoalMetricSource.updateMany({ where: { parentMetricId: id, deletedAt: null }, data: { deletedAt } });
+    await tx.annualGoalMetricAssignment.updateMany({
+      where: { deletedAt: null, OR: [{ metricId: id }, ...(sourceIds.length ? [{ sourceMetricId: { in: sourceIds } }] : [])] },
+      data: { deletedAt, updatedById: context.user.id },
+    });
+    await tx.annualGoalQuarterTarget.updateMany({
+      where: { deletedAt: null, OR: [{ metricId: id }, ...(sourceIds.length ? [{ sourceMetricId: { in: sourceIds } }] : [])] },
+      data: { deletedAt, updatedById: context.user.id },
     });
   });
   revalidateAnnualGoals();
@@ -1011,16 +898,10 @@ export async function deleteAnnualGoalMetric(formData: FormData) {
 export async function saveAnnualGoalQuarterTargets(formData: FormData) {
   const metricId = formData.get("metricId") as string;
   const sourceMetricId = (formData.get("sourceMetricId") as string) || null;
+  const teamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
   if (!metricId) throw new Error("请选择指标项");
 
-  const metric = await prisma.annualGoalMetric.findUnique({ where: { id: metricId }, include: { plan: true } });
-  if (!metric || metric.deletedAt || metric.plan.deletedAt) throw new Error("指标项不存在");
-  const { context } = await assertPlanEditable(metric.planId);
-
-  if (sourceMetricId) {
-    const sourceMetric = await prisma.annualGoalMetricSource.findUnique({ where: { id: sourceMetricId } });
-    if (!sourceMetric || sourceMetric.deletedAt || sourceMetric.parentMetricId !== metricId) throw new Error("元指标不存在");
-  }
+  const { context, metric } = await assertQuarterTargetsManageable(metricId, sourceMetricId, teamOrgNodeId);
 
   const targets = [1, 2, 3, 4].flatMap((quarter) => {
     const targetRaw = formData.get(`q${quarter}Target`);
@@ -1037,13 +918,13 @@ export async function saveAnnualGoalQuarterTargets(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     await tx.annualGoalQuarterTarget.updateMany({
-      where: { metricId, sourceMetricId, deletedAt: null },
+      where: { ...authorityQuarterWhere(metricId, sourceMetricId), deletedAt: null },
       data: { deletedAt: adjustedAt },
     });
     if (targets.length > 0) {
       await tx.annualGoalQuarterTarget.createMany({
         data: targets.map((target) => ({
-          metricId,
+          metricId: sourceMetricId ? null : metricId,
           sourceMetricId,
           year: metric.plan.year,
           quarter: target.quarter,
@@ -1054,6 +935,7 @@ export async function saveAnnualGoalQuarterTargets(formData: FormData) {
         })),
       });
     }
+    await syncAnnualGoalCurrentValues(tx, metricId, sourceMetricId, adjustedAt, context.user.id);
   });
 
   revalidateAnnualGoals();
@@ -1062,9 +944,10 @@ export async function saveAnnualGoalQuarterTargets(formData: FormData) {
 export async function updateAnnualGoalQuarterProgress(formData: FormData) {
   const metricId = formData.get("metricId") as string;
   const sourceMetricId = (formData.get("sourceMetricId") as string) || null;
+  const teamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
   if (!metricId) throw new Error("缺少季度指标 ID");
 
-  const { context } = await assertQuarterProgressUpdatable(metricId, sourceMetricId);
+  const { context } = await assertQuarterProgressUpdatable(metricId, sourceMetricId, teamOrgNodeId);
 
   const updates = [1, 2, 3, 4].flatMap((quarter) => {
     const targetId = formData.get(`q${quarter}Id`) as string | null;
@@ -1077,10 +960,11 @@ export async function updateAnnualGoalQuarterProgress(formData: FormData) {
   if (updates.length === 0) throw new Error("暂无可更新的季度指标");
 
   const existingTargets = await prisma.annualGoalQuarterTarget.findMany({
-    where: { id: { in: updates.map((target) => target.id) }, metricId, sourceMetricId, deletedAt: null },
-    select: { id: true },
+    where: { id: { in: updates.map((target) => target.id) }, ...authorityQuarterWhere(metricId, sourceMetricId), deletedAt: null },
+    select: { id: true, currentValue: true },
   });
   if (existingTargets.length !== updates.length) throw new Error("季度指标不存在");
+  const existingById = new Map(existingTargets.map((target) => [target.id, target]));
 
   const progressUpdatedAt = new Date();
   await prisma.$transaction(async (tx) => {
@@ -1088,6 +972,17 @@ export async function updateAnnualGoalQuarterProgress(formData: FormData) {
       await tx.annualGoalQuarterTarget.update({
         where: { id: update.id },
         data: { targetValue: update.targetValue, currentValue: update.currentValue, progressUpdatedAt, updatedById: context.user.id },
+      });
+      await tx.annualGoalProgress.create({
+        data: {
+          metricId,
+          sourceMetricId,
+          quarterTargetId: update.id,
+          updaterId: context.user.id,
+          progressDate: progressUpdatedAt,
+          completedValue: roundValue(update.currentValue - (existingById.get(update.id)?.currentValue ?? 0)),
+          cumulativeValue: update.currentValue,
+        },
       });
     }
     await syncAnnualGoalCurrentValues(tx, metricId, sourceMetricId, progressUpdatedAt, context.user.id);
@@ -1104,22 +999,23 @@ export async function updateAnnualGoalWeeklyProgress(formData: FormData) {
     if (!targetId) return null;
     const metricId = formData.get(`metricId_${index}`) as string;
     const sourceMetricId = (formData.get(`sourceMetricId_${index}`) as string) || null;
+    const teamOrgNodeId = (formData.get(`teamOrgNodeId_${index}`) as string) || null;
     const weeklyIncrement = numberFromForm(formData.get(`weeklyIncrement_${index}`), "本周新增");
     if (!metricId) throw new Error("缺少指标项 ID");
     if (weeklyIncrement < 0) throw new Error("更新数值不能小于 0");
-    return { id: targetId, metricId, sourceMetricId, weeklyIncrement };
-  }).filter((update): update is { id: string; metricId: string; sourceMetricId: string | null; weeklyIncrement: number } => Boolean(update));
+    return { id: targetId, metricId, sourceMetricId, teamOrgNodeId, weeklyIncrement };
+  }).filter((update): update is { id: string; metricId: string; sourceMetricId: string | null; teamOrgNodeId: string | null; weeklyIncrement: number } => Boolean(update));
 
   if (updates.length === 0) throw new Error("暂无可更新的季度指标");
   if (new Set(updates.map((update) => update.id)).size !== updates.length) throw new Error("季度指标重复");
 
-  const pairs = new Map<string, { metricId: string; sourceMetricId: string | null; updatedById?: string }>();
+  const pairs = new Map<string, { metricId: string; sourceMetricId: string | null; teamOrgNodeId: string | null; updatedById?: string }>();
   for (const update of updates) {
-    pairs.set(`${update.metricId}:${update.sourceMetricId ?? ""}`, { metricId: update.metricId, sourceMetricId: update.sourceMetricId });
+    pairs.set(`${update.metricId}:${update.sourceMetricId ?? ""}`, { metricId: update.metricId, sourceMetricId: update.sourceMetricId, teamOrgNodeId: update.teamOrgNodeId });
   }
   for (const pair of pairs.values()) {
-    const { context } = await assertQuarterProgressUpdatable(pair.metricId, pair.sourceMetricId);
-    pairs.set(`${pair.metricId}:${pair.sourceMetricId ?? ""}`, { metricId: pair.metricId, sourceMetricId: pair.sourceMetricId, updatedById: context.user.id });
+    const { context } = await assertQuarterProgressUpdatable(pair.metricId, pair.sourceMetricId, pair.teamOrgNodeId);
+    pairs.set(`${pair.metricId}:${pair.sourceMetricId ?? ""}`, { ...pair, updatedById: context.user.id });
   }
 
   const existingTargets = await prisma.annualGoalQuarterTarget.findMany({
@@ -1129,7 +1025,7 @@ export async function updateAnnualGoalWeeklyProgress(formData: FormData) {
   const targetById = new Map(existingTargets.map((target) => [target.id, target]));
   const normalizedUpdates = updates.map((update) => {
     const target = targetById.get(update.id);
-    if (!target || target.metricId !== update.metricId || target.sourceMetricId !== update.sourceMetricId) {
+    if (!target || target.sourceMetricId !== update.sourceMetricId || (update.sourceMetricId ? target.metricId !== null : target.metricId !== update.metricId)) {
       throw new Error("季度指标不存在");
     }
     return { ...update, currentValue: Math.round(((target.currentValue ?? 0) + update.weeklyIncrement + Number.EPSILON) * 100) / 100 };
@@ -1138,9 +1034,22 @@ export async function updateAnnualGoalWeeklyProgress(formData: FormData) {
   const progressUpdatedAt = new Date();
   await prisma.$transaction(async (tx) => {
     for (const update of normalizedUpdates) {
+      const updaterId = pairs.get(`${update.metricId}:${update.sourceMetricId ?? ""}`)?.updatedById;
+      if (!updaterId) throw new Error("缺少进度更新人");
       await tx.annualGoalQuarterTarget.update({
         where: { id: update.id },
-        data: { weeklyIncrement: update.weeklyIncrement, currentValue: update.currentValue, progressUpdatedAt, updatedById: pairs.get(`${update.metricId}:${update.sourceMetricId ?? ""}`)?.updatedById },
+        data: { weeklyIncrement: update.weeklyIncrement, currentValue: update.currentValue, progressUpdatedAt, updatedById: updaterId },
+      });
+      await tx.annualGoalProgress.create({
+        data: {
+          metricId: update.metricId,
+          sourceMetricId: update.sourceMetricId,
+          quarterTargetId: update.id,
+          updaterId,
+          progressDate: progressUpdatedAt,
+          completedValue: update.weeklyIncrement,
+          cumulativeValue: update.currentValue,
+        },
       });
     }
     for (const pair of pairs.values()) {
@@ -1154,20 +1063,18 @@ export async function updateAnnualGoalWeeklyProgress(formData: FormData) {
 export async function deleteAnnualGoalQuarterTargets(formData: FormData) {
   const metricId = formData.get("metricId") as string;
   const sourceMetricId = (formData.get("sourceMetricId") as string) || null;
+  const teamOrgNodeId = (formData.get("teamOrgNodeId") as string) || null;
   if (!metricId) throw new Error("缺少季度指标 ID");
 
-  const metric = await prisma.annualGoalMetric.findUnique({ where: { id: metricId }, include: { plan: true } });
-  if (!metric || metric.deletedAt || metric.plan.deletedAt) throw new Error("指标项不存在");
-  const { context } = await assertPlanEditable(metric.planId);
+  const { context } = await assertQuarterTargetsManageable(metricId, sourceMetricId, teamOrgNodeId);
 
-  if (sourceMetricId) {
-    const sourceMetric = await prisma.annualGoalMetricSource.findUnique({ where: { id: sourceMetricId } });
-    if (!sourceMetric || sourceMetric.deletedAt || sourceMetric.parentMetricId !== metricId) throw new Error("元指标不存在");
-  }
-
-  await prisma.annualGoalQuarterTarget.updateMany({
-    where: { metricId, sourceMetricId, deletedAt: null },
-    data: { deletedAt: new Date(), updatedById: context.user.id },
+  const deletedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.annualGoalQuarterTarget.updateMany({
+      where: { ...authorityQuarterWhere(metricId, sourceMetricId), deletedAt: null },
+      data: { deletedAt, updatedById: context.user.id },
+    });
+    await syncAnnualGoalCurrentValues(tx, metricId, sourceMetricId, deletedAt, context.user.id);
   });
 
   revalidateAnnualGoals();

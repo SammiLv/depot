@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-url="${!#}"
-if [[ "$url" == */login ]]; then
-  printf '200'
-else
-  printf '307'
-fi

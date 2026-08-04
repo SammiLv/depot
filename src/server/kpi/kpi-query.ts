@@ -4,9 +4,12 @@ import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/pe
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
 import {
+  buildKpiCompletedProgressStages,
+  getApprovalStepDisplayLabel,
   getEditableStageFromApprovalStep,
-  getKpiStatusForApprovalStep,
   isSelfReviewStatus,
+  kpiProgressStageLabels,
+  kpiProgressStageOrder,
 } from "@/server/kpi/approval-workflow";
 
 
@@ -21,6 +24,7 @@ type ViewScopeSummary = {
   canViewTemplate: boolean;
   hasAnyViewPermission: boolean;
   hasGlobalViewKpiScope: boolean;
+  hasDepartmentWideKpiView: boolean;
   departmentAllTabOrgNodeIds: string[];
   visibleDepartmentOrgNodeIds: string[];
   visibleTeamOrgNodeIds: string[];
@@ -60,6 +64,13 @@ type KpiPageData = {
       canLeaderScore: boolean;
       canManagerScore: boolean;
       canFinalReview: boolean;
+    };
+    completedProgressStages: {
+      init: boolean;
+      selfReview: boolean;
+      leader: boolean;
+      manager: boolean;
+      final: boolean;
     };
   }>;
   stages: Array<{ label: string; count: number }>;
@@ -130,6 +141,7 @@ function mergePermissionCoverages(coverages: PermissionCoverage[]): PermissionCo
     return {
       hasPermission: false,
       hasAllAccess: false,
+      hasSubtreeAccess: false,
       includesSelf: false,
       orgNodeIds: [],
     };
@@ -139,17 +151,20 @@ function mergePermissionCoverages(coverages: PermissionCoverage[]): PermissionCo
     return {
       hasPermission: true,
       hasAllAccess: true,
+      hasSubtreeAccess: true,
       includesSelf: true,
       orgNodeIds: [],
     };
   }
 
   const includesSelf = availableCoverages.some((coverage) => coverage.includesSelf);
+  const hasSubtreeAccess = availableCoverages.some((coverage) => coverage.hasSubtreeAccess);
   const orgNodeIds = [...new Set(availableCoverages.flatMap((coverage) => coverage.orgNodeIds))];
 
   return {
     hasPermission: true,
     hasAllAccess: false,
+    hasSubtreeAccess,
     includesSelf,
     orgNodeIds,
   };
@@ -186,6 +201,9 @@ async function buildViewScopeOrgNodeIds(
   if (coverage.includesSelf && currentUser.orgNodeId) {
     coveredNodeIds.add(currentUser.orgNodeId);
   }
+  if (!coverage.hasAllAccess && !coverage.hasSubtreeAccess && currentUser.orgNodeId) {
+    coveredNodeIds.add(currentUser.orgNodeId);
+  }
 
   const visibleDepartmentOrgNodeIds = [...new Set(
     [...coveredNodeIds]
@@ -199,8 +217,10 @@ async function buildViewScopeOrgNodeIds(
       .filter((teamOrgNodeId): teamOrgNodeId is string => Boolean(teamOrgNodeId))
   )];
 
+  const hasDepartmentWideView = coverage.hasAllAccess || coverage.hasSubtreeAccess;
+
   return {
-    departmentAllTabOrgNodeIds: visibleDepartmentOrgNodeIds,
+    departmentAllTabOrgNodeIds: hasDepartmentWideView ? visibleDepartmentOrgNodeIds : [],
     visibleTeamOrgNodeIds,
     visibleDepartmentOrgNodeIds,
   };
@@ -221,13 +241,14 @@ async function resolveKpiViewScope(currentUser: DataScopeInput): Promise<ViewSco
     manageTemplateCoverage,
     toggleTemplateCoverage,
   ]);
-  const { departmentAllTabOrgNodeIds, visibleTeamOrgNodeIds, visibleDepartmentOrgNodeIds } = await buildViewScopeOrgNodeIds(currentUser, effectiveCoverage);
+  const { departmentAllTabOrgNodeIds, visibleTeamOrgNodeIds, visibleDepartmentOrgNodeIds } = await buildViewScopeOrgNodeIds(currentUser, viewKpiCoverage);
 
   return {
     canViewKpi: viewKpiCoverage.hasPermission,
     canViewTemplate: viewTemplateCoverage.hasPermission,
     hasAnyViewPermission: effectiveCoverage.hasPermission,
-    hasGlobalViewKpiScope: effectiveCoverage.hasAllAccess,
+    hasGlobalViewKpiScope: viewKpiCoverage.hasAllAccess,
+    hasDepartmentWideKpiView: viewKpiCoverage.hasAllAccess || viewKpiCoverage.hasSubtreeAccess,
     departmentAllTabOrgNodeIds,
     visibleDepartmentOrgNodeIds,
     visibleTeamOrgNodeIds,
@@ -355,6 +376,21 @@ function getKpiListStageLabel(status: string) {
     return "已完成";
   }
   return status;
+}
+
+function buildProgressStageSummary(
+  rows: Array<{ completedProgressStages: ReturnType<typeof buildKpiCompletedProgressStages> }>,
+) {
+  return kpiProgressStageOrder.map((stageKey) => ({
+    label: kpiProgressStageLabels[stageKey],
+    count: rows.filter((row) => {
+      if (stageKey === "INIT") return row.completedProgressStages.init;
+      if (stageKey === "SELF_REVIEW") return row.completedProgressStages.selfReview;
+      if (stageKey === "LEADER") return row.completedProgressStages.leader;
+      if (stageKey === "MANAGER") return row.completedProgressStages.manager;
+      return row.completedProgressStages.final;
+    }).length,
+  }));
 }
 
 function getDepartmentOrgNodeIdForRecord(
@@ -705,30 +741,25 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
         },
         ...approvalSteps.map((step) => ({
           key: `APPROVAL_STEP_${step.stepOrder}`,
-          label: step.stepLabel || stageLabels[getKpiStatusForApprovalStep(step.stageKey)] || `审批步骤 ${step.stepOrder}`,
+          label: getApprovalStepDisplayLabel(step.stageKey) || `审批步骤 ${step.stepOrder}`,
           count: step.status === "WAITING" ? 0 : 1,
           active: !selfReviewActive && step.status === "PENDING",
           completed: step.status === "COMPLETED",
           approverName: actorNameById.get(step.approverId) ?? "—",
         })),
-        {
-          key: "COMPLETED",
-          label: "已完成",
-          count: personalKpi.status === "COMPLETED" ? 1 : 0,
-          active: personalKpi.status === "COMPLETED",
-          completed: false,
-          approverName: null,
-        },
       ]
     : (() => {
-        const completedStageIndex = stageOrder.includes(personalKpi.status)
-          ? stageOrder.indexOf(personalKpi.status)
-          : 0;
-        return stageOrder.map((stage, index) => ({
+        const visibleStageOrder = stageOrder.filter((stage) => stage !== "COMPLETED");
+        const completedStageIndex = personalKpi.status === "COMPLETED"
+          ? visibleStageOrder.length
+          : visibleStageOrder.includes(personalKpi.status)
+            ? visibleStageOrder.indexOf(personalKpi.status)
+            : 0;
+        return visibleStageOrder.map((stage, index) => ({
           key: stage,
           label: stageLabels[stage] ?? stage,
-          count: index <= completedStageIndex ? 1 : 0,
-          active: index === completedStageIndex,
+          count: index < completedStageIndex ? 1 : 0,
+          active: personalKpi.status !== "COMPLETED" && index === completedStageIndex,
           completed: index < completedStageIndex,
           approverName: null,
         }));
@@ -742,9 +773,11 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     year: personalKpi.year,
     quarter: personalKpi.quarter,
     stageKey: personalKpi.status,
-    status: !selfReviewActive && currentApprovalStep?.stepLabel
-      ? currentApprovalStep.stepLabel
-      : stageLabels[personalKpi.status] ?? personalKpi.status,
+    status: personalKpi.status === "COMPLETED"
+      ? "终审"
+      : !selfReviewActive && currentApprovalStep
+        ? getApprovalStepDisplayLabel(currentApprovalStep.stageKey) || stageLabels[personalKpi.status] || personalKpi.status
+        : stageLabels[personalKpi.status] ?? personalKpi.status,
     tone,
     editableStage,
     availableActions: {
@@ -876,14 +909,10 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const year = selectedYear;
   const quarter = selectedQuarter;
 
-  const emptyStages = [
-    { label: "初始化", count: 0 },
-    { label: "自评", count: 0 },
-    { label: "组长评", count: 0 },
-    { label: "主管评", count: 0 },
-    { label: "终审", count: 0 },
-    { label: "已完成", count: 0 },
-  ];
+  const emptyStages = kpiProgressStageOrder.map((stageKey) => ({
+    label: kpiProgressStageLabels[stageKey],
+    count: 0,
+  }));
 
   const allScopedOrgNodes = await prisma.orgNode.findMany({
     select: { id: true, name: true, nodeType: true, parentId: true },
@@ -929,6 +958,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const relationships = buildOrgNodeRelationships(resolvedOrgNodes);
   const canManageKpi = Boolean(manageKpiScope);
   const canManageKpiTemplate = Boolean(manageTemplateScope);
+  const canManageAllDepartmentTemplates = canManageKpiTemplate && viewScope.hasDepartmentWideKpiView;
   const canToggleKpiTemplate = Boolean(toggleTemplateScope);
   const canScoreSelf = Boolean(scoreSelfScope);
   const canScoreLeader = Boolean(scoreLeaderScope);
@@ -986,8 +1016,12 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     : [];
   const activeApprovalStepByKpiId = new Map<string, typeof approvalStepRows[number]>();
   const hasApprovalChainByKpiId = new Map<string, boolean>();
+  const approvalStepsByKpiId = new Map<string, typeof approvalStepRows>();
   for (const step of approvalStepRows) {
     hasApprovalChainByKpiId.set(step.personalKpiId, true);
+    const steps = approvalStepsByKpiId.get(step.personalKpiId) ?? [];
+    steps.push(step);
+    approvalStepsByKpiId.set(step.personalKpiId, steps);
     if (step.status !== "PENDING") continue;
     if (!activeApprovalStepByKpiId.has(step.personalKpiId)) {
       activeApprovalStepByKpiId.set(step.personalKpiId, step);
@@ -1043,6 +1077,16 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       ?? getDepartmentOrgNodeIdForRecord(personalKpi.orgNodeId, relationships.nearestDepartmentOrgNodeIdByNodeId)
       ?? null;
     stageCounts[personalKpi.status] += 1;
+    const completedProgressStages = buildKpiCompletedProgressStages({
+      status: personalKpi.status,
+      approvalSteps: approvalStepsByKpiId.get(personalKpi.id),
+    });
+    const listStageLabel = personalKpi.status === "COMPLETED"
+      ? "已完成"
+      : isSelfReviewStatus(personalKpi.status)
+        ? getKpiListStageLabel(personalKpi.status)
+        : getApprovalStepDisplayLabel(activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey)
+          || getKpiListStageLabel(personalKpi.status);
 
     return [{
       id: personalKpi.id,
@@ -1053,26 +1097,29 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       teamName: teamOrgNodeId ? (orgNodeMap.get(teamOrgNodeId)?.name ?? "—") : "—",
       itemCount: items.length,
       stageKey: personalKpi.status,
-      status: activeApprovalStepByKpiId.get(personalKpi.id)?.stepLabel
-        || getKpiListStageLabel(personalKpi.status),
+      status: listStageLabel,
       tone: getKpiTone(personalKpi.status),
       progress,
       score: `${personalKpi.finalScore ?? personalKpi.managerScore ?? personalKpi.leaderScore ?? personalKpi.selfScore ?? 0}`,
       availableActions: {
-        canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && (personalKpi.status === "DRAFT" || personalKpi.status === "PENDING_SELF_REVIEW"),
+        canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),
         canLeaderScore: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
+          ? !isSelfReviewStatus(personalKpi.status)
+            && activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
             && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "LEADER"
           : canScoreLeader && personalKpi.status === "PENDING_LEADER_SCORE",
         canManagerScore: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
+          ? !isSelfReviewStatus(personalKpi.status)
+            && activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
             && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "MANAGER"
           : canScoreManager && personalKpi.status === "PENDING_MANAGER_SCORE",
         canFinalReview: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
+          ? !isSelfReviewStatus(personalKpi.status)
+            && activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
             && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "FINAL"
           : canScoreFinal && personalKpi.status === "PENDING_FINAL_REVIEW",
       },
+      completedProgressStages,
     }];
   });
 
@@ -1143,7 +1190,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     const matchedUserIds: string[] = [];
     const matchedTeamOrgNodeIds = new Set<string>();
 
-    if (canManageKpiTemplate) {
+    if (canManageAllDepartmentTemplates) {
       visibleTemplateIds.add(template.id);
       matchedUserIdsByTemplateId.set(template.id, []);
       matchedTeamOrgNodeIdsByTemplateId.set(template.id, []);
@@ -1151,7 +1198,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     }
 
     if (assignments.length === 0) {
-      if (canToggleKpiTemplate) {
+      if (canToggleKpiTemplate && viewScope.hasDepartmentWideKpiView) {
         visibleTemplateIds.add(template.id);
         matchedUserIdsByTemplateId.set(template.id, []);
         matchedTeamOrgNodeIdsByTemplateId.set(template.id, []);
@@ -1259,32 +1306,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const templateUserById = new Map(templateUsers.map((user) => [user.id, user.name] as const));
   const departmentNameById = new Map(departments.map((department) => [department.id, department.name] as const));
 
-  const stages = [
-    {
-      label: "初始化",
-      count: rows.filter((row) => row.stageKey === "DRAFT").length,
-    },
-    {
-      label: "自评",
-      count: rows.filter((row) => row.stageKey === "PENDING_SELF_REVIEW").length,
-    },
-    {
-      label: "组长评",
-      count: rows.filter((row) => row.stageKey === "PENDING_LEADER_SCORE").length,
-    },
-    {
-      label: "主管评",
-      count: rows.filter((row) => row.stageKey === "PENDING_MANAGER_SCORE").length,
-    },
-    {
-      label: "终审",
-      count: rows.filter((row) => row.stageKey === "PENDING_FINAL_REVIEW").length,
-    },
-    {
-      label: "已完成",
-      count: rows.filter((row) => row.stageKey === "COMPLETED").length,
-    },
-  ];
+  const stages = buildProgressStageSummary(rows);
 
   const teamNameById = new Map(teamOptions.map((team) => [team.id, team.name] as const));
   const memberNameById = new Map(users.map((user) => [user.id, user.name] as const));

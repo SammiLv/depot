@@ -1,6 +1,4 @@
 import type { RoleType } from "@prisma/client";
-import type { AnnualGoalCapabilities } from "@/server/organization/annual-goal-permissions";
-import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 
 type DataScopeInput = {
@@ -45,56 +43,6 @@ export async function getTeamWhereByScope(user: DataScopeInput) {
   return {
     id: { in: teamIds },
   };
-}
-
-export async function getAnnualPlanWhereByScope(
-  user: DataScopeInput,
-  capabilities?: Pick<AnnualGoalCapabilities, "canViewDepartmentPlans">,
-) {
-  if (user.roleType === "ADMIN") {
-    return { deletedAt: null };
-  }
-
-  if (!user.orgNodeId) {
-    return { id: "__no_annual_plan__", deletedAt: null };
-  }
-
-  if (user.roleType === "DEPARTMENT_MANAGER") {
-    const ids = await getDescendantOrgNodeIds(user.orgNodeId);
-    return ids.length > 0
-      ? { ownerOrgNodeId: { in: ids }, deletedAt: null }
-      : { id: "__no_annual_plan__", deletedAt: null };
-  }
-
-  const canViewDepartmentPlans = capabilities?.canViewDepartmentPlans ?? false;
-
-  if (canViewDepartmentPlans) {
-    const ancestorRows = await prisma.orgClosure.findMany({
-      where: { descendantId: user.orgNodeId },
-      orderBy: { depth: "desc" },
-      select: { ancestorId: true },
-    });
-    const ancestorIds = ancestorRows.map((r) => r.ancestorId);
-    let scopeId = user.orgNodeId;
-    if (ancestorIds.length > 0) {
-      const deptNodes = await prisma.orgNode.findMany({
-        where: { id: { in: ancestorIds }, nodeType: "DEPARTMENT" },
-        select: { id: true },
-      });
-      const deptIdSet = new Set(deptNodes.map((n) => n.id));
-      const nearestDept = ancestorRows.find((r) => deptIdSet.has(r.ancestorId));
-      if (nearestDept) scopeId = nearestDept.ancestorId;
-    }
-    const ids = await getDescendantOrgNodeIds(scopeId);
-    return ids.length > 0
-      ? { ownerOrgNodeId: { in: ids }, deletedAt: null }
-      : { id: "__no_annual_plan__", deletedAt: null };
-  }
-
-  const ids = await getDescendantOrgNodeIds(user.orgNodeId);
-  return ids.length > 0
-    ? { ownerOrgNodeId: { in: ids }, deletedAt: null }
-    : { id: "__no_annual_plan__", deletedAt: null };
 }
 
 export async function getOwnerWhereByScope(user: DataScopeInput) {

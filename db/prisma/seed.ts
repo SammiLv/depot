@@ -2,7 +2,7 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { AnnualGoalOwnerType, AnnualMetricCalculationType, ApprovalStatus, PrismaClient, RoleType } from "@prisma/client";
+import { AnnualMetricCalculationType, PrismaClient, RoleType } from "@prisma/client";
 import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
 import { kpiDefaultPermissionGrants } from "../../src/server/permissions/permission-constants";
 
@@ -93,11 +93,11 @@ async function syncLegacyOrgReferences(rootNodeId: string) {
   }
 
   const annualGoalPlans = await prisma.annualGoalPlan.findMany({
-    select: { id: true, ownerOrgNodeId: true },
+    select: { id: true, departmentOrgNodeId: true },
   });
   for (const plan of annualGoalPlans) {
-    if (plan.ownerOrgNodeId) continue;
-    throw new Error(`年度方案缺少 ownerOrgNodeId: ${plan.id}`);
+    if (plan.departmentOrgNodeId) continue;
+    throw new Error(`年度方案缺少 departmentOrgNodeId: ${plan.id}`);
   }
 
   const projects = await prisma.project.findMany({
@@ -174,8 +174,8 @@ async function main() {
   await prisma.todoItem.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.annualGoalProgress.deleteMany();
-  await prisma.annualGoalRevisionLog.deleteMany();
   await prisma.annualGoalQuarterTarget.deleteMany();
+  await prisma.annualGoalMetricAssignment.deleteMany();
   await prisma.annualGoalMetricSource.deleteMany();
   await prisma.annualGoalMetric.deleteMany();
   await prisma.annualGoalPlan.deleteMany();
@@ -487,14 +487,8 @@ async function main() {
       year: 2026,
       name: "产品部 2026 年度业绩指标",
       description: "产品部承接公司下达年度业绩指标，并拆解最细指标元数据分配到小组",
-      ownerType: AnnualGoalOwnerType.DEPARTMENT,
-      ownerOrgNodeId: departmentOrgNodeId,
-      version: 1,
-      isActive: true,
-      approvalStatus: ApprovalStatus.APPROVED,
-      effectiveFrom: new Date("2026-01-01"),
-      effectiveTo: new Date("2026-12-31"),
-      approvedAt: new Date("2026-01-05"),
+      departmentOrgNodeId,
+      status: "ACTIVE",
       createdById: manager.id,
       metrics: {
         create: [
@@ -650,38 +644,14 @@ async function main() {
   for (const plan of teamAnnualPlans) {
     const team = teams[plan.teamName];
 
-    await prisma.annualGoalPlan.create({
-      data: {
-        year: 2026,
-        name: `${plan.teamName} 2026 年度业绩指标`,
-        ownerType: AnnualGoalOwnerType.TEAM,
-        ownerOrgNodeId: team.orgNodeId,
-        parentPlanId: productAnnualPlan.id,
-        version: 1,
-        isActive: true,
-        approvalStatus: ApprovalStatus.APPROVED,
-        effectiveFrom: new Date("2026-01-01"),
-        effectiveTo: new Date("2026-12-31"),
-        approvedAt: new Date("2026-01-08"),
+    await prisma.annualGoalMetricAssignment.createMany({
+      data: plan.metrics.map(([metricCode, weight], index) => ({
+        teamOrgNodeId: team.orgNodeId,
+        sourceMetricId: sourceByCode[metricCode].id,
+        weight,
+        sortOrder: (index + 1) * 10,
         createdById: manager.id,
-        metrics: {
-          create: plan.metrics.map(([metricCode, weight], index) => {
-            const source = sourceByCode[metricCode];
-            return {
-              sourceMetricId: source.id,
-              metricCode: source.metricCode,
-              name: source.name,
-              targetValue: source.targetValue,
-              currentValue: source.currentValue,
-              unit: source.unit,
-              weight,
-              calculationType: source.calculationType,
-              riskStatus: source.riskStatus,
-              sortOrder: (index + 1) * 10,
-            };
-          }),
-        },
-      },
+      })),
     });
   }
 
@@ -690,14 +660,8 @@ async function main() {
       year: 2026,
       name: "平台部 2026 年度业绩指标",
       description: "用于验证多部门并行推进时的平台部年度目标和数据隔离。",
-      ownerType: AnnualGoalOwnerType.DEPARTMENT,
-      ownerOrgNodeId: secondDepartmentOrgNodeId,
-      version: 1,
-      isActive: true,
-      approvalStatus: ApprovalStatus.APPROVED,
-      effectiveFrom: new Date("2026-01-01"),
-      effectiveTo: new Date("2026-12-31"),
-      approvedAt: new Date("2026-01-06"),
+      departmentOrgNodeId: secondDepartmentOrgNodeId,
+      status: "ACTIVE",
       createdById: secondDepartmentManager.id,
       metrics: {
         create: [

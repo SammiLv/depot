@@ -335,7 +335,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-semibold tracking-tight">{`${data.basicInfo.name} · ${data.basicInfo.quarterLabel} KPI`}</h1>
-                <Badge tone={data.tone}>{data.status}</Badge>
+                {data.stageKey !== "COMPLETED" ? <Badge tone={data.tone}>{data.status}</Badge> : null}
               </div>
               <p className="text-sm text-muted-foreground">
                 {!viewOnly && data.availableActions.canSave ? "处理季度 KPI 评分并推进当前流程。" : "查看季度 KPI 单据详情、评分汇总与绩效总结。"}
