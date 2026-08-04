@@ -9,7 +9,9 @@ export const KPI_RESET_TABLES = [
   "PersonalKpiApprovalStep",
   "PersonalKpiItem",
   "PersonalKpi",
+  "KpiApprovalPolicyStepOrgNode",
   "KpiApprovalPolicyStep",
+  "KpiApprovalPolicyScope",
   "KpiApprovalPolicy",
   "KpiTemplateAssignment",
   "KpiTemplateItem",
@@ -23,6 +25,8 @@ export const KPI_MIGRATIONS = [
   "20260720000200_add_kpi_approval_policy_step",
   "20260727000100_extend_personal_kpi_approval_snapshot",
   "20260727000200_add_personal_kpi_item_step_score",
+  "20260803000100_add_kpi_approval_node_selection",
+  "20260803000200_add_scoped_dual_mode_kpi_approval",
 ] as const;
 
 const REQUIRED_PERSONAL_KPI_COLUMNS = [
@@ -30,6 +34,7 @@ const REQUIRED_PERSONAL_KPI_COLUMNS = [
   "approvalPolicyName",
   "approvalPolicyScopeType",
   "approvalPolicyDepartmentOrgNodeId",
+  "approvalPolicyScopeOrgNodeId",
 ] as const;
 
 const REQUIRED_APPROVAL_STEP_COLUMNS = [
@@ -39,6 +44,8 @@ const REQUIRED_APPROVAL_STEP_COLUMNS = [
   "stepOrder",
   "stageKey",
   "stepLabel",
+  "nodeMode",
+  "configuredOrgNodeId",
   "ancestorDepth",
   "resolverType",
   "resolverUserId",
@@ -55,6 +62,7 @@ const REQUIRED_APPROVAL_STEP_INDEXES = [
   "PersonalKpiApprovalStep_personalKpiId_stepOrder_idx",
   "PersonalKpiApprovalStep_policyStepId_idx",
   "PersonalKpiApprovalStep_approverId_status_idx",
+  "PersonalKpiApprovalStep_configuredOrgNodeId_idx",
 ] as const;
 
 const REQUIRED_KPI_APPROVAL_POLICY_COLUMNS = [
@@ -72,7 +80,6 @@ const REQUIRED_KPI_APPROVAL_POLICY_COLUMNS = [
 const REQUIRED_KPI_APPROVAL_POLICY_INDEXES = [
   "KpiApprovalPolicy_scopeType_departmentOrgNodeId_name_key",
   "KpiApprovalPolicy_activeScopeKey_key",
-  "KpiApprovalPolicy_single_active_scope_key",
   "KpiApprovalPolicy_scopeType_departmentOrgNodeId_isActive_idx",
 ] as const;
 
@@ -81,6 +88,8 @@ const REQUIRED_KPI_APPROVAL_POLICY_STEP_COLUMNS = [
   "policyId",
   "stepOrder",
   "label",
+  "nodeMode",
+  "approvalOrgNodeId",
   "ancestorDepth",
   "resolverType",
   "resolverUserId",
@@ -96,6 +105,33 @@ const REQUIRED_KPI_APPROVAL_POLICY_STEP_INDEXES = [
   "KpiApprovalPolicyStep_policyId_idx",
   "KpiApprovalPolicyStep_resolverType_idx",
   "KpiApprovalPolicyStep_resolverUserId_idx",
+  "KpiApprovalPolicyStep_approvalOrgNodeId_idx",
+] as const;
+
+const REQUIRED_KPI_APPROVAL_POLICY_SCOPE_COLUMNS = [
+  "id",
+  "policyId",
+  "orgNodeId",
+  "createdAt",
+] as const;
+
+const REQUIRED_KPI_APPROVAL_POLICY_SCOPE_INDEXES = [
+  "KpiApprovalPolicyScope_policyId_orgNodeId_key",
+  "KpiApprovalPolicyScope_policyId_idx",
+  "KpiApprovalPolicyScope_orgNodeId_idx",
+] as const;
+
+const REQUIRED_KPI_APPROVAL_POLICY_STEP_ORG_NODE_COLUMNS = [
+  "id",
+  "policyStepId",
+  "orgNodeId",
+  "createdAt",
+] as const;
+
+const REQUIRED_KPI_APPROVAL_POLICY_STEP_ORG_NODE_INDEXES = [
+  "KpiApprovalPolicyStepOrgNode_policyStepId_orgNodeId_key",
+  "KpiApprovalPolicyStepOrgNode_policyStepId_idx",
+  "KpiApprovalPolicyStepOrgNode_orgNodeId_idx",
 ] as const;
 
 const REQUIRED_PERSONAL_KPI_ITEM_STEP_SCORE_COLUMNS = [
@@ -141,7 +177,9 @@ export type ProductionDatabaseReport = {
   structure: {
     orgPermissionGrant: "MISSING" | "LEGACY" | "TARGET" | "PARTIAL";
     kpiApprovalPolicy: boolean;
+    kpiApprovalPolicyScope: boolean;
     kpiApprovalPolicyStep: boolean;
+    kpiApprovalPolicyStepOrgNode: boolean;
     personalKpiSnapshotColumns: boolean;
     personalKpiApprovalStepColumns: boolean;
     personalKpiItemStepScore: boolean;
@@ -394,11 +432,23 @@ export function inspectProductionDatabase(databasePath: string): ProductionDatab
         REQUIRED_KPI_APPROVAL_POLICY_COLUMNS,
         REQUIRED_KPI_APPROVAL_POLICY_INDEXES,
       ),
+      kpiApprovalPolicyScope: hasTableContract(
+        db,
+        "KpiApprovalPolicyScope",
+        REQUIRED_KPI_APPROVAL_POLICY_SCOPE_COLUMNS,
+        REQUIRED_KPI_APPROVAL_POLICY_SCOPE_INDEXES,
+      ),
       kpiApprovalPolicyStep: hasTableContract(
         db,
         "KpiApprovalPolicyStep",
         REQUIRED_KPI_APPROVAL_POLICY_STEP_COLUMNS,
         REQUIRED_KPI_APPROVAL_POLICY_STEP_INDEXES,
+      ),
+      kpiApprovalPolicyStepOrgNode: hasTableContract(
+        db,
+        "KpiApprovalPolicyStepOrgNode",
+        REQUIRED_KPI_APPROVAL_POLICY_STEP_ORG_NODE_COLUMNS,
+        REQUIRED_KPI_APPROVAL_POLICY_STEP_ORG_NODE_INDEXES,
       ),
       personalKpiSnapshotColumns: hasColumns(db, "PersonalKpi", REQUIRED_PERSONAL_KPI_COLUMNS),
       personalKpiApprovalStepColumns: hasColumns(
@@ -420,7 +470,9 @@ export function inspectProductionDatabase(databasePath: string): ProductionDatab
     const targetFlags = [
       structure.orgPermissionGrant === "TARGET",
       structure.kpiApprovalPolicy,
+      structure.kpiApprovalPolicyScope,
       structure.kpiApprovalPolicyStep,
+      structure.kpiApprovalPolicyStepOrgNode,
       structure.personalKpiSnapshotColumns,
       structure.personalKpiApprovalStepColumns,
       structure.personalKpiItemStepScore,
@@ -585,7 +637,9 @@ function ensureKpiTargetStructure(db: Database) {
   db.exec(`
     DROP TABLE IF EXISTS "PersonalKpiItemStepScore";
     DROP TABLE IF EXISTS "PersonalKpiApprovalStep";
+    DROP TABLE IF EXISTS "KpiApprovalPolicyStepOrgNode";
     DROP TABLE IF EXISTS "KpiApprovalPolicyStep";
+    DROP TABLE IF EXISTS "KpiApprovalPolicyScope";
     DROP TABLE IF EXISTS "KpiApprovalPolicy";
 
     CREATE TABLE "KpiApprovalPolicy" (
@@ -603,17 +657,29 @@ function ensureKpiTargetStructure(db: Database) {
       ON "KpiApprovalPolicy"("scopeType", "departmentOrgNodeId", "name");
     CREATE UNIQUE INDEX "KpiApprovalPolicy_activeScopeKey_key"
       ON "KpiApprovalPolicy"("activeScopeKey");
-    CREATE UNIQUE INDEX "KpiApprovalPolicy_single_active_scope_key"
-      ON "KpiApprovalPolicy"("scopeType", "departmentOrgNodeId")
-      WHERE "isActive" = true;
     CREATE INDEX "KpiApprovalPolicy_scopeType_departmentOrgNodeId_isActive_idx"
       ON "KpiApprovalPolicy"("scopeType", "departmentOrgNodeId", "isActive");
+
+    CREATE TABLE "KpiApprovalPolicyScope" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "policyId" TEXT NOT NULL,
+      "orgNodeId" TEXT NOT NULL,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX "KpiApprovalPolicyScope_policyId_orgNodeId_key"
+      ON "KpiApprovalPolicyScope"("policyId", "orgNodeId");
+    CREATE INDEX "KpiApprovalPolicyScope_policyId_idx"
+      ON "KpiApprovalPolicyScope"("policyId");
+    CREATE INDEX "KpiApprovalPolicyScope_orgNodeId_idx"
+      ON "KpiApprovalPolicyScope"("orgNodeId");
 
     CREATE TABLE "KpiApprovalPolicyStep" (
       "id" TEXT NOT NULL PRIMARY KEY,
       "policyId" TEXT NOT NULL,
       "stepOrder" INTEGER NOT NULL,
       "label" TEXT NOT NULL,
+      "nodeMode" TEXT,
+      "approvalOrgNodeId" TEXT,
       "ancestorDepth" INTEGER,
       "resolverType" TEXT NOT NULL,
       "resolverUserId" TEXT,
@@ -631,6 +697,21 @@ function ensureKpiTargetStructure(db: Database) {
       ON "KpiApprovalPolicyStep"("resolverType");
     CREATE INDEX "KpiApprovalPolicyStep_resolverUserId_idx"
       ON "KpiApprovalPolicyStep"("resolverUserId");
+    CREATE INDEX "KpiApprovalPolicyStep_approvalOrgNodeId_idx"
+      ON "KpiApprovalPolicyStep"("approvalOrgNodeId");
+
+    CREATE TABLE "KpiApprovalPolicyStepOrgNode" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "policyStepId" TEXT NOT NULL,
+      "orgNodeId" TEXT NOT NULL,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX "KpiApprovalPolicyStepOrgNode_policyStepId_orgNodeId_key"
+      ON "KpiApprovalPolicyStepOrgNode"("policyStepId", "orgNodeId");
+    CREATE INDEX "KpiApprovalPolicyStepOrgNode_policyStepId_idx"
+      ON "KpiApprovalPolicyStepOrgNode"("policyStepId");
+    CREATE INDEX "KpiApprovalPolicyStepOrgNode_orgNodeId_idx"
+      ON "KpiApprovalPolicyStepOrgNode"("orgNodeId");
 
     CREATE TABLE "PersonalKpiItemStepScore" (
       "id" TEXT NOT NULL PRIMARY KEY,
@@ -655,6 +736,8 @@ function ensureKpiTargetStructure(db: Database) {
       "stepOrder" INTEGER NOT NULL,
       "stageKey" TEXT NOT NULL,
       "stepLabel" TEXT,
+      "nodeMode" TEXT,
+      "configuredOrgNodeId" TEXT,
       "ancestorDepth" INTEGER,
       "resolverType" TEXT,
       "resolverUserId" TEXT,
@@ -672,6 +755,8 @@ function ensureKpiTargetStructure(db: Database) {
       ON "PersonalKpiApprovalStep"("policyStepId");
     CREATE INDEX "PersonalKpiApprovalStep_approverId_status_idx"
       ON "PersonalKpiApprovalStep"("approverId", "status");
+    CREATE INDEX "PersonalKpiApprovalStep_configuredOrgNodeId_idx"
+      ON "PersonalKpiApprovalStep"("configuredOrgNodeId");
   `);
 
   if (!tableExists(db, "PersonalKpi")) {
@@ -681,9 +766,12 @@ function ensureKpiTargetStructure(db: Database) {
   addColumnIfMissing(db, "PersonalKpi", "approvalPolicyName", "TEXT");
   addColumnIfMissing(db, "PersonalKpi", "approvalPolicyScopeType", "TEXT");
   addColumnIfMissing(db, "PersonalKpi", "approvalPolicyDepartmentOrgNodeId", "TEXT");
+  addColumnIfMissing(db, "PersonalKpi", "approvalPolicyScopeOrgNodeId", "TEXT");
   db.exec(`
     CREATE INDEX IF NOT EXISTS "PersonalKpi_approvalPolicyId_idx"
       ON "PersonalKpi"("approvalPolicyId");
+    CREATE INDEX IF NOT EXISTS "PersonalKpi_approvalPolicyScopeOrgNodeId_idx"
+      ON "PersonalKpi"("approvalPolicyScopeOrgNodeId");
   `);
 
 }
@@ -766,11 +854,23 @@ export function getKpiResetVerificationIssues(db: Database) {
       REQUIRED_KPI_APPROVAL_POLICY_COLUMNS,
       REQUIRED_KPI_APPROVAL_POLICY_INDEXES,
     ),
+    kpiApprovalPolicyScope: hasTableContract(
+      db,
+      "KpiApprovalPolicyScope",
+      REQUIRED_KPI_APPROVAL_POLICY_SCOPE_COLUMNS,
+      REQUIRED_KPI_APPROVAL_POLICY_SCOPE_INDEXES,
+    ),
     kpiApprovalPolicyStep: hasTableContract(
       db,
       "KpiApprovalPolicyStep",
       REQUIRED_KPI_APPROVAL_POLICY_STEP_COLUMNS,
       REQUIRED_KPI_APPROVAL_POLICY_STEP_INDEXES,
+    ),
+    kpiApprovalPolicyStepOrgNode: hasTableContract(
+      db,
+      "KpiApprovalPolicyStepOrgNode",
+      REQUIRED_KPI_APPROVAL_POLICY_STEP_ORG_NODE_COLUMNS,
+      REQUIRED_KPI_APPROVAL_POLICY_STEP_ORG_NODE_INDEXES,
     ),
     personalKpiSnapshotColumns: hasColumns(db, "PersonalKpi", REQUIRED_PERSONAL_KPI_COLUMNS),
     personalKpiApprovalStepColumns: hasColumns(
@@ -793,7 +893,9 @@ export function getKpiResetVerificationIssues(db: Database) {
     issues.push("OrgPermissionGrant 尚未升级为目标结构");
   }
   if (!reportStructure.kpiApprovalPolicy) issues.push("KpiApprovalPolicy 结构不完整");
+  if (!reportStructure.kpiApprovalPolicyScope) issues.push("KpiApprovalPolicyScope 结构不完整");
   if (!reportStructure.kpiApprovalPolicyStep) issues.push("KpiApprovalPolicyStep 结构不完整");
+  if (!reportStructure.kpiApprovalPolicyStepOrgNode) issues.push("KpiApprovalPolicyStepOrgNode 结构不完整");
   if (!reportStructure.personalKpiSnapshotColumns) issues.push("PersonalKpi 缺少策略快照字段");
   if (!reportStructure.personalKpiApprovalStepColumns) {
     issues.push("PersonalKpiApprovalStep 缺少扩展字段");

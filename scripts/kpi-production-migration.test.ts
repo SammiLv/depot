@@ -197,20 +197,34 @@ test("mixed partial KPI tables are rebuilt to the complete target contract", () 
         .map((column) => column.name),
     );
     assert.equal(policyColumns.has("activeScopeKey"), true);
+    const policyStepColumns = new Set(
+      (db.prepare('PRAGMA table_info("KpiApprovalPolicyStep")').all() as Array<{ name: string }>)
+        .map((column) => column.name),
+    );
+    assert.equal(policyStepColumns.has("nodeMode"), true);
+    assert.equal(policyStepColumns.has("approvalOrgNodeId"), true);
+    const approvalStepColumns = new Set(
+      (db.prepare('PRAGMA table_info("PersonalKpiApprovalStep")').all() as Array<{ name: string }>)
+        .map((column) => column.name),
+    );
+    assert.equal(approvalStepColumns.has("nodeMode"), true);
+    assert.equal(approvalStepColumns.has("configuredOrgNodeId"), true);
+    assert.equal(policyColumns.has("activeScopeKey"), true);
+    assert.equal(
+      (db.prepare(`SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('KpiApprovalPolicyScope', 'KpiApprovalPolicyStepOrgNode')`).get() as { count: number }).count,
+      2,
+    );
 
     db.prepare(`
       INSERT INTO "KpiApprovalPolicy" (
         "id", "scopeType", "departmentOrgNodeId", "name", "isActive"
-      ) VALUES (?, 'SYSTEM', '', ?, true)
+      ) VALUES (?, 'DEPARTMENT', 'department-1', ?, true)
     `).run("active-policy-1", "启用策略一");
-    assert.throws(
-      () => db.prepare(`
-        INSERT INTO "KpiApprovalPolicy" (
-          "id", "scopeType", "departmentOrgNodeId", "name", "isActive"
-        ) VALUES (?, 'SYSTEM', '', ?, true)
-      `).run("active-policy-2", "启用策略二"),
-      /UNIQUE constraint failed: KpiApprovalPolicy.scopeType, KpiApprovalPolicy.departmentOrgNodeId/,
-    );
+    db.prepare(`
+      INSERT INTO "KpiApprovalPolicy" (
+        "id", "scopeType", "departmentOrgNodeId", "name", "isActive"
+      ) VALUES (?, 'DEPARTMENT', 'department-1', ?, true)
+    `).run("active-policy-2", "启用策略二");
   } finally {
     db.close();
   }

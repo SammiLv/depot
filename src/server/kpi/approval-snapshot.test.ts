@@ -20,6 +20,8 @@ const configuredPolicy: ApplicableKpiApprovalPolicy = {
   isActive: true,
   createdAt: new Date(0),
   updatedAt: new Date(0),
+  scopeOrgNodeIds: ["department-1"],
+  matchedScopeOrgNodeId: "department-1",
   steps: [],
 };
 
@@ -29,6 +31,8 @@ const resolvedSteps: ResolvedKpiApprovalStep[] = [
     policyStepOrder: 1,
     policyStepId: "policy-step-1",
     stepLabel: "直属组长",
+    nodeMode: "CURRENT_TEAM",
+    configuredOrgNodeId: null,
     ancestorDepth: 0,
     resolverType: "TEAM_LEADER",
     resolverUserId: null,
@@ -40,6 +44,8 @@ const resolvedSteps: ResolvedKpiApprovalStep[] = [
     policyStepOrder: 2,
     policyStepId: "policy-step-2",
     stepLabel: "部门负责人",
+    nodeMode: "FIXED_NODE",
+    configuredOrgNodeId: "department-1",
     ancestorDepth: null,
     resolverType: "DEPARTMENT_MANAGER",
     resolverUserId: null,
@@ -51,6 +57,8 @@ const resolvedSteps: ResolvedKpiApprovalStep[] = [
     policyStepOrder: 3,
     policyStepId: "policy-step-3",
     stepLabel: "指定终审人",
+    nodeMode: "NONE",
+    configuredOrgNodeId: null,
     ancestorDepth: null,
     resolverType: "EXPLICIT_USER",
     resolverUserId: "reviewer-1",
@@ -67,11 +75,13 @@ test("configured strategy is mapped to a complete persisted snapshot", () => {
     policyName: snapshot.policyName,
     policyScopeType: snapshot.policyScopeType,
     policyDepartmentOrgNodeId: snapshot.policyDepartmentOrgNodeId,
+    policyScopeOrgNodeId: snapshot.policyScopeOrgNodeId,
   }, {
     policyId: "policy-1",
     policyName: "部门审批策略",
     policyScopeType: "DEPARTMENT",
     policyDepartmentOrgNodeId: "department-1",
+    policyScopeOrgNodeId: "department-1",
   });
   assert.deepEqual(snapshot.steps.map((step) => step.stageKey), ["LEADER", "MANAGER", "FINAL"]);
   assert.equal(snapshot.steps[2]?.policyStepId, "policy-step-3");
@@ -89,6 +99,7 @@ test("configured snapshot maps every policy and step field to persistence data",
     approvalPolicyName: "部门审批策略",
     approvalPolicyScopeType: "DEPARTMENT",
     approvalPolicyDepartmentOrgNodeId: "department-1",
+    approvalPolicyScopeOrgNodeId: "department-1",
   });
   assert.deepEqual(stepData[0], {
     personalKpiId: "personal-kpi-1",
@@ -96,6 +107,8 @@ test("configured snapshot maps every policy and step field to persistence data",
     stepOrder: 1,
     stageKey: "LEADER",
     stepLabel: "直属组长",
+    nodeMode: "CURRENT_TEAM",
+    configuredOrgNodeId: null,
     ancestorDepth: 0,
     resolverType: "TEAM_LEADER",
     resolverUserId: null,

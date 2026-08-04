@@ -133,6 +133,15 @@ enum KpiApprovalResolverType {
   EXPLICIT_USER
 }
 
+enum KpiApprovalNodeMode {
+  CURRENT_TEAM
+  CURRENT_DEPARTMENT
+  FIXED_NODE
+  NONE
+  ORG_NODE_OWNER
+  CASCADE_TO_DEPARTMENT
+}
+
 model User {
   id                   String    @id @default(cuid())
   dingtalkUserId       String?   @unique
@@ -613,11 +622,24 @@ model KpiApprovalPolicy {
   @@index([scopeType, departmentOrgNodeId, isActive])
 }
 
+model KpiApprovalPolicyScope {
+  id        String   @id @default(cuid())
+  policyId  String
+  orgNodeId String
+  createdAt DateTime @default(now())
+
+  @@unique([policyId, orgNodeId])
+  @@index([policyId])
+  @@index([orgNodeId])
+}
+
 model KpiApprovalPolicyStep {
   id                      String                  @id @default(cuid())
   policyId                String
   stepOrder               Int
   label                   String
+  nodeMode                KpiApprovalNodeMode?
+  approvalOrgNodeId       String?
   ancestorDepth           Int?
   resolverType            KpiApprovalResolverType
   resolverUserId          String?
@@ -629,8 +651,20 @@ model KpiApprovalPolicyStep {
 
   @@unique([policyId, stepOrder])
   @@index([policyId])
+  @@index([approvalOrgNodeId])
   @@index([resolverType])
   @@index([resolverUserId])
+}
+
+model KpiApprovalPolicyStepOrgNode {
+  id           String   @id @default(cuid())
+  policyStepId String
+  orgNodeId    String
+  createdAt    DateTime @default(now())
+
+  @@unique([policyStepId, orgNodeId])
+  @@index([policyStepId])
+  @@index([orgNodeId])
 }
 
 model KpiTemplateItem {
@@ -661,6 +695,7 @@ model PersonalKpi {
   approvalPolicyName                String?
   approvalPolicyScopeType           PermissionScopeType?
   approvalPolicyDepartmentOrgNodeId String?
+  approvalPolicyScopeOrgNodeId      String?
   status                            KpiStatus            @default(DRAFT)
   selfScore                         Float?
   leaderScore                       Float?
@@ -748,6 +783,8 @@ model PersonalKpiApprovalStep {
   stepOrder      Int
   stageKey       String
   stepLabel      String?
+  nodeMode       KpiApprovalNodeMode?
+  configuredOrgNodeId String?
   ancestorDepth  Int?
   resolverType   KpiApprovalResolverType?
   resolverUserId String?
@@ -761,6 +798,7 @@ model PersonalKpiApprovalStep {
 
   @@index([personalKpiId, stepOrder])
   @@index([policyStepId])
+  @@index([configuredOrgNodeId])
   @@index([approverId, status])
 }
 

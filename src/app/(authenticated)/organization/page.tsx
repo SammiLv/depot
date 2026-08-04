@@ -1,4 +1,5 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
+import { redirect } from "next/navigation";
 import { prisma } from "@/server/db/prisma";
 import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
@@ -58,6 +59,7 @@ export type OrganizationHierarchyNode = OrganizationEntityNode | OrganizationPer
 
 
 const roleTypes = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
+const COMPANY_ORG_NAME = "锐竞信息";
 
 export default async function OrgPage({
   searchParams,
@@ -65,10 +67,9 @@ export default async function OrgPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = searchParams ? await searchParams : {};
-  const requestedScope = Array.isArray(params.scope) ? params.scope[0] : params.scope;
-  const requestedDepartment = Array.isArray(params.department) ? params.department[0] : params.department;
-  const requestedTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
-  const requestedSection = Array.isArray(params.section) ? params.section[0] : params.section;
+  if (Object.keys(params).length > 0) {
+    redirect("/organization");
+  }
   const currentUser = await requireCurrentUser();
   const canManageUsers = currentUser.roleType === "ADMIN" || currentUser.roleType === "DEPARTMENT_MANAGER";
   const canManageTeams = canManageUsers;
@@ -127,6 +128,10 @@ export default async function OrgPage({
   ]);
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
+  const rootOrgNode = await prisma.orgNode.findFirst({
+    where: { nodeType: "ROOT" },
+    select: { id: true, name: true, nodeType: true, parentId: true },
+  });
   const departmentById = new Map(orgNodes.filter((node) => node.nodeType === "DEPARTMENT").map((node) => [node.id, node]));
   const nearestDepartmentOrgNodeIdByNodeId = new Map<string, string | null>();
 
@@ -210,18 +215,7 @@ export default async function OrgPage({
   const defaultScope = currentUser.roleType === "ADMIN"
     ? { scopeType: "SYSTEM" as const, departmentOrgNodeId: "" }
     : { scopeType: "DEPARTMENT" as const, departmentOrgNodeId: currentDepartmentOrgNodeId ?? department?.orgNodeId ?? "" };
-  const requestedScopeType = requestedScope === "SYSTEM" || requestedScope === "DEPARTMENT"
-    ? requestedScope
-    : defaultScope.scopeType;
-  const normalizedScopeType = currentUser.roleType === "ADMIN"
-    ? requestedScopeType
-    : "DEPARTMENT" as const;
-  const requestedDepartmentId = requestedDepartment && departments.some((item) => item.orgNodeId === requestedDepartment)
-    ? requestedDepartment
-    : defaultScope.departmentOrgNodeId;
-  const initialScope = normalizedScopeType === "SYSTEM"
-    ? { scopeType: "SYSTEM" as const, departmentOrgNodeId: "" }
-    : { scopeType: "DEPARTMENT" as const, departmentOrgNodeId: requestedDepartmentId };
+  const initialScope = defaultScope;
   const scopeOptions = currentUser.roleType === "ADMIN"
     ? [
         { scopeType: "SYSTEM" as const, departmentOrgNodeId: "", label: "全部" },
@@ -243,23 +237,23 @@ export default async function OrgPage({
     where: { roleType: { in: [...roleTypes] } },
   });
   const roleMenuMap = new Map(roleMenuRows.map((row) => [`${row.scopeType}:${row.departmentOrgNodeId}:${row.roleType}:${row.menuPermissionId}`, row]));
-  const roleMenuMatrix = menus.map((menu) => ({
+  const buildRoleMenuMatrix = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => menus.map((menu) => ({
     id: menu.id,
     code: menu.code,
     name: menu.name,
     path: menu.path,
     cells: Object.fromEntries(roleTypes.map((roleType) => {
       const systemRow = roleMenuMap.get(`SYSTEM::${roleType}:${menu.id}`);
-      const scopedRow = initialScope.scopeType === "DEPARTMENT"
-        ? roleMenuMap.get(`DEPARTMENT:${initialScope.departmentOrgNodeId}:${roleType}:${menu.id}`)
+      const scopedRow = scope.scopeType === "DEPARTMENT"
+        ? roleMenuMap.get(`DEPARTMENT:${scope.departmentOrgNodeId}:${roleType}:${menu.id}`)
         : undefined;
       const sourceRow = scopedRow ?? systemRow;
       const allowed = sourceRow?.allowed ?? false;
       return [roleType, {
         allowed,
         source: scopedRow ? "DEPARTMENT" : "SYSTEM",
-        explicit: Boolean(scopedRow || (initialScope.scopeType === "SYSTEM" && systemRow)),
-        inherited: initialScope.scopeType === "DEPARTMENT" && !scopedRow,
+        explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
+        inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
       }];
     })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
   }));
@@ -268,23 +262,23 @@ export default async function OrgPage({
     where: { roleType: { in: [...roleTypes] } },
   });
   const annualGoalMatrixMap = new Map(annualGoalMatrixRows.map((row) => [`${row.scopeType}:${row.departmentOrgNodeId}:${row.roleType}:${row.annualGoalPermissionId}`, row]));
-  const annualGoalMatrix = annualGoalPermissions.map((permission) => ({
+  const buildAnnualGoalMatrix = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => annualGoalPermissions.map((permission) => ({
     id: permission.id,
     code: permission.code,
     name: permission.name,
     description: permission.description,
     cells: Object.fromEntries(roleTypes.map((roleType) => {
       const systemRow = annualGoalMatrixMap.get(`SYSTEM::${roleType}:${permission.id}`);
-      const scopedRow = initialScope.scopeType === "DEPARTMENT"
-        ? annualGoalMatrixMap.get(`DEPARTMENT:${initialScope.departmentOrgNodeId}:${roleType}:${permission.id}`)
+      const scopedRow = scope.scopeType === "DEPARTMENT"
+        ? annualGoalMatrixMap.get(`DEPARTMENT:${scope.departmentOrgNodeId}:${roleType}:${permission.id}`)
         : undefined;
       const sourceRow = scopedRow ?? systemRow;
       const allowed = sourceRow?.allowed ?? false;
       return [roleType, {
         allowed,
         source: scopedRow ? "DEPARTMENT" : "SYSTEM",
-        explicit: Boolean(scopedRow || (initialScope.scopeType === "SYSTEM" && systemRow)),
-        inherited: initialScope.scopeType === "DEPARTMENT" && !scopedRow,
+        explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
+        inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
       }];
     })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
   }));
@@ -331,7 +325,7 @@ export default async function OrgPage({
   const kpiPermissionMap = new Map(kpiPermissionGrants
     .filter((row) => row.subjectType === "ROLE")
     .map((row) => [`${row.scopeType}:${row.orgNodeId ?? ""}:${row.roleType}:${row.abilityKey}`, row]));
-  const kpiPermissions = kpiOrdinaryPermissionAbilityKeys.map((abilityKey) => ({
+  const buildKpiPermissions = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => kpiOrdinaryPermissionAbilityKeys.map((abilityKey) => ({
     id: abilityKey,
     code: abilityKey,
     name: kpiPermissionPresentation[abilityKey].name,
@@ -339,7 +333,7 @@ export default async function OrgPage({
     cells: Object.fromEntries(roleTypes.map((roleType) => {
       const scopeByRole = roleType === "ADMIN" ? "ALL" : roleType === "DEPARTMENT_MANAGER" ? "SUBTREE" : roleType === "TEAM_LEADER" ? "NODE" : "SELF";
       const systemRow = kpiPermissionMap.get(`${scopeByRole}:${""}:${roleType}:${abilityKey}`);
-      const scopedOrgNodeId = initialScope.scopeType === "DEPARTMENT" ? initialScope.departmentOrgNodeId : "";
+      const scopedOrgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : "";
       const scopedRow = scopedOrgNodeId
         ? kpiPermissionMap.get(`${scopeByRole}:${scopedOrgNodeId}:${roleType}:${abilityKey}`)
         : undefined;
@@ -348,8 +342,8 @@ export default async function OrgPage({
       return [roleType, {
         allowed,
         source: scopedRow ? "DEPARTMENT" : "SYSTEM",
-        explicit: Boolean(scopedRow || (initialScope.scopeType === "SYSTEM" && systemRow)),
-        inherited: initialScope.scopeType === "DEPARTMENT" && !scopedRow,
+        explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
+        inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
       }];
     })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
   }));
@@ -378,15 +372,7 @@ export default async function OrgPage({
         departmentOrgNodeId,
       };
     })
-    .filter((grant): grant is KpiUserPermissionGrantRowWithDepartment => Boolean(grant))
-    .filter((grant) => initialScope.scopeType === "SYSTEM"
-      ? true
-      : grant.scopeType !== "ALL" && grant.departmentOrgNodeId === initialScope.departmentOrgNodeId)
-    .map(({ departmentOrgNodeId: _departmentOrgNodeId, ...grant }) => grant);
-
-  const selectedDepartment = initialScope.scopeType === "DEPARTMENT"
-    ? departments.find((item) => item.orgNodeId === initialScope.departmentOrgNodeId) ?? null
-    : null;
+    .filter((grant): grant is KpiUserPermissionGrantRowWithDepartment => Boolean(grant));
 
   const leaderNameByTeamOrgNodeId = new Map(teamData.map((item) => [item.teamOrgNodeId, item.leaderName ?? null]));
   const directMemberCountByOrgNodeId = new Map(teamData.map((item) => [item.teamOrgNodeId, item.count]));
@@ -475,11 +461,10 @@ export default async function OrgPage({
     };
   }
 
-  const organizationHierarchyRoot = initialScope.scopeType === "SYSTEM"
-    ? {
+  const systemOrganizationHierarchyRoot = {
         id: "company-root",
         nodeType: "DEPARTMENT" as const,
-        name: "锐竞信息",
+        name: COMPANY_ORG_NAME,
         parentOrgNodeId: null,
         departmentOrgNodeId: "company-root",
         leaderId: null,
@@ -497,28 +482,26 @@ export default async function OrgPage({
           ...mappedUsers.filter((user) => !user.departmentOrgNodeId).map(buildPersonNode),
         ],
         team: null,
-      }
-    : selectedDepartment
-      ? buildOrganizationEntityNode(
-          {
-            id: selectedDepartment.orgNodeId,
-            name: selectedDepartment.name,
-            nodeType: "DEPARTMENT",
-            parentId: null,
-          },
-          selectedDepartment.orgNodeId,
-        )
-      : null;
+      };
+
+  const buildDepartmentOrganizationHierarchyRoot = (departmentItem: (typeof departments)[number]) =>
+    buildOrganizationEntityNode(
+      {
+        id: departmentItem.orgNodeId,
+        name: departmentItem.name,
+        nodeType: "DEPARTMENT",
+        parentId: null,
+      },
+      departmentItem.orgNodeId,
+    );
 
   const approvalPolicyRows = await prisma.kpiApprovalPolicy.findMany({
-    where: initialScope.scopeType === "SYSTEM"
-      ? { scopeType: "SYSTEM", departmentOrgNodeId: "" }
-      : {
-          OR: [
-            { scopeType: "DEPARTMENT", departmentOrgNodeId: initialScope.departmentOrgNodeId },
-            { scopeType: "SYSTEM", departmentOrgNodeId: "" },
-          ],
-        },
+    where: {
+      OR: [
+        { scopeType: "SYSTEM", departmentOrgNodeId: "" },
+        { scopeType: "DEPARTMENT", departmentOrgNodeId: { in: departments.map((item) => item.orgNodeId) } },
+      ],
+    },
     orderBy: [{ scopeType: "desc" }, { isActive: "desc" }, { createdAt: "asc" }],
   });
   const approvalPolicySteps = approvalPolicyRows.length
@@ -527,10 +510,94 @@ export default async function OrgPage({
         orderBy: [{ policyId: "asc" }, { stepOrder: "asc" }],
       })
     : [];
+  const approvalPolicyScopeRows = approvalPolicyRows.length
+    ? await prisma.kpiApprovalPolicyScope.findMany({
+        where: { policyId: { in: approvalPolicyRows.map((policy) => policy.id) } },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  const approvalPolicyStepOrgNodeRows = approvalPolicySteps.length
+    ? await prisma.kpiApprovalPolicyStepOrgNode.findMany({
+        where: { policyStepId: { in: approvalPolicySteps.map((step) => step.id) } },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
   const kpiApprovalPolicies = approvalPolicyRows.map((policy) => ({
     ...policy,
-    inherited: initialScope.scopeType === "DEPARTMENT" && policy.scopeType === "SYSTEM",
-    steps: approvalPolicySteps.filter((step) => step.policyId === policy.id),
+    inherited: false,
+    scopeOrgNodeIds: approvalPolicyScopeRows
+      .filter((row) => row.policyId === policy.id)
+      .map((row) => row.orgNodeId),
+    steps: approvalPolicySteps
+      .filter((step) => step.policyId === policy.id)
+      .map((step) => ({
+        ...step,
+        approvalOrgNodeIds: approvalPolicyStepOrgNodeRows
+          .filter((row) => row.policyStepId === step.id)
+          .map((row) => row.orgNodeId),
+      })),
+  }));
+  const approvalOrgNodeRows = rootOrgNode
+    ? [{ ...rootOrgNode, name: COMPANY_ORG_NAME }, ...orgNodes]
+    : orgNodes;
+  const approvalOrgNodeById = new Map(approvalOrgNodeRows.map((node) => [node.id, node]));
+  const getApprovalOrgNodePath = (orgNodeId: string) => {
+    const names: string[] = [];
+    const visited = new Set<string>();
+    let current = approvalOrgNodeById.get(orgNodeId) ?? null;
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
+      names.unshift(current.name);
+      current = current.parentId ? approvalOrgNodeById.get(current.parentId) ?? null : null;
+    }
+    return names.join(" / ");
+  };
+  const approvalOrgNodes = approvalOrgNodeRows.map((node) => ({
+    id: node.id,
+    name: node.name,
+    nodeType: node.nodeType,
+    parentId: node.parentId,
+    departmentOrgNodeId: node.nodeType === "ROOT"
+      ? null
+      : nearestDepartmentOrgNodeIdByNodeId.get(node.id) ?? null,
+    path: getApprovalOrgNodePath(node.id),
+  }));
+
+  const scopesForViews = scopeOptions.length > 0
+    ? scopeOptions.map(({ scopeType, departmentOrgNodeId }) => ({ scopeType, departmentOrgNodeId }))
+    : [initialScope];
+  const scopeViews = Object.fromEntries(scopesForViews.map((scope) => {
+    const selectedDepartment = scope.scopeType === "DEPARTMENT"
+      ? departments.find((item) => item.orgNodeId === scope.departmentOrgNodeId) ?? null
+      : null;
+    const scopedUserPermissionGrants = kpiUserPermissionGrants
+      .filter((grant) => scope.scopeType === "SYSTEM"
+        ? true
+        : grant.scopeType !== "ALL" && grant.departmentOrgNodeId === scope.departmentOrgNodeId)
+      .map(({ departmentOrgNodeId: _departmentOrgNodeId, ...grant }) => grant);
+    const scopedApprovalPolicies = kpiApprovalPolicies
+      .filter((policy) => scope.scopeType === "SYSTEM"
+        ? policy.scopeType === "SYSTEM"
+        : policy.scopeType === "SYSTEM"
+          || (policy.scopeType === "DEPARTMENT" && policy.departmentOrgNodeId === scope.departmentOrgNodeId))
+      .map((policy) => ({
+        ...policy,
+        inherited: scope.scopeType === "DEPARTMENT" && policy.scopeType === "SYSTEM",
+      }));
+
+    return [`${scope.scopeType}:${scope.departmentOrgNodeId}`, {
+      department: selectedDepartment,
+      organizationHierarchyRoot: scope.scopeType === "SYSTEM"
+        ? systemOrganizationHierarchyRoot
+        : selectedDepartment
+          ? buildDepartmentOrganizationHierarchyRoot(selectedDepartment)
+          : null,
+      menus: buildRoleMenuMatrix(scope),
+      annualGoalPermissions: buildAnnualGoalMatrix(scope),
+      kpiPermissions: buildKpiPermissions(scope),
+      kpiUserPermissionGrants: scopedUserPermissionGrants,
+      kpiApprovalPolicies: scopedApprovalPolicies,
+    }];
   }));
 
   return (
@@ -540,17 +607,12 @@ export default async function OrgPage({
       teams={teams}
       departments={departments}
       teamParentOptions={teamParentOptions}
-      department={selectedDepartment}
-      organizationHierarchyRoot={organizationHierarchyRoot}
+      approvalOrgNodes={approvalOrgNodes}
       scopeOptions={scopeOptions}
       initialScope={initialScope}
-      initialTab={requestedTab === "organization" || requestedTab === "permissions" ? requestedTab : initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
-      initialPermissionSection={requestedSection === "annual-goal" || requestedSection === "kpi" || requestedSection === "approval-policy" || requestedSection === "menu" ? requestedSection : "menu"}
-      menus={roleMenuMatrix}
-      annualGoalPermissions={annualGoalMatrix}
-      kpiPermissions={kpiPermissions}
-      kpiUserPermissionGrants={kpiUserPermissionGrants}
-      kpiApprovalPolicies={kpiApprovalPolicies}
+      initialTab={initialScope.scopeType === "SYSTEM" ? "permissions" : "organization"}
+      initialPermissionSection="menu"
+      scopeViews={scopeViews}
       canManageUsers={canManageUsers}
       canManageTeams={canManageTeams}
       canManageRolePermissions={canManageRolePermissions}

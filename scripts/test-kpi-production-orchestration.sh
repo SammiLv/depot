@@ -20,7 +20,9 @@ WHERE "migration_name" IN (
   '20260720000100_add_kpi_approval_policy',
   '20260720000200_add_kpi_approval_policy_step',
   '20260727000100_extend_personal_kpi_approval_snapshot',
-  '20260727000200_add_personal_kpi_item_step_score'
+  '20260727000200_add_personal_kpi_item_step_score',
+  '20260803000100_add_kpi_approval_node_selection',
+  '20260803000200_add_scoped_dual_mode_kpi_approval'
 );
 
 INSERT INTO "OrgNode" (

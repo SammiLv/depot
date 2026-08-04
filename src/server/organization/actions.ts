@@ -11,8 +11,15 @@ import { kpiOrdinaryPermissionAbilityKeys, orgPermissionModuleKeys } from "@/ser
 import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, Prisma, RoleType } from "@prisma/client";
 import {
   getKpiApprovalPolicyActiveScopeKey,
+  getKpiApprovalResolverTypeForNode,
   parseKpiApprovalPolicySteps,
 } from "@/server/kpi/approval-policy-admin";
+import {
+  syncAnnualGoalPermissionMatrix,
+  syncKpiPermissionMatrix,
+  syncRoleMenuPermissionMatrix,
+  type PermissionMatrixSyncMode,
+} from "@/server/organization/permission-matrix-sync";
 
 const managerEditableRoles: RoleType[] = ["TEAM_LEADER", "MEMBER"];
 const permissionRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
@@ -761,6 +768,54 @@ export async function saveKpiRolePermissions(formData: FormData) {
   revalidateOrganization();
 }
 
+type PermissionMatrixKind = "menu" | "annual-goal" | "kpi";
+
+async function saveAndSyncPermissionMatrix(
+  formData: FormData,
+  kind: PermissionMatrixKind,
+  mode: PermissionMatrixSyncMode,
+) {
+  const scope = await resolvePermissionScope(formData);
+  if (scope.scopeType !== "SYSTEM") throw new Error("仅系统权限矩阵可同步至所有部门");
+  await requireAdmin();
+
+  const expectedConfirmation = mode === "CHANGES" ? "SYNC_PERMISSION_CHANGES" : "SYNC_FULL_PERMISSION_MATRIX";
+  if (formData.get("confirmation") !== expectedConfirmation) throw new Error("请完成二次确认后再同步");
+  const permissions = formData.get("permissions");
+  if (typeof permissions !== "string" || !permissions) throw new Error("权限矩阵不能为空");
+
+  await prisma.$transaction(async (tx) => {
+    if (kind === "menu") await syncRoleMenuPermissionMatrix(tx, permissions, mode);
+    else if (kind === "annual-goal") await syncAnnualGoalPermissionMatrix(tx, permissions, mode);
+    else await syncKpiPermissionMatrix(tx, permissions, mode);
+  });
+  revalidateOrganization();
+}
+
+export async function saveAndApplyRoleMenuPermissionChangesToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "menu", "CHANGES");
+}
+
+export async function saveAndApplyAnnualGoalPermissionChangesToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "annual-goal", "CHANGES");
+}
+
+export async function saveAndApplyKpiPermissionChangesToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "kpi", "CHANGES");
+}
+
+export async function saveAndApplyRoleMenuPermissionsToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "menu", "FULL");
+}
+
+export async function saveAndApplyAnnualGoalPermissionsToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "annual-goal", "FULL");
+}
+
+export async function saveAndApplyKpiPermissionsToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "kpi", "FULL");
+}
+
 function parseRepeatedStrings(formData: FormData, fieldName: string) {
   return [...new Set(
     formData.getAll(fieldName)
@@ -1142,43 +1197,150 @@ async function requireKpiApprovalPolicyEditor(policyId: string) {
   return policy;
 }
 
-async function assertSingleActiveKpiApprovalPolicy(
+async function assertNoActiveKpiApprovalPolicyConflict(
   scopeType: "SYSTEM" | "DEPARTMENT",
   departmentOrgNodeId: string,
+  scopeOrgNodeIds: string[],
   excludeId?: string,
 ) {
-  const conflict = await prisma.kpiApprovalPolicy.findFirst({
+  if (scopeType === "SYSTEM") {
+    const conflict = await prisma.kpiApprovalPolicy.findFirst({
+      where: {
+        scopeType: "SYSTEM",
+        departmentOrgNodeId: "",
+        isActive: true,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { name: true },
+    });
+    if (conflict) {
+      throw new Error(`已有启用的系统默认策略“${conflict.name}”，请先停用后再启用新策略`);
+    }
+    return;
+  }
+
+  const candidates = await prisma.kpiApprovalPolicy.findMany({
     where: {
-      scopeType,
-      departmentOrgNodeId,
+      scopeType: "DEPARTMENT",
       isActive: true,
       ...(excludeId ? { id: { not: excludeId } } : {}),
     },
-    select: { id: true, name: true },
+    select: { id: true, name: true, departmentOrgNodeId: true },
+  });
+  const scopeRows = candidates.length > 0
+    ? await prisma.kpiApprovalPolicyScope.findMany({
+        where: { policyId: { in: candidates.map((policy) => policy.id) } },
+        select: { policyId: true, orgNodeId: true },
+      })
+    : [];
+  const scopeIdsByPolicy = new Map<string, string[]>();
+  for (const row of scopeRows) {
+    const ids = scopeIdsByPolicy.get(row.policyId) ?? [];
+    ids.push(row.orgNodeId);
+    scopeIdsByPolicy.set(row.policyId, ids);
+  }
+  const requestedScopeIds = new Set(scopeOrgNodeIds);
+  const conflict = candidates.find((policy) => {
+    const configuredIds = scopeIdsByPolicy.get(policy.id) ?? [policy.departmentOrgNodeId];
+    return configuredIds.some((orgNodeId) => requestedScopeIds.has(orgNodeId));
   });
   if (conflict) {
-    throw new Error(`当前范围已有启用策略“${conflict.name}”，请先停用后再启用新策略`);
+    throw new Error(`选中的组织节点已被启用策略“${conflict.name}”使用，同一节点不能同时启用多条审批策略`);
   }
 }
 
-async function validateExplicitApprovalUsers(
+async function normalizeApprovalPolicyScopeOrgNodeIds(
+  value: FormDataEntryValue | null,
+  scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string },
+) {
+  let scopeOrgNodeIds: string[] = [];
+  try {
+    const parsed = JSON.parse(String(value ?? "[]"));
+    if (!Array.isArray(parsed)) throw new Error();
+    scopeOrgNodeIds = [...new Set(parsed.map((item) => String(item).trim()).filter(Boolean))];
+  } catch {
+    throw new Error("策略适用范围数据格式错误");
+  }
+  if (scope.scopeType === "SYSTEM") return [];
+  if (scopeOrgNodeIds.length === 0) throw new Error("部门策略至少需要选择一个适用组织节点");
+
+  const nodes = await prisma.orgNode.findMany({
+    where: { id: { in: scopeOrgNodeIds } },
+    select: { id: true },
+  });
+  if (nodes.length !== scopeOrgNodeIds.length) throw new Error("部分策略适用组织节点不存在或已失效");
+  for (const orgNodeId of scopeOrgNodeIds) {
+    if (!await isOrgNodeInSubtree(orgNodeId, scope.departmentOrgNodeId)) {
+      throw new Error("部门策略的适用节点必须属于当前部门");
+    }
+  }
+  return scopeOrgNodeIds;
+}
+
+async function normalizeApprovalPolicyStepTargets(
   steps: ReturnType<typeof parseKpiApprovalPolicySteps>,
   scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string },
 ) {
-  const userIds = [...new Set(steps.flatMap((step) => step.resolverUserId ? [step.resolverUserId] : []))];
-  if (userIds.length === 0) return;
-  const users = await prisma.user.findMany({
-    where: { id: { in: userIds }, isActive: true, deletedAt: null },
-    select: { id: true, orgNodeId: true },
-  });
-  if (users.length !== userIds.length) throw new Error("部分指定审批人不存在或已失效");
-  if (scope.scopeType === "DEPARTMENT") {
-    for (const user of users) {
-      if (await findDepartmentOrgNodeId(user.orgNodeId) !== scope.departmentOrgNodeId) {
-        throw new Error("部门策略的指定审批人必须属于当前部门");
+  const fixedNodeIds = [...new Set(steps.flatMap((step) => [
+    ...(step.nodeMode === "FIXED_NODE" && step.approvalOrgNodeId ? [step.approvalOrgNodeId] : []),
+    ...(step.nodeMode === "ORG_NODE_OWNER" ? step.approvalOrgNodeIds : []),
+  ]))];
+  const fixedNodes = fixedNodeIds.length > 0
+    ? await prisma.orgNode.findMany({
+        where: { id: { in: fixedNodeIds } },
+        select: { id: true, nodeType: true },
+      })
+    : [];
+  if (fixedNodes.length !== fixedNodeIds.length) {
+    throw new Error("部分固定审批节点不存在或已失效");
+  }
+  const fixedNodeById = new Map(fixedNodes.map((node) => [node.id, node]));
+  for (const node of fixedNodes) {
+    if (scope.scopeType === "DEPARTMENT"
+      && node.nodeType !== "ROOT"
+      && !await isOrgNodeInSubtree(node.id, scope.departmentOrgNodeId)) {
+      throw new Error("部门策略的固定审批节点必须属于当前部门");
+    }
+  }
+  for (const [stepIndex, step] of steps.entries()) {
+    if (step.nodeMode !== "ORG_NODE_OWNER") continue;
+    for (let leftIndex = 0; leftIndex < step.approvalOrgNodeIds.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < step.approvalOrgNodeIds.length; rightIndex += 1) {
+        const leftId = step.approvalOrgNodeIds[leftIndex];
+        const rightId = step.approvalOrgNodeIds[rightIndex];
+        if (!leftId || !rightId) continue;
+        if (await isOrgNodeInSubtree(leftId, rightId) || await isOrgNodeInSubtree(rightId, leftId)) {
+          throw new Error(`第 ${stepIndex + 1} 个审批步骤不能同时选择存在上下级关系的组织节点`);
+        }
       }
     }
   }
+
+  const userIds = [...new Set(steps.flatMap((step) => step.resolverUserId ? [step.resolverUserId] : []))];
+  if (userIds.length > 0) {
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds }, isActive: true, deletedAt: null },
+      select: { id: true, orgNodeId: true },
+    });
+    if (users.length !== userIds.length) throw new Error("部分指定审批人不存在或已失效");
+    if (scope.scopeType === "DEPARTMENT") {
+      for (const user of users) {
+        if (await findDepartmentOrgNodeId(user.orgNodeId) !== scope.departmentOrgNodeId) {
+          throw new Error("部门策略的指定审批人必须属于当前部门");
+        }
+      }
+    }
+  }
+
+  return steps.map((step) => {
+    if (step.nodeMode !== "FIXED_NODE" || !step.approvalOrgNodeId) return step;
+    const node = fixedNodeById.get(step.approvalOrgNodeId);
+    if (!node) throw new Error("固定审批节点不存在或已失效");
+    return {
+      ...step,
+      resolverType: getKpiApprovalResolverTypeForNode(node.nodeType),
+    };
+  });
 }
 
 export async function saveKpiApprovalPolicy(formData: FormData) {
@@ -1190,8 +1352,12 @@ export async function saveKpiApprovalPolicy(formData: FormData) {
   const isActive = formData.get("isActive") === "true";
   if (!name) throw new Error("审批策略名称不能为空");
   if (name.length > 100) throw new Error("审批策略名称不能超过 100 个字符");
-  const steps = parseKpiApprovalPolicySteps(String(formData.get("steps") ?? "[]"));
-  await validateExplicitApprovalUsers(steps, scope);
+  const parsedSteps = parseKpiApprovalPolicySteps(String(formData.get("steps") ?? "[]"));
+  const steps = await normalizeApprovalPolicyStepTargets(parsedSteps, scope);
+  const scopeOrgNodeIds = await normalizeApprovalPolicyScopeOrgNodeIds(
+    formData.get("scopeOrgNodeIds"),
+    scope,
+  );
 
   if (id) {
     const existing = await requireKpiApprovalPolicyEditor(id);
@@ -1200,7 +1366,12 @@ export async function saveKpiApprovalPolicy(formData: FormData) {
     }
   }
   if (isActive) {
-    await assertSingleActiveKpiApprovalPolicy(scope.scopeType, scope.departmentOrgNodeId, id ?? undefined);
+    await assertNoActiveKpiApprovalPolicyConflict(
+      scope.scopeType,
+      scope.departmentOrgNodeId,
+      scopeOrgNodeIds,
+      id ?? undefined,
+    );
   }
 
   await prisma.$transaction(async (tx) => {
@@ -1224,14 +1395,36 @@ export async function saveKpiApprovalPolicy(formData: FormData) {
             activeScopeKey,
           },
         });
-    await tx.kpiApprovalPolicyStep.deleteMany({ where: { policyId: policy.id } });
-    await tx.kpiApprovalPolicyStep.createMany({
-      data: steps.map((step, index) => ({
-        policyId: policy.id,
-        stepOrder: index + 1,
-        ...step,
-      })),
+    const oldSteps = await tx.kpiApprovalPolicyStep.findMany({
+      where: { policyId: policy.id },
+      select: { id: true },
     });
+    if (oldSteps.length > 0) {
+      await tx.kpiApprovalPolicyStepOrgNode.deleteMany({
+        where: { policyStepId: { in: oldSteps.map((step) => step.id) } },
+      });
+    }
+    await tx.kpiApprovalPolicyStep.deleteMany({ where: { policyId: policy.id } });
+    await tx.kpiApprovalPolicyScope.deleteMany({ where: { policyId: policy.id } });
+    if (scopeOrgNodeIds.length > 0) {
+      await tx.kpiApprovalPolicyScope.createMany({
+        data: scopeOrgNodeIds.map((orgNodeId) => ({ policyId: policy.id, orgNodeId })),
+      });
+    }
+    for (const [index, step] of steps.entries()) {
+      const { approvalOrgNodeIds, ...stepData } = step;
+      const createdStep = await tx.kpiApprovalPolicyStep.create({
+        data: { policyId: policy.id, stepOrder: index + 1, ...stepData },
+      });
+      if (approvalOrgNodeIds.length > 0) {
+        await tx.kpiApprovalPolicyStepOrgNode.createMany({
+          data: approvalOrgNodeIds.map((orgNodeId) => ({
+            policyStepId: createdStep.id,
+            orgNodeId,
+          })),
+        });
+      }
+    }
   });
   revalidateOrganization();
 }
@@ -1240,7 +1433,19 @@ export async function toggleKpiApprovalPolicy(formData: FormData) {
   const id = String(formData.get("id") ?? "").trim();
   const policy = await requireKpiApprovalPolicyEditor(id);
   if (!policy.isActive) {
-    await assertSingleActiveKpiApprovalPolicy(policy.scopeType, policy.departmentOrgNodeId, policy.id);
+    const scopeRows = await prisma.kpiApprovalPolicyScope.findMany({
+      where: { policyId: policy.id },
+      select: { orgNodeId: true },
+    });
+    const scopeOrgNodeIds = policy.scopeType === "DEPARTMENT" && scopeRows.length === 0
+      ? [policy.departmentOrgNodeId]
+      : scopeRows.map((row) => row.orgNodeId);
+    await assertNoActiveKpiApprovalPolicyConflict(
+      policy.scopeType,
+      policy.departmentOrgNodeId,
+      scopeOrgNodeIds,
+      policy.id,
+    );
   }
   await prisma.kpiApprovalPolicy.update({
     where: { id },
@@ -1264,7 +1469,17 @@ export async function deleteKpiApprovalPolicy(formData: FormData) {
     throw new Error("该审批策略已生成 KPI 单据，只能停用，不能删除");
   }
   await prisma.$transaction(async (tx) => {
+    const steps = await tx.kpiApprovalPolicyStep.findMany({
+      where: { policyId: id },
+      select: { id: true },
+    });
+    if (steps.length > 0) {
+      await tx.kpiApprovalPolicyStepOrgNode.deleteMany({
+        where: { policyStepId: { in: steps.map((step) => step.id) } },
+      });
+    }
     await tx.kpiApprovalPolicyStep.deleteMany({ where: { policyId: id } });
+    await tx.kpiApprovalPolicyScope.deleteMany({ where: { policyId: id } });
     await tx.kpiApprovalPolicy.delete({ where: { id } });
   });
   revalidateOrganization();

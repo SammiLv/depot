@@ -1,11 +1,12 @@
 import type {
   KpiApprovalResolverType,
+  KpiApprovalNodeMode,
   OrgNodeType,
   PermissionScopeType,
   RoleType,
 } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
+import { getKpiApprovalResolverTypeForNode } from "@/server/kpi/approval-policy-admin";
 
 type PolicyRow = {
   id: string;
@@ -23,6 +24,9 @@ export type KpiApprovalPolicyStepDefinition = {
   policyId: string;
   stepOrder: number;
   label: string;
+  nodeMode: KpiApprovalNodeMode | null;
+  approvalOrgNodeId: string | null;
+  approvalOrgNodeIds: string[];
   ancestorDepth: number | null;
   resolverType: KpiApprovalResolverType;
   resolverUserId: string | null;
@@ -32,13 +36,16 @@ export type KpiApprovalPolicyStepDefinition = {
 };
 
 export type ApplicableKpiApprovalPolicy = PolicyRow & {
+  scopeOrgNodeIds: string[];
+  matchedScopeOrgNodeId: string | null;
   steps: KpiApprovalPolicyStepDefinition[];
 };
 
-type AncestorNode = {
+export type KpiApprovalAncestorNode = {
   id: string;
   nodeType: OrgNodeType;
   depth: number;
+  name?: string;
 };
 
 type ApproverCandidate = {
@@ -51,6 +58,8 @@ export type ResolvedKpiApprovalStep = {
   policyStepOrder: number;
   policyStepId: string;
   stepLabel: string;
+  nodeMode: KpiApprovalNodeMode | null;
+  configuredOrgNodeId: string | null;
   ancestorDepth: number | null;
   resolverType: KpiApprovalResolverType;
   resolverUserId: string | null;
@@ -59,60 +68,86 @@ export type ResolvedKpiApprovalStep = {
 };
 
 export type ApprovalPolicyResolverDependencies = {
-  getAncestorNodes(orgNodeId: string | null): Promise<AncestorNode[]>;
+  getAncestorNodes(orgNodeId: string | null): Promise<KpiApprovalAncestorNode[]>;
+  findOrgNodeById(orgNodeId: string): Promise<Omit<KpiApprovalAncestorNode, "depth"> | null>;
   findFirstActiveUserByRole(roleType: RoleType, orgNodeIds?: string[]): Promise<ApproverCandidate | null>;
   findActiveUserById(userId: string): Promise<ApproverCandidate | null>;
 };
 
-function describePolicyScope(scopeType: PermissionScopeType, departmentOrgNodeId: string | null) {
-  return scopeType === "DEPARTMENT" ? `部门 ${departmentOrgNodeId ?? "未知"}` : "系统";
-}
-
 export function selectApplicableKpiApprovalPolicy(
-  policies: PolicyRow[],
-  departmentOrgNodeId: string | null,
-): PolicyRow | null {
-  const departmentPolicies = departmentOrgNodeId
-    ? policies.filter((policy) =>
-      policy.isActive
-      && policy.scopeType === "DEPARTMENT"
-      && policy.departmentOrgNodeId === departmentOrgNodeId
-    )
-    : [];
+  policies: Array<PolicyRow & { scopeOrgNodeIds: string[] }>,
+  ancestorNodes: KpiApprovalAncestorNode[],
+): (PolicyRow & { scopeOrgNodeIds: string[]; matchedScopeOrgNodeId: string | null }) | null {
+  const depthByNodeId = new Map(ancestorNodes.map((node) => [node.id, node.depth]));
+  const scopedMatches = policies.flatMap((policy) => {
+    if (!policy.isActive || policy.scopeType !== "DEPARTMENT") return [];
+    const configuredScopeIds = policy.scopeOrgNodeIds.length > 0
+      ? policy.scopeOrgNodeIds
+      : [policy.departmentOrgNodeId].filter(Boolean);
+    const matches = configuredScopeIds.flatMap((orgNodeId) => {
+      const depth = depthByNodeId.get(orgNodeId);
+      return depth === undefined ? [] : [{ orgNodeId, depth }];
+    });
+    if (matches.length === 0) return [];
+    const match = matches.sort((left, right) => left.depth - right.depth)[0];
+    return [{ policy, match }];
+  });
+
+  if (scopedMatches.length > 0) {
+    const winningDepth = Math.min(...scopedMatches.map(({ match }) => match.depth));
+    const winners = scopedMatches.filter(({ match }) => match.depth === winningDepth);
+    if (winners.length > 1) {
+      throw new Error(`组织节点 ${winners[0]?.match.orgNodeId ?? "未知"}存在多个同级启用的 KPI 审批策略`);
+    }
+    const winner = winners[0];
+    return winner ? {
+      ...winner.policy,
+      matchedScopeOrgNodeId: winner.match.orgNodeId,
+    } : null;
+  }
+
   const systemPolicies = policies.filter((policy) =>
     policy.isActive
     && policy.scopeType === "SYSTEM"
     && policy.departmentOrgNodeId === ""
   );
-  const preferredPolicies = departmentPolicies.length > 0 ? departmentPolicies : systemPolicies;
-
-  if (preferredPolicies.length > 1) {
-    const scopeType: PermissionScopeType = departmentPolicies.length > 0 ? "DEPARTMENT" : "SYSTEM";
-    throw new Error(`${describePolicyScope(scopeType, departmentOrgNodeId)}存在多个启用中的 KPI 审批策略`);
+  if (systemPolicies.length > 1) {
+    throw new Error("系统存在多个启用中的 KPI 审批策略");
   }
-
-  return preferredPolicies[0] ?? null;
+  const systemPolicy = systemPolicies[0];
+  return systemPolicy ? { ...systemPolicy, matchedScopeOrgNodeId: null } : null;
 }
 
 export async function findApplicableKpiApprovalPolicy(
-  departmentOrgNodeId: string | null,
+  subjectOrgNodeId: string | null,
 ): Promise<ApplicableKpiApprovalPolicy | null> {
   const policies = await prisma.kpiApprovalPolicy.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        { scopeType: "SYSTEM", departmentOrgNodeId: "" },
-        ...(departmentOrgNodeId
-          ? [{ scopeType: "DEPARTMENT" as const, departmentOrgNodeId }]
-          : []),
-      ],
-    },
+    where: { isActive: true },
     orderBy: [
       { createdAt: "asc" },
       { id: "asc" },
     ],
   });
-  const selected = selectApplicableKpiApprovalPolicy(policies, departmentOrgNodeId);
+  const scopeRows = policies.length > 0
+    ? await prisma.kpiApprovalPolicyScope.findMany({
+        where: { policyId: { in: policies.map((policy) => policy.id) } },
+        select: { policyId: true, orgNodeId: true },
+      })
+    : [];
+  const scopeIdsByPolicy = new Map<string, string[]>();
+  for (const row of scopeRows) {
+    const ids = scopeIdsByPolicy.get(row.policyId) ?? [];
+    ids.push(row.orgNodeId);
+    scopeIdsByPolicy.set(row.policyId, ids);
+  }
+  const ancestorNodes = await getAncestorNodes(subjectOrgNodeId);
+  const selected = selectApplicableKpiApprovalPolicy(
+    policies.map((policy) => ({
+      ...policy,
+      scopeOrgNodeIds: scopeIdsByPolicy.get(policy.id) ?? [],
+    })),
+    ancestorNodes,
+  );
   if (!selected) {
     return null;
   }
@@ -124,21 +159,36 @@ export async function findApplicableKpiApprovalPolicy(
       { id: "asc" },
     ],
   });
+  const stepOrgNodeRows = steps.length > 0
+    ? await prisma.kpiApprovalPolicyStepOrgNode.findMany({
+        where: { policyStepId: { in: steps.map((step) => step.id) } },
+        select: { policyStepId: true, orgNodeId: true },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  const orgNodeIdsByStep = new Map<string, string[]>();
+  for (const row of stepOrgNodeRows) {
+    const ids = orgNodeIdsByStep.get(row.policyStepId) ?? [];
+    ids.push(row.orgNodeId);
+    orgNodeIdsByStep.set(row.policyStepId, ids);
+  }
 
   return {
     ...selected,
-    steps,
+    steps: steps.map((step) => ({
+      ...step,
+      approvalOrgNodeIds: orgNodeIdsByStep.get(step.id) ?? [],
+    })),
   };
 }
 
 export async function resolveApplicableKpiApprovalPolicy(
   subjectOrgNodeId: string | null,
 ): Promise<ApplicableKpiApprovalPolicy | null> {
-  const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(subjectOrgNodeId);
-  return findApplicableKpiApprovalPolicy(departmentOrgNodeId);
+  return findApplicableKpiApprovalPolicy(subjectOrgNodeId);
 }
 
-async function getAncestorNodes(orgNodeId: string | null): Promise<AncestorNode[]> {
+async function getAncestorNodes(orgNodeId: string | null): Promise<KpiApprovalAncestorNode[]> {
   if (!orgNodeId) {
     return [];
   }
@@ -154,14 +204,14 @@ async function getAncestorNodes(orgNodeId: string | null): Promise<AncestorNode[
   if (closureRows.length === 0) {
     const currentNode = await prisma.orgNode.findUnique({
       where: { id: orgNodeId },
-      select: { id: true, nodeType: true },
+      select: { id: true, nodeType: true, name: true },
     });
     return currentNode ? [{ ...currentNode, depth: 0 }] : [];
   }
 
   const nodes = await prisma.orgNode.findMany({
     where: { id: { in: closureRows.map((row) => row.ancestorId) } },
-    select: { id: true, nodeType: true },
+    select: { id: true, nodeType: true, name: true },
   });
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
@@ -173,6 +223,12 @@ async function getAncestorNodes(orgNodeId: string | null): Promise<AncestorNode[
 
 const defaultResolverDependencies: ApprovalPolicyResolverDependencies = {
   getAncestorNodes,
+  async findOrgNodeById(orgNodeId) {
+    return prisma.orgNode.findUnique({
+      where: { id: orgNodeId },
+      select: { id: true, nodeType: true, name: true },
+    });
+  },
   async findFirstActiveUserByRole(roleType, orgNodeIds) {
     return prisma.user.findFirst({
       where: {
@@ -206,18 +262,18 @@ const defaultResolverDependencies: ApprovalPolicyResolverDependencies = {
   },
 };
 
-function findAncestorAtDepth(ancestorNodes: AncestorNode[], ancestorDepth: number) {
+function findAncestorAtDepth(ancestorNodes: KpiApprovalAncestorNode[], ancestorDepth: number) {
   return ancestorNodes.find((node) => node.depth === ancestorDepth) ?? null;
 }
 
 async function resolveTeamLeader(
   step: KpiApprovalPolicyStepDefinition,
-  ancestorNodes: AncestorNode[],
+  ancestorNodes: KpiApprovalAncestorNode[],
   dependencies: ApprovalPolicyResolverDependencies,
 ) {
   const candidateNodes = step.ancestorDepth === null
     ? ancestorNodes
-    : [findAncestorAtDepth(ancestorNodes, step.ancestorDepth)].filter((node): node is AncestorNode => Boolean(node));
+    : [findAncestorAtDepth(ancestorNodes, step.ancestorDepth)].filter((node): node is KpiApprovalAncestorNode => Boolean(node));
 
   for (const node of candidateNodes) {
     const approver = await dependencies.findFirstActiveUserByRole("TEAM_LEADER", [node.id]);
@@ -231,7 +287,7 @@ async function resolveTeamLeader(
 
 async function resolveDepartmentManager(
   step: KpiApprovalPolicyStepDefinition,
-  ancestorNodes: AncestorNode[],
+  ancestorNodes: KpiApprovalAncestorNode[],
   dependencies: ApprovalPolicyResolverDependencies,
 ) {
   const targetNode = step.ancestorDepth === null
@@ -247,25 +303,132 @@ async function resolveDepartmentManager(
 
 async function resolveStepApprover(
   step: KpiApprovalPolicyStepDefinition,
-  ancestorNodes: AncestorNode[],
+  ancestorNodes: KpiApprovalAncestorNode[],
   dependencies: ApprovalPolicyResolverDependencies,
 ) {
+  if (step.nodeMode != null) {
+    let targetNode: Omit<KpiApprovalAncestorNode, "depth"> | null = null;
+    if (step.nodeMode === "CURRENT_TEAM") {
+      targetNode = ancestorNodes.find((node) => node.nodeType === "TEAM") ?? null;
+    } else if (step.nodeMode === "CURRENT_DEPARTMENT") {
+      targetNode = ancestorNodes.find((node) => node.nodeType === "DEPARTMENT") ?? null;
+    } else if (step.nodeMode === "FIXED_NODE" && step.approvalOrgNodeId) {
+      targetNode = await dependencies.findOrgNodeById(step.approvalOrgNodeId);
+    }
+
+    if (step.resolverUserId) {
+      const approver = await dependencies.findActiveUserById(step.resolverUserId);
+      return approver ? {
+        approver,
+        resolvedOrgNodeId: targetNode?.id ?? null,
+        resolverType: targetNode
+          ? getKpiApprovalResolverTypeForNode(targetNode.nodeType)
+          : "EXPLICIT_USER" as const,
+      } : null;
+    }
+    if (!targetNode) return null;
+
+    const resolverType = getKpiApprovalResolverTypeForNode(targetNode.nodeType);
+    const approver = await dependencies.findFirstActiveUserByRole(
+      resolverType,
+      resolverType === "ADMIN" ? undefined : [targetNode.id],
+    );
+    return approver ? { approver, resolvedOrgNodeId: targetNode.id, resolverType } : null;
+  }
+
   if (step.resolverType === "TEAM_LEADER") {
-    return resolveTeamLeader(step, ancestorNodes, dependencies);
+    const resolution = await resolveTeamLeader(step, ancestorNodes, dependencies);
+    return resolution ? { ...resolution, resolverType: step.resolverType } : null;
   }
   if (step.resolverType === "DEPARTMENT_MANAGER") {
-    return resolveDepartmentManager(step, ancestorNodes, dependencies);
+    const resolution = await resolveDepartmentManager(step, ancestorNodes, dependencies);
+    return resolution ? { ...resolution, resolverType: step.resolverType } : null;
   }
   if (step.resolverType === "ADMIN") {
     const approver = await dependencies.findFirstActiveUserByRole("ADMIN");
-    return approver ? { approver, resolvedOrgNodeId: approver.orgNodeId } : null;
+    return approver ? { approver, resolvedOrgNodeId: approver.orgNodeId, resolverType: step.resolverType } : null;
   }
   if (!step.resolverUserId) {
     return null;
   }
 
   const approver = await dependencies.findActiveUserById(step.resolverUserId);
-  return approver ? { approver, resolvedOrgNodeId: approver.orgNodeId } : null;
+  return approver ? { approver, resolvedOrgNodeId: approver.orgNodeId, resolverType: step.resolverType } : null;
+}
+
+type StepResolution = {
+  approver: ApproverCandidate;
+  resolvedOrgNodeId: string | null;
+  configuredOrgNodeId: string | null;
+  resolverType: KpiApprovalResolverType;
+  stepLabel: string;
+};
+
+async function resolveNodeOwnerStep(
+  step: KpiApprovalPolicyStepDefinition,
+  ancestorNodes: KpiApprovalAncestorNode[],
+  dependencies: ApprovalPolicyResolverDependencies,
+): Promise<StepResolution[]> {
+  const configuredNodeIds = new Set(step.approvalOrgNodeIds);
+  const matchingNodes = ancestorNodes.filter((node) => configuredNodeIds.has(node.id));
+  if (matchingNodes.length > 1) {
+    throw new Error(`KPI 审批步骤“${step.label}”在员工组织路径上命中了多个节点`);
+  }
+  const targetNode = matchingNodes[0];
+  if (!targetNode) {
+    // 该步骤不适用于当前员工，不视为“找不到审批人”。
+    return [];
+  }
+
+  const resolverType = getKpiApprovalResolverTypeForNode(targetNode.nodeType);
+  const approver = step.resolverUserId
+    ? await dependencies.findActiveUserById(step.resolverUserId)
+    : await dependencies.findFirstActiveUserByRole(
+        resolverType,
+        resolverType === "ADMIN" ? undefined : [targetNode.id],
+      );
+  if (!approver) return [];
+  return [{
+    approver,
+    resolvedOrgNodeId: targetNode.id,
+    configuredOrgNodeId: targetNode.id,
+    resolverType,
+    stepLabel: step.label,
+  }];
+}
+
+async function resolveCascadeStep(
+  step: KpiApprovalPolicyStepDefinition,
+  ancestorNodes: KpiApprovalAncestorNode[],
+  dependencies: ApprovalPolicyResolverDependencies,
+): Promise<StepResolution[]> {
+  const orderedNodes = [...ancestorNodes].sort((left, right) => left.depth - right.depth);
+  const departmentIndex = orderedNodes.findIndex((node) => node.nodeType === "DEPARTMENT");
+  if (departmentIndex < 0) return [];
+  const targetNodes = orderedNodes
+    .slice(0, departmentIndex + 1)
+    .filter((node) => node.nodeType !== "ROOT");
+
+  const resolutions: StepResolution[] = [];
+  for (const targetNode of targetNodes) {
+    const resolverType = getKpiApprovalResolverTypeForNode(targetNode.nodeType);
+    const approver = await dependencies.findFirstActiveUserByRole(
+      resolverType,
+      resolverType === "ADMIN" ? undefined : [targetNode.id],
+    );
+    if (!approver) {
+      if (step.allowSkipWhenNoApprover) continue;
+      throw new Error(`KPI 审批步骤“${step.label}”的组织节点“${targetNode.name ?? targetNode.id}”未找到有效负责人`);
+    }
+    resolutions.push({
+      approver,
+      resolvedOrgNodeId: targetNode.id,
+      configuredOrgNodeId: null,
+      resolverType,
+      stepLabel: targetNode.name ? `${step.label}（${targetNode.name}）` : step.label,
+    });
+  }
+  return resolutions;
 }
 
 function validatePolicySteps(policy: ApplicableKpiApprovalPolicy) {
@@ -282,6 +445,18 @@ function validatePolicySteps(policy: ApplicableKpiApprovalPolicy) {
       throw new Error(`KPI 审批策略“${policy.name}”存在重复的步骤顺序 ${step.stepOrder}`);
     }
     seenOrders.add(step.stepOrder);
+    if (step.nodeMode === "FIXED_NODE" && !step.approvalOrgNodeId) {
+      throw new Error(`KPI 审批步骤“${step.label}”没有配置固定审批节点`);
+    }
+    if (step.nodeMode === "NONE" && !step.resolverUserId) {
+      throw new Error(`KPI 审批步骤“${step.label}”没有配置指定审批人`);
+    }
+    if (step.nodeMode === "ORG_NODE_OWNER" && step.approvalOrgNodeIds.length === 0) {
+      throw new Error(`KPI 审批步骤“${step.label}”没有配置组织节点`);
+    }
+    if (step.nodeMode === "CASCADE_TO_DEPARTMENT" && step.resolverUserId) {
+      throw new Error(`KPI 审批步骤“${step.label}”为逐级审批时不允许指定审批人`);
+    }
     if (step.ancestorDepth !== null && (!Number.isInteger(step.ancestorDepth) || step.ancestorDepth < 0)) {
       throw new Error(`KPI 审批步骤“${step.label}”的祖先层级无效`);
     }
@@ -309,33 +484,50 @@ export async function resolveKpiApprovalPolicySteps(
   );
 
   for (const step of orderedSteps) {
-    const resolution = await resolveStepApprover(step, ancestorNodes, dependencies);
-    if (!resolution) {
+    let resolutions: StepResolution[];
+    if (step.nodeMode === "ORG_NODE_OWNER") {
+      resolutions = await resolveNodeOwnerStep(step, ancestorNodes, dependencies);
+      // 没有命中组织节点表示步骤不适用，直接省略。
+      if (resolutions.length === 0 && !ancestorNodes.some((node) => step.approvalOrgNodeIds.includes(node.id))) {
+        continue;
+      }
+    } else if (step.nodeMode === "CASCADE_TO_DEPARTMENT") {
+      resolutions = await resolveCascadeStep(step, ancestorNodes, dependencies);
+    } else {
+      const legacyResolution = await resolveStepApprover(step, ancestorNodes, dependencies);
+      resolutions = legacyResolution ? [{
+        ...legacyResolution,
+        configuredOrgNodeId: step.approvalOrgNodeId,
+        stepLabel: step.label,
+      }] : [];
+    }
+
+    if (resolutions.length === 0) {
       if (step.allowSkipWhenNoApprover) {
         continue;
       }
       throw new Error(`KPI 审批步骤“${step.label}”未找到有效审批人`);
     }
 
-    if (step.skipIfSelf && resolution.approver.id === input.subjectUserId) {
-      continue;
-    }
-    if (step.skipIfDuplicateApprover && seenApproverIds.has(resolution.approver.id)) {
-      continue;
-    }
+    for (const resolution of resolutions) {
+      if (step.skipIfSelf && resolution.approver.id === input.subjectUserId) continue;
+      if (step.skipIfDuplicateApprover && seenApproverIds.has(resolution.approver.id)) continue;
 
-    seenApproverIds.add(resolution.approver.id);
-    resolvedSteps.push({
-      stepOrder: resolvedSteps.length + 1,
-      policyStepOrder: step.stepOrder,
-      policyStepId: step.id,
-      stepLabel: step.label,
-      ancestorDepth: step.ancestorDepth,
-      resolverType: step.resolverType,
-      resolverUserId: step.resolverUserId,
-      orgNodeId: resolution.resolvedOrgNodeId,
-      approverId: resolution.approver.id,
-    });
+      seenApproverIds.add(resolution.approver.id);
+      resolvedSteps.push({
+        stepOrder: resolvedSteps.length + 1,
+        policyStepOrder: step.stepOrder,
+        policyStepId: step.id,
+        stepLabel: resolution.stepLabel,
+        nodeMode: step.nodeMode ?? null,
+        configuredOrgNodeId: resolution.configuredOrgNodeId,
+        ancestorDepth: step.ancestorDepth,
+        resolverType: resolution.resolverType,
+        resolverUserId: step.resolverUserId,
+        orgNodeId: resolution.resolvedOrgNodeId,
+        approverId: resolution.approver.id,
+      });
+    }
   }
 
   if (resolvedSteps.length === 0) {

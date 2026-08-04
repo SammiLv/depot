@@ -66,30 +66,34 @@ test("configured approval runs end-to-end against a migrated SQLite database", a
         policyId: "system-policy",
         stepOrder: 1,
         label: "系统管理员",
+        nodeMode: "ORG_NODE_OWNER",
         resolverType: "ADMIN",
       },
       {
         id: "department-leader-step",
         policyId: "department-policy",
         stepOrder: 1,
-        label: "直属组长",
-        ancestorDepth: 0,
+        label: "逐级审批至部门",
+        nodeMode: "CASCADE_TO_DEPARTMENT",
         resolverType: "TEAM_LEADER",
-      },
-      {
-        id: "department-manager-step",
-        policyId: "department-policy",
-        stepOrder: 2,
-        label: "部门主管",
-        resolverType: "DEPARTMENT_MANAGER",
       },
       {
         id: "department-admin-step",
         policyId: "department-policy",
-        stepOrder: 3,
+        stepOrder: 2,
         label: "管理员终审",
+        nodeMode: "ORG_NODE_OWNER",
         resolverType: "ADMIN",
       },
+    ],
+  });
+  await prisma.kpiApprovalPolicyScope.create({
+    data: { id: "department-policy-scope", policyId: "department-policy", orgNodeId: "department" },
+  });
+  await prisma.kpiApprovalPolicyStepOrgNode.createMany({
+    data: [
+      { id: "system-admin-node", policyStepId: "system-admin-step", orgNodeId: "company" },
+      { id: "department-admin-node", policyStepId: "department-admin-step", orgNodeId: "company" },
     ],
   });
 
@@ -98,8 +102,14 @@ test("configured approval runs end-to-end against a migrated SQLite database", a
     subjectOrgNodeId: "team",
   });
   assert.equal(snapshot.policyId, "department-policy");
+  assert.equal(snapshot.policyScopeOrgNodeId, "department");
   assert.deepEqual(snapshot.steps.map((step) => step.approverId), ["leader", "manager", "admin"]);
   assert.deepEqual(snapshot.steps.map((step) => step.stageKey), ["LEADER", "MANAGER", "FINAL"]);
+  assert.deepEqual(snapshot.steps.map((step) => step.nodeMode), [
+    "CASCADE_TO_DEPARTMENT",
+    "CASCADE_TO_DEPARTMENT",
+    "ORG_NODE_OWNER",
+  ]);
 
   const fallbackSnapshot = await resolveKpiApprovalSnapshot({
     subjectUserId: "other-member",
@@ -147,8 +157,8 @@ test("configured approval runs end-to-end against a migrated SQLite database", a
     data: { name: "产品部审批（新版）" },
   });
   await prisma.kpiApprovalPolicyStep.update({
-    where: { id: "department-manager-step" },
-    data: { label: "新版部门主管" },
+    where: { id: "department-leader-step" },
+    data: { label: "新版逐级审批" },
   });
   const persistedSnapshot = await prisma.personalKpi.findUniqueOrThrow({
     where: { id: personalKpi.id },
@@ -157,7 +167,9 @@ test("configured approval runs end-to-end against a migrated SQLite database", a
     where: { id: initializedSteps[1]!.id },
   });
   assert.equal(persistedSnapshot.approvalPolicyName, "产品部审批");
-  assert.equal(persistedManagerStep.stepLabel, "部门主管");
+  assert.equal(persistedManagerStep.stepLabel, "逐级审批至部门（产品部）");
+  assert.equal(persistedManagerStep.nodeMode, "CASCADE_TO_DEPARTMENT");
+  assert.equal(persistedManagerStep.orgNodeId, "department");
 
   const selfSubmittedStatus = await prisma.$transaction(async (tx) => {
     const nextStatus = await transitionKpiApprovalChain(tx, {
