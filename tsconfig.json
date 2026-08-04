@@ -41,7 +41,6 @@
     "node_modules",
     "prototyes",
     "db",
-    "requirements",
-    "scripts/annual-goals-migration"
+    "requirements"
   ]
 }
