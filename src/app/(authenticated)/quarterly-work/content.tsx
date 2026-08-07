@@ -117,20 +117,46 @@ function resolveDefaultOwnerId(memberOptions: MemberPickerOption[], ...preferred
   return memberOptions[0]?.id ?? "";
 }
 
-function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  stickyLayout = false,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  stickyLayout?: boolean;
+}) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
-        <div className="mb-5 flex items-center justify-between">
+      <div
+        className={`relative w-full max-w-2xl rounded-2xl border border-border bg-card shadow-xl ${
+          stickyLayout
+            ? "grid h-[min(90vh,max-content)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden"
+            : "max-h-[90vh] overflow-y-auto p-6"
+        }`}
+      >
+        <div
+          className={`flex shrink-0 items-center justify-between ${
+            stickyLayout ? "border-b border-border px-6 py-4" : "mb-5"
+          }`}
+        >
           <h2 className="text-lg font-semibold">{title}</h2>
           <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted">
             <X className="h-4 w-4" />
           </button>
         </div>
-        {children}
+        {stickyLayout ? (
+          <div className="min-h-0 overflow-hidden px-6 pb-6 pt-4">{children}</div>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );
@@ -205,6 +231,22 @@ function FormRow({ label, children, align = "start" }: { label: string; children
       <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{renderRequiredLabel(label)}</label>
       <div>{children}</div>
     </div>
+  );
+}
+
+const stickyDialogFormClassName = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden";
+
+function StickyFormScroll({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-0 overflow-y-auto pr-1">
+      <div className="space-y-4">{children}</div>
+    </div>
+  );
+}
+
+function StickyFormFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="space-y-3 border-t border-border bg-card pt-4">{children}</div>
   );
 }
 
@@ -443,6 +485,7 @@ function QuarterlyWorkForm({
   memberOptions,
   onClose,
   onSuccess,
+  stickyLayout = false,
 }: {
   data: Props["data"];
   mode: "create" | "edit";
@@ -453,6 +496,7 @@ function QuarterlyWorkForm({
   memberOptions: MemberPickerOption[];
   onClose: () => void;
   onSuccess: FormSuccessHandler;
+  stickyLayout?: boolean;
 }) {
   const monthOptions = useMemo(
     () => Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: `${index + 1}月` })),
@@ -493,11 +537,8 @@ function QuarterlyWorkForm({
     onClose();
   };
 
-  return (
-    <form action={submitAction}>
-      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
-      {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
-      <div className="space-y-4">
+  const formFields = (
+    <>
         <FormRow label="所属项目" align="center">
           <ProjectPicker
             name="projectId"
@@ -577,14 +618,34 @@ function QuarterlyWorkForm({
             ))}
           </select>
         </FormRow>
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          {mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {mode === "edit" ? "保存" : "创建"}
-        </Button>
-      </div>
+    </>
+  );
+
+  const formActions = (
+    <div className="flex justify-end gap-3">
+      <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+      <Button type="submit" className="rounded-lg">
+        {mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+        {mode === "edit" ? "保存" : "创建"}
+      </Button>
+    </div>
+  );
+
+  return (
+    <form action={submitAction} className={stickyLayout ? stickyDialogFormClassName : undefined}>
+      <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
+      {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
+      {stickyLayout ? (
+        <>
+          <StickyFormScroll>{formFields}</StickyFormScroll>
+          <StickyFormFooter>{formActions}</StickyFormFooter>
+        </>
+      ) : (
+        <>
+          <div className="space-y-4">{formFields}</div>
+          <div className="mt-6">{formActions}</div>
+        </>
+      )}
     </form>
   );
 }
@@ -622,20 +683,23 @@ function ProjectEditForm({
   }, []);
 
   return (
-    <form onSubmit={async (event) => {
-      event.preventDefault();
-      const formData = new FormData(event.currentTarget);
-      try {
-        setErrorMessage("");
-        await updateProject(formData);
-        onClose();
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "保存项目失败");
-      }
-    }}>
+    <form
+      className={stickyDialogFormClassName}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        try {
+          setErrorMessage("");
+          await updateProject(formData);
+          onClose();
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "保存项目失败");
+        }
+      }}
+    >
       <input type="hidden" name="projectId" value={item.id} />
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
-      <div className="space-y-4">
+      <StickyFormScroll>
         <FormRow label="项目名称 *" align="center">
           <input
             name="title"
@@ -739,22 +803,24 @@ function ProjectEditForm({
             ))}
           </select>
         </FormRow>
+      </StickyFormScroll>
+      <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-          项目变更为已完成或关闭时，将同步更新其下所有季度工作状态。
+          项目变更为已完成或关闭时，将同步更新其下所有任务状态。
         </div>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Pencil className="h-4 w-4" />
-          保存
-        </Button>
-      </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">
+            <Pencil className="h-4 w-4" />
+            保存
+          </Button>
+        </div>
+      </StickyFormFooter>
     </form>
   );
 }
@@ -1183,7 +1249,9 @@ function ValueOverviewEditForm({
   const [errorMessage, setErrorMessage] = useState("");
 
   return (
-    <form onSubmit={async (event) => {
+    <form
+      className={stickyDialogFormClassName}
+      onSubmit={async (event) => {
       event.preventDefault();
       const formData = new FormData(event.currentTarget);
       try {
@@ -1195,7 +1263,7 @@ function ValueOverviewEditForm({
       }
     }}>
       <input type="hidden" name="projectId" value={item.id} />
-      <div className="space-y-4">
+      <StickyFormScroll>
         <FormRow label="项目名称" align="center">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.title}</div>
         </FormRow>
@@ -1249,19 +1317,21 @@ function ValueOverviewEditForm({
             ))}
           </select>
         </FormRow>
+      </StickyFormScroll>
+      <StickyFormFooter>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Pencil className="h-4 w-4" />
-          保存
-        </Button>
-      </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">
+            <Pencil className="h-4 w-4" />
+            保存
+          </Button>
+        </div>
+      </StickyFormFooter>
     </form>
   );
 }
@@ -1271,7 +1341,9 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
   const [errorMessage, setErrorMessage] = useState("");
 
   return (
-    <form onSubmit={async (event) => {
+    <form
+      className={stickyDialogFormClassName}
+      onSubmit={async (event) => {
       event.preventDefault();
       const formData = new FormData(event.currentTarget);
       try {
@@ -1284,7 +1356,7 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
       }
     }}>
       <input type="hidden" name="trackId" value={item.id} />
-      <div className="space-y-4">
+      <StickyFormScroll>
         <FormRow label="项目" align="center">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.projectTitle}</div>
         </FormRow>
@@ -1327,19 +1399,21 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
+      </StickyFormScroll>
+      <StickyFormFooter>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Pencil className="h-4 w-4" />
-          保存
-        </Button>
-      </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">
+            <Pencil className="h-4 w-4" />
+            保存
+          </Button>
+        </div>
+      </StickyFormFooter>
     </form>
   );
 }
@@ -1364,7 +1438,9 @@ function ProductGoalEditForm({
   }, []);
 
   return (
-    <form onSubmit={async (event) => {
+    <form
+      className={stickyDialogFormClassName}
+      onSubmit={async (event) => {
       event.preventDefault();
       const formData = new FormData(event.currentTarget);
       try {
@@ -1377,7 +1453,7 @@ function ProductGoalEditForm({
     }}>
       <input type="hidden" name="productGoalId" value={item.id} />
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
-      <div className="space-y-4">
+      <StickyFormScroll>
         <FormRow label="产品目标名称 *" align="center">
           <input
             name="title"
@@ -1433,19 +1509,21 @@ function ProductGoalEditForm({
             ))}
           </select>
         </FormRow>
+      </StickyFormScroll>
+      <StickyFormFooter>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Pencil className="h-4 w-4" />
-          保存
-        </Button>
-      </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">
+            <Pencil className="h-4 w-4" />
+            保存
+          </Button>
+        </div>
+      </StickyFormFooter>
     </form>
   );
 }
@@ -2500,7 +2578,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         )}
       </Dialog>
 
-      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title="编辑任务">
+      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title="编辑任务" stickyLayout>
         {editDialog && (
           <QuarterlyWorkForm
             data={data}
@@ -2511,11 +2589,12 @@ export function QuarterlyWorkContent({ data }: Props) {
             memberOptions={getMemberOptionsForForm(editDialog.item.ownerId)}
             onClose={() => setEditDialog(null)}
             onSuccess={handleFormSuccess}
+            stickyLayout
           />
         )}
       </Dialog>
 
-      <Dialog open={!!projectDialog} onClose={() => setProjectDialog(null)} title="编辑项目">
+      <Dialog open={!!projectDialog} onClose={() => setProjectDialog(null)} title="编辑项目" stickyLayout>
         {projectDialog && (
           <ProjectEditForm
             data={data}
@@ -2539,7 +2618,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
-      <Dialog open={!!productGoalDialog} onClose={() => setProductGoalDialog(null)} title="编辑产品目标">
+      <Dialog open={!!productGoalDialog} onClose={() => setProductGoalDialog(null)} title="编辑产品目标" stickyLayout>
         {productGoalDialog ? (
           <ProductGoalEditForm
             item={productGoalDialog}
@@ -2576,7 +2655,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
-      <Dialog open={!!valueOverviewDialog} onClose={() => setValueOverviewDialog(null)} title="编辑项目价值">
+      <Dialog open={!!valueOverviewDialog} onClose={() => setValueOverviewDialog(null)} title="编辑项目价值" stickyLayout>
         {valueOverviewDialog ? (
           <ValueOverviewEditForm
             item={valueOverviewDialog}
@@ -2585,7 +2664,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
-      <Dialog open={!!valueTrackDialog} onClose={() => setValueTrackDialog(null)} title="编辑价值跟踪">
+      <Dialog open={!!valueTrackDialog} onClose={() => setValueTrackDialog(null)} title="编辑价值跟踪" stickyLayout>
         {valueTrackDialog ? (
           <ValueTrackEditForm
             item={valueTrackDialog}
