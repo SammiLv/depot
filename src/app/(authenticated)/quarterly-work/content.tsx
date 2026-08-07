@@ -7,7 +7,7 @@ import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
-import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2 } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2, Search } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
 type BoardTab = "goal" | "project" | "board" | "value";
@@ -132,6 +132,63 @@ function Dialog({ open, onClose, title, children }: { open: boolean; onClose: ()
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+function matchesFuzzySearch(text: string, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return text.toLowerCase().includes(normalizedQuery);
+}
+
+function BoardSearchBar({
+  title,
+  placeholder,
+  inputValue,
+  onInputChange,
+  appliedQuery,
+  onSearch,
+  onClear,
+}: {
+  title: string;
+  placeholder: string;
+  inputValue: string;
+  onInputChange: (value: string) => void;
+  appliedQuery: string;
+  onSearch: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <h3 className="text-sm font-medium text-foreground">{title}</h3>
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSearch();
+        }}
+      >
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={inputValue}
+            onChange={(event) => onInputChange(event.target.value)}
+            placeholder={placeholder}
+            className="h-9 w-64 rounded-lg bg-muted pl-9 pr-3 text-sm focus:outline-none"
+          />
+        </div>
+        <Button type="submit" variant="outline" className="h-9 rounded-lg">搜索</Button>
+        {appliedQuery ? (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-sm text-muted-foreground transition hover:text-foreground"
+          >
+            清除
+          </button>
+        ) : null}
+      </form>
     </div>
   );
 }
@@ -262,6 +319,120 @@ function MemberPicker({
   );
 }
 
+function ProjectPicker({
+  name,
+  options,
+  defaultValue,
+  onChange,
+}: {
+  name: string;
+  options: Array<{ id: string; label: string }>;
+  defaultValue: string;
+  onChange?: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState(defaultValue);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setSelectedId(defaultValue);
+  }, [defaultValue]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
+  const selectedOption = options.find((option) => option.id === selectedId) ?? options[0] ?? null;
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
+  }, [options, query]);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input type="hidden" name={name} value={selectedOption?.id ?? ""} />
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+      >
+        <span className={`truncate text-left ${selectedOption ? "text-foreground" : "text-muted-foreground"}`}>
+          {selectedOption?.label ?? "请选择项目"}
+        </span>
+        <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+
+      {open ? (
+        <div className="absolute z-50 mt-2 w-full rounded-lg border border-border bg-card p-2 shadow-xl">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索项目"
+            className="mb-2 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+          <div className="max-h-56 overflow-y-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => {
+                const active = option.id === selectedOption?.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(option.id);
+                      onChange?.(option.id);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
+                  >
+                    <span className="truncate">{option.label}</span>
+                    {active ? <Check className="ml-2 h-4 w-4 shrink-0" /> : null}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">未找到匹配项目</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function QuarterlyWorkForm({
   data,
   mode,
@@ -290,6 +461,10 @@ function QuarterlyWorkForm({
   const statusOptions = useMemo(() => editableStatuses, []);
   const projectOptionById = useMemo(
     () => new Map(data.projectOptions.map((project) => [project.id, project])),
+    [data.projectOptions]
+  );
+  const projectPickerOptions = useMemo(
+    () => data.projectOptions.map((project) => ({ id: project.id, label: project.title })),
     [data.projectOptions]
   );
   const initialProjectId = item?.projectId ?? defaultProjectId ?? data.projectOptions[0]?.id ?? "";
@@ -324,16 +499,12 @@ function QuarterlyWorkForm({
       {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
       <div className="space-y-4">
         <FormRow label="所属项目" align="center">
-          <select
+          <ProjectPicker
             name="projectId"
+            options={projectPickerOptions}
             defaultValue={selectedProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {data.projectOptions.map((project) => (
-              <option key={project.id} value={project.id}>{project.title}</option>
-            ))}
-          </select>
+            onChange={setSelectedProjectId}
+          />
         </FormRow>
         <FormRow label="项目预期收益 *">
           <input type="hidden" name="expectedOutcome" value={selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? ""} />
@@ -911,8 +1082,13 @@ function ProductGoalCreateForm({
 }
 
 function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props["data"]; defaultProjectId?: string; onClose: () => void }) {
+  const router = useRouter();
   const completedProjectMap = useMemo(
     () => new Map(data.completedProjectOptions.map((project) => [project.id, project])),
+    [data.completedProjectOptions]
+  );
+  const projectPickerOptions = useMemo(
+    () => data.completedProjectOptions.map((project) => ({ id: project.id, label: project.title })),
     [data.completedProjectOptions]
   );
   const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId ?? data.completedProjectOptions[0]?.id ?? "");
@@ -921,20 +1097,17 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
   return (
     <form action={async (fd: FormData) => {
       await createValueTrack(fd);
+      router.refresh();
       onClose();
     }}>
       <div className="space-y-4">
         <FormRow label="项目 *" align="center">
-          <select
+          <ProjectPicker
             name="projectId"
-            value={selectedProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {data.completedProjectOptions.map((project) => (
-              <option key={project.id} value={project.id}>{project.title}</option>
-            ))}
-          </select>
+            options={projectPickerOptions}
+            defaultValue={selectedProjectId}
+            onChange={setSelectedProjectId}
+          />
         </FormRow>
         <FormRow label="项目完成时间" align="center">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.completedAt)}</div>
@@ -1094,6 +1267,7 @@ function ValueOverviewEditForm({
 }
 
 function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrackItems"][number]; onClose: () => void }) {
+  const router = useRouter();
   const [errorMessage, setErrorMessage] = useState("");
 
   return (
@@ -1103,6 +1277,7 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
       try {
         setErrorMessage("");
         await updateValueTrack(formData);
+        router.refresh();
         onClose();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "保存价值跟踪失败");
@@ -1276,9 +1451,11 @@ function ProductGoalEditForm({
 }
 
 function ValueTrackDeleteForm({ item, onClose }: { item: Props["data"]["valueTrackItems"][number]; onClose: () => void }) {
+  const router = useRouter();
   return (
     <form action={async (formData: FormData) => {
       await deleteValueTrack(formData);
+      router.refresh();
       onClose();
     }}>
       <input type="hidden" name="trackId" value={item.id} />
@@ -1396,6 +1573,9 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [valueTrackDialog, setValueTrackDialog] = useState<ValueTrackDialogState>(null);
   const [valueTrackDeleteDialog, setValueTrackDeleteDialog] = useState<ValueTrackDeleteState>(null);
   const [valueOverviewDialog, setValueOverviewDialog] = useState<ValueOverviewDialogState>(null);
+  const [tabSearchInput, setTabSearchInput] = useState("");
+  const [tabSearchQuery, setTabSearchQuery] = useState("");
+  const valueTrackLogSectionRef = useRef<HTMLDivElement | null>(null);
   const [productGoalDialog, setProductGoalDialog] = useState<ProductGoalDialogState>(null);
   const [productGoalDeleteDialog, setProductGoalDeleteDialog] = useState<ProductGoalDeleteState>(null);
   const [projectDeleteDialog, setProjectDeleteDialog] = useState<ProjectDeleteState>(null);
@@ -1477,6 +1657,59 @@ export function QuarterlyWorkContent({ data }: Props) {
     ),
     [data.valueTrackItems, departmentTab, teamTab, teamDepartmentMap]
   );
+  const filteredProductGoalColumns = useMemo(
+    () => visibleProductGoalColumns.map((column) => ({
+      ...column,
+      items: column.items.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
+    })),
+    [visibleProductGoalColumns, tabSearchQuery],
+  );
+  const filteredProjectColumns = useMemo(
+    () => visibleProjectColumns.map((column) => ({
+      ...column,
+      items: column.items.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
+    })),
+    [visibleProjectColumns, tabSearchQuery],
+  );
+  const filteredTaskColumns = useMemo(
+    () => visibleColumns.map((column) => ({
+      ...column,
+      items: column.items.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
+    })),
+    [visibleColumns, tabSearchQuery],
+  );
+  const filteredValueOverviewItems = useMemo(
+    () => visibleValueOverviewItems.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
+    [visibleValueOverviewItems, tabSearchQuery],
+  );
+  const filteredValueTrackItems = useMemo(() => {
+    const items = visibleValueTrackItems.filter((item) =>
+      matchesFuzzySearch(item.projectTitle, tabSearchQuery),
+    );
+    return [...items].sort((left, right) => new Date(right.trackedAt).getTime() - new Date(left.trackedAt).getTime());
+  }, [visibleValueTrackItems, tabSearchQuery]);
+  const applyTabSearch = () => {
+    setTabSearchQuery(tabSearchInput.trim());
+  };
+  const clearTabSearch = () => {
+    setTabSearchInput("");
+    setTabSearchQuery("");
+  };
+  const openValueTrackCreateDialog = (projectId: string) => {
+    setCreateValueTrackProjectId(projectId);
+    setCreateValueTrackDialog(true);
+  };
+  const focusValueTrackLogs = (projectTitle: string) => {
+    setTabSearchInput(projectTitle);
+    setTabSearchQuery(projectTitle.trim());
+    window.requestAnimationFrame(() => {
+      valueTrackLogSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+  useEffect(() => {
+    setTabSearchInput("");
+    setTabSearchQuery("");
+  }, [departmentTab, teamTab, tab]);
   const visibleProductGoalOptions = useMemo(
     () => visibleProductGoalColumns.flatMap((column) => column.items).map((item) => ({
       id: item.id,
@@ -1503,6 +1736,17 @@ export function QuarterlyWorkContent({ data }: Props) {
     }),
     [allItems, data.updateReminders, belongsToSelectedDepartment, teamTab]
   );
+  const filteredReminders = useMemo(
+    () => visibleReminders.filter((reminder) => matchesFuzzySearch(reminder.task, tabSearchQuery)),
+    [visibleReminders, tabSearchQuery],
+  );
+  const tabSearchBarProps = {
+    inputValue: tabSearchInput,
+    onInputChange: setTabSearchInput,
+    appliedQuery: tabSearchQuery,
+    onSearch: applyTabSearch,
+    onClear: clearTabSearch,
+  };
 
   return (
     <>
@@ -1628,9 +1872,15 @@ export function QuarterlyWorkContent({ data }: Props) {
 
         <div className="px-5 pb-5 pt-0">
           {tab === "goal" ? (
-            viewMode === "card" ? (
+            <>
+            <BoardSearchBar
+              title="产品目标"
+              placeholder="搜索产品目标名称"
+              {...tabSearchBarProps}
+            />
+            {viewMode === "card" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {visibleProductGoalColumns.map((column: Props["data"]["productGoalColumns"][number]) => (
+              {filteredProductGoalColumns.map((column: Props["data"]["productGoalColumns"][number]) => (
                 <div key={column.key} className="min-h-[320px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
                   <div className="mb-3 flex items-center justify-between px-1">
                     <div className="flex items-center gap-2">
@@ -1707,8 +1957,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div className="text-right">操作</div>
                 </div>
                 <div className="divide-y divide-border">
-                  {visibleProductGoalColumns.flatMap((column) => column.items).length ? (
-                    visibleProductGoalColumns.flatMap((column) => column.items).map((item) => (
+                  {filteredProductGoalColumns.flatMap((column) => column.items).length ? (
+                    filteredProductGoalColumns.flatMap((column) => column.items).map((item) => (
                       <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_90px_1.3fr_1.3fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -1741,15 +1991,24 @@ export function QuarterlyWorkContent({ data }: Props) {
                       </div>
                     ))
                   ) : (
-                    <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无产品目标数据</div>
+                    <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                      {tabSearchQuery ? "暂无匹配的产品目标数据" : "暂无产品目标数据"}
+                    </div>
                   )}
                 </div>
               </div>
-            )
+            )}
+            </>
           ) : tab === "project" ? (
-            viewMode === "card" ? (
+            <>
+            <BoardSearchBar
+              title="项目看板"
+              placeholder="搜索项目名称"
+              {...tabSearchBarProps}
+            />
+            {viewMode === "card" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {visibleProjectColumns.map((column: Props["data"]["projectColumns"][number]) => (
+              {filteredProjectColumns.map((column: Props["data"]["projectColumns"][number]) => (
                 <div key={column.key} className="min-h-[320px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
                   <div className="mb-3 flex items-center justify-between px-1">
                     <div className="flex items-center gap-2">
@@ -1832,8 +2091,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div className="min-w-0 text-right">操作</div>
                 </div>
                 <div className="divide-y divide-border">
-                  {visibleProjectColumns.flatMap((column) => column.items).length ? (
-                    visibleProjectColumns.flatMap((column) => column.items).map((item) => (
+                  {filteredProjectColumns.flatMap((column) => column.items).length ? (
+                    filteredProjectColumns.flatMap((column) => column.items).map((item) => (
                       <div key={item.id} className={`px-4 py-4 grid ${projectListGridClass} gap-x-2 gap-y-3 items-start text-sm hover:bg-muted/20 transition`}>
                         <div className="min-w-0 font-medium text-foreground break-words">{item.title}</div>
                         <div className="min-w-0 text-muted-foreground break-words">{item.productGoalTitle || "—"}</div>
@@ -1867,17 +2126,26 @@ export function QuarterlyWorkContent({ data }: Props) {
                       </div>
                     ))
                   ) : (
-                    <div className="px-4 py-12 text-center text-sm text-muted-foreground">暂无项目数据</div>
+                    <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+                      {tabSearchQuery ? "暂无匹配的项目数据" : "暂无项目数据"}
+                    </div>
                   )}
                 </div>
               </div>
-            )
+            )}
+            </>
           ) : tab === "board" ? (
-            viewMode === "card" ? (
+            <>
+            <BoardSearchBar
+              title="任务看板"
+              placeholder="搜索任务名称"
+              {...tabSearchBarProps}
+            />
+            {viewMode === "card" ? (
             <>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {visibleColumns.map((c) => (
-                  <div key={c.key} className="min-h-[400px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
+                {filteredTaskColumns.map((c) => (
+                  <div key={c.key} className="min-h-[320px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
                     <div className="mb-3 flex items-center justify-between px-1">
                       <div className="flex items-center gap-2">
                         <Badge tone={c.tone}>{c.title}</Badge>
@@ -1935,11 +2203,11 @@ export function QuarterlyWorkContent({ data }: Props) {
                 ))}
               </div>
 
-              {visibleReminders.length > 0 && (
+              {filteredReminders.length > 0 && (
                 <Card className="mt-6">
                   <h3 className="mb-3 font-semibold">本周更新提醒</h3>
                   <div className="space-y-2">
-                    {visibleReminders.map((r, i) => (
+                    {filteredReminders.map((r, i) => (
                       <div key={i} className="flex items-center justify-between border-b border-border py-2 last:border-0">
                         <div className="flex items-center gap-3">
                           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">{r.who[0]}</div>
@@ -1970,8 +2238,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div className="text-right">操作</div>
                 </div>
                 <div className="divide-y divide-border">
-                  {visibleColumns.flatMap((column) => column.items).length ? (
-                    visibleColumns.flatMap((column) => column.items).map((item) => (
+                  {filteredTaskColumns.flatMap((column) => column.items).length ? (
+                    filteredTaskColumns.flatMap((column) => column.items).map((item) => (
                       <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
@@ -2007,15 +2275,25 @@ export function QuarterlyWorkContent({ data }: Props) {
                       </div>
                     ))
                   ) : (
-                    <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无任务数据</div>
+                    <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                      {tabSearchQuery ? "暂无匹配的任务数据" : "暂无任务数据"}
+                    </div>
                   )}
                 </div>
               </div>
-            )
-          ) : viewMode === "card" ? (
+            )}
+            </>
+          ) : (
+            <>
+            <BoardSearchBar
+              title="需求价值概览"
+              placeholder="搜索项目名称"
+              {...tabSearchBarProps}
+            />
+            {viewMode === "card" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {valueOverviewCardColumns.map((column) => {
-                const items = visibleValueOverviewItems.filter((item) => item.valueJudgement === column.key);
+                const items = filteredValueOverviewItems.filter((item) => item.valueJudgement === column.key);
                 return (
                   <div key={column.key} className="min-h-[320px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
                     <div className="mb-3 flex items-center justify-between px-1">
@@ -2038,10 +2316,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 <div className="flex items-center gap-1">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setCreateValueTrackProjectId(item.id);
-                                      setCreateValueTrackDialog(true);
-                                    }}
+                                    onClick={() => openValueTrackCreateDialog(item.id)}
                                     className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
                                     aria-label={`为${item.title}新增价值跟踪`}
                                   >
@@ -2088,7 +2363,6 @@ export function QuarterlyWorkContent({ data }: Props) {
           ) : (
             <div className="space-y-6">
               <div>
-                <h3 className="mb-3 text-sm font-medium text-foreground">需求价值概览</h3>
                 <div className="overflow-x-auto rounded-2xl border border-border bg-card">
                   <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.9fr_0.9fr_1fr_140px] gap-4 text-xs text-muted-foreground">
                     <div>项目名称</div>
@@ -2103,8 +2377,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                     <div className="text-right">操作</div>
                   </div>
                   <div className="divide-y divide-border">
-                    {visibleValueOverviewItems.length ? (
-                      visibleValueOverviewItems.map((item: Props["data"]["valueOverviewItems"][number]) => (
+                    {filteredValueOverviewItems.length ? (
+                      filteredValueOverviewItems.map((item: Props["data"]["valueOverviewItems"][number]) => (
                           <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.9fr_0.9fr_1fr_140px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                             <div className="font-medium text-foreground break-words">{item.title}</div>
                             <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -2116,7 +2390,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                             <div className="text-muted-foreground">{projectTitleByStatus[item.status]}</div>
                             <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                             <div className="text-right">
-                              <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                              <div className="inline-flex flex-col items-end gap-1 whitespace-nowrap text-sm">
                                 <button
                                   type="button"
                                   onClick={() => setValueOverviewDialog(item)}
@@ -2127,27 +2401,34 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setCreateValueTrackProjectId(item.id);
-                                    setCreateValueTrackDialog(true);
-                                  }}
+                                  onClick={() => openValueTrackCreateDialog(item.id)}
                                   className="text-primary hover:underline"
                                   aria-label={`为${item.title}新增价值跟踪`}
                                 >
                                   新增跟踪
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => focusValueTrackLogs(item.title)}
+                                  className="text-primary hover:underline"
+                                  aria-label={`查看${item.title}的跟踪日志`}
+                                >
+                                  查看日志
                                 </button>
                               </div>
                             </div>
                           </div>
                       ))
                     ) : (
-                      <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无需求价值概览数据</div>
+                      <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                        {tabSearchQuery ? "暂无匹配的需求价值概览数据" : "暂无需求价值概览数据"}
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div>
+              <div ref={valueTrackLogSectionRef}>
                 <h3 className="mb-3 text-sm font-medium text-foreground">价值跟踪日志</h3>
                 <div className="overflow-x-auto rounded-2xl border border-border bg-card">
                   <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_1fr_1.6fr_1.6fr_120px] gap-4 text-xs text-muted-foreground">
@@ -2159,8 +2440,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                     <div className="text-right">操作</div>
                   </div>
                   <div className="divide-y divide-border">
-                    {visibleValueTrackItems.length ? (
-                      visibleValueTrackItems.map((item: Props["data"]["valueTrackItems"][number]) => (
+                    {filteredValueTrackItems.length ? (
+                      filteredValueTrackItems.map((item: Props["data"]["valueTrackItems"][number]) => (
                         <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_1fr_1.6fr_1.6fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                           <div className="font-medium text-foreground break-words">{item.projectTitle}</div>
                           <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -2190,12 +2471,16 @@ export function QuarterlyWorkContent({ data }: Props) {
                         </div>
                       ))
                     ) : (
-                      <div className="px-5 py-12 text-center text-sm text-muted-foreground">暂无价值跟踪日志数据</div>
+                      <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                        {tabSearchQuery ? "暂无匹配的价值跟踪日志" : "暂无价值跟踪日志数据"}
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       </Card>
