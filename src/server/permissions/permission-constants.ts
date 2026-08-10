@@ -3,6 +3,7 @@ import type { OrgPermissionAbilityKey, OrgPermissionGrantScopeType, OrgPermissio
 export const orgPermissionModuleKeys = {
   annualGoal: "ANNUAL_GOAL",
   kpi: "KPI",
+  notification: "NOTIFICATION",
 } satisfies Record<string, OrgPermissionModuleKey>;
 
 export const kpiAbilityKeys = {
@@ -15,6 +16,10 @@ export const kpiAbilityKeys = {
   scoreLeader: "SCORE_LEADER",
   scoreManager: "SCORE_MANAGER",
   scoreFinal: "SCORE_FINAL",
+} satisfies Record<string, OrgPermissionAbilityKey>;
+
+export const notificationAbilityKeys = {
+  manageNotificationScenario: "MANAGE_NOTIFICATION_SCENARIO",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
 export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, number> = {
@@ -148,3 +153,22 @@ export const kpiDefaultPermissionGrants: Array<{
     orgNodeSeedKey: "TEAM",
   },
 ];
+
+/** 场景全系统共享：有能力即可配置，默认给管理角色 ALL 作用域。 */
+export const notificationDefaultPermissionGrants: Array<{
+  moduleKey: OrgPermissionModuleKey;
+  abilityKey: OrgPermissionAbilityKey;
+  scopeType: OrgPermissionGrantScopeType;
+  subjectType: "ROLE";
+  roleType: RoleType;
+  orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
+}> = (
+  ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"] as const
+).map((roleType) => ({
+  moduleKey: orgPermissionModuleKeys.notification,
+  abilityKey: notificationAbilityKeys.manageNotificationScenario,
+  scopeType: "ALL" as const,
+  subjectType: "ROLE" as const,
+  roleType,
+  orgNodeSeedKey: null,
+}));

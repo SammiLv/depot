@@ -331,8 +331,8 @@ export default async function OrgPage({
   const buildKpiPermissions = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => kpiOrdinaryPermissionAbilityKeys.map((abilityKey) => ({
     id: abilityKey,
     code: abilityKey,
-    name: kpiPermissionPresentation[abilityKey].name,
-    description: kpiPermissionPresentation[abilityKey].description,
+    name: kpiPermissionPresentation[abilityKey as keyof typeof kpiPermissionPresentation].name,
+    description: kpiPermissionPresentation[abilityKey as keyof typeof kpiPermissionPresentation].description,
     cells: Object.fromEntries(roleTypes.map((roleType) => {
       const scopeByRole = roleType === "ADMIN" ? "ALL" : roleType === "DEPARTMENT_MANAGER" ? "SUBTREE" : roleType === "TEAM_LEADER" ? "NODE" : "SELF";
       const systemRow = kpiPermissionMap.get(`${scopeByRole}:${""}:${roleType}:${abilityKey}`);
@@ -368,7 +368,7 @@ export default async function OrgPage({
         userId: row.userId,
         userName: user.name,
         abilityKey: row.abilityKey,
-        abilityName: kpiPermissionPresentation[row.abilityKey]?.name ?? row.abilityKey,
+        abilityName: kpiPermissionPresentation[row.abilityKey as keyof typeof kpiPermissionPresentation]?.name ?? row.abilityKey,
         scopeType: row.scopeType,
         orgNodeId: row.orgNodeId,
         orgNodeName: orgNode?.name ?? null,

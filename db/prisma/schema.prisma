@@ -27,6 +27,7 @@ enum PermissionScopeType {
 enum OrgPermissionModuleKey {
   ANNUAL_GOAL
   KPI
+  NOTIFICATION
 }
 
 enum OrgPermissionAbilityKey {
@@ -39,6 +40,23 @@ enum OrgPermissionAbilityKey {
   SCORE_LEADER
   SCORE_MANAGER
   SCORE_FINAL
+  MANAGE_NOTIFICATION_SCENARIO
+}
+
+enum NotificationTriggerType {
+  EVENT
+  SCHEDULE
+}
+
+enum NotificationDeliveryChannel {
+  IN_APP
+  DINGTALK
+}
+
+enum NotificationDeliveryStatus {
+  SENT
+  FAILED
+  SKIPPED
 }
 
 enum OrgPermissionGrantScopeType {
@@ -841,6 +859,48 @@ model Notification {
 
   @@index([userId])
   @@index([targetType, targetId])
+}
+
+model NotificationScenario {
+  id              String                  @id @default(cuid())
+  name            String
+  description     String?
+  triggerType     NotificationTriggerType
+  triggerEvent    String
+  scheduleConfig  Json?
+  nextRunAt       DateTime?
+  recipientConfig Json
+  channelConfig   Json
+  conditionConfig Json?
+  isActive        Boolean                 @default(true)
+  sortOrder       Int                     @default(0)
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  deliveryLogs NotificationDeliveryLog[]
+
+  @@index([triggerType, isActive])
+  @@index([triggerEvent, isActive])
+  @@index([nextRunAt])
+}
+
+model NotificationDeliveryLog {
+  id         String                     @id @default(cuid())
+  scenarioId String
+  eventKey   String
+  userId     String
+  channel    NotificationDeliveryChannel
+  status     NotificationDeliveryStatus
+  error      String?
+  createdAt  DateTime                   @default(now())
+
+  scenario NotificationScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([scenarioId, eventKey, channel])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model TodoItem {
