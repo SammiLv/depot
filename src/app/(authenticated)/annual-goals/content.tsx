@@ -4,6 +4,7 @@ import { useEffect, useState, type ComponentProps, type FormEvent } from "react"
 import { useRouter } from "next/navigation";
 import { Badge, Button as UiButton, Card, Progress } from "@/components/ui-kit";
 import { createAnnualGoalMetric, createAnnualGoalMetricSource, createAnnualGoalPlan, deleteAnnualGoalMetric, deleteAnnualGoalMetricSource, deleteAnnualGoalPlan, deleteAnnualGoalQuarterTargets, saveAnnualGoalQuarterTargets, updateAnnualGoalMetric, updateAnnualGoalMetricSource, updateAnnualGoalPlan, updateAnnualGoalQuarterProgress, updateAnnualGoalWeeklyProgress } from "@/server/annual-goals/actions";
+import { runServerAction } from "@/lib/run-server-action";
 import type { getAnnualGoalsData } from "@/server/annual-goals/annual-goals-query";
 import { Edit, Plus, Trash2, X } from "lucide-react";
 
@@ -220,7 +221,7 @@ function submitWithClose(action: (formData: FormData) => Promise<void>, onSucces
     setError?.(null);
     const formData = new FormData(event.currentTarget);
     try {
-      await action(formData);
+      await runServerAction(() => action(formData));
       onSuccess();
     } catch (err) {
       setError?.(err instanceof Error ? err.message : "保存失败");
@@ -238,7 +239,7 @@ function PlanForm({ plan, data, onClose }: { plan?: Plan; data: Data; onClose: (
     event.preventDefault();
     setError(null);
     try {
-      await action(new FormData(event.currentTarget));
+      await runServerAction(() => action(new FormData(event.currentTarget)));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -349,7 +350,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
         setFieldErrors(nextFieldErrors);
         return;
       }
-      await action(formData);
+      await runServerAction(() => action(formData));
       onClose();
     } catch (err) {
       if (err instanceof Error) {
@@ -547,7 +548,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
         setFieldErrors(nextFieldErrors);
         return;
       }
-      await action(formData);
+      await runServerAction(() => action(formData));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -706,7 +707,7 @@ function QuarterTargetForm({ metric, sourceMetric, onClose }: { metric: Metric; 
         setFieldErrors(nextFieldErrors);
         return;
       }
-      await saveAnnualGoalQuarterTargets(formData);
+      await runServerAction(() => saveAnnualGoalQuarterTargets(formData));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -834,7 +835,7 @@ function QuarterTargetSetupForm({ plan, onClose }: { plan: Plan; onClose: () => 
         setFieldErrors(nextFieldErrors);
         return;
       }
-      await saveAnnualGoalQuarterTargets(formData);
+      await runServerAction(() => saveAnnualGoalQuarterTargets(formData));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -961,7 +962,7 @@ function QuarterProgressUpdateForm({ metric, sourceMetric, onClose }: { metric: 
         setFieldErrors(nextFieldErrors);
         return;
       }
-      await updateAnnualGoalQuarterProgress(formData);
+      await runServerAction(() => updateAnnualGoalQuarterProgress(formData));
       onClose();
     } catch (err) {
       if (err instanceof Error) {
@@ -1074,7 +1075,7 @@ function QuarterWeeklyUpdateForm({ plan, onClose }: { plan: Plan; onClose: () =>
         setFieldErrors(nextFieldErrors);
         return;
       }
-      await updateAnnualGoalWeeklyProgress(new FormData(event.currentTarget));
+      await runServerAction(() => updateAnnualGoalWeeklyProgress(new FormData(event.currentTarget)));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -1166,7 +1167,7 @@ function QuarterTargetChooser({ plan, onSelect, onClose }: { plan: Plan; onSelec
 function DeleteMetricConfirm({ metric, onClose }: { metric: Metric; onClose: () => void }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await deleteAnnualGoalMetric(new FormData(event.currentTarget));
+    await runServerAction(() => deleteAnnualGoalMetric(new FormData(event.currentTarget)));
     onClose();
   }
 
@@ -1189,7 +1190,7 @@ function DeleteMetricConfirm({ metric, onClose }: { metric: Metric; onClose: () 
 function DeleteSourceMetricConfirm({ sourceMetric, onClose }: { sourceMetric: SourceMetric; onClose: () => void }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await deleteAnnualGoalMetricSource(new FormData(event.currentTarget));
+    await runServerAction(() => deleteAnnualGoalMetricSource(new FormData(event.currentTarget)));
     onClose();
   }
 
@@ -1212,7 +1213,7 @@ function DeleteQuarterTargetsConfirm({ metric, sourceMetric, onClose }: { metric
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await deleteAnnualGoalQuarterTargets(new FormData(event.currentTarget));
+    await runServerAction(() => deleteAnnualGoalQuarterTargets(new FormData(event.currentTarget)));
     onClose();
   }
 
@@ -1235,7 +1236,7 @@ function DeleteQuarterTargetsConfirm({ metric, sourceMetric, onClose }: { metric
 function DeletePlanConfirm({ plan, years, onClose }: { plan: Plan; years: number[]; onClose: () => void }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await deleteAnnualGoalPlan(new FormData(event.currentTarget));
+    await runServerAction(() => deleteAnnualGoalPlan(new FormData(event.currentTarget)));
     onClose();
   }
 

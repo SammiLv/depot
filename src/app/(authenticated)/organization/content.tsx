@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
+import { runServerAction } from "@/lib/run-server-action";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree, Search } from "lucide-react";
 import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments } from "@/server/organization/actions";
 import {
@@ -667,7 +668,7 @@ function UserForm({
   }, [user?.departmentOrgNodeId, departmentOrgNodeId, departments]);
 
   return (
-    <form action={async (fd) => { await action(fd); onClose(); }}>
+    <form action={async (fd) => { await runServerAction(() => action(fd)); onClose(); }}>
       {isEdit && <input type="hidden" name="id" value={user.id} />}
       <input type="hidden" name="departmentOrgNodeId" value={selectedDepartmentOrgNodeId} />
       <div className="space-y-4">
@@ -733,7 +734,7 @@ function DepartmentForm({ users, onClose }: { users: OrgUser[]; onClose: () => v
   const availableUsers = users.filter((user) => user.isActive && user.roleType !== "ADMIN");
 
   return (
-    <form action={async (fd) => { await createDepartment(fd); onClose(); }}>
+    <form action={async (fd) => { await runServerAction(() => createDepartment(fd)); onClose(); }}>
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">{renderRequiredLabel("部门名称 *")}</label>
@@ -795,7 +796,7 @@ function TeamForm({
   }, [team?.orgNodeId, team?.parentOrgNodeId, teamParentOptions, selectedDepartmentOrgNodeId]);
 
   return (
-    <form action={async (fd) => { await action(fd); onClose(); }}>
+    <form action={async (fd) => { await runServerAction(() => action(fd)); onClose(); }}>
       {isEdit && <input type="hidden" name="id" value={team.orgNodeId} />}
       <input type="hidden" name="parentOrgNodeId" value={selectedParentOrgNodeId} />
       <div className="space-y-4">
@@ -860,7 +861,7 @@ function DeleteConfirm({ message, action, onClose }: { message: string; action: 
       <p className="text-sm text-muted-foreground">{message}</p>
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={onClose}>取消</Button>
-        <Button variant="primary" onClick={async () => { await action(); onClose(); }} className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
+        <Button variant="primary" onClick={async () => { await runServerAction(() => action()); onClose(); }} className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
       </div>
     </div>
   );
@@ -924,7 +925,7 @@ function KpiUserPermissionGrantForm({
   }
 
   return (
-    <form action={async (fd) => { await createKpiUserPermissionGrant(fd); onClose(); }} className="space-y-6">
+    <form action={async (fd) => { await runServerAction(() => createKpiUserPermissionGrant(fd)); onClose(); }} className="space-y-6">
       <input type="hidden" name="scopeType" value={scopeType} />
       <input type="hidden" name="departmentOrgNodeId" value={scopeType === "DEPARTMENT" ? departmentOrgNodeId : ""} />
       <input type="hidden" name="grantScopeType" value={grantScopeType} />
@@ -1046,7 +1047,7 @@ function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogDat
       : applyKpiPermissionToAllDepartments;
 
   return (
-    <form action={async (fd) => { await action(fd); onClose(); }} className="space-y-4">
+    <form action={async (fd) => { await runServerAction(() => action(fd)); onClose(); }} className="space-y-4">
       <input type="hidden" name="permissionId" value={data.permissionId} />
       <input type="hidden" name="roleType" value={data.roleType} />
       <input type="hidden" name="allowed" value={String(data.allowed)} />
@@ -1083,7 +1084,7 @@ function PermissionMatrixSyncConfirm({ data, onClose }: { data: PermissionMatrix
       setPending(true);
       setError(null);
       try {
-        await action(formData);
+        await runServerAction(() => action(formData));
         onClose();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "同步失败，请稍后重试");
@@ -1412,7 +1413,7 @@ function KpiApprovalPolicyForm({
   }]);
 
   return (
-    <form action={async (formData) => { await saveKpiApprovalPolicy(formData); onClose(); }} className="space-y-4">
+    <form action={async (formData) => { await runServerAction(() => saveKpiApprovalPolicy(formData)); onClose(); }} className="space-y-4">
       <input type="hidden" name="id" value={policy?.id ?? ""} />
       <input type="hidden" name="scopeType" value={scope.scopeType} />
       <input type="hidden" name="departmentOrgNodeId" value={scope.departmentOrgNodeId} />
@@ -1808,7 +1809,7 @@ export function OrgContent({
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const result = await updateFromDingTalk();
+      const result = await runServerAction(() => updateFromDingTalk());
       setSyncMessage(`已从钉钉更新：${result.departmentName}，${result.teams} 个小组，${result.users} 位成员`);
     } catch (error) {
       setSyncMessage(error instanceof Error ? error.message : "从钉钉更新失败");
@@ -2557,7 +2558,7 @@ export function OrgContent({
           action={async () => {
             const fd = new FormData();
             fd.set("id", (dialog?.data as KpiUserPermissionGrant).id);
-            await deleteKpiUserPermissionGrant(fd);
+            await runServerAction(() => deleteKpiUserPermissionGrant(fd));
           }}
           onClose={() => setDialog(null)}
         />
@@ -2584,7 +2585,7 @@ export function OrgContent({
           action={async () => {
             const fd = new FormData();
             fd.set("id", (dialog?.data as KpiApprovalPolicy).id);
-            await deleteKpiApprovalPolicy(fd);
+            await runServerAction(() => deleteKpiApprovalPolicy(fd));
           }}
           onClose={() => setDialog(null)}
         />
@@ -2596,7 +2597,7 @@ export function OrgContent({
           action={async () => {
             const fd = new FormData();
             fd.set("id", (dialog?.data as OrgUser).id);
-            await deleteUser(fd);
+            await runServerAction(() => deleteUser(fd));
           }}
           onClose={() => setDialog(null)}
         />
@@ -2608,7 +2609,7 @@ export function OrgContent({
           action={async () => {
             const fd = new FormData();
             fd.set("id", (dialog?.data as OrgTeam).orgNodeId);
-            await deleteTeam(fd);
+            await runServerAction(() => deleteTeam(fd));
           }}
           onClose={() => setDialog(null)}
         />

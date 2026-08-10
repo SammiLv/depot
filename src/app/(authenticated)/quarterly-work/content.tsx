@@ -7,6 +7,7 @@ import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
+import { runServerAction } from "@/lib/run-server-action";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2, Search } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
@@ -529,9 +530,9 @@ function QuarterlyWorkForm({
         ?? ""
     );
     if (mode === "edit") {
-      await updateQuarterlyWork(fd);
+      await runServerAction(() => updateQuarterlyWork(fd));
     } else {
-      await createQuarterlyWork(fd);
+      await runServerAction(() => createQuarterlyWork(fd));
     }
     onSuccess(ownerTeamOrgNodeIdByMemberId.get(nextOwnerId) ?? null);
     onClose();
@@ -690,7 +691,7 @@ function ProjectEditForm({
         const formData = new FormData(event.currentTarget);
         try {
           setErrorMessage("");
-          await updateProject(formData);
+          await runServerAction(() => updateProject(formData));
           onClose();
         } catch (error) {
           setErrorMessage(error instanceof Error ? error.message : "保存项目失败");
@@ -882,7 +883,7 @@ function ProjectCreateForm({
       try {
         setErrorMessage("");
         validateQuarterRange(formData);
-        await createProject(formData);
+        await runServerAction(() => createProject(formData));
         onClose();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "创建项目失败");
@@ -1075,7 +1076,7 @@ function ProductGoalCreateForm({
 
   return (
     <form action={async (fd: FormData) => {
-      await createProductGoal(fd);
+      await runServerAction(() => createProductGoal(fd));
       onClose();
     }}>
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
@@ -1162,7 +1163,7 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
 
   return (
     <form action={async (fd: FormData) => {
-      await createValueTrack(fd);
+      await runServerAction(() => createValueTrack(fd));
       router.refresh();
       onClose();
     }}>
@@ -1256,7 +1257,7 @@ function ValueOverviewEditForm({
       const formData = new FormData(event.currentTarget);
       try {
         setErrorMessage("");
-        await updateProjectValue(formData);
+        await runServerAction(() => updateProjectValue(formData));
         onClose();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "保存项目价值失败");
@@ -1348,7 +1349,7 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
       const formData = new FormData(event.currentTarget);
       try {
         setErrorMessage("");
-        await updateValueTrack(formData);
+        await runServerAction(() => updateValueTrack(formData));
         router.refresh();
         onClose();
       } catch (error) {
@@ -1445,7 +1446,7 @@ function ProductGoalEditForm({
       const formData = new FormData(event.currentTarget);
       try {
         setErrorMessage("");
-        await updateProductGoal(formData);
+        await runServerAction(() => updateProductGoal(formData));
         onClose();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "保存产品目标失败");
@@ -1532,7 +1533,7 @@ function ValueTrackDeleteForm({ item, onClose }: { item: Props["data"]["valueTra
   const router = useRouter();
   return (
     <form action={async (formData: FormData) => {
-      await deleteValueTrack(formData);
+      await runServerAction(() => deleteValueTrack(formData));
       router.refresh();
       onClose();
     }}>
@@ -1559,7 +1560,7 @@ function ValueTrackDeleteForm({ item, onClose }: { item: Props["data"]["valueTra
 function ProductGoalDeleteForm({ item, onClose }: { item: Props["data"]["productGoalColumns"][number]["items"][number]; onClose: () => void }) {
   return (
     <form action={async (formData: FormData) => {
-      await deleteProductGoal(formData);
+      await runServerAction(() => deleteProductGoal(formData));
       onClose();
     }}>
       <input type="hidden" name="productGoalId" value={item.id} />
@@ -1585,7 +1586,7 @@ function ProductGoalDeleteForm({ item, onClose }: { item: Props["data"]["product
 function ProjectDeleteForm({ item, onClose }: { item: Props["data"]["projectColumns"][number]["items"][number]; onClose: () => void }) {
   return (
     <form action={async (formData: FormData) => {
-      await deleteProject(formData);
+      await runServerAction(() => deleteProject(formData));
       onClose();
     }}>
       <input type="hidden" name="projectId" value={item.id} />
@@ -1611,7 +1612,7 @@ function ProjectDeleteForm({ item, onClose }: { item: Props["data"]["projectColu
 function QuarterlyWorkDeleteForm({ item, onClose }: { item: Props["data"]["columns"][number]["items"][number]; onClose: () => void }) {
   return (
     <form action={async (formData: FormData) => {
-      await deleteQuarterlyWork(formData);
+      await runServerAction(() => deleteQuarterlyWork(formData));
       onClose();
     }}>
       <input type="hidden" name="workId" value={item.id} />

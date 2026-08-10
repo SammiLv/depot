@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
+import { runServerAction } from "@/lib/run-server-action";
 import { Badge, Button, Card } from "@/components/ui-kit";
 
 type EditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL" | null;
@@ -299,13 +300,13 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
         formData.set("rejectRemark", rejectRemark);
       }
       if (action === "save") {
-        await savePersonalKpiScoring(formData);
+        await runServerAction(() => savePersonalKpiScoring(formData));
       } else if (action === "submit") {
-        await submitPersonalKpiScoring(formData);
+        await runServerAction(() => submitPersonalKpiScoring(formData));
       } else if (action === "approve") {
-        await approvePersonalKpiScoring(formData);
+        await runServerAction(() => approvePersonalKpiScoring(formData));
       } else {
-        await rejectPersonalKpiScoring(formData);
+        await runServerAction(() => rejectPersonalKpiScoring(formData));
       }
       setPendingAction(null);
       setRejectRemark("");
