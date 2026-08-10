@@ -449,8 +449,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     .filter((team): team is { orgNodeId: string; name: string; departmentOrgNodeId: string } => Boolean(team.departmentOrgNodeId));
 
   const now = new Date();
-  const fallbackYear = works[0]?.year ?? now.getFullYear();
-  const fallbackQuarter = works[0]?.quarter ?? Math.floor(now.getMonth() / 3) + 1;
+  const fallbackYear = now.getFullYear();
+  const fallbackQuarter = Math.floor(now.getMonth() / 3) + 1;
   const availableYears = Array.from(new Set(works.map((work) => work.year))).sort((a, b) => b - a);
   if (!availableYears.includes(fallbackYear)) availableYears.unshift(fallbackYear);
   const activeYear = availableYears.includes(options?.selectedYear ?? Number.NaN) ? options!.selectedYear! : fallbackYear;
