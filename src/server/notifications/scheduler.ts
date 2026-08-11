@@ -1,7 +1,11 @@
 import { prisma } from "@/server/db/prisma";
 import { emitNotificationEvent } from "@/server/notifications/emit";
-import { SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
-import { computeNextRunAt, parseScheduleConfig } from "@/server/notifications/schedule-utils";
+import { runKpiInitializationPendingScan } from "@/server/notifications/kpi-initialization-scan";
+import {
+  runAnnualGoalQuarterTargetMissingScan,
+  runAnnualGoalWeeklyProgressPendingScan,
+} from "@/server/notifications/annual-goal-schedule-scan";
+import { computeNextRunAt, getScheduleSlot, parseScheduleConfig } from "@/server/notifications/schedule-utils";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -14,21 +18,25 @@ function isSchedulerEnabled() {
   return !["0", "false", "off", "no"].includes(flag.toLowerCase());
 }
 
-async function claimScenarioRun(scenarioId: string, expectedNextRunAt: Date | null, nextRunAt: Date) {
+/** 原子认领：仅当场景仍到期时才推进 nextRunAt（避免 SQLite 精确时间比较失败）。 */
+async function claimScenarioRun(scenarioId: string, nextRunAt: Date) {
+  const now = new Date();
   const result = await prisma.notificationScenario.updateMany({
     where: {
       id: scenarioId,
       isActive: true,
-      ...(expectedNextRunAt
-        ? { nextRunAt: expectedNextRunAt }
-        : { OR: [{ nextRunAt: null }, { nextRunAt: { lte: new Date() } }] }),
+      OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
     },
     data: { nextRunAt },
   });
   return result.count > 0;
 }
 
-async function runKpiSelfReviewPendingScan(scenarioId: string, daysBefore: number) {
+async function runKpiSelfReviewPendingScan(
+  scenarioId: string,
+  daysBefore: number,
+  options?: { testRunId?: number | string; scheduleSlot?: string },
+) {
   const kpis = await prisma.personalKpi.findMany({
     where: {
       deletedAt: null,
@@ -64,11 +72,15 @@ async function runKpiSelfReviewPendingScan(scenarioId: string, daysBefore: numbe
       quarter: kpi.quarter,
       status: kpi.status,
       daysBefore,
-    }, { scenarioIds: [scenarioId] });
+    }, { scenarioIds: [scenarioId], testRunId: options?.testRunId, scheduleSlot: options?.scheduleSlot });
   }
 }
 
-async function runTodoDueScan(scenarioId: string, daysBefore: number) {
+async function runTodoDueScan(
+  scenarioId: string,
+  daysBefore: number,
+  options?: { testRunId?: number | string; scheduleSlot?: string },
+) {
   const now = new Date();
   const end = new Date(now);
   end.setDate(end.getDate() + Math.max(0, daysBefore));
@@ -103,7 +115,28 @@ async function runTodoDueScan(scenarioId: string, daysBefore: number) {
       targetType: todo.targetType,
       targetId: todo.targetId,
       daysBefore,
-    }, { scenarioIds: [scenarioId] });
+    }, { scenarioIds: [scenarioId], testRunId: options?.testRunId, scheduleSlot: options?.scheduleSlot });
+  }
+}
+
+async function runScanForSchedule(
+  scenarioId: string,
+  schedule: NonNullable<ReturnType<typeof parseScheduleConfig>>,
+  testRunId?: number | string,
+) {
+  const daysBefore = schedule.daysBefore ?? 0;
+  const scheduleSlot = getScheduleSlot();
+  const emitOptions = { scenarioIds: [scenarioId], testRunId, scheduleSlot };
+  if (schedule.scanType === "kpi_initialization_pending") {
+    await runKpiInitializationPendingScan(scenarioId, emitOptions);
+  } else if (schedule.scanType === "kpi_self_review_pending") {
+    await runKpiSelfReviewPendingScan(scenarioId, daysBefore, emitOptions);
+  } else if (schedule.scanType === "todo_due") {
+    await runTodoDueScan(scenarioId, daysBefore, emitOptions);
+  } else if (schedule.scanType === "annual_goal_weekly_progress_pending") {
+    await runAnnualGoalWeeklyProgressPendingScan(scenarioId, daysBefore, emitOptions);
+  } else if (schedule.scanType === "annual_goal_quarter_target_missing") {
+    await runAnnualGoalQuarterTargetMissingScan(scenarioId, emitOptions);
   }
 }
 
@@ -115,23 +148,43 @@ async function executeScheduleScenario(scenarioId: string) {
 
   const schedule = parseScheduleConfig(scenario.scheduleConfig);
   if (!schedule) {
-    console.error("[notifications] invalid scheduleConfig", scenario.id);
+    console.error("[notifications] invalid scheduleConfig", scenario.id, scenario.scheduleConfig);
     return;
   }
 
-  const nextRunAt = computeNextRunAt(schedule, new Date());
-  const claimed = await claimScenarioRun(scenario.id, scenario.nextRunAt, nextRunAt);
+  const nextRunAt = computeNextRunAt(schedule, new Date(), { skipGrace: true });
+  const claimed = await claimScenarioRun(scenario.id, nextRunAt);
   if (!claimed) return;
 
-  const scanMeta = SCHEDULE_SCAN_REGISTRY[schedule.scanType];
-  if (!scanMeta) return;
+  await runScanForSchedule(scenario.id, schedule);
+}
 
-  const daysBefore = schedule.daysBefore ?? 0;
-  if (schedule.scanType === "kpi_self_review_pending") {
-    await runKpiSelfReviewPendingScan(scenario.id, daysBefore);
-  } else if (schedule.scanType === "todo_due") {
-    await runTodoDueScan(scenario.id, daysBefore);
+/** 手动或测试触发定时扫描；默认不推进 nextRunAt。 */
+export async function runScheduleScenarioScan(
+  scenarioId: string,
+  options?: { advanceSchedule?: boolean; testRunId?: number | string },
+) {
+  const scenario = await prisma.notificationScenario.findFirst({
+    where: { id: scenarioId, isActive: true, triggerType: "SCHEDULE" },
+  });
+  if (!scenario) {
+    throw new Error("场景不存在或未启用");
   }
+
+  const schedule = parseScheduleConfig(scenario.scheduleConfig);
+  if (!schedule) {
+    throw new Error("定时配置无效，请检查扫描类型与执行时间");
+  }
+
+  if (options?.advanceSchedule) {
+    const nextRunAt = computeNextRunAt(schedule, new Date(), { skipGrace: true });
+    const claimed = await claimScenarioRun(scenario.id, nextRunAt);
+    if (!claimed) {
+      throw new Error("场景正在由调度器执行，请稍后再试");
+    }
+  }
+
+  await runScanForSchedule(scenario.id, schedule, options?.testRunId);
 }
 
 export async function tickNotificationScheduler() {
@@ -166,7 +219,8 @@ export function startNotificationScheduler() {
   console.info("[notifications] scheduler started");
 
   void tickNotificationScheduler();
+  const tickIntervalMs = process.env.NODE_ENV === "development" ? 15_000 : 60_000;
   setInterval(() => {
     void tickNotificationScheduler();
-  }, 60_000);
+  }, tickIntervalMs);
 }

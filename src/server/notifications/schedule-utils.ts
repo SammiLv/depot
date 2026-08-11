@@ -8,8 +8,17 @@ function parseTimeOfDay(timeOfDay: string) {
   return { hour, minute };
 }
 
+/** 定时任务去重槽位（按东八区自然日）。 */
+export function getScheduleSlot(date = new Date()) {
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+}
+
 /** 按 Asia/Shanghai 近似：使用本地时区（服务器应设为东八区）。 */
-export function computeNextRunAt(schedule: ScheduleConfig, from = new Date()) {
+export function computeNextRunAt(
+  schedule: ScheduleConfig,
+  from = new Date(),
+  options?: { skipGrace?: boolean },
+) {
   const { hour, minute } = parseTimeOfDay(schedule.timeOfDay || "09:00");
   const candidate = new Date(from);
   candidate.setSeconds(0, 0);
@@ -21,6 +30,19 @@ export function computeNextRunAt(schedule: ScheduleConfig, from = new Date()) {
   };
 
   if (candidate.getTime() <= from.getTime()) {
+    if (!options?.skipGrace) {
+      const missedMs = from.getTime() - candidate.getTime();
+      const graceMs = 30 * 60 * 1000;
+      if (missedMs <= graceMs) {
+        const immediate = new Date(from);
+        immediate.setSeconds(0, 0);
+        immediate.setMilliseconds(0);
+        if (immediate.getTime() <= from.getTime()) {
+          immediate.setMinutes(immediate.getMinutes() + 1);
+        }
+        return immediate;
+      }
+    }
     advanceOneDay();
   }
 
@@ -35,10 +57,64 @@ export function computeNextRunAt(schedule: ScheduleConfig, from = new Date()) {
   return candidate;
 }
 
+export type ScheduleNextRunPreview = {
+  nextRunAt: Date;
+  mode: "future" | "catchup_now" | "tomorrow";
+};
+
+/** 预览保存后的下次执行计划（不含 skipGrace，与保存逻辑一致）。 */
+export function previewScheduleNextRun(schedule: ScheduleConfig, from = new Date()): ScheduleNextRunPreview {
+  const { hour, minute } = parseTimeOfDay(schedule.timeOfDay || "09:00");
+  const candidate = new Date(from);
+  candidate.setSeconds(0, 0);
+  candidate.setMilliseconds(0);
+  candidate.setHours(hour, minute, 0, 0);
+
+  if (candidate.getTime() > from.getTime()) {
+    return { nextRunAt: candidate, mode: "future" };
+  }
+
+  const missedMs = from.getTime() - candidate.getTime();
+  const graceMs = 30 * 60 * 1000;
+  if (missedMs <= graceMs) {
+    const immediate = new Date(from);
+    immediate.setSeconds(0, 0);
+    immediate.setMilliseconds(0);
+    if (immediate.getTime() <= from.getTime()) {
+      immediate.setMinutes(immediate.getMinutes() + 1);
+    }
+    return { nextRunAt: immediate, mode: "catchup_now" };
+  }
+
+  return {
+    nextRunAt: computeNextRunAt(schedule, from, { skipGrace: true }),
+    mode: "tomorrow",
+  };
+}
+
+export function formatScheduleNextRunHint(preview: ScheduleNextRunPreview, timeOfDay: string) {
+  const when = preview.nextRunAt.toLocaleString("zh-CN", { hour12: false });
+  if (preview.mode === "future") {
+    return `保存后将于 ${when} 首次执行。建议在执行时间之前保存，以确保准时触发。`;
+  }
+  if (preview.mode === "catchup_now") {
+    return `当前已超过今日 ${timeOfDay}。保存后将立即补跑一次（约 ${when}），之后仍按每天 ${timeOfDay} 定时执行。`;
+  }
+  return `当前已超过今日 ${timeOfDay} 30 分钟以上。保存后将推迟到 ${when} 执行，今日不会补跑。`;
+}
+
 export function parseScheduleConfig(value: unknown): ScheduleConfig | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const raw = value as Partial<ScheduleConfig>;
-  if (raw.scanType !== "kpi_self_review_pending" && raw.scanType !== "todo_due") return null;
+  if (
+    raw.scanType !== "kpi_initialization_pending"
+    && raw.scanType !== "kpi_self_review_pending"
+    && raw.scanType !== "todo_due"
+    && raw.scanType !== "annual_goal_weekly_progress_pending"
+    && raw.scanType !== "annual_goal_quarter_target_missing"
+  ) {
+    return null;
+  }
   if (raw.frequency !== "daily" && raw.frequency !== "weekly") return null;
   return {
     frequency: raw.frequency,

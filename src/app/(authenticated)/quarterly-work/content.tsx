@@ -41,7 +41,7 @@ type ValueTrackDeleteState = Props["data"]["valueTrackItems"][number] | null;
 type ValueOverviewDialogState = Props["data"]["valueOverviewItems"][number] | null;
 type ProductGoalDialogState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
 type ProductGoalDeleteState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
-type ProjectDeleteState = Props["data"]["projectColumns"][number]["items"][number] | null;
+type ProjectDeleteState = Props["data"]["projectColumns"][number]["items"][number] | Props["data"]["valueOverviewItems"][number] | null;
 type BoardDeleteState = Props["data"]["columns"][number]["items"][number] | null;
 type FormSuccessHandler = (ownerTeamOrgNodeId: Props["data"]["memberOptions"][number]["teamOrgNodeId"] | null) => void;
 
@@ -651,6 +651,57 @@ function QuarterlyWorkForm({
   );
 }
 
+function validateSelectedProductGoalIds(formData: FormData) {
+  const productGoalIds = formData.getAll("productGoalIds").map((value) => String(value).trim()).filter(Boolean);
+  if (!productGoalIds.length) {
+    throw new Error("产品目标为必填项，请至少选择一个");
+  }
+}
+
+function ProductGoalMultiPicker({
+  options,
+  defaultSelectedIds = [],
+}: {
+  options: Array<{ id: string; title: string; year: number }>;
+  defaultSelectedIds?: string[];
+}) {
+  const [selectedIds, setSelectedIds] = useState(defaultSelectedIds);
+
+  const toggleSelection = (goalId: string) => {
+    setSelectedIds((current) => (
+      current.includes(goalId)
+        ? current.filter((id) => id !== goalId)
+        : [...current, goalId]
+    ));
+  };
+
+  return (
+    <div className="space-y-2">
+      {selectedIds.map((goalId) => (
+        <input key={goalId} type="hidden" name="productGoalIds" value={goalId} />
+      ))}
+      <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background">
+        {options.length ? options.map((goal) => (
+          <label
+            key={goal.id}
+            className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30"
+          >
+            <input
+              type="checkbox"
+              checked={selectedIds.includes(goal.id)}
+              onChange={() => toggleSelection(goal.id)}
+            />
+            <span className="min-w-0 flex-1 break-words">{goal.year} · {goal.title}</span>
+          </label>
+        )) : (
+          <div className="px-3 py-4 text-sm text-muted-foreground">暂无可选产品目标</div>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground">已选 {selectedIds.length} 个，至少选择 1 个</div>
+    </div>
+  );
+}
+
 function ProjectEditForm({
   data,
   item,
@@ -691,6 +742,7 @@ function ProjectEditForm({
         const formData = new FormData(event.currentTarget);
         try {
           setErrorMessage("");
+          validateSelectedProductGoalIds(formData);
           await runServerAction(() => updateProject(formData));
           onClose();
         } catch (error) {
@@ -709,17 +761,11 @@ function ProjectEditForm({
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="产品目标" align="center">
-          <select
-            name="productGoalId"
-            defaultValue={item.productGoalId ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="">请选择产品目标</option>
-            {productGoalOptions.map((goal) => (
-              <option key={goal.id} value={goal.id}>{goal.year} · {goal.title}</option>
-            ))}
-          </select>
+        <FormRow label="产品目标 *">
+          <ProductGoalMultiPicker
+            options={productGoalOptions}
+            defaultSelectedIds={item.productGoalIds}
+          />
         </FormRow>
         <FormRow label="负责人 *" align="center">
           <MemberPicker
@@ -832,7 +878,7 @@ function ProjectCreateForm({
   departmentOrgNodeId,
   memberOptions,
   defaultStatus,
-  defaultProductGoalId,
+  defaultProductGoalIds,
   onClose,
 }: {
   data: Props["data"];
@@ -840,7 +886,7 @@ function ProjectCreateForm({
   departmentOrgNodeId: string;
   memberOptions: MemberPickerOption[];
   defaultStatus?: ProjectStatus;
-  defaultProductGoalId?: string;
+  defaultProductGoalIds?: string[];
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
@@ -883,6 +929,7 @@ function ProjectCreateForm({
       try {
         setErrorMessage("");
         validateQuarterRange(formData);
+        validateSelectedProductGoalIds(formData);
         await runServerAction(() => createProject(formData));
         onClose();
       } catch (error) {
@@ -899,17 +946,11 @@ function ProjectCreateForm({
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="产品目标" align="center">
-          <select
-            name="productGoalId"
-            defaultValue={defaultProductGoalId ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="">请选择产品目标</option>
-            {productGoalOptions.map((goal) => (
-              <option key={goal.id} value={goal.id}>{goal.year} · {goal.title}</option>
-            ))}
-          </select>
+        <FormRow label="产品目标 *">
+          <ProductGoalMultiPicker
+            options={productGoalOptions}
+            defaultSelectedIds={defaultProductGoalIds ?? []}
+          />
         </FormRow>
         <FormRow label="负责人 *" align="center">
           <MemberPicker
@@ -1583,7 +1624,7 @@ function ProductGoalDeleteForm({ item, onClose }: { item: Props["data"]["product
   );
 }
 
-function ProjectDeleteForm({ item, onClose }: { item: Props["data"]["projectColumns"][number]["items"][number]; onClose: () => void }) {
+function ProjectDeleteForm({ item, onClose }: { item: NonNullable<ProjectDeleteState>; onClose: () => void }) {
   return (
     <form action={async (formData: FormData) => {
       await runServerAction(() => deleteProject(formData));
@@ -1660,7 +1701,14 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [projectDeleteDialog, setProjectDeleteDialog] = useState<ProjectDeleteState>(null);
   const [boardDeleteDialog, setBoardDeleteDialog] = useState<BoardDeleteState>(null);
   const [createProjectDialog, setCreateProjectDialog] = useState<ProjectStatus | null>(null);
-  const [createProjectProductGoalId, setCreateProjectProductGoalId] = useState<string | null>(null);
+  const [createProjectProductGoalIds, setCreateProjectProductGoalIds] = useState<string[]>([]);
+  const canManageProductGoal = data.permissions.canManageProductGoal;
+  const canManageProjectAndValueTracking = data.permissions.canManageProjectAndValueTracking;
+  const canManageProductTask = data.permissions.canManageProductTask;
+  const canCreateProductGoal = data.canCreate && canManageProductGoal;
+  const canCreateProject = data.canCreate && canManageProjectAndValueTracking;
+  const canCreateTask = data.canCreate && canManageProductTask;
+  const canCreateValueTrack = data.canCreate && canManageProjectAndValueTracking;
   const allItems = useMemo(() => data.columns.flatMap((column) => column.items), [data.columns]);
   const teamDepartmentMap = useMemo(
     () => new Map(data.teamOptions.map((team) => [team.id, team.departmentOrgNodeId])),
@@ -1797,12 +1845,15 @@ export function QuarterlyWorkContent({ data }: Props) {
     })),
     [visibleProductGoalColumns]
   );
-  const getProductGoalOptionsForForm = (currentProductGoalId?: string | null) => {
-    if (!currentProductGoalId || visibleProductGoalOptions.some((goal) => goal.id === currentProductGoalId)) {
-      return visibleProductGoalOptions;
-    }
-    const currentGoal = data.productGoalOptions.find((goal) => goal.id === currentProductGoalId);
-    return currentGoal ? [...visibleProductGoalOptions, currentGoal] : visibleProductGoalOptions;
+  const getProductGoalOptionsForForm = (currentProductGoalIds?: string[]) => {
+    const missingIds = (currentProductGoalIds ?? []).filter(
+      (goalId) => !visibleProductGoalOptions.some((goal) => goal.id === goalId),
+    );
+    if (!missingIds.length) return visibleProductGoalOptions;
+    const extraGoals = missingIds
+      .map((goalId) => data.productGoalOptions.find((goal) => goal.id === goalId))
+      .filter((goal): goal is NonNullable<typeof goal> => Boolean(goal));
+    return [...visibleProductGoalOptions, ...extraGoals];
   };
   const getMemberOptionsForForm = (preserveOwnerId?: string | null) =>
     resolveMemberOptionsForForm(data.memberOptions, departmentTab, teamDepartmentMap, preserveOwnerId);
@@ -1893,15 +1944,23 @@ export function QuarterlyWorkContent({ data }: Props) {
               ))}
             </div>
 
-            {data.canCreate && (
+            {(canCreateProductGoal || canCreateProject || canCreateTask || canCreateValueTrack) && (
               <div className="flex items-center gap-2">
-                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProductGoalDialog(true)}><Plus className="h-4 w-4" />新增产品目标</Button>
-                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
-                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增任务</Button>
-                <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => {
-                  setCreateValueTrackProjectId(null);
-                  setCreateValueTrackDialog(true);
-                }}><Plus className="h-4 w-4" />新增价值跟踪</Button>
+                {canCreateProductGoal ? (
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProductGoalDialog(true)}><Plus className="h-4 w-4" />新增产品目标</Button>
+                ) : null}
+                {canCreateProject ? (
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
+                ) : null}
+                {canCreateTask ? (
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增任务</Button>
+                ) : null}
+                {canCreateValueTrack ? (
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => {
+                    setCreateValueTrackProjectId(null);
+                    setCreateValueTrackDialog(true);
+                  }}><Plus className="h-4 w-4" />新增价值跟踪</Button>
+                ) : null}
               </div>
             )}
 
@@ -1966,7 +2025,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                       <Badge tone={column.tone}>{column.title}</Badge>
                       <span className="text-xs text-muted-foreground">{column.items.length}</span>
                     </div>
-                    {data.canCreate && (
+                    {canCreateProductGoal ? (
                       <button
                         type="button"
                         onClick={() => setCreateProductGoalDialog(true)}
@@ -1974,7 +2033,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                       >
                         + 添加
                       </button>
-                    )}
+                    ) : null}
                   </div>
                   <div className="space-y-2">
                     {column.items.length ? (
@@ -1988,25 +2047,39 @@ export function QuarterlyWorkContent({ data }: Props) {
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCreateProjectProductGoalId(item.id);
-                                  setCreateProjectDialog("NOT_STARTED");
-                                }}
-                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`为${item.title}新增项目`}
-                              >
-                                <Plus className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setProductGoalDialog(item)}
-                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`编辑${item.title}`}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
+                              {canCreateProject ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCreateProjectProductGoalIds([item.id]);
+                                    setCreateProjectDialog("NOT_STARTED");
+                                  }}
+                                  className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                  aria-label={`为${item.title}新增项目`}
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </button>
+                              ) : null}
+                              {canManageProductGoal ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setProductGoalDialog(item)}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                    aria-label={`编辑${item.title}`}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setProductGoalDeleteDialog(item)}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                    aria-label={`删除${item.title}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </>
+                              ) : null}
                             </div>
                           </div>
                           <div className="mt-3 text-xs text-muted-foreground">
@@ -2048,24 +2121,28 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="text-right">
-                          <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                            <button
-                              type="button"
-                              onClick={() => setProductGoalDialog(item)}
-                              className="text-primary hover:underline"
-                              aria-label={`编辑${item.title}`}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setProductGoalDeleteDialog(item)}
-                              className="text-destructive hover:underline"
-                              aria-label={`删除${item.title}`}
-                            >
-                              删除
-                            </button>
-                          </div>
+                          {canManageProductGoal ? (
+                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                              <button
+                                type="button"
+                                onClick={() => setProductGoalDialog(item)}
+                                className="text-primary hover:underline"
+                                aria-label={`编辑${item.title}`}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setProductGoalDeleteDialog(item)}
+                                className="text-destructive hover:underline"
+                                aria-label={`删除${item.title}`}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </div>
                       </div>
                     ))
@@ -2094,7 +2171,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                       <Badge tone={column.tone}>{column.title}</Badge>
                       <span className="text-xs text-muted-foreground">{column.items.length}</span>
                     </div>
-                    {data.canCreate && (
+                    {canCreateProject ? (
                       <button
                         type="button"
                         onClick={() => setCreateProjectDialog(column.status)}
@@ -2102,7 +2179,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                       >
                         + 添加
                       </button>
-                    )}
+                    ) : null}
                   </div>
                   <div className="space-y-2">
                     {column.items.length ? (
@@ -2118,22 +2195,36 @@ export function QuarterlyWorkContent({ data }: Props) {
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}
-                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`为${item.title}新增任务`}
-                              >
-                                <Plus className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setProjectDialog({ item, title: column.title })}
-                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`编辑${item.title}`}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
+                              {canCreateTask ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}
+                                  className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                  aria-label={`为${item.title}新增任务`}
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </button>
+                              ) : null}
+                              {canManageProjectAndValueTracking ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setProjectDialog({ item, title: column.title })}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                    aria-label={`编辑${item.title}`}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setProjectDeleteDialog(item)}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                    aria-label={`删除${item.title}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </>
+                              ) : null}
                             </div>
                           </div>
                           <div className="mt-3 flex items-center justify-between gap-4 text-xs text-muted-foreground">
@@ -2183,24 +2274,28 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="min-w-0 text-right">
-                          <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                            <button
-                              type="button"
-                              onClick={() => setProjectDialog({ item, title: projectTitleByStatus[item.status] })}
-                              className="text-primary hover:underline"
-                              aria-label={`编辑${item.title}`}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setProjectDeleteDialog(item)}
-                              className="text-destructive hover:underline"
-                              aria-label={`删除${item.title}`}
-                            >
-                              删除
-                            </button>
-                          </div>
+                          {canManageProjectAndValueTracking ? (
+                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                              <button
+                                type="button"
+                                onClick={() => setProjectDialog({ item, title: projectTitleByStatus[item.status] })}
+                                className="text-primary hover:underline"
+                                aria-label={`编辑${item.title}`}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setProjectDeleteDialog(item)}
+                                className="text-destructive hover:underline"
+                                aria-label={`删除${item.title}`}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </div>
                       </div>
                     ))
@@ -2230,7 +2325,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <Badge tone={c.tone}>{c.title}</Badge>
                         <span className="text-xs text-muted-foreground">{c.items.length}</span>
                       </div>
-                      {data.canCreate && (
+                      {canCreateTask ? (
                         <button
                           type="button"
                           onClick={() => setCreateDialog({ status: c.status, title: c.title })}
@@ -2238,7 +2333,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                         >
                           + 添加
                         </button>
-                      )}
+                      ) : null}
                     </div>
                     <div className="space-y-2">
                       {c.items.length ? (
@@ -2249,14 +2344,26 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 <div className="text-sm font-medium leading-snug">{it.title}</div>
                                 <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => setEditDialog({ item: it, title: c.title })}
-                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                aria-label={`编辑${it.title}`}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
+                              {canManageProductTask ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditDialog({ item: it, title: c.title })}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                    aria-label={`编辑${it.title}`}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setBoardDeleteDialog(it)}
+                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                    aria-label={`删除${it.title}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
                             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                               <span>{it.owner}</span>
@@ -2332,24 +2439,28 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="text-right">
-                          <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                            <button
-                              type="button"
-                              onClick={() => setEditDialog({ item, title: columnTitleByStatus[item.status] })}
-                              className="text-primary hover:underline"
-                              aria-label={`编辑${item.title}`}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setBoardDeleteDialog(item)}
-                              className="text-destructive hover:underline"
-                              aria-label={`删除${item.title}`}
-                            >
-                              删除
-                            </button>
-                          </div>
+                          {canManageProductTask ? (
+                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                              <button
+                                type="button"
+                                onClick={() => setEditDialog({ item, title: columnTitleByStatus[item.status] })}
+                                className="text-primary hover:underline"
+                                aria-label={`编辑${item.title}`}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setBoardDeleteDialog(item)}
+                                className="text-destructive hover:underline"
+                                aria-label={`删除${item.title}`}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </div>
                       </div>
                     ))
@@ -2393,22 +2504,36 @@ export function QuarterlyWorkContent({ data }: Props) {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => openValueTrackCreateDialog(item.id)}
-                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                    aria-label={`为${item.title}新增价值跟踪`}
-                                  >
-                                    <Plus className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setValueOverviewDialog(item)}
-                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                    aria-label={`编辑${item.title}的项目价值`}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </button>
+                                  {canCreateValueTrack ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => openValueTrackCreateDialog(item.id)}
+                                      className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                      aria-label={`为${item.title}新增价值跟踪`}
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                    </button>
+                                  ) : null}
+                                  {canManageProjectAndValueTracking ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => setValueOverviewDialog(item)}
+                                        className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                        aria-label={`编辑${item.title}的项目价值`}
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setProjectDeleteDialog(item)}
+                                        className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                        aria-label={`删除${item.title}`}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="mt-3 space-y-2 text-xs text-muted-foreground">
@@ -2470,22 +2595,26 @@ export function QuarterlyWorkContent({ data }: Props) {
                             <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                             <div className="text-right">
                               <div className="inline-flex flex-col items-end gap-1 whitespace-nowrap text-sm">
-                                <button
-                                  type="button"
-                                  onClick={() => setValueOverviewDialog(item)}
-                                  className="text-primary hover:underline"
-                                  aria-label={`编辑${item.title}的项目价值`}
-                                >
-                                  编辑
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => openValueTrackCreateDialog(item.id)}
-                                  className="text-primary hover:underline"
-                                  aria-label={`为${item.title}新增价值跟踪`}
-                                >
-                                  新增跟踪
-                                </button>
+                                {canManageProjectAndValueTracking ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setValueOverviewDialog(item)}
+                                    className="text-primary hover:underline"
+                                    aria-label={`编辑${item.title}的项目价值`}
+                                  >
+                                    编辑
+                                  </button>
+                                ) : null}
+                                {canCreateValueTrack ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openValueTrackCreateDialog(item.id)}
+                                    className="text-primary hover:underline"
+                                    aria-label={`为${item.title}新增价值跟踪`}
+                                  >
+                                    新增跟踪
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   onClick={() => focusValueTrackLogs(item.title)}
@@ -2528,24 +2657,28 @@ export function QuarterlyWorkContent({ data }: Props) {
                           <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.trackingResult}</div>
                           <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.followUpOptimization || "—"}</div>
                           <div className="text-right">
-                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                              <button
-                                type="button"
-                                onClick={() => setValueTrackDialog(item)}
-                                className="text-primary hover:underline"
-                                aria-label={`编辑${item.projectTitle}的价值跟踪`}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setValueTrackDeleteDialog(item)}
-                                className="text-destructive hover:underline"
-                                aria-label={`删除${item.projectTitle}的价值跟踪`}
-                              >
-                                删除
-                              </button>
-                            </div>
+                            {canManageProjectAndValueTracking ? (
+                              <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                                <button
+                                  type="button"
+                                  onClick={() => setValueTrackDialog(item)}
+                                  className="text-primary hover:underline"
+                                  aria-label={`编辑${item.projectTitle}的价值跟踪`}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setValueTrackDeleteDialog(item)}
+                                  className="text-destructive hover:underline"
+                                  aria-label={`删除${item.projectTitle}的价值跟踪`}
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </div>
                         </div>
                       ))
@@ -2600,7 +2733,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           <ProjectEditForm
             data={data}
             item={projectDialog.item}
-            productGoalOptions={getProductGoalOptionsForForm(projectDialog.item.productGoalId)}
+            productGoalOptions={getProductGoalOptionsForForm(projectDialog.item.productGoalIds)}
             departmentOrgNodeId={departmentTab}
             memberOptions={getMemberOptionsForForm(projectDialog.item.ownerId)}
             onClose={() => setProjectDialog(null)}
@@ -2703,7 +2836,7 @@ export function QuarterlyWorkContent({ data }: Props) {
 
       <Dialog open={!!createProjectDialog} onClose={() => {
         setCreateProjectDialog(null);
-        setCreateProjectProductGoalId(null);
+        setCreateProjectProductGoalIds([]);
       }} title="新增项目">
         {createProjectDialog && (
           <ProjectCreateForm
@@ -2712,10 +2845,10 @@ export function QuarterlyWorkContent({ data }: Props) {
             departmentOrgNodeId={departmentTab}
             memberOptions={getMemberOptionsForForm()}
             defaultStatus={createProjectDialog}
-            defaultProductGoalId={createProjectProductGoalId ?? undefined}
+            defaultProductGoalIds={createProjectProductGoalIds}
             onClose={() => {
               setCreateProjectDialog(null);
-              setCreateProjectProductGoalId(null);
+              setCreateProjectProductGoalIds([]);
             }}
           />
         )}

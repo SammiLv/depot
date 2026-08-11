@@ -119,6 +119,22 @@ test("configured snapshot maps every policy and step field to persistence data",
   assert.equal(stepData[1]?.status, "WAITING");
 });
 
+test("parallel approvers at the same step order all start pending", () => {
+  const snapshot = buildConfiguredKpiApprovalSnapshot(configuredPolicy, [
+    ...resolvedSteps.slice(0, 1),
+    {
+      ...resolvedSteps[0]!,
+      approverId: "leader-2",
+    },
+    ...resolvedSteps.slice(1),
+  ]);
+  const stepData = buildPersonalKpiApprovalStepData("personal-kpi-1", snapshot);
+  const stepOne = stepData.filter((step) => step.stepOrder === 1);
+  assert.equal(stepOne.length, 2);
+  assert.deepEqual(stepOne.map((step) => step.status), ["PENDING", "PENDING"]);
+  assert.equal(stepData.find((step) => step.stepOrder === 2)?.status, "WAITING");
+});
+
 test("configured strategy is used without invoking the legacy chain", async () => {
   let legacyInvoked = false;
   const snapshot = await resolveKpiApprovalSnapshot({

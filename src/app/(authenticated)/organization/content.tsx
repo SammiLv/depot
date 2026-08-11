@@ -5,7 +5,7 @@ import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { runServerAction } from "@/lib/run-server-action";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree, Search } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyNotificationPermissionToAllDepartments, applyProductManagementPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveNotificationRolePermissions, saveProductManagementRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyNotificationPermissionChangesToAllDepartments, saveAndApplyProductManagementPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments, saveAndApplyNotificationPermissionsToAllDepartments, saveAndApplyProductManagementPermissionsToAllDepartments } from "@/server/organization/actions";
 import {
   buildKpiApprovalOrgTreeIndex,
   getKpiApprovalOrgNodeIdsAtDepth,
@@ -90,6 +90,22 @@ type ScopedKpiPermission = {
   cells: Record<RoleType, PermissionCellState>;
 };
 
+type ScopedNotificationPermission = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  cells: Record<RoleType, PermissionCellState>;
+};
+
+type ScopedProductManagementPermission = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  cells: Record<RoleType, PermissionCellState>;
+};
+
 type KpiUserPermissionGrant = {
   id: string;
   userId: string;
@@ -141,7 +157,7 @@ type PermissionScopeOption = {
 };
 
 type ApplyAllDialogData = {
-  kind: "menu" | "annual-goal" | "kpi";
+  kind: "menu" | "annual-goal" | "kpi" | "notification" | "product-management";
   permissionId: string;
   permissionName: string;
   roleType: RoleType;
@@ -150,7 +166,7 @@ type ApplyAllDialogData = {
 };
 
 type PermissionMatrixSyncDialogData = {
-  kind: "menu" | "annual-goal" | "kpi";
+  kind: "menu" | "annual-goal" | "kpi" | "notification" | "product-management";
   mode: "CHANGES" | "FULL";
   moduleName: string;
   permissions: string;
@@ -176,13 +192,15 @@ type Props = {
   scopeOptions: PermissionScopeOption[];
   initialScope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
   initialTab: "organization" | "permissions";
-  initialPermissionSection: "menu" | "annual-goal" | "kpi" | "approval-policy";
+  initialPermissionSection: "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "approval-policy";
   scopeViews: Record<string, {
     department: OrgDepartment | null;
     organizationHierarchyRoot: OrganizationEntityNode | null;
     menus: OrgMenu[];
     annualGoalPermissions: ScopedAnnualGoalPermission[];
     kpiPermissions: ScopedKpiPermission[];
+    notificationPermissions: ScopedNotificationPermission[];
+    productManagementPermissions: ScopedProductManagementPermission[];
     kpiUserPermissionGrants: KpiUserPermissionGrant[];
     kpiApprovalPolicies: KpiApprovalPolicy[];
   }>;
@@ -232,6 +250,36 @@ function buildPermissionChangedItems(
       afterAllowed,
     }];
   }));
+}
+
+function countDepartmentSyncValueChanges(
+  initialCells: Record<string, PermissionCellState>,
+  draftCells: Record<string, PermissionCellState>,
+) {
+  return Object.entries(draftCells).filter(([key, cell]) => {
+    if (key.startsWith("ADMIN:")) return false;
+    return (initialCells[key]?.allowed ?? false) !== cell.allowed;
+  }).length;
+}
+
+function canSyncPermissionMatrixToDepartments(
+  hasChanges: boolean,
+  departmentSyncChangeCount: number,
+  mode: "CHANGES" | "FULL",
+) {
+  if (departmentSyncChangeCount > 0) {
+    return true;
+  }
+  return mode === "FULL" && !hasChanges;
+}
+
+function buildDepartmentSyncChangedItems(
+  initialCells: Record<string, PermissionCellState>,
+  draftCells: Record<string, PermissionCellState>,
+  permissions: readonly { id: string; name: string }[],
+) {
+  return buildPermissionChangedItems(initialCells, draftCells, permissions)
+    .filter((item) => item.roleLabel !== "初始管理员");
 }
 
 function PermissionBulkCheckbox({
@@ -1044,7 +1092,11 @@ function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogDat
     ? applyRoleMenuPermissionToAllDepartments
     : data.kind === "annual-goal"
       ? applyAnnualGoalPermissionToAllDepartments
-      : applyKpiPermissionToAllDepartments;
+      : data.kind === "notification"
+        ? applyNotificationPermissionToAllDepartments
+        : data.kind === "product-management"
+          ? applyProductManagementPermissionToAllDepartments
+          : applyKpiPermissionToAllDepartments;
 
   return (
     <form action={async (fd) => { await runServerAction(() => action(fd)); onClose(); }} className="space-y-4">
@@ -1071,11 +1123,15 @@ function PermissionMatrixSyncConfirm({ data, onClose }: { data: PermissionMatrix
     menu: saveAndApplyRoleMenuPermissionChangesToAllDepartments,
     "annual-goal": saveAndApplyAnnualGoalPermissionChangesToAllDepartments,
     kpi: saveAndApplyKpiPermissionChangesToAllDepartments,
+    notification: saveAndApplyNotificationPermissionChangesToAllDepartments,
+    "product-management": saveAndApplyProductManagementPermissionChangesToAllDepartments,
   };
   const fullActions = {
     menu: saveAndApplyRoleMenuPermissionsToAllDepartments,
     "annual-goal": saveAndApplyAnnualGoalPermissionsToAllDepartments,
     kpi: saveAndApplyKpiPermissionsToAllDepartments,
+    notification: saveAndApplyNotificationPermissionsToAllDepartments,
+    "product-management": saveAndApplyProductManagementPermissionsToAllDepartments,
   };
   const action = data.mode === "CHANGES" ? changesActions[data.kind] : fullActions[data.kind];
   return (
@@ -1140,6 +1196,7 @@ function PermissionMatrixSyncConfirm({ data, onClose }: { data: PermissionMatrix
         {data.mode === "CHANGES"
           ? "系统将先保存当前系统矩阵，并把以上变更同步到所有部门；其他权限保留各部门现有配置。"
           : "系统将保存当前系统矩阵，并把以上变更同步到所有部门；各部门在本模块中的独立角色配置将被替换。"}
+        系统管理员的权限不会同步至部门。
       </p>
       {error ? <div role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
       <div className="flex justify-end gap-3">
@@ -1159,6 +1216,7 @@ function PermissionMatrixSaveActions({
   valueChangeCount,
   reset,
   onSync,
+  showSync = true,
 }: {
   saveAction: (formData: FormData) => Promise<void>;
   scopeType: PermissionScopeType;
@@ -1168,13 +1226,17 @@ function PermissionMatrixSaveActions({
   valueChangeCount: number;
   reset: () => void;
   onSync: (mode: "CHANGES" | "FULL") => void;
+  showSync?: boolean;
 }) {
+  const canSyncChanges = canSyncPermissionMatrixToDepartments(hasChanges, valueChangeCount, "CHANGES");
+  const canSyncFull = canSyncPermissionMatrixToDepartments(hasChanges, valueChangeCount, "FULL");
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      {scopeType === "SYSTEM" ? (
+      {showSync && scopeType === "SYSTEM" ? (
         <>
-          <button type="button" disabled={valueChangeCount === 0} onClick={() => onSync("CHANGES")} className="inline-flex h-9 items-center justify-center rounded-lg border border-warning/50 bg-card px-4 text-sm font-medium text-warning transition-all hover:bg-warning/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">保存并同步本次变更</button>
-          <button type="button" onClick={() => onSync("FULL")} className="inline-flex h-9 items-center justify-center rounded-lg border border-destructive/40 bg-card px-4 text-sm font-medium text-destructive transition-all hover:bg-destructive/10 active:scale-[0.99]">完整同步至所有部门</button>
+          <button type="button" disabled={!canSyncChanges} onClick={() => onSync("CHANGES")} className="inline-flex h-9 items-center justify-center rounded-lg border border-warning/50 bg-card px-4 text-sm font-medium text-warning transition-all hover:bg-warning/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">保存并同步本次变更</button>
+          <button type="button" disabled={!canSyncFull} onClick={() => onSync("FULL")} className="inline-flex h-9 items-center justify-center rounded-lg border border-destructive/40 bg-card px-4 text-sm font-medium text-destructive transition-all hover:bg-destructive/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">完整同步至所有部门</button>
         </>
       ) : null}
       <form action={saveAction} className="flex gap-2">
@@ -1582,7 +1644,7 @@ export function OrgContent({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
-  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi" | "approval-policy">(initialPermissionSection);
+  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "approval-policy">(initialPermissionSection);
   const [organizationViewMode, setOrganizationViewMode] = useState<"list" | "tree">("tree");
   const [selectedScope, setSelectedScope] = useState(initialScope);
   const selectedScopeKey = `${selectedScope.scopeType}:${selectedScope.departmentOrgNodeId}`;
@@ -1593,6 +1655,8 @@ export function OrgContent({
     menus,
     annualGoalPermissions,
     kpiPermissions,
+    notificationPermissions,
+    productManagementPermissions,
     kpiUserPermissionGrants,
     kpiApprovalPolicies,
   } = selectedScopeView;
@@ -1625,16 +1689,33 @@ export function OrgContent({
     { ...permission.cells[role.value] },
   ])));
   const [draftKpiCells, setDraftKpiCells] = useState<Record<string, PermissionCellState>>(initialKpiCells);
+  const initialNotificationCells = Object.fromEntries(notificationPermissions.flatMap((permission) => roleOptions.map((role) => [
+    `${role.value}:${permission.id}`,
+    { ...permission.cells[role.value] },
+  ])));
+  const [draftNotificationCells, setDraftNotificationCells] = useState<Record<string, PermissionCellState>>(initialNotificationCells);
+  const initialProductManagementCells = Object.fromEntries(productManagementPermissions.flatMap((permission) => roleOptions.map((role) => [
+    `${role.value}:${permission.id}`,
+    { ...permission.cells[role.value] },
+  ])));
+  const [draftProductManagementCells, setDraftProductManagementCells] = useState<Record<string, PermissionCellState>>(initialProductManagementCells);
   const visibleRoleTypes = permissionRoleOptions.map((role) => role.value);
   const menuPermissionIds = menus.map((menu) => menu.id);
   const annualGoalPermissionIds = annualGoalPermissions.map((permission) => permission.id);
   const kpiPermissionIds = kpiPermissions.map((permission) => permission.id);
+  const notificationPermissionIds = notificationPermissions.map((permission) => permission.id);
+  const productManagementPermissionIds = productManagementPermissions.map((permission) => permission.id);
   const roleMenuCellKeys = buildPermissionCellKeys(visibleRoleTypes, menuPermissionIds);
   const annualGoalCellKeys = buildPermissionCellKeys(visibleRoleTypes, annualGoalPermissionIds);
   const kpiCellKeys = buildPermissionCellKeys(visibleRoleTypes, kpiPermissionIds);
+  const notificationCellKeys = buildPermissionCellKeys(visibleRoleTypes, notificationPermissionIds);
+  const productManagementCellKeys = buildPermissionCellKeys(visibleRoleTypes, productManagementPermissionIds);
   const lockedRoleMenuCellKeys = new Set(menus
     .filter((menu) => ["/organization", "/dashboard"].includes(menu.path))
     .map((menu) => `ADMIN:${menu.id}`));
+  const lockedNotificationCellKeys = new Set<string>();
+  const canEditNotificationPermissions = canManageRolePermissions;
+  const canEditProductManagementPermissions = canManageRolePermissions;
   const draftRoleMenuKeyString = JSON.stringify(draftRoleMenuCells);
   const initialRoleMenuKeyString = JSON.stringify(initialRoleMenuCells);
   const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
@@ -1652,13 +1733,35 @@ export function OrgContent({
   const draftKpiPermissionKeyString = JSON.stringify(draftKpiCells);
   const initialKpiPermissionKeyString = JSON.stringify(initialKpiCells);
   const hasKpiPermissionChanges = draftKpiPermissionKeyString !== initialKpiPermissionKeyString;
+  const draftNotificationPermissionKeyString = JSON.stringify(draftNotificationCells);
+  const initialNotificationPermissionKeyString = JSON.stringify(initialNotificationCells);
+  const hasNotificationPermissionChanges = draftNotificationPermissionKeyString !== initialNotificationPermissionKeyString;
+  const draftProductManagementPermissionKeyString = JSON.stringify(draftProductManagementCells);
+  const initialProductManagementPermissionKeyString = JSON.stringify(initialProductManagementCells);
+  const hasProductManagementPermissionChanges = draftProductManagementPermissionKeyString !== initialProductManagementPermissionKeyString;
   const roleMenuValueChangeCount = countPermissionValueChanges(initialRoleMenuCells, draftRoleMenuCells);
   const annualGoalValueChangeCount = countPermissionValueChanges(initialAnnualGoalCells, draftAnnualGoalCells);
   const kpiValueChangeCount = countPermissionValueChanges(initialKpiCells, draftKpiCells);
-  const roleMenuChangedItems = buildPermissionChangedItems(initialRoleMenuCells, draftRoleMenuCells, menus);
-  const annualGoalChangedItems = buildPermissionChangedItems(initialAnnualGoalCells, draftAnnualGoalCells, annualGoalPermissions);
-  const kpiChangedItems = buildPermissionChangedItems(initialKpiCells, draftKpiCells, kpiPermissions);
+  const notificationValueChangeCount = countPermissionValueChanges(initialNotificationCells, draftNotificationCells);
+  const roleMenuSyncValueChangeCount = countDepartmentSyncValueChanges(initialRoleMenuCells, draftRoleMenuCells);
+  const annualGoalSyncValueChangeCount = countDepartmentSyncValueChanges(initialAnnualGoalCells, draftAnnualGoalCells);
+  const kpiSyncValueChangeCount = countDepartmentSyncValueChanges(initialKpiCells, draftKpiCells);
+  const notificationSyncValueChangeCount = countDepartmentSyncValueChanges(initialNotificationCells, draftNotificationCells);
+  const productManagementSyncValueChangeCount = countDepartmentSyncValueChanges(initialProductManagementCells, draftProductManagementCells);
+  const roleMenuChangedItems = buildDepartmentSyncChangedItems(initialRoleMenuCells, draftRoleMenuCells, menus);
+  const annualGoalChangedItems = buildDepartmentSyncChangedItems(initialAnnualGoalCells, draftAnnualGoalCells, annualGoalPermissions);
+  const kpiChangedItems = buildDepartmentSyncChangedItems(initialKpiCells, draftKpiCells, kpiPermissions);
+  const notificationChangedItems = buildDepartmentSyncChangedItems(initialNotificationCells, draftNotificationCells, notificationPermissions);
+  const productManagementChangedItems = buildDepartmentSyncChangedItems(initialProductManagementCells, draftProductManagementCells, productManagementPermissions);
   const draftKpiPayload = JSON.stringify(Object.entries(draftKpiCells).map(([key, cell]) => {
+    const [roleType, permissionId] = key.split(":");
+    return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
+  }));
+  const draftNotificationPayload = JSON.stringify(Object.entries(draftNotificationCells).map(([key, cell]) => {
+    const [roleType, permissionId] = key.split(":");
+    return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
+  }));
+  const draftProductManagementPayload = JSON.stringify(Object.entries(draftProductManagementCells).map(([key, cell]) => {
     const [roleType, permissionId] = key.split(":");
     return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
   }));
@@ -1674,6 +1777,14 @@ export function OrgContent({
   useEffect(() => {
     setDraftKpiCells(initialKpiCells);
   }, [initialKpiPermissionKeyString]);
+
+  useEffect(() => {
+    setDraftNotificationCells(initialNotificationCells);
+  }, [initialNotificationPermissionKeyString]);
+
+  useEffect(() => {
+    setDraftProductManagementCells(initialProductManagementCells);
+  }, [initialProductManagementPermissionKeyString]);
 
   useEffect(() => {
     setExpandedTreeNodes(buildInitialExpandedState(organizationHierarchyRoot));
@@ -1740,6 +1851,42 @@ export function OrgContent({
     });
   }
 
+  function toggleDraftNotificationPermission(roleType: RoleType, permission: ScopedNotificationPermission) {
+    if (!canEditNotificationPermissions) return;
+    const key = `${roleType}:${permission.id}`;
+    setDraftNotificationCells((current) => {
+      const cell = current[key];
+      const nextAllowed = !cell.allowed;
+      return {
+        ...current,
+        [key]: {
+          allowed: nextAllowed,
+          source: selectedScope.scopeType,
+          explicit: true,
+          inherited: false,
+        },
+      };
+    });
+  }
+
+  function toggleDraftProductManagementPermission(roleType: RoleType, permission: ScopedProductManagementPermission) {
+    if (!canEditProductManagementPermissions) return;
+    const key = `${roleType}:${permission.id}`;
+    setDraftProductManagementCells((current) => {
+      const cell = current[key];
+      const nextAllowed = !cell.allowed;
+      return {
+        ...current,
+        [key]: {
+          allowed: nextAllowed,
+          source: selectedScope.scopeType,
+          explicit: true,
+          inherited: false,
+        },
+      };
+    });
+  }
+
   function toggleRoleMenuCells(targetKeys: readonly string[]) {
     setDraftRoleMenuCells((current) => setPermissionCellsAllowed(
       current,
@@ -1768,6 +1915,27 @@ export function OrgContent({
     ));
   }
 
+  function toggleNotificationCells(targetKeys: readonly string[]) {
+    if (!canEditNotificationPermissions) return;
+    setDraftNotificationCells((current) => setPermissionCellsAllowed(
+      current,
+      targetKeys,
+      getPermissionSelectionState(current, targetKeys, lockedNotificationCellKeys) !== "checked",
+      selectedScope.scopeType,
+      lockedNotificationCellKeys,
+    ));
+  }
+
+  function toggleProductManagementCells(targetKeys: readonly string[]) {
+    if (!canEditProductManagementPermissions) return;
+    setDraftProductManagementCells((current) => setPermissionCellsAllowed(
+      current,
+      targetKeys,
+      getPermissionSelectionState(current, targetKeys) !== "checked",
+      selectedScope.scopeType,
+    ));
+  }
+
   function resetDraftPermissions() {
     setDraftRoleMenuCells(initialRoleMenuCells);
   }
@@ -1778,6 +1946,14 @@ export function OrgContent({
 
   function resetDraftKpiPermissions() {
     setDraftKpiCells(initialKpiCells);
+  }
+
+  function resetDraftNotificationPermissions() {
+    setDraftNotificationCells(initialNotificationCells);
+  }
+
+  function resetDraftProductManagementPermissions() {
+    setDraftProductManagementCells(initialProductManagementCells);
   }
 
   function openPermissionMatrixSync(
@@ -1927,15 +2103,17 @@ export function OrgContent({
               <div className="inline-flex p-1 rounded-lg bg-muted">
                 {[
                   { key: "menu", label: "菜单权限" },
-                  { key: "annual-goal", label: "年度指标权限" },
-                  { key: "kpi", label: "KPI 权限" },
+                  { key: "annual-goal", label: "指标管理权限" },
+                  { key: "product-management", label: "产品管理权限" },
+                  { key: "kpi", label: "KPI 管理权限" },
+                  { key: "notification", label: "通知中心权限" },
                   { key: "approval-policy", label: "KPI 审批策略" },
                 ].map((item) => (
                   <button
                     key={item.key}
                     type="button"
                     onClick={() => {
-                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi" | "approval-policy");
+                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "approval-policy");
                     }}
                     className={`px-4 py-1.5 rounded-md text-sm transition ${
                       permissionSection === item.key
@@ -1963,9 +2141,9 @@ export function OrgContent({
                       departmentOrgNodeId={selectedScope.departmentOrgNodeId}
                       permissions={draftRoleMenuPayload}
                       hasChanges={hasRoleMenuChanges}
-                      valueChangeCount={roleMenuValueChangeCount}
+                      valueChangeCount={roleMenuSyncValueChangeCount}
                       reset={resetDraftPermissions}
-                      onSync={(mode) => openPermissionMatrixSync("menu", mode, "菜单权限", draftRoleMenuPayload, menus.length, roleMenuValueChangeCount, roleMenuChangedItems)}
+                      onSync={(mode) => openPermissionMatrixSync("menu", mode, "菜单权限", draftRoleMenuPayload, menus.length, roleMenuSyncValueChangeCount, roleMenuChangedItems)}
                     />
                   )}
                 </div>
@@ -2026,7 +2204,7 @@ export function OrgContent({
                                   ) : (
                                     <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
                                   )}
-                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && !locked && (
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && !locked && role.value !== "ADMIN" && (
                                     <button
                                       type="button"
                                       onClick={() => setDialog({
@@ -2060,8 +2238,8 @@ export function OrgContent({
               <div className="p-5">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h3 className="font-semibold">年度指标权限</h3>
-                    {canManageRolePermissions && hasAnnualGoalPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的年度指标权限调整</div>}
+                    <h3 className="font-semibold">指标管理权限</h3>
+                    {canManageRolePermissions && hasAnnualGoalPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的指标管理权限调整</div>}
                   </div>
                   {canManageRolePermissions && (
                     <PermissionMatrixSaveActions
@@ -2070,9 +2248,9 @@ export function OrgContent({
                       departmentOrgNodeId={selectedScope.departmentOrgNodeId}
                       permissions={draftAnnualGoalPayload}
                       hasChanges={hasAnnualGoalPermissionChanges}
-                      valueChangeCount={annualGoalValueChangeCount}
+                      valueChangeCount={annualGoalSyncValueChangeCount}
                       reset={resetDraftAnnualGoalPermissions}
-                      onSync={(mode) => openPermissionMatrixSync("annual-goal", mode, "年度指标权限", draftAnnualGoalPayload, annualGoalPermissions.length, annualGoalValueChangeCount, annualGoalChangedItems)}
+                      onSync={(mode) => openPermissionMatrixSync("annual-goal", mode, "指标管理权限", draftAnnualGoalPayload, annualGoalPermissions.length, annualGoalSyncValueChangeCount, annualGoalChangedItems)}
                     />
                   )}
                 </div>
@@ -2132,7 +2310,7 @@ export function OrgContent({
                                   ) : (
                                     <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
                                   )}
-                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && role.value !== "ADMIN" && (
                                     <button
                                       type="button"
                                       onClick={() => setDialog({
@@ -2162,12 +2340,131 @@ export function OrgContent({
                   </table>
                 </div>
               </div>
+            ) : permissionSection === "product-management" ? (
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">产品管理权限</h3>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      控制产品目标、项目与需求价值跟踪、任务看板的维护权限。系统范围可批量同步至各部门，部门范围可维护本部门角色默认权限。
+                    </div>
+                    {canEditProductManagementPermissions && hasProductManagementPermissionChanges ? (
+                      <div className="text-xs text-warning mt-1">有未保存的产品管理权限调整</div>
+                    ) : null}
+                  </div>
+                  {canEditProductManagementPermissions ? (
+                    <PermissionMatrixSaveActions
+                      saveAction={saveProductManagementRolePermissions}
+                      scopeType={selectedScope.scopeType}
+                      departmentOrgNodeId={selectedScope.departmentOrgNodeId}
+                      permissions={draftProductManagementPayload}
+                      hasChanges={hasProductManagementPermissionChanges}
+                      valueChangeCount={productManagementSyncValueChangeCount}
+                      reset={resetDraftProductManagementPermissions}
+                      onSync={(mode) => openPermissionMatrixSync("product-management", mode, "产品管理权限", draftProductManagementPayload, productManagementPermissions.length, productManagementSyncValueChangeCount, productManagementChangedItems)}
+                      showSync={selectedScope.scopeType === "SYSTEM"}
+                    />
+                  ) : null}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[260px]" />
+                      {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 font-medium">
+                          {canEditProductManagementPermissions ? (
+                            <PermissionBulkCheckbox
+                              state={getPermissionSelectionState(draftProductManagementCells, productManagementCellKeys)}
+                              label="能力项"
+                              onToggle={() => toggleProductManagementCells(productManagementCellKeys)}
+                            />
+                          ) : "能力项"}
+                        </th>
+                        {permissionRoleOptions.map((role) => {
+                          const roleCellKeys = buildPermissionCellKeys([role.value], productManagementPermissionIds);
+                          return (
+                            <th key={role.value} className="py-2 font-medium text-center align-middle">
+                              {canEditProductManagementPermissions ? (
+                                <PermissionBulkCheckbox
+                                  state={getPermissionSelectionState(draftProductManagementCells, roleCellKeys)}
+                                  label={role.label}
+                                  onToggle={() => toggleProductManagementCells(roleCellKeys)}
+                                />
+                              ) : role.label}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productManagementPermissions.map((permission) => (
+                        <tr key={permission.id} className="border-t border-border">
+                          <td className="py-0 pr-4 align-middle">
+                            <div className="min-h-[72px] flex flex-col justify-center">
+                              <div className="font-medium break-words">{permission.name}</div>
+                              <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
+                            </div>
+                          </td>
+                          {permissionRoleOptions.map((role) => {
+                            const cell = draftProductManagementCells[`${role.value}:${permission.id}`];
+                            const enabled = cell?.allowed ?? false;
+                            const inherited = cell?.inherited;
+                            return (
+                              <td key={role.value} className="py-0 text-center align-middle">
+                                <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                                  {canEditProductManagementPermissions ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDraftProductManagementPermission(role.value, permission)}
+                                      className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`}
+                                      title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}
+                                    >
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : (
+                                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </span>
+                                  )}
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && role.value !== "ADMIN" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDialog({
+                                        type: "applyAllDepartments",
+                                        data: {
+                                          kind: "product-management",
+                                          permissionId: permission.id,
+                                          permissionName: permission.name,
+                                          roleType: role.value,
+                                          roleLabel: role.label,
+                                          allowed: enabled,
+                                        },
+                                      })}
+                                      className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                      title="按当前系统值覆盖到全部部门"
+                                    >
+                                      <Wand2 className="w-3 h-3" />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             ) : permissionSection === "kpi" ? (
               <div className="p-5">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h3 className="font-semibold">角色默认权限</h3>
-                    {canManageRolePermissions && hasKpiPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的 KPI 权限调整</div>}
+                    <h3 className="font-semibold">KPI 管理权限</h3>
+                    {canManageRolePermissions && hasKpiPermissionChanges && <div className="text-xs text-warning mt-1">有未保存的 KPI 管理权限调整</div>}
                   </div>
                   {canManageRolePermissions && (
                     <PermissionMatrixSaveActions
@@ -2176,9 +2473,9 @@ export function OrgContent({
                       departmentOrgNodeId={selectedScope.departmentOrgNodeId}
                       permissions={draftKpiPayload}
                       hasChanges={hasKpiPermissionChanges}
-                      valueChangeCount={kpiValueChangeCount}
+                      valueChangeCount={kpiSyncValueChangeCount}
                       reset={resetDraftKpiPermissions}
-                      onSync={(mode) => openPermissionMatrixSync("kpi", mode, "KPI 权限", draftKpiPayload, kpiPermissions.length, kpiValueChangeCount, kpiChangedItems)}
+                      onSync={(mode) => openPermissionMatrixSync("kpi", mode, "KPI 管理权限", draftKpiPayload, kpiPermissions.length, kpiSyncValueChangeCount, kpiChangedItems)}
                     />
                   )}
                 </div>
@@ -2238,7 +2535,7 @@ export function OrgContent({
                                   ) : (
                                     <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{enabled && <Check className="w-3.5 h-3.5" />}</span>
                                   )}
-                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && (
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && role.value !== "ADMIN" && (
                                     <button
                                       type="button"
                                       onClick={() => setDialog({
@@ -2322,6 +2619,125 @@ export function OrgContent({
                       </div>
                     )}
                   </div>
+                </div>
+              </div>
+            ) : permissionSection === "notification" ? (
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">通知中心权限</h3>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      控制谁可在通知中心配置场景。场景为全系统共享；系统范围可批量同步至各部门，部门范围可维护本部门角色默认权限。
+                    </div>
+                    {canEditNotificationPermissions && hasNotificationPermissionChanges ? (
+                      <div className="text-xs text-warning mt-1">有未保存的通知中心权限调整</div>
+                    ) : null}
+                  </div>
+                  {canEditNotificationPermissions ? (
+                    <PermissionMatrixSaveActions
+                      saveAction={saveNotificationRolePermissions}
+                      scopeType={selectedScope.scopeType}
+                      departmentOrgNodeId={selectedScope.departmentOrgNodeId}
+                      permissions={draftNotificationPayload}
+                      hasChanges={hasNotificationPermissionChanges}
+                      valueChangeCount={notificationSyncValueChangeCount}
+                      reset={resetDraftNotificationPermissions}
+                      onSync={(mode) => openPermissionMatrixSync("notification", mode, "通知中心权限", draftNotificationPayload, notificationPermissions.length, notificationSyncValueChangeCount, notificationChangedItems)}
+                      showSync={selectedScope.scopeType === "SYSTEM"}
+                    />
+                  ) : null}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[260px]" />
+                      {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 font-medium">
+                          {canEditNotificationPermissions ? (
+                            <PermissionBulkCheckbox
+                              state={getPermissionSelectionState(draftNotificationCells, notificationCellKeys, lockedNotificationCellKeys)}
+                              label="能力项"
+                              onToggle={() => toggleNotificationCells(notificationCellKeys)}
+                            />
+                          ) : "能力项"}
+                        </th>
+                        {permissionRoleOptions.map((role) => {
+                          const roleCellKeys = buildPermissionCellKeys([role.value], notificationPermissionIds);
+                          return (
+                            <th key={role.value} className="py-2 font-medium text-center align-middle">
+                              {canEditNotificationPermissions ? (
+                                <PermissionBulkCheckbox
+                                  state={getPermissionSelectionState(draftNotificationCells, roleCellKeys, lockedNotificationCellKeys)}
+                                  label={role.label}
+                                  onToggle={() => toggleNotificationCells(roleCellKeys)}
+                                />
+                              ) : role.label}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {notificationPermissions.map((permission) => (
+                        <tr key={permission.id} className="border-t border-border">
+                          <td className="py-0 pr-4 align-middle">
+                            <div className="min-h-[72px] flex flex-col justify-center">
+                              <div className="font-medium break-words">{permission.name}</div>
+                              <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
+                            </div>
+                          </td>
+                          {permissionRoleOptions.map((role) => {
+                            const cell = draftNotificationCells[`${role.value}:${permission.id}`];
+                            const enabled = cell?.allowed ?? false;
+                            const inherited = cell?.inherited;
+                            return (
+                              <td key={role.value} className="py-0 text-center align-middle">
+                                <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                                  {canEditNotificationPermissions ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDraftNotificationPermission(role.value, permission)}
+                                      className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`}
+                                      title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}
+                                    >
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : (
+                                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </span>
+                                  )}
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && role.value !== "ADMIN" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDialog({
+                                        type: "applyAllDepartments",
+                                        data: {
+                                          kind: "notification",
+                                          permissionId: permission.id,
+                                          permissionName: permission.name,
+                                          roleType: role.value,
+                                          roleLabel: role.label,
+                                          allowed: enabled,
+                                        },
+                                      })}
+                                      className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                      title="按当前系统值覆盖到全部部门"
+                                    >
+                                      <Wand2 className="w-3 h-3" />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             ) : (

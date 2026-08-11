@@ -1,6 +1,11 @@
 import type { OrgPermissionAbilityKey, Prisma, RoleType } from "@prisma/client";
 import { annualGoalPermissionCodes, annualGoalPermissionDefinitions } from "./annual-goal-permissions";
-import { kpiOrdinaryPermissionAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
+import {
+  kpiOrdinaryPermissionAbilityKeys,
+  notificationOrdinaryPermissionAbilityKeys,
+  productManagementOrdinaryPermissionAbilityKeys,
+  orgPermissionModuleKeys,
+} from "@/server/permissions/permission-constants";
 
 export const permissionMatrixRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
 
@@ -61,14 +66,19 @@ function changedCells(current: Map<string, boolean>, next: NormalizedPermissionC
   return next.filter((cell) => (current.get(`${cell.roleType}:${cell.permissionId}`) ?? false) !== cell.allowed);
 }
 
-function summary(mode: PermissionMatrixSyncMode, departments: number, permissions: number, changes: number): SyncSummary {
+function departmentSyncTargets(targets: NormalizedPermissionCell[]) {
+  return targets.filter((cell) => cell.roleType !== "ADMIN");
+}
+
+function summary(mode: PermissionMatrixSyncMode, departments: number, permissions: number, changes: NormalizedPermissionCell[], syncTargets: NormalizedPermissionCell[]): SyncSummary {
+  const nonAdminChanges = changes.filter((cell) => cell.roleType !== "ADMIN");
   return {
     mode,
     departmentCount: departments,
     roleCount: permissionMatrixRoles.length,
     permissionCount: permissions,
-    changedCellCount: changes,
-    syncedCellCount: departments * (mode === "FULL" ? permissionMatrixRoles.length * permissions : changes),
+    changedCellCount: nonAdminChanges.length,
+    syncedCellCount: departments * syncTargets.length,
   };
 }
 
@@ -88,12 +98,12 @@ export async function syncRoleMenuPermissionMatrix(tx: Prisma.TransactionClient,
   await tx.roleMenuPermission.deleteMany({ where: { scopeType: "SYSTEM", departmentOrgNodeId: "", roleType: { in: permissionMatrixRoles }, menuPermissionId: { in: menus.map((menu) => menu.id) } } });
   if (cells.length) await tx.roleMenuPermission.createMany({ data: cells.map((cell) => ({ scopeType: "SYSTEM", departmentOrgNodeId: "", roleType: cell.roleType, menuPermissionId: cell.permissionId, allowed: cell.allowed })) });
 
-  const targets = mode === "FULL" ? cells : changes;
+  const targets = departmentSyncTargets(mode === "FULL" ? cells : changes);
   if (departments.length && targets.length) {
     await tx.roleMenuPermission.deleteMany({ where: { scopeType: "DEPARTMENT", departmentOrgNodeId: { in: departments.map((department) => department.id) }, OR: targets.map((cell) => ({ roleType: cell.roleType, menuPermissionId: cell.permissionId })) } });
     await tx.roleMenuPermission.createMany({ data: departments.flatMap((department) => targets.map((cell) => ({ scopeType: "DEPARTMENT" as const, departmentOrgNodeId: department.id, roleType: cell.roleType, menuPermissionId: cell.permissionId, allowed: cell.allowed }))) });
   }
-  return summary(mode, departments.length, menus.length, changes.length);
+  return summary(mode, departments.length, menus.length, changes, targets);
 }
 
 export async function syncAnnualGoalPermissionMatrix(tx: Prisma.TransactionClient, raw: string, mode: PermissionMatrixSyncMode) {
@@ -108,12 +118,12 @@ export async function syncAnnualGoalPermissionMatrix(tx: Prisma.TransactionClien
 
   await tx.roleAnnualGoalPermission.deleteMany({ where: { scopeType: "SYSTEM", departmentOrgNodeId: "", roleType: { in: permissionMatrixRoles }, annualGoalPermissionId: { in: permissions.map((permission) => permission.id) } } });
   if (cells.length) await tx.roleAnnualGoalPermission.createMany({ data: cells.map((cell) => ({ scopeType: "SYSTEM", departmentOrgNodeId: "", roleType: cell.roleType, annualGoalPermissionId: cell.permissionId, allowed: cell.allowed })) });
-  const targets = mode === "FULL" ? cells : changes;
+  const targets = departmentSyncTargets(mode === "FULL" ? cells : changes);
   if (departments.length && targets.length) {
     await tx.roleAnnualGoalPermission.deleteMany({ where: { scopeType: "DEPARTMENT", departmentOrgNodeId: { in: departments.map((department) => department.id) }, OR: targets.map((cell) => ({ roleType: cell.roleType, annualGoalPermissionId: cell.permissionId })) } });
     await tx.roleAnnualGoalPermission.createMany({ data: departments.flatMap((department) => targets.map((cell) => ({ scopeType: "DEPARTMENT" as const, departmentOrgNodeId: department.id, roleType: cell.roleType, annualGoalPermissionId: cell.permissionId, allowed: cell.allowed }))) });
   }
-  return summary(mode, departments.length, permissions.length, changes.length);
+  return summary(mode, departments.length, permissions.length, changes, targets);
 }
 
 export async function syncKpiPermissionMatrix(tx: Prisma.TransactionClient, raw: string, mode: PermissionMatrixSyncMode) {
@@ -127,11 +137,154 @@ export async function syncKpiPermissionMatrix(tx: Prisma.TransactionClient, raw:
   const enabledSystem = cells.filter((cell) => cell.allowed);
   if (enabledSystem.length) await tx.orgPermissionGrant.createMany({ data: enabledSystem.map((cell) => ({ moduleKey: orgPermissionModuleKeys.kpi, abilityKey: cell.permissionId as OrgPermissionAbilityKey, scopeType: kpiScopeByRole[cell.roleType], subjectType: "ROLE", roleType: cell.roleType, userId: null, orgNodeId: null, isActive: true })) });
 
-  const targets = mode === "FULL" ? cells : changes;
+  const targets = departmentSyncTargets(mode === "FULL" ? cells : changes);
   if (departments.length && targets.length) {
     await tx.orgPermissionGrant.deleteMany({ where: { moduleKey: orgPermissionModuleKeys.kpi, subjectType: "ROLE", orgNodeId: { in: departments.map((department) => department.id) }, OR: targets.map((cell) => ({ roleType: cell.roleType, abilityKey: cell.permissionId as OrgPermissionAbilityKey })) } });
     const enabledTargets = targets.filter((cell) => cell.allowed);
     if (enabledTargets.length) await tx.orgPermissionGrant.createMany({ data: departments.flatMap((department) => enabledTargets.map((cell) => ({ moduleKey: orgPermissionModuleKeys.kpi, abilityKey: cell.permissionId as OrgPermissionAbilityKey, scopeType: kpiScopeByRole[cell.roleType], subjectType: "ROLE" as const, roleType: cell.roleType, userId: null, orgNodeId: department.id, isActive: true }))) });
   }
-  return summary(mode, departments.length, abilityIds.length, changes.length);
+  return summary(mode, departments.length, abilityIds.length, changes, targets);
+}
+
+export async function syncNotificationPermissionMatrix(tx: Prisma.TransactionClient, raw: string, mode: PermissionMatrixSyncMode) {
+  const abilityIds = [...notificationOrdinaryPermissionAbilityKeys];
+  const cells = parseCompletePermissionMatrix(raw, abilityIds);
+
+  const currentRows = await tx.orgPermissionGrant.findMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.notification,
+      subjectType: "ROLE",
+      orgNodeId: null,
+      scopeType: "ALL",
+      roleType: { in: permissionMatrixRoles },
+      abilityKey: { in: abilityIds },
+    },
+    select: { roleType: true, abilityKey: true, isActive: true },
+  });
+  const changes = changedCells(new Map(currentRows.filter((row) => row.roleType).map((row) => [`${row.roleType}:${row.abilityKey}`, row.isActive])), cells);
+  const departments = await tx.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+
+  await tx.orgPermissionGrant.deleteMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.notification,
+      subjectType: "ROLE",
+      orgNodeId: null,
+      scopeType: "ALL",
+      roleType: { in: permissionMatrixRoles },
+      abilityKey: { in: abilityIds },
+    },
+  });
+  const enabledSystem = cells.filter((cell) => cell.allowed);
+  if (enabledSystem.length) {
+    await tx.orgPermissionGrant.createMany({
+      data: enabledSystem.map((cell) => ({
+        moduleKey: orgPermissionModuleKeys.notification,
+        abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+        scopeType: "ALL" as const,
+        subjectType: "ROLE" as const,
+        roleType: cell.roleType,
+        userId: null,
+        orgNodeId: null,
+        isActive: true,
+      })),
+    });
+  }
+
+  const targets = departmentSyncTargets(mode === "FULL" ? cells : changes);
+  if (departments.length && targets.length) {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.notification,
+        subjectType: "ROLE",
+        orgNodeId: { in: departments.map((department) => department.id) },
+        OR: targets.map((cell) => ({ roleType: cell.roleType, abilityKey: cell.permissionId as OrgPermissionAbilityKey })),
+      },
+    });
+    const enabledTargets = targets.filter((cell) => cell.allowed);
+    if (enabledTargets.length) {
+      await tx.orgPermissionGrant.createMany({
+        data: departments.flatMap((department) => enabledTargets.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.notification,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiScopeByRole[cell.roleType],
+          subjectType: "ROLE" as const,
+          roleType: cell.roleType,
+          userId: null,
+          orgNodeId: department.id,
+          isActive: true,
+        }))),
+      });
+    }
+  }
+  return summary(mode, departments.length, abilityIds.length, changes, targets);
+}
+
+export async function syncProductManagementPermissionMatrix(tx: Prisma.TransactionClient, raw: string, mode: PermissionMatrixSyncMode) {
+  const abilityIds = [...productManagementOrdinaryPermissionAbilityKeys];
+  const cells = parseCompletePermissionMatrix(raw, abilityIds);
+  const currentRows = await tx.orgPermissionGrant.findMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.productManagement,
+      subjectType: "ROLE",
+      orgNodeId: null,
+      roleType: { in: permissionMatrixRoles },
+      abilityKey: { in: abilityIds },
+    },
+    select: { roleType: true, abilityKey: true, isActive: true },
+  });
+  const changes = changedCells(new Map(currentRows.filter((row) => row.roleType).map((row) => [`${row.roleType}:${row.abilityKey}`, row.isActive])), cells);
+  const departments = await tx.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+
+  await tx.orgPermissionGrant.deleteMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.productManagement,
+      subjectType: "ROLE",
+      orgNodeId: null,
+      roleType: { in: permissionMatrixRoles },
+      abilityKey: { in: abilityIds },
+    },
+  });
+  const enabledSystem = cells.filter((cell) => cell.allowed);
+  if (enabledSystem.length) {
+    await tx.orgPermissionGrant.createMany({
+      data: enabledSystem.map((cell) => ({
+        moduleKey: orgPermissionModuleKeys.productManagement,
+        abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+        scopeType: kpiScopeByRole[cell.roleType],
+        subjectType: "ROLE" as const,
+        roleType: cell.roleType,
+        userId: null,
+        orgNodeId: null,
+        isActive: true,
+      })),
+    });
+  }
+
+  const targets = departmentSyncTargets(mode === "FULL" ? cells : changes);
+  if (departments.length && targets.length) {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.productManagement,
+        subjectType: "ROLE",
+        orgNodeId: { in: departments.map((department) => department.id) },
+        OR: targets.map((cell) => ({ roleType: cell.roleType, abilityKey: cell.permissionId as OrgPermissionAbilityKey })),
+      },
+    });
+    const enabledTargets = targets.filter((cell) => cell.allowed);
+    if (enabledTargets.length) {
+      await tx.orgPermissionGrant.createMany({
+        data: departments.flatMap((department) => enabledTargets.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.productManagement,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiScopeByRole[cell.roleType],
+          subjectType: "ROLE" as const,
+          roleType: cell.roleType,
+          userId: null,
+          orgNodeId: department.id,
+          isActive: true,
+        }))),
+      });
+    }
+  }
+  return summary(mode, departments.length, abilityIds.length, changes, targets);
 }

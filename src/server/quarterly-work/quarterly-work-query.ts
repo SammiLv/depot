@@ -1,6 +1,11 @@
 import { prisma } from "@/server/db/prisma";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import {
+  canManageProductGoal,
+  canManageProductTask,
+  canManageProjectAndValueTracking,
+} from "@/server/quarterly-work/permission";
+import {
   isCompletedProjectVisibleInPeriod,
   isValueTrackVisibleInPeriod,
   type ActivePeriod,
@@ -62,7 +67,7 @@ type ProductGoalBoardItem = {
 type ProjectBoardItem = {
   id: string;
   title: string;
-  productGoalId: string | null;
+  productGoalIds: string[];
   productGoalTitle: string | null;
   ownerId: string;
   owner: string;
@@ -396,6 +401,12 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     prisma.project.findMany({
       where: ownerWhere,
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      include: {
+        productGoalLinks: {
+          orderBy: { sortOrder: "asc" },
+          select: { productGoalId: true },
+        },
+      },
     }),
     prisma.quarterlyWork.findMany({
       where: ownerWhere,
@@ -554,12 +565,16 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     const activeProjectWorks = projectWorks.filter((work) => work.status !== "COMPLETED" && work.status !== "CLOSED");
     const teamOrgNodeId = getTeamOrgNodeIdForRecord(project.orgNodeId, orgNodeById);
     const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(project.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
+    const productGoalIds = project.productGoalLinks.map((link) => link.productGoalId);
+    const productGoalTitles = productGoalIds
+      .map((goalId) => productGoals.find((goal) => goal.id === goalId)?.title ?? null)
+      .filter((title): title is string => Boolean(title));
 
     return {
       id: project.id,
       title: project.title,
-      productGoalId: project.productGoalId,
-      productGoalTitle: project.productGoalId ? productGoals.find((goal) => goal.id === project.productGoalId)?.title ?? null : null,
+      productGoalIds,
+      productGoalTitle: productGoalTitles.length ? productGoalTitles.join("、") : null,
       ownerId: project.ownerId,
       owner: ownerMap.get(project.ownerId) ?? "—",
       departmentOrgNodeId,
@@ -727,6 +742,16 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     };
   });
 
+  const [
+    canManageProductGoalPermission,
+    canManageProjectAndValueTrackingPermission,
+    canManageProductTaskPermission,
+  ] = await Promise.all([
+    canManageProductGoal(currentUser),
+    canManageProjectAndValueTracking(currentUser),
+    canManageProductTask(currentUser),
+  ]);
+
   return {
     year: activeYear,
     quarter: activeQuarter,
@@ -739,6 +764,11 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     projectTotalCount: projects.length,
     updateReminders,
     canCreate: users.length > 0,
+    permissions: {
+      canManageProductGoal: canManageProductGoalPermission,
+      canManageProjectAndValueTracking: canManageProjectAndValueTrackingPermission,
+      canManageProductTask: canManageProductTaskPermission,
+    },
     currentUserId: currentUser.id,
     isSystemAdmin: currentUser.roleType === "ADMIN",
     departments: scopedDepartments.sort(compareNames).map((department) => ({

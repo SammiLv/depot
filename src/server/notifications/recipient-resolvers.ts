@@ -2,9 +2,9 @@ import type { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import type { NotificationEventPayload, RecipientConfig, RecipientRule } from "@/server/notifications/types";
 
-async function findTeamLeaderUserId(orgNodeId: string | null | undefined) {
-  if (!orgNodeId) return null;
-  const leader = await prisma.user.findFirst({
+async function findTeamLeaderUserIds(orgNodeId: string | null | undefined) {
+  if (!orgNodeId) return [] as string[];
+  const leaders = await prisma.user.findMany({
     where: {
       orgNodeId,
       roleType: "TEAM_LEADER",
@@ -12,9 +12,41 @@ async function findTeamLeaderUserId(orgNodeId: string | null | undefined) {
       deletedAt: null,
     },
     select: { id: true },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
-  return leader?.id ?? null;
+  return leaders.map((user) => user.id);
+}
+
+const leaderStageStatuses = new Set(["PENDING_LEADER_SCORE"]);
+const managerStageStatuses = new Set(["PENDING_MANAGER_SCORE"]);
+
+async function findSubjectOrgNodeId(payload: NotificationEventPayload) {
+  const subjectId = payload.subjectUserId ?? payload.userId;
+  if (!subjectId) return null;
+  const subject = await prisma.user.findFirst({
+    where: { id: subjectId, deletedAt: null },
+    select: { orgNodeId: true },
+  });
+  return subject?.orgNodeId ?? null;
+}
+
+async function resolveCurrentApproverRecipients(payload: NotificationEventPayload) {
+  const ids = new Set<string>();
+  if (payload.currentApproverId) {
+    ids.add(payload.currentApproverId);
+  }
+  const subjectOrgNodeId = await findSubjectOrgNodeId(payload);
+  if (payload.status && leaderStageStatuses.has(String(payload.status))) {
+    for (const leaderId of await findTeamLeaderUserIds(subjectOrgNodeId)) {
+      ids.add(leaderId);
+    }
+  }
+  if (payload.status && managerStageStatuses.has(String(payload.status))) {
+    for (const managerId of await findDepartmentManagerUserIds(subjectOrgNodeId)) {
+      ids.add(managerId);
+    }
+  }
+  return [...ids];
 }
 
 async function findDepartmentManagerUserIds(orgNodeId: string | null | undefined) {
@@ -64,21 +96,13 @@ async function resolveOneRule(rule: RecipientRule, payload: NotificationEventPay
     case "SUBMITTER":
       return [payload.submitterId].filter((id): id is string => Boolean(id));
     case "CURRENT_APPROVER":
-      return [payload.currentApproverId].filter((id): id is string => Boolean(id));
+      return resolveCurrentApproverRecipients(payload);
     case "EXPLICIT_USERS":
       return [...new Set(rule.userIds ?? [])];
     case "ROLE":
       return findUsersByRoles(rule.roleTypes ?? []);
-    case "TEAM_LEADER_OF_SUBJECT": {
-      const subjectId = payload.subjectUserId ?? payload.userId;
-      if (!subjectId) return [];
-      const subject = await prisma.user.findFirst({
-        where: { id: subjectId, deletedAt: null },
-        select: { orgNodeId: true },
-      });
-      const leaderId = await findTeamLeaderUserId(subject?.orgNodeId);
-      return leaderId ? [leaderId] : [];
-    }
+    case "TEAM_LEADER_OF_SUBJECT":
+      return findTeamLeaderUserIds(await findSubjectOrgNodeId(payload));
     case "DEPARTMENT_MANAGER": {
       const subjectId = payload.subjectUserId ?? payload.userId;
       if (!subjectId) return [];
@@ -87,6 +111,19 @@ async function resolveOneRule(rule: RecipientRule, payload: NotificationEventPay
         select: { orgNodeId: true },
       });
       return findDepartmentManagerUserIds(subject?.orgNodeId);
+    }
+    case "METRIC_RESPONSIBLE": {
+      const responsibleId = payload.responsibleUserId ?? payload.userId;
+      return typeof responsibleId === "string" && responsibleId ? [responsibleId] : [];
+    }
+    case "TEAM_LEADERS_OF_TEAM":
+      return findTeamLeaderUserIds(typeof payload.teamOrgNodeId === "string" ? payload.teamOrgNodeId : undefined);
+    case "PLAN_DEPARTMENT_MANAGERS":
+      return findDepartmentManagerUserIds(typeof payload.departmentOrgNodeId === "string" ? payload.departmentOrgNodeId : undefined);
+    case "METRIC_RESPONSIBLE_OR_DEPT_MANAGER": {
+      const responsibleId = payload.responsibleUserId ?? payload.userId;
+      if (typeof responsibleId === "string" && responsibleId) return [responsibleId];
+      return findDepartmentManagerUserIds(typeof payload.departmentOrgNodeId === "string" ? payload.departmentOrgNodeId : undefined);
     }
     default:
       return [];

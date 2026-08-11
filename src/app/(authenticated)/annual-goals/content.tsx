@@ -295,6 +295,9 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
     (m) => !plan.metrics.some((pm) => pm.sourceMetricId === m.id) || m.id === metric?.sourceMetricId
   );
   const teamMemberOptions = plan.teamOrgNodeId ? (data.memberOptionsByTeam[plan.teamOrgNodeId] ?? []) : [];
+  const departmentMemberOptions = !isTeamPlan && plan.scopeDepartmentOrgNodeId
+    ? (data.memberOptionsByDepartment[plan.scopeDepartmentOrgNodeId] ?? [])
+    : [];
   const teamMemberOptionIds = new Set(teamMemberOptions.map((option) => option.id));
   const selectedSourceMetric = availableSourceMetrics.find((source) => source.id === selectedSourceMetricId);
   const candidateResponsibleUser = metric?.responsibleUser ?? selectedSourceMetric?.responsibleUser ?? (!selectedSourceMetricId ? selectedParentMetric?.responsibleUser ?? null : null);
@@ -468,6 +471,15 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
                 <option value="COMPLETED">已完成</option>
               </select>
             </div>
+            <SearchableMemberField
+              key={metric?.id ?? plan.id}
+              name="responsibleUserId"
+              label="负责人"
+              options={departmentMemberOptions}
+              defaultUser={metric?.responsibleUser ?? null}
+              placeholder="输入姓名或姓名 · 职务"
+              inline
+            />
             <div className="flex items-start gap-3">
               <label className="text-sm font-medium shrink-0 w-20 mt-2">说明</label>
               <textarea name="description" defaultValue={metric?.description ?? ""} rows={3} className="flex-1 px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring" />
@@ -1308,7 +1320,7 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
             <div />
             <div>创建人</div>
             <div>创建时间</div>
-            <div>最后更新人</div>
+            <div>最后更新</div>
             <div>最后更新时间</div>
           </div>
           <div className="divide-y divide-border">
@@ -1367,7 +1379,7 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
                 <div />
                 <div>创建人</div>
                 <div>创建时间</div>
-                <div>最后更新人</div>
+                <div>最后更新</div>
                 <div>最后更新时间</div>
               </div>
               <div className="divide-y divide-border">
@@ -1425,7 +1437,7 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
               <div>本周新增</div>
               <div>创建人</div>
               <div>创建时间</div>
-              <div>最后更新人</div>
+              <div>最后更新</div>
               <div>最后更新时间</div>
             </div>
             <div className="divide-y divide-border">

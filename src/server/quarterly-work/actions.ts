@@ -4,9 +4,14 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import {
+  requireManageProductGoal,
+  requireManageProductTask,
+  requireManageProjectAndValueTracking,
+} from "@/server/quarterly-work/permission";
 import type { ProjectStatus, WorkStatus } from "@prisma/client";
 
-const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
+type ScopeUser = Awaited<ReturnType<typeof requireCurrentUser>>;
 const creatableStatuses: WorkStatus[] = ["NOT_STARTED", "IN_PROGRESS", "DELAYED_COMPLETED", "COMPLETED", "CLOSED"];
 const manuallyEditableStatuses: WorkStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 const projectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
@@ -14,14 +19,6 @@ const projectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLET
 function revalidateQuarterlyWork() {
   revalidatePath("/quarterly-work");
   revalidatePath("/dashboard");
-}
-
-async function requireQuarterlyWorkEditor() {
-  const user = await requireCurrentUser();
-  if (!editableRoles.includes(user.roleType as (typeof editableRoles)[number])) {
-    throw new Error("当前角色不能维护季度工作");
-  }
-  return user;
 }
 
 function requiredString(value: FormDataEntryValue | null, fieldName: string) {
@@ -43,6 +40,47 @@ function parseOptionalFloat(value: FormDataEntryValue | null) {
 function parseOptionalId(value: FormDataEntryValue | null) {
   const text = (value as string | null)?.trim();
   return text || null;
+}
+
+function parseRequiredProductGoalIds(formData: FormData) {
+  const ids = [...new Set(
+    formData.getAll("productGoalIds")
+      .map((value) => String(value).trim())
+      .filter(Boolean),
+  )];
+  if (!ids.length) throw new Error("产品目标为必填项，请至少选择一个");
+  return ids;
+}
+
+async function validateProductGoalIds(
+  productGoalIds: string[],
+  scopeWhere: ReturnType<typeof getProjectManagementScopeWhere>,
+) {
+  const goals = await prisma.productGoal.findMany({
+    where: {
+      id: { in: productGoalIds },
+      ...scopeWhere,
+    },
+    select: { id: true },
+  });
+  if (goals.length !== productGoalIds.length) {
+    throw new Error("产品目标不存在或无权限选择");
+  }
+}
+
+async function replaceProjectProductGoals(
+  tx: Pick<typeof prisma, "projectProductGoal">,
+  projectId: string,
+  productGoalIds: string[],
+) {
+  await tx.projectProductGoal.deleteMany({ where: { projectId } });
+  await tx.projectProductGoal.createMany({
+    data: productGoalIds.map((productGoalId, index) => ({
+      projectId,
+      productGoalId,
+      sortOrder: (index + 1) * 10,
+    })),
+  });
 }
 
 function parseRequiredYear(value: FormDataEntryValue | null, fieldName: string) {
@@ -127,7 +165,7 @@ function getValueJudgementForCompletedStatus(status: ProjectStatus, previousStat
   return undefined;
 }
 
-function getProjectManagementScopeWhere(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
+function getProjectManagementScopeWhere(currentUser: ScopeUser, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
   if (currentUser.roleType === "ADMIN") {
     return { deletedAt: null };
   }
@@ -139,7 +177,7 @@ function getProjectManagementScopeWhere(currentUser: Awaited<ReturnType<typeof r
   return { ownerId: currentUser.id, deletedAt: null };
 }
 
-async function getProjectManagementDepartmentScope(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>) {
+async function getProjectManagementDepartmentScope(currentUser: ScopeUser) {
   if (currentUser.roleType === "ADMIN") {
     return { departmentOrgNodeId: null, scopedOrgNodeIds: null };
   }
@@ -153,7 +191,7 @@ async function getProjectManagementDepartmentScope(currentUser: Awaited<ReturnTy
 }
 
 async function assertDepartmentOrgNodeAccessible(
-  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>,
+  currentUser: ScopeUser,
   departmentOrgNodeId: string,
 ) {
   const department = await prisma.orgNode.findFirst({
@@ -173,7 +211,7 @@ async function assertDepartmentOrgNodeAccessible(
 }
 
 async function findEditableOwner(
-  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>,
+  currentUser: ScopeUser,
   ownerId: string,
   departmentOrgNodeId: string,
 ) {
@@ -199,7 +237,7 @@ function parseDepartmentOrgNodeId(value: FormDataEntryValue | null) {
   return departmentOrgNodeId;
 }
 
-async function findEditableProject(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, projectId: string) {
+async function findEditableProject(currentUser: ScopeUser, projectId: string) {
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const project = await prisma.project.findFirst({
     where: {
@@ -220,7 +258,7 @@ async function findEditableProject(currentUser: Awaited<ReturnType<typeof requir
 }
 
 async function ensureProjectForWork(params: {
-  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>;
+  currentUser: ScopeUser;
   projectId: string | null;
   title: string;
   description: string;
@@ -263,7 +301,7 @@ async function syncProjectStatusFromWork(projectId: string, status: WorkStatus) 
 }
 
 export async function createQuarterlyWork(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductTask();
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
@@ -316,7 +354,7 @@ export async function createQuarterlyWork(formData: FormData) {
 }
 
 export async function updateQuarterlyWork(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductTask();
   const workId = parseWorkId(formData.get("workId"));
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
@@ -386,7 +424,7 @@ export async function updateQuarterlyWork(formData: FormData) {
 }
 
 export async function updateProjectStatus(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const status = parseProjectStatus(formData.get("status"));
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -428,9 +466,9 @@ export async function updateProjectStatus(formData: FormData) {
 }
 
 export async function createProject(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const title = requiredString(formData.get("title"), "项目名称");
-  const productGoalId = parseOptionalId(formData.get("productGoalId"));
+  const productGoalIds = parseRequiredProductGoalIds(formData);
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const description = requiredString(formData.get("description"), "项目描述");
@@ -440,41 +478,34 @@ export async function createProject(formData: FormData) {
   const endQuarter = parseRequiredQuarter(formData.get("endQuarter"), "结束季度");
   assertQuarterRange(startQuarter, endQuarter);
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
+  const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
+  await validateProductGoalIds(productGoalIds, scopeWhere);
 
-  if (productGoalId) {
-    const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
-    const productGoal = await prisma.productGoal.findFirst({
-      where: {
-        id: productGoalId,
-        ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+  await prisma.$transaction(async (tx) => {
+    const project = await tx.project.create({
+      data: {
+        title,
+        description,
+        expectedOutcome,
+        startQuarter,
+        endQuarter,
+        ownerId: owner.id,
+        orgNodeId: owner.orgNodeId,
+        status,
+        createdById: currentUser.id,
+        completedAt: getProjectCompletedAtByStatus(status),
+        ...(status === "COMPLETED" ? { valueJudgement: VALUE_JUDGEMENT_NOT_OBSERVED } : {}),
       },
-      select: { id: true },
     });
-    if (!productGoal) throw new Error("产品目标不存在或无权限选择");
-  }
-
-  await prisma.project.create({
-    data: {
-      title,
-      productGoalId,
-      description,
-      expectedOutcome,
-      startQuarter,
-      endQuarter,
-      ownerId: owner.id,
-      orgNodeId: owner.orgNodeId,
-      status,
-      createdById: currentUser.id,
-      completedAt: getProjectCompletedAtByStatus(status),
-      ...(status === "COMPLETED" ? { valueJudgement: VALUE_JUDGEMENT_NOT_OBSERVED } : {}),
-    },
+    await replaceProjectProductGoals(tx, project.id, productGoalIds);
   });
 
   revalidateQuarterlyWork();
 }
 
 export async function createProductGoal(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductGoal();
   const title = requiredString(formData.get("title"), "产品目标名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
@@ -502,7 +533,7 @@ export async function createProductGoal(formData: FormData) {
 }
 
 export async function updateProductGoal(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductGoal();
   const productGoalId = requiredString(formData.get("productGoalId"), "产品目标");
   const title = requiredString(formData.get("title"), "产品目标名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
@@ -542,7 +573,7 @@ export async function updateProductGoal(formData: FormData) {
 }
 
 export async function createValueTrack(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
@@ -588,7 +619,7 @@ export async function createValueTrack(formData: FormData) {
 }
 
 export async function updateValueTrack(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const trackId = requiredString(formData.get("trackId"), "价值跟踪");
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
   const valueJudgement = requiredString(formData.get("valueJudgement"), "价值判断");
@@ -635,7 +666,7 @@ export async function updateValueTrack(formData: FormData) {
 }
 
 export async function updateProjectValue(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
@@ -673,7 +704,7 @@ export async function updateProjectValue(formData: FormData) {
 }
 
 export async function deleteValueTrack(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const trackId = requiredString(formData.get("trackId"), "价值跟踪");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -703,7 +734,7 @@ export async function deleteValueTrack(formData: FormData) {
 }
 
 export async function deleteQuarterlyWork(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductTask();
   const workId = requiredString(formData.get("workId"), "任务");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -726,7 +757,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
 }
 
 export async function deleteProject(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -762,7 +793,7 @@ export async function deleteProject(formData: FormData) {
 }
 
 export async function deleteProductGoal(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductGoal();
   const productGoalId = requiredString(formData.get("productGoalId"), "产品目标");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -777,10 +808,7 @@ export async function deleteProductGoal(formData: FormData) {
   if (!productGoal) throw new Error("产品目标不存在或无权限删除");
 
   await prisma.$transaction(async (tx) => {
-    await tx.project.updateMany({
-      where: { productGoalId: productGoal.id, deletedAt: null },
-      data: { productGoalId: null },
-    });
+    await tx.projectProductGoal.deleteMany({ where: { productGoalId: productGoal.id } });
 
     await tx.productGoal.update({
       where: { id: productGoal.id },
@@ -792,10 +820,10 @@ export async function deleteProductGoal(formData: FormData) {
 }
 
 export async function updateProject(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const title = requiredString(formData.get("title"), "项目名称");
-  const productGoalId = parseOptionalId(formData.get("productGoalId"));
+  const productGoalIds = parseRequiredProductGoalIds(formData);
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const status = parseProjectStatus(formData.get("status"));
@@ -806,27 +834,19 @@ export async function updateProject(formData: FormData) {
   const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
   const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
 
   if (status === "COMPLETED" && workloadPersonDay === null) {
     throw new Error("项目状态为已完成时，工作量(人天)为必填项");
   }
 
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds) },
+    where: { id: projectId, ...scopeWhere },
     select: { id: true, status: true },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
 
-  if (productGoalId) {
-    const productGoal = await prisma.productGoal.findFirst({
-      where: {
-        id: productGoalId,
-        ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
-      },
-      select: { id: true },
-    });
-    if (!productGoal) throw new Error("产品目标不存在或无权限选择");
-  }
+  await validateProductGoalIds(productGoalIds, scopeWhere);
 
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const valueJudgement = getValueJudgementForCompletedStatus(status, project.status);
@@ -836,7 +856,6 @@ export async function updateProject(formData: FormData) {
       where: { id: project.id },
       data: {
         title,
-        productGoalId,
         description,
         expectedOutcome,
         workloadPersonDay,
@@ -850,6 +869,7 @@ export async function updateProject(formData: FormData) {
         ...(valueJudgement ? { valueJudgement } : {}),
       },
     });
+    await replaceProjectProductGoals(tx, project.id, productGoalIds);
 
     if (status === "COMPLETED" || status === "CLOSED") {
       await tx.quarterlyWork.updateMany({

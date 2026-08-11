@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:office": "HOSTNAME=0.0.0.0 PORT=80 APP_URL=http://depot.rj-info.com DEV_ALLOWED_ORIGINS=depot.rj-info.com next dev -H 0.0.0.0 -p 80",
-    "dev:home": "HOSTNAME=0.0.0.0 PORT=3000 APP_URL=http://localhost:3000 DEV_ALLOWED_ORIGINS=localhost:3000,127.0.0.1:3000 next dev -H 0.0.0.0 -p 3000",
+    "dev:home": "NOTIFICATION_SCHEDULER_ENABLED=true HOSTNAME=0.0.0.0 PORT=3000 APP_URL=http://localhost:3000 DEV_ALLOWED_ORIGINS=localhost:3000,127.0.0.1:3000 next dev -H 0.0.0.0 -p 3000",
     "dev:quarterly": "HOSTNAME=0.0.0.0 PORT=3001 APP_URL=http://localhost:3001 DEV_ALLOWED_ORIGINS=localhost:3001,127.0.0.1:3001 next dev -H 0.0.0.0 -p 3001",
     "dev:annual": "HOSTNAME=0.0.0.0 PORT=3002 APP_URL=http://localhost:3002 DEV_ALLOWED_ORIGINS=localhost:3002,127.0.0.1:3002 next dev -H 0.0.0.0 -p 3002",
     "dev:platform": "HOSTNAME=0.0.0.0 PORT=3003 APP_URL=http://localhost:3003 DEV_ALLOWED_ORIGINS=localhost:3003,127.0.0.1:3003 next dev -H 0.0.0.0 -p 3003",
@@ -18,11 +18,15 @@
     "test:permissions": "node --import tsx --test src/server/organization/permission-matrix.test.ts src/server/organization/annual-goal-permissions.test.ts",
     "test:permissions:integration": "bash scripts/test-permission-matrix-sync.sh",
     "test:permissions:all": "npm run test:permissions && npm run test:permissions:integration",
-    "test:kpi": "node --import tsx --test src/server/kpi/approval-policy.test.ts src/server/kpi/approval-policy-admin.test.ts src/server/kpi/approval-snapshot.test.ts src/server/kpi/approval-workflow.test.ts src/server/kpi/approval-org-tree.test.ts",
+    "test:kpi": "node --import tsx --test src/server/kpi/approval-policy.test.ts src/server/kpi/approval-policy-admin.test.ts src/server/kpi/approval-snapshot.test.ts src/server/kpi/approval-workflow.test.ts src/server/kpi/approval-org-tree.test.ts src/server/kpi/approval-step-utils.test.ts src/server/kpi/kpi-summary-utils.test.ts",
+    "postinstall": "prisma generate --schema db/prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema db/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema db/prisma/schema.prisma",
     "prisma:studio": "prisma studio --schema db/prisma/schema.prisma",
     "seed": "tsx db/prisma/seed.ts",
+    "seed:full": "SEED_FULL_RESET=true tsx db/prisma/seed.ts",
+    "restore-annual-goals": "tsx scripts/restore-annual-goals-demo.ts",
+    "backfill-notifications": "tsx scripts/backfill-notifications-from-delivery-log.ts",
     "set-admin-password": "tsx scripts/set-admin-password.ts"
   },
   "dependencies": {

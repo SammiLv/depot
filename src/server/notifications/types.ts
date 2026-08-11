@@ -6,6 +6,10 @@ export type RecipientRuleType =
   | "CURRENT_APPROVER"
   | "TEAM_LEADER_OF_SUBJECT"
   | "DEPARTMENT_MANAGER"
+  | "METRIC_RESPONSIBLE"
+  | "TEAM_LEADERS_OF_TEAM"
+  | "PLAN_DEPARTMENT_MANAGERS"
+  | "METRIC_RESPONSIBLE_OR_DEPT_MANAGER"
   | "EXPLICIT_USERS"
   | "ROLE";
 
@@ -21,7 +25,8 @@ export type RecipientConfig = {
 };
 
 export type ChannelConfig = {
-  channels: Array<"IN_APP" | "DINGTALK">;
+  channels: Array<"IN_APP" | "DINGTALK" | "DINGTALK_PERSONAL" | "DINGTALK_GROUP">;
+  groupBotId?: string;
   notificationType?: NotificationType;
   dingtalkNotifyType?: number;
   titleTemplate: string;
@@ -31,7 +36,12 @@ export type ChannelConfig = {
 
 export type ScheduleFrequency = "daily" | "weekly";
 
-export type ScheduleScanType = "kpi_self_review_pending" | "todo_due";
+export type ScheduleScanType =
+  | "kpi_initialization_pending"
+  | "kpi_self_review_pending"
+  | "todo_due"
+  | "annual_goal_weekly_progress_pending"
+  | "annual_goal_quarter_target_missing";
 
 export type ScheduleConfig = {
   frequency: ScheduleFrequency;
@@ -66,6 +76,12 @@ export type NotificationEventPayload = {
   dueDate?: string;
   todoId?: string;
   status?: string;
+  submittedAt?: string;
+  eventAt?: string;
+  pendingCount?: number;
+  departmentOrgNodeId?: string;
+  departmentName?: string;
+  testRunId?: number | string;
   appUrl?: string;
   [key: string]: string | number | boolean | undefined | null;
 };

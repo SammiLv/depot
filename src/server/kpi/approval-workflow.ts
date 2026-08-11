@@ -1,4 +1,5 @@
 import type { KpiStatus } from "@prisma/client";
+import { hasCompletedApprovalStage } from "@/server/kpi/approval-step-utils";
 
 export type KpiApprovalStageKey = "LEADER" | "MANAGER" | "FINAL";
 export type KpiEditableStage = "SELF" | KpiApprovalStageKey;
@@ -60,11 +61,7 @@ export function hasCompletedKpiProgressStage(
 
   if (approvalSteps && approvalSteps.length > 0) {
     const approvalStageKey = stage as KpiApprovalStageKey;
-    const step = approvalSteps.find((item) => item.stageKey === approvalStageKey);
-    if (step) {
-      return step.status === "COMPLETED";
-    }
-    return status === "COMPLETED";
+    return hasCompletedApprovalStage(approvalSteps, approvalStageKey);
   }
 
   const statusIndex = legacyStatusOrder.indexOf(status);

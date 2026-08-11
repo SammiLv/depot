@@ -7,7 +7,7 @@ import type { NotificationEventPayload } from "@/server/notifications/types";
 export async function emitNotificationEvent(
   eventCode: string,
   payload: NotificationEventPayload,
-  options?: { scenarioIds?: string[] },
+  options?: { scenarioIds?: string[]; testRunId?: number | string; scheduleSlot?: string },
 ) {
   try {
     await processNotificationEvent(eventCode, payload, options);

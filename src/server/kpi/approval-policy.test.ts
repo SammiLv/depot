@@ -83,11 +83,15 @@ function dependencies(): ApprovalPolicyResolverDependencies {
       return nodes[orgNodeId as keyof typeof nodes] ?? null;
     },
     async findFirstActiveUserByRole(roleType, orgNodeIds) {
-      if (roleType === "ADMIN") return users.admin;
-      if (roleType === "DEPARTMENT_MANAGER" && orgNodeIds?.includes("department")) return users.manager;
-      if (roleType === "TEAM_LEADER" && orgNodeIds?.includes("team")) return users.leader;
-      if (roleType === "TEAM_LEADER" && orgNodeIds?.includes("parent-team")) return users.parentLeader;
-      return null;
+      const users = await this.findActiveUsersByRole(roleType, orgNodeIds);
+      return users[0] ?? null;
+    },
+    async findActiveUsersByRole(roleType, orgNodeIds) {
+      if (roleType === "ADMIN") return [users.admin];
+      if (roleType === "DEPARTMENT_MANAGER" && orgNodeIds?.includes("department")) return [users.manager];
+      if (roleType === "TEAM_LEADER" && orgNodeIds?.includes("team")) return [users.leader];
+      if (roleType === "TEAM_LEADER" && orgNodeIds?.includes("parent-team")) return [users.parentLeader];
+      return [];
     },
     async findActiveUserById(userId) {
       return userId === users.explicit.id ? users.explicit : null;
@@ -196,12 +200,12 @@ test("department manager resolver searches only the target department node", asy
   });
   const resolverDependencies = dependencies();
   const searchedOrgNodeIds: string[][] = [];
-  resolverDependencies.findFirstActiveUserByRole = async (roleType, orgNodeIds) => {
+  resolverDependencies.findActiveUsersByRole = async (roleType, orgNodeIds) => {
     if (roleType === "DEPARTMENT_MANAGER" && orgNodeIds) {
       searchedOrgNodeIds.push(orgNodeIds);
-      return { id: "manager", orgNodeId: "department" };
+      return [{ id: "manager", orgNodeId: "department" }];
     }
-    return null;
+    return [];
   };
 
   const result = await resolveKpiApprovalPolicySteps({
@@ -444,6 +448,31 @@ test("organization-node owner applies only to the selected node on the employee 
 
   assert.deepEqual(result.map((item) => item.approverId), ["parent-leader"]);
   assert.equal(result[0]?.configuredOrgNodeId, "parent-team");
+});
+
+test("multiple team leaders at the same node share one step order", async () => {
+  const resolverDependencies = dependencies();
+  resolverDependencies.findActiveUsersByRole = async (roleType, orgNodeIds) => {
+    if (roleType === "TEAM_LEADER" && orgNodeIds?.includes("team")) {
+      return [
+        { id: "leader-a", orgNodeId: "team" },
+        { id: "leader-b", orgNodeId: "team" },
+      ];
+    }
+    return [];
+  };
+  const selectedPolicy = policy("multi-leader", "DEPARTMENT", "department", {
+    steps: [step("leader-step", 1, "TEAM_LEADER")],
+  });
+
+  const result = await resolveKpiApprovalPolicySteps({
+    subjectUserId: "member",
+    subjectOrgNodeId: "team",
+    policy: selectedPolicy,
+  }, resolverDependencies);
+
+  assert.deepEqual(result.map((item) => item.approverId), ["leader-a", "leader-b"]);
+  assert.deepEqual(result.map((item) => item.stepOrder), [1, 1]);
 });
 
 test("cascade mode expands every responsible node through the department and excludes company", async () => {

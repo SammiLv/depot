@@ -11,6 +11,8 @@ import {
   kpiProgressStageLabels,
   kpiProgressStageOrder,
 } from "@/server/kpi/approval-workflow";
+import { findUserPendingApprovalStep, isUserActiveApproverAtStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
+import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 
 
 type DataScopeInput = {
@@ -455,29 +457,6 @@ function buildOrgNodeRelationships(scopedOrgNodes: OrgNodeSummary[]): OrgNodeRel
   };
 }
 
-function parseStructuredSummary(value: string | null | undefined, firstLabel: string, secondLabel: string) {
-  const text = (value ?? "").trim();
-  if (!text) {
-    return { first: "", second: "" };
-  }
-
-  const blockRegex = /【([^】]+)】\s*([\s\S]*?)(?=\n\s*【|$)/g;
-  const blockMap = new Map<string, string>();
-  let match: RegExpExecArray | null = null;
-  while ((match = blockRegex.exec(text)) !== null) {
-    blockMap.set(match[1], match[2].trim());
-  }
-
-  if (blockMap.size > 0) {
-    return {
-      first: blockMap.get(firstLabel) ?? "",
-      second: blockMap.get(secondLabel) ?? "",
-    };
-  }
-
-  return { first: text, second: "" };
-}
-
 function getEditableStage(status: string): "SELF" | "LEADER" | "MANAGER" | "FINAL" | null {
   if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") {
     return "SELF";
@@ -704,7 +683,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     : 0;
   const finalTotal = managerTotal + attendanceScore;
   const hasApprovalChain = approvalSteps.length > 0;
-  const currentApprovalStep = approvalSteps.find((step) => step.status === "PENDING") ?? null;
+  const currentApprovalStep = findUserPendingApprovalStep(approvalSteps, currentUser.id);
   const selfReviewActive = isSelfReviewStatus(personalKpi.status);
   const editableStage = isSelfReviewStatus(personalKpi.status)
     ? "SELF"
@@ -718,7 +697,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const canScore = editableStage === "SELF"
     ? hasStagePermission && currentUser.id === personalKpi.userId
     : hasApprovalChain
-      ? currentApprovalStep?.approverId === currentUser.id
+      ? Boolean(currentApprovalStep)
       : hasStagePermission;
   const currentStepScores = currentApprovalStep
     ? await prisma.personalKpiItemStepScore.findMany({
@@ -728,6 +707,10 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     : [];
   const currentStepScoreByItemId = new Map(
     currentStepScores.map((stepScore) => [stepScore.personalKpiItemId, stepScore.score] as const)
+  );
+  const groupedApprovalSteps = buildGroupedApprovalStepDisplays(
+    approvalSteps,
+    (step) => actorNameById.get(step.approverId) ?? "—",
   );
   const stages = hasApprovalChain
     ? [
@@ -739,13 +722,13 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
           completed: !selfReviewActive,
           approverName: user?.name ?? "—",
         },
-        ...approvalSteps.map((step) => ({
-          key: `APPROVAL_STEP_${step.stepOrder}`,
-          label: getApprovalStepDisplayLabel(step.stageKey) || `审批步骤 ${step.stepOrder}`,
-          count: step.status === "WAITING" ? 0 : 1,
-          active: !selfReviewActive && step.status === "PENDING",
-          completed: step.status === "COMPLETED",
-          approverName: actorNameById.get(step.approverId) ?? "—",
+        ...groupedApprovalSteps.map((group) => ({
+          key: `APPROVAL_STEP_${group.stepOrder}`,
+          label: group.stepLabel || getApprovalStepDisplayLabel(group.stageKey) || `审批步骤 ${group.stepOrder}`,
+          count: group.count,
+          active: !selfReviewActive && group.active,
+          completed: group.completed,
+          approverName: group.approverName,
         })),
       ]
     : (() => {
@@ -843,12 +826,12 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       actedAt: log.actedAt.toISOString(),
       remark: log.remark,
     })),
-    approvalSteps: approvalSteps.map((step) => ({
-      stepOrder: step.stepOrder,
-      stageKey: step.stageKey,
-      stepLabel: step.stepLabel,
-      approverName: actorNameById.get(step.approverId) ?? "—",
-      status: step.status,
+    approvalSteps: groupedApprovalSteps.map((group) => ({
+      stepOrder: group.stepOrder,
+      stageKey: group.stageKey,
+      stepLabel: group.stepLabel,
+      approverName: group.approverName,
+      status: group.status,
     } satisfies ApprovalStepSummary)),
   };
 }
@@ -1022,9 +1005,9 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     const steps = approvalStepsByKpiId.get(step.personalKpiId) ?? [];
     steps.push(step);
     approvalStepsByKpiId.set(step.personalKpiId, steps);
-    if (step.status !== "PENDING") continue;
-    if (!activeApprovalStepByKpiId.has(step.personalKpiId)) {
-      activeApprovalStepByKpiId.set(step.personalKpiId, step);
+    const userStep = findUserPendingApprovalStep(steps, currentUser.id);
+    if (userStep) {
+      activeApprovalStepByKpiId.set(step.personalKpiId, userStep);
     }
   }
   const itemsByKpi = new Map<string, typeof allItems>();
@@ -1104,19 +1087,13 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),
         canLeaderScore: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? !isSelfReviewStatus(personalKpi.status)
-            && activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
-            && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "LEADER"
+          ? isUserActiveApproverAtStage(approvalStepsByKpiId.get(personalKpi.id) ?? [], currentUser.id, "LEADER")
           : canScoreLeader && personalKpi.status === "PENDING_LEADER_SCORE",
         canManagerScore: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? !isSelfReviewStatus(personalKpi.status)
-            && activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
-            && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "MANAGER"
+          ? isUserActiveApproverAtStage(approvalStepsByKpiId.get(personalKpi.id) ?? [], currentUser.id, "MANAGER")
           : canScoreManager && personalKpi.status === "PENDING_MANAGER_SCORE",
         canFinalReview: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? !isSelfReviewStatus(personalKpi.status)
-            && activeApprovalStepByKpiId.get(personalKpi.id)?.approverId === currentUser.id
-            && activeApprovalStepByKpiId.get(personalKpi.id)?.stageKey === "FINAL"
+          ? isUserActiveApproverAtStage(approvalStepsByKpiId.get(personalKpi.id) ?? [], currentUser.id, "FINAL")
           : canScoreFinal && personalKpi.status === "PENDING_FINAL_REVIEW",
       },
       completedProgressStages,

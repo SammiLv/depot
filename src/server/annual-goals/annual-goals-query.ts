@@ -793,8 +793,12 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
       const authorityPlan = assignment.sourceMetric?.parentMetric.plan ?? assignment.metric?.plan;
       return authorityPlan?.year === resolvedSelectedYear && !authorityPlan.deletedAt;
     });
-    if (teamAssignments.length === 0) return [];
-    const authorityPlanRecord = teamAssignments[0].sourceMetric?.parentMetric.plan ?? teamAssignments[0].metric?.plan;
+    const authorityPlanRecord = teamAssignments[0]?.sourceMetric?.parentMetric.plan
+      ?? teamAssignments[0]?.metric?.plan
+      ?? selectedYearPlans.find(
+        (plan) => plan.departmentOrgNodeId === team.departmentOrgNodeId && !plan.deletedAt,
+      )
+      ?? null;
     if (!authorityPlanRecord) return [];
     const authorityPlan = departmentPlanDataById.get(authorityPlanRecord.id);
     if (!authorityPlan) return [];

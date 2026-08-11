@@ -28,6 +28,7 @@ enum OrgPermissionModuleKey {
   ANNUAL_GOAL
   KPI
   NOTIFICATION
+  PRODUCT_MANAGEMENT
 }
 
 enum OrgPermissionAbilityKey {
@@ -41,6 +42,9 @@ enum OrgPermissionAbilityKey {
   SCORE_MANAGER
   SCORE_FINAL
   MANAGE_NOTIFICATION_SCENARIO
+  MANAGE_PRODUCT_GOAL
+  MANAGE_PROJECT_AND_VALUE_TRACKING
+  MANAGE_PRODUCT_TASK
 }
 
 enum NotificationTriggerType {
@@ -51,6 +55,14 @@ enum NotificationTriggerType {
 enum NotificationDeliveryChannel {
   IN_APP
   DINGTALK
+  DINGTALK_PERSONAL
+  DINGTALK_GROUP
+}
+
+enum DingTalkGroupBotSecurityType {
+  KEYWORD
+  SIGN
+  IP
 }
 
 enum NotificationDeliveryStatus {
@@ -475,7 +487,6 @@ model AnnualGoalProgress {
 model Project {
   id                String        @id @default(cuid())
   title             String
-  productGoalId     String?
   description       String?
   expectedOutcome   String?
   startQuarter      String?
@@ -494,11 +505,26 @@ model Project {
   deletedAt         DateTime?
 
   quarterlyWorks QuarterlyWork[]
+  productGoalLinks ProjectProductGoal[]
 
-  @@index([productGoalId])
   @@index([ownerId])
   @@index([orgNodeId])
   @@index([status])
+}
+
+model ProjectProductGoal {
+  id            String   @id @default(cuid())
+  projectId     String
+  productGoalId String
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productGoal ProductGoal @relation(fields: [productGoalId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, productGoalId])
+  @@index([projectId])
+  @@index([productGoalId])
 }
 
 model ProductGoal {
@@ -515,6 +541,8 @@ model ProductGoal {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
+
+  projectLinks ProjectProductGoal[]
 
   @@index([year])
   @@index([ownerId])
@@ -865,6 +893,7 @@ model NotificationScenario {
   id              String                  @id @default(cuid())
   name            String
   description     String?
+  module          String                  @default("KPI管理")
   triggerType     NotificationTriggerType
   triggerEvent    String
   scheduleConfig  Json?
@@ -883,6 +912,7 @@ model NotificationScenario {
 
   @@index([triggerType, isActive])
   @@index([triggerEvent, isActive])
+  @@index([module, isActive])
   @@index([nextRunAt])
 }
 
@@ -901,6 +931,18 @@ model NotificationDeliveryLog {
   @@unique([scenarioId, eventKey, channel])
   @@index([userId])
   @@index([createdAt])
+}
+
+model NotificationGroupBot {
+  id            String                       @id @default(cuid())
+  name          String                       @unique
+  webhookUrl    String
+  securityType  DingTalkGroupBotSecurityType
+  securityValue String
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
 }
 
 model TodoItem {

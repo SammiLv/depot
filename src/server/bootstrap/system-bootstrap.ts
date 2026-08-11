@@ -7,6 +7,7 @@ import {
   orgPermissionModuleKeys,
 } from "@/server/permissions/permission-constants";
 import { ensurePresetNotificationScenarios } from "@/server/notifications/preset-scenarios";
+import { removePermissionMatrixIntegrationTestArtifacts } from "@/server/organization/integration-test-artifacts";
 
 const systemMenus = [
   ["dashboard", "首页工作台", "/dashboard", 10, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
@@ -20,6 +21,7 @@ const systemMenus = [
 ] as const;
 
 export async function ensureInitialSystemBootstrap() {
+  await removePermissionMatrixIntegrationTestArtifacts();
   await ensureSystemMenus();
   await ensureAnnualGoalPermissions();
   await ensureSystemAnnualGoalRolePermissions();
@@ -124,27 +126,25 @@ async function ensureAdminKpiPermissions() {
 
 async function ensureNotificationScenarioPermissions() {
   const abilityKey = notificationAbilityKeys.manageNotificationScenario;
-  for (const roleType of [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER]) {
-    const where = {
-      moduleKey: orgPermissionModuleKeys.notification,
-      abilityKey,
-      scopeType: "ALL" as const,
-      subjectType: "ROLE" as const,
-      roleType,
-      userId: null,
-      orgNodeId: null,
-    };
-    const result = await prisma.orgPermissionGrant.updateMany({
-      where,
-      data: { isActive: true },
+  const where = {
+    moduleKey: orgPermissionModuleKeys.notification,
+    abilityKey,
+    scopeType: "ALL" as const,
+    subjectType: "ROLE" as const,
+    roleType: RoleType.ADMIN,
+    userId: null,
+    orgNodeId: null,
+  };
+  const result = await prisma.orgPermissionGrant.updateMany({
+    where,
+    data: { isActive: true },
+  });
+  if (result.count === 0) {
+    await prisma.orgPermissionGrant.create({
+      data: {
+        ...where,
+        isActive: true,
+      },
     });
-    if (result.count === 0) {
-      await prisma.orgPermissionGrant.create({
-        data: {
-          ...where,
-          isActive: true,
-        },
-      });
-    }
   }
 }
