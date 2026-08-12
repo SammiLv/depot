@@ -1,5 +1,5 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -31,7 +31,9 @@ function resolvePrismaClientOptions() {
   const adapter = new PrismaBetterSqlite3({ url: databaseUrl });
   return {
     adapter,
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] as const : ["error"] as const,
+    log: (process.env.NODE_ENV === "development"
+      ? ["query", "error", "warn"]
+      : ["error"]) satisfies Prisma.LogLevel[],
   };
 }
 

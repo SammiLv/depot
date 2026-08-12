@@ -224,6 +224,8 @@ export async function getDashboardData(currentUser: CurrentUser) {
           personalKpiId: true,
           approverId: true,
           stageKey: true,
+          stepOrder: true,
+          status: true,
         },
       })
     : [];

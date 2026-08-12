@@ -88,7 +88,10 @@ export function isUserActiveApproverAtStage<T extends ApprovalStepLike>(
   return step?.stageKey === stageKey;
 }
 
-export function hasCompletedApprovalStage(steps: ApprovalStepLike[], stageKey: string) {
+export function hasCompletedApprovalStage(
+  steps: Array<Pick<ApprovalStepLike, "stageKey" | "status">>,
+  stageKey: string,
+) {
   return steps.some((step) => step.stageKey === stageKey && step.status === "COMPLETED");
 }
 

@@ -517,7 +517,8 @@ export async function deliverTestNotification(input: {
   const recipientConfig = asRecipientConfig(input.scenario.recipientConfig);
   const conditionConfig = asConditionConfig(input.scenario.conditionConfig);
   const testRunId = input.testRunId ?? Date.now();
-  const payload = await buildTestEventPayload(input.scenario, testRunId);
+  const normalizedTestRunId = typeof testRunId === "string" ? Number(testRunId) || Date.now() : testRunId;
+  const payload = await buildTestEventPayload(input.scenario, normalizedTestRunId);
 
   if (!matchesConditions(conditionConfig, payload)) {
     throw new Error("测试数据不满足场景条件，请调整条件配置或准备测试数据");

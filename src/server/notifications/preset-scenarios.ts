@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/prisma";
 import { computeNextRunAt, parseScheduleConfig } from "@/server/notifications/schedule-utils";
 import { resolveEventModule } from "@/server/notifications/event-registry";
+import type { ScheduleConfig } from "@/server/notifications/types";
 
 const initializationReminderSchedule = {
   frequency: "weekly" as const,
@@ -265,7 +266,7 @@ export async function ensurePresetNotificationScenarios() {
     const updateData: {
       description: string;
       module: string;
-      scheduleConfig?: typeof preset.scheduleConfig;
+      scheduleConfig?: ScheduleConfig;
       nextRunAt?: Date | null;
     } = {
       description: preset.description,

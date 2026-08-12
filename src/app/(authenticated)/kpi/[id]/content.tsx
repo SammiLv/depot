@@ -580,11 +580,11 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                           <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
                             <div>
                               <div className="mb-2 text-sm font-medium">表扬</div>
-                              <SummaryTextarea readOnly placeholder="暂无上级表扬" />
+                              <SummaryTextarea value="" readOnly placeholder="暂无上级表扬" />
                             </div>
                             <div>
                               <div className="mb-2 text-sm font-medium">机会</div>
-                              <SummaryTextarea readOnly placeholder="暂无上级建议与机会" />
+                              <SummaryTextarea value="" readOnly placeholder="暂无上级建议与机会" />
                             </div>
                           </div>
                         ) : null}

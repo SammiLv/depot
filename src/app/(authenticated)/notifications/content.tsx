@@ -18,6 +18,8 @@ import {
   formatScheduleNextRunHint,
   previewScheduleNextRun,
 } from "@/server/notifications/schedule-utils";
+import type { ScheduleConfig, ScheduleScanType } from "@/server/notifications/types";
+import { SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
 
 function Button({ className = "", size = "md", ...props }: ComponentProps<typeof UiButton>) {
   return <UiButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
@@ -110,15 +112,6 @@ type ChannelConfigState = {
   titleTemplate: string;
   contentTemplate: string;
   messageUrlTemplate: string;
-};
-
-type ScheduleConfigState = {
-  frequency: "daily" | "weekly";
-  timeOfDay: string;
-  weekdays: number[];
-  scanType: string;
-  daysBefore: number;
-  timezone: string;
 };
 
 const iconMap: Record<string, { icon: typeof CheckCircle2; tone: string }> = {
@@ -401,7 +394,7 @@ function defaultChannelConfig(): ChannelConfigState {
   };
 }
 
-function defaultScheduleConfig(scanType = "kpi_self_review_pending"): ScheduleConfigState {
+function defaultScheduleConfig(scanType: ScheduleScanType = "kpi_self_review_pending"): ScheduleConfig {
   return {
     frequency: "daily",
     timeOfDay: "09:00",
@@ -433,15 +426,19 @@ function parseChannelConfig(value: unknown): ChannelConfigState {
   };
 }
 
-function parseScheduleConfig(value: unknown): ScheduleConfigState {
+function parseScheduleConfig(value: unknown): ScheduleConfig {
   const defaults = defaultScheduleConfig();
   if (!value || typeof value !== "object") return defaults;
-  const raw = value as Partial<ScheduleConfigState>;
+  const raw = value as Partial<ScheduleConfig>;
+  const scanType =
+    raw.scanType && raw.scanType in SCHEDULE_SCAN_REGISTRY
+      ? raw.scanType
+      : defaults.scanType;
   return {
     frequency: raw.frequency === "weekly" ? "weekly" : "daily",
     timeOfDay: raw.timeOfDay ?? "09:00",
     weekdays: Array.isArray(raw.weekdays) ? raw.weekdays : defaults.weekdays,
-    scanType: raw.scanType ?? defaults.scanType,
+    scanType,
     daysBefore: typeof raw.daysBefore === "number" ? raw.daysBefore : 0,
     timezone: raw.timezone ?? "Asia/Shanghai",
   };
@@ -753,7 +750,7 @@ function ScenarioForm({
               <label className="block text-sm font-medium mb-1">扫描类型</label>
               <select
                 value={scheduleConfig.scanType}
-                onChange={(event) => setScheduleConfig((prev) => ({ ...prev, scanType: event.target.value }))}
+                onChange={(event) => setScheduleConfig((prev) => ({ ...prev, scanType: event.target.value as ScheduleScanType }))}
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               >
                 {scanOptions.map((option) => (

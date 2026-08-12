@@ -319,6 +319,9 @@ async function resolveApproversForNode(
   if (resolverType === "ADMIN") {
     return dependencies.findActiveUsersByRole("ADMIN");
   }
+  if (resolverType === "EXPLICIT_USER") {
+    return [];
+  }
   if (!targetNodeId) return [];
   return dependencies.findActiveUsersByRole(resolverType, [targetNodeId]);
 }
