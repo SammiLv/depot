@@ -5,6 +5,13 @@ import {
   runAnnualGoalQuarterTargetMissingScan,
   runAnnualGoalWeeklyProgressPendingScan,
 } from "@/server/notifications/annual-goal-schedule-scan";
+import {
+  runProjectDueSoonScan,
+  runProjectOverdueScan,
+  runProjectValueTrackPendingScan,
+  runQuarterlyWorkDueSoonScan,
+  runQuarterlyWorkOverdueScan,
+} from "@/server/notifications/quarterly-work-schedule-scan";
 import { computeNextRunAt, getScheduleSlot, parseScheduleConfig } from "@/server/notifications/schedule-utils";
 
 declare global {
@@ -137,6 +144,16 @@ async function runScanForSchedule(
     await runAnnualGoalWeeklyProgressPendingScan(scenarioId, daysBefore, emitOptions);
   } else if (schedule.scanType === "annual_goal_quarter_target_missing") {
     await runAnnualGoalQuarterTargetMissingScan(scenarioId, emitOptions);
+  } else if (schedule.scanType === "quarterly_work_overdue") {
+    await runQuarterlyWorkOverdueScan(scenarioId, emitOptions);
+  } else if (schedule.scanType === "quarterly_work_due_soon") {
+    await runQuarterlyWorkDueSoonScan(scenarioId, daysBefore, emitOptions);
+  } else if (schedule.scanType === "project_overdue") {
+    await runProjectOverdueScan(scenarioId, emitOptions);
+  } else if (schedule.scanType === "project_due_soon") {
+    await runProjectDueSoonScan(scenarioId, daysBefore, emitOptions);
+  } else if (schedule.scanType === "project_value_track_pending") {
+    await runProjectValueTrackPendingScan(scenarioId, daysBefore, emitOptions);
   }
 }
 

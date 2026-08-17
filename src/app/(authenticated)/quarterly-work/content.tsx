@@ -7,6 +7,15 @@ import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
+import {
+  VALUE_JUDGEMENT_BELOW_EXPECTATION,
+  VALUE_JUDGEMENTS,
+  VALUE_TRACK_STATUS_COMPLETED,
+  VALUE_TRACK_STATUS_NOT_OBSERVED,
+  VALUE_TRACK_STATUS_OBSERVING,
+  VALUE_TRACK_STATUSES,
+  isValueJudgement,
+} from "@/server/quarterly-work/value-track-constants";
 import { runServerAction } from "@/lib/run-server-action";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2, Search } from "lucide-react";
 
@@ -62,13 +71,26 @@ const projectTitleByStatus: Record<ProjectStatus, string> = {
 
 const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
-const valueJudgementOptions = ["未观测", "观测中", "不达预期", "已达预期"] as const;
 const valueOverviewCardColumns = [
   { key: "未观测", label: "未观测", tone: "default" as const },
   { key: "观测中", label: "观测中", tone: "primary" as const },
-  { key: "不达预期", label: "不达预期", tone: "warning" as const },
-  { key: "已达预期", label: "已达预期", tone: "success" as const },
+  { key: "未达预期", label: "未达预期", tone: "warning" as const },
+  { key: "已完成", label: "已完成", tone: "success" as const },
 ] as const;
+
+function matchesValueOverviewColumn(
+  item: { valueTrackStatus: string; valueJudgement: string | null },
+  columnKey: (typeof valueOverviewCardColumns)[number]["key"],
+) {
+  if (columnKey === "未观测") return item.valueTrackStatus === VALUE_TRACK_STATUS_NOT_OBSERVED;
+  if (columnKey === "观测中") {
+    return item.valueTrackStatus === VALUE_TRACK_STATUS_OBSERVING && item.valueJudgement !== VALUE_JUDGEMENT_BELOW_EXPECTATION;
+  }
+  if (columnKey === "未达预期") {
+    return item.valueJudgement === VALUE_JUDGEMENT_BELOW_EXPECTATION && item.valueTrackStatus !== VALUE_TRACK_STATUS_COMPLETED;
+  }
+  return item.valueTrackStatus === VALUE_TRACK_STATUS_COMPLETED;
+}
 const projectListGridClass =
   "grid-cols-[minmax(0,1.05fr)_minmax(0,0.78fr)_minmax(0,0.52fr)_minmax(0,0.58fr)_minmax(0,1.08fr)_minmax(0,0.46fr)_minmax(0,0.48fr)_minmax(0,0.56fr)_minmax(0,0.56fr)_minmax(88px,0.62fr)]";
 
@@ -1189,6 +1211,49 @@ function ProductGoalCreateForm({
   );
 }
 
+function ValueTrackStatusFields({
+  defaultStatus,
+  defaultJudgement,
+}: {
+  defaultStatus?: string | null;
+  defaultJudgement?: string | null;
+}) {
+  const [status, setStatus] = useState(defaultStatus || VALUE_TRACK_STATUS_OBSERVING);
+  const showJudgement = status !== VALUE_TRACK_STATUS_NOT_OBSERVED;
+
+  return (
+    <>
+      <FormRow label="跟踪状态 *" align="center">
+        <select
+          name="valueTrackStatus"
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+        >
+          {VALUE_TRACK_STATUSES.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </FormRow>
+      {showJudgement ? (
+        <FormRow label="价值判断 *" align="center">
+          <select
+            name="valueJudgement"
+            defaultValue={isValueJudgement(defaultJudgement) ? defaultJudgement : ""}
+            required
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择价值判断</option>
+            {VALUE_JUDGEMENTS.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </FormRow>
+      ) : null}
+    </>
+  );
+}
+
 function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props["data"]; defaultProjectId?: string; onClose: () => void }) {
   const router = useRouter();
   const completedProjectMap = useMemo(
@@ -1250,17 +1315,11 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="价值判断 *" align="center">
-          <select
-            name="valueJudgement"
-            defaultValue="观测中"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {valueJudgementOptions.filter((option) => option !== "未观测").map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </FormRow>
+        <ValueTrackStatusFields
+          key={selectedProjectId}
+          defaultStatus={selectedProject?.valueTrackStatus === VALUE_TRACK_STATUS_COMPLETED ? VALUE_TRACK_STATUS_COMPLETED : VALUE_TRACK_STATUS_OBSERVING}
+          defaultJudgement={selectedProject?.valueJudgement}
+        />
         <FormRow label="后续优化">
           <textarea
             name="followUpOptimization"
@@ -1348,17 +1407,10 @@ function ValueOverviewEditForm({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="价值判断 *" align="center">
-          <select
-            name="valueJudgement"
-            defaultValue={item.valueJudgement}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {valueJudgementOptions.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </FormRow>
+        <ValueTrackStatusFields
+          defaultStatus={item.valueTrackStatus}
+          defaultJudgement={item.valueJudgement}
+        />
       </StickyFormScroll>
       <StickyFormFooter>
         {errorMessage ? (
@@ -1411,17 +1463,10 @@ function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrack
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="价值判断 *" align="center">
-          <select
-            name="valueJudgement"
-            defaultValue={item.valueJudgement === "未观测" ? "观测中" : item.valueJudgement}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {valueJudgementOptions.filter((option) => option !== "未观测").map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </FormRow>
+        <ValueTrackStatusFields
+          defaultStatus={item.valueTrackStatus}
+          defaultJudgement={item.valueJudgement}
+        />
         <FormRow label="跟踪结果描述 *">
           <textarea
             name="trackingResult"
@@ -2483,7 +2528,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             {viewMode === "card" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {valueOverviewCardColumns.map((column) => {
-                const items = filteredValueOverviewItems.filter((item) => item.valueJudgement === column.key);
+                const items = filteredValueOverviewItems.filter((item) => matchesValueOverviewColumn(item, column.key));
                 return (
                   <div key={column.key} className="min-h-[320px] rounded-xl border border-border bg-muted/30 p-3 shadow-sm">
                     <div className="mb-3 flex items-center justify-between px-1">
@@ -2538,6 +2583,10 @@ export function QuarterlyWorkContent({ data }: Props) {
                               </div>
                               <div className="mt-3 space-y-2 text-xs text-muted-foreground">
                                 <div>
+                                  <span className="text-[11px]">价值判断：</span>
+                                  <span className="text-foreground">{item.valueJudgement || "—"}</span>
+                                </div>
+                                <div>
                                   <span className="text-[11px]">工作量(人天)：</span>
                                   <span className="text-foreground">{item.workloadPersonDay ?? "—"}</span>
                                 </div>
@@ -2568,13 +2617,14 @@ export function QuarterlyWorkContent({ data }: Props) {
             <div className="space-y-6">
               <div>
                 <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                  <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.9fr_0.9fr_1fr_140px] gap-4 text-xs text-muted-foreground">
+                  <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.8fr_0.9fr_0.9fr_1fr_140px] gap-4 text-xs text-muted-foreground">
                     <div>项目名称</div>
                     <div>负责人</div>
                     <div>工作量(人天)</div>
                     <div>其他成本</div>
                     <div>预期收益</div>
                     <div>实际收益</div>
+                    <div>跟踪状态</div>
                     <div>价值判断</div>
                     <div>项目状态</div>
                     <div>完成时间</div>
@@ -2583,14 +2633,15 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div className="divide-y divide-border">
                     {filteredValueOverviewItems.length ? (
                       filteredValueOverviewItems.map((item: Props["data"]["valueOverviewItems"][number]) => (
-                          <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.9fr_0.9fr_1fr_140px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                          <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_110px_1fr_1fr_1fr_0.8fr_0.9fr_0.9fr_1fr_140px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                             <div className="font-medium text-foreground break-words">{item.title}</div>
                             <div className="text-muted-foreground break-words">{item.owner}</div>
                             <div className="text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
                             <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.otherCost || "—"}</div>
                             <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
                             <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.actualValue || "—"}</div>
-                            <div className="text-muted-foreground">{item.valueJudgement}</div>
+                            <div className="text-muted-foreground">{item.valueTrackStatus}</div>
+                            <div className="text-muted-foreground">{item.valueJudgement || "—"}</div>
                             <div className="text-muted-foreground">{projectTitleByStatus[item.status]}</div>
                             <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                             <div className="text-right">

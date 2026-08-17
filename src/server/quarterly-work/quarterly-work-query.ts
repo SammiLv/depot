@@ -10,6 +10,7 @@ import {
   isValueTrackVisibleInPeriod,
   type ActivePeriod,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
+import { normalizeValueTrackStatus } from "@/server/quarterly-work/value-track-constants";
 import type { OrgNodeType, ProjectStatus, RoleType, WorkStatus } from "@prisma/client";
 
 type DataScopeInput = {
@@ -83,6 +84,7 @@ type ProjectBoardItem = {
   otherCost: string | null;
   actualValue: string | null;
   valueJudgement: string | null;
+  valueTrackStatus: string;
   workCount: number;
   activeQuarterCount: number;
   createdAt: Date;
@@ -125,7 +127,8 @@ type ValueOverviewItem = {
   otherCost: string | null;
   expectedOutcome: string | null;
   actualValue: string | null;
-  valueJudgement: string;
+  valueJudgement: string | null;
+  valueTrackStatus: string;
   status: ProjectStatus;
   completedAt: Date | null;
 };
@@ -142,7 +145,8 @@ type ValueTrackItem = {
   trackingResult: string;
   followUpOptimization: string | null;
   actualValue: string | null;
-  valueJudgement: string;
+  valueJudgement: string | null;
+  valueTrackStatus: string;
 };
 
 const asciiLetterPattern = /^[A-Za-z]$/;
@@ -589,6 +593,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       otherCost: project.otherCost,
       actualValue: project.actualValue,
       valueJudgement: project.valueJudgement,
+      valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
       workCount: projectWorks.length,
       activeQuarterCount: activeProjectWorks.length,
       createdAt: project.createdAt,
@@ -639,7 +644,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       otherCost: project.otherCost,
       expectedOutcome: project.expectedOutcome,
       actualValue: project.actualValue,
-      valueJudgement: project.valueJudgement ?? "未观测",
+      valueJudgement: project.valueJudgement,
+      valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
       status: project.status,
       completedAt: project.completedAt,
     };
@@ -816,7 +822,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         trackingResult: track.trackingResult,
         followUpOptimization: track.followUpOptimization,
         actualValue: project?.actualValue ?? null,
-        valueJudgement: project?.valueJudgement ?? "未观测",
+        valueJudgement: project?.valueJudgement ?? null,
+        valueTrackStatus: normalizeValueTrackStatus(project?.valueTrackStatus),
       };
     }),
     productGoalOptions: productGoals.map((goal) => ({
@@ -835,6 +842,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         workloadPersonDay: project.workloadPersonDay,
         otherCost: project.otherCost,
         actualValue: project.actualValue,
+        valueJudgement: project.valueJudgement,
+        valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
       })),
     projectOptions: projects
       .filter((project) => project.status !== "COMPLETED" && project.status !== "CLOSED")

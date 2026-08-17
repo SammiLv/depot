@@ -56,6 +56,7 @@ export default async function ValueTrackingPage() {
       otherCost: true,
       workloadPersonDay: true,
       valueJudgement: true,
+      valueTrackStatus: true,
       completedAt: true,
     },
   });
@@ -99,6 +100,10 @@ export default async function ValueTrackingPage() {
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">工作量(人天)</div>
                     <div className="mt-0.5 font-medium">{project?.workloadPersonDay ?? "—"}</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <div className="text-xs text-muted-foreground">跟踪状态</div>
+                    <div className="mt-0.5 font-medium">{project?.valueTrackStatus ?? "未观测"}</div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">价值判断</div>

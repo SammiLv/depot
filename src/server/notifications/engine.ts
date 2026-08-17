@@ -4,6 +4,7 @@ import { sendDingTalkMessage } from "@/server/dingtalk/message-client";
 import { sendGroupRobotMessage } from "@/server/dingtalk/group-robot-client";
 import { buildAnnualGoalTestEventPayload } from "@/server/notifications/annual-goal-test-payload";
 import { buildKpiTestEventPayload } from "@/server/notifications/kpi-test-payload";
+import { buildQuarterlyWorkTestEventPayload } from "@/server/notifications/quarterly-work-test-payload";
 import { resolveRecipientUserIds } from "@/server/notifications/recipient-resolvers";
 import { buildEventKey, renderTemplate } from "@/server/notifications/template-render";
 import type {
@@ -425,6 +426,11 @@ async function buildTestEventPayload(
   if (scenario.triggerEvent.startsWith("annual_goal.")) {
     const annualGoalPayload = await buildAnnualGoalTestEventPayload(scenario.triggerEvent, base);
     if (annualGoalPayload) return annualGoalPayload;
+  }
+
+  if (scenario.triggerEvent.startsWith("quarterly_work.") || scenario.triggerEvent.startsWith("project.")) {
+    const productPayload = await buildQuarterlyWorkTestEventPayload(scenario.triggerEvent, base);
+    if (productPayload) return productPayload;
   }
 
   if (scenario.triggerEvent === "kpi.initialization.pending" || scenario.triggerEvent === "kpi.self_review.pending") {

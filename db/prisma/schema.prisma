@@ -499,6 +499,7 @@ model Project {
   otherCost         String?
   actualValue       String?
   valueJudgement    String?
+  valueTrackStatus  String?
   createdById       String
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt

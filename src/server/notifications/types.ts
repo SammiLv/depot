@@ -41,7 +41,12 @@ export type ScheduleScanType =
   | "kpi_self_review_pending"
   | "todo_due"
   | "annual_goal_weekly_progress_pending"
-  | "annual_goal_quarter_target_missing";
+  | "annual_goal_quarter_target_missing"
+  | "quarterly_work_overdue"
+  | "quarterly_work_due_soon"
+  | "project_overdue"
+  | "project_due_soon"
+  | "project_value_track_pending";
 
 export type ScheduleConfig = {
   frequency: ScheduleFrequency;

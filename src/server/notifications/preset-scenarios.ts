@@ -39,6 +39,43 @@ const annualGoalQuarterTargetSchedule = {
   timezone: "Asia/Shanghai",
 };
 
+const weeklyMondaySchedule = {
+  frequency: "weekly" as const,
+  timeOfDay: "09:00",
+  weekdays: [1],
+  timezone: "Asia/Shanghai",
+};
+
+const quarterlyWorkOverdueSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "quarterly_work_overdue" as const,
+  daysBefore: 0,
+};
+
+const quarterlyWorkDueSoonSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "quarterly_work_due_soon" as const,
+  daysBefore: 7,
+};
+
+const projectOverdueSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "project_overdue" as const,
+  daysBefore: 0,
+};
+
+const projectDueSoonSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "project_due_soon" as const,
+  daysBefore: 14,
+};
+
+const projectValueTrackPendingSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "project_value_track_pending" as const,
+  daysBefore: 7,
+};
+
 const PRESET_SCENARIOS = [
   {
     name: "季度 KPI 初始化提醒",
@@ -248,6 +285,184 @@ const PRESET_SCENARIOS = [
     },
     isActive: true,
     sortOrder: 100,
+  },
+  {
+    name: "季度任务负责人变更通知",
+    description: "新增任务或变更任务负责人时通知新负责人",
+    module: resolveEventModule("quarterly_work.assigned"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "quarterly_work.assigned",
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "您被指派为任务负责人：{{title}}",
+      contentTemplate: "{{ownerName}}，请及时跟进「{{title}}」。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 110,
+  },
+  {
+    name: "项目完成提醒价值跟踪",
+    description: "项目完成后通知负责人启动价值跟踪",
+    module: resolveEventModule("project.completed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "project.completed",
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 0,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目已完成，请开始价值跟踪：{{title}}",
+      contentTemplate: "{{ownerName}}，「{{title}}」已完成，请及时维护跟踪状态与价值判断。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 120,
+  },
+  {
+    name: "价值判断未达预期提醒",
+    description: "价值判断变更为未达预期时通知负责人、组长和主管",
+    module: resolveEventModule("project.value_judgement.changed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "project.value_judgement.changed",
+    conditionConfig: {
+      conditions: [{ field: "valueJudgement", operator: "eq", value: "未达预期" }],
+    },
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 0,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "价值判断未达预期：{{title}}",
+      contentTemplate: "「{{title}}」的价值判断已变更为未达预期，请关注后续优化。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+    },
+    isActive: true,
+    sortOrder: 130,
+  },
+  {
+    name: "季度任务延期提醒",
+    description: "每周一扫描结束月份已过且仍未完成的任务",
+    module: resolveEventModule("quarterly_work.overdue"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "quarterly_work.overdue",
+    scheduleConfig: quarterlyWorkOverdueSchedule,
+    nextRunAt: computeNextRunAt(quarterlyWorkOverdueSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "任务已延期：{{title}}",
+      contentTemplate: "「{{title}}」已超过结束月份 {{overdueDays}} 天，请尽快更新进展。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 140,
+  },
+  {
+    name: "季度任务即将延期提醒",
+    description: "每周一扫描距离任务结束月份不足 1 周的未完成任务",
+    module: resolveEventModule("quarterly_work.due_soon"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "quarterly_work.due_soon",
+    scheduleConfig: quarterlyWorkDueSoonSchedule,
+    nextRunAt: computeNextRunAt(quarterlyWorkDueSoonSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "任务即将延期：{{title}}",
+      contentTemplate: "「{{title}}」距结束月份还剩 {{daysUntilDue}} 天，请及时推进。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 150,
+  },
+  {
+    name: "项目延期提醒",
+    description: "每周一扫描结束季度已过且仍未完成的项目",
+    module: resolveEventModule("project.overdue"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "project.overdue",
+    scheduleConfig: projectOverdueSchedule,
+    nextRunAt: computeNextRunAt(projectOverdueSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目已延期：{{title}}",
+      contentTemplate: "「{{title}}」已超过结束季度 {{overdueDays}} 天，请尽快处理。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+    },
+    isActive: true,
+    sortOrder: 160,
+  },
+  {
+    name: "项目即将延期提醒",
+    description: "每周一扫描距离项目结束季度不足 2 周的未完成项目",
+    module: resolveEventModule("project.due_soon"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "project.due_soon",
+    scheduleConfig: projectDueSoonSchedule,
+    nextRunAt: computeNextRunAt(projectDueSoonSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目即将延期：{{title}}",
+      contentTemplate: "「{{title}}」距结束季度还剩 {{daysUntilDue}} 天，请及时推进。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+    },
+    isActive: true,
+    sortOrder: 170,
+  },
+  {
+    name: "价值跟踪待完成提醒",
+    description: "每季度末前一周扫描跟踪状态尚未变为已完成的已完成项目",
+    module: resolveEventModule("project.value_track.pending"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "project.value_track.pending",
+    scheduleConfig: projectValueTrackPendingSchedule,
+    nextRunAt: computeNextRunAt(projectValueTrackPendingSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "请完成价值跟踪：{{title}}",
+      contentTemplate: "距本季度结束还剩 {{daysUntilQuarterEnd}} 天，「{{title}}」跟踪状态仍为{{valueTrackStatus}}，请尽快完成。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 180,
   },
 ] as const;
 

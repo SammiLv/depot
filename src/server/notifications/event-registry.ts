@@ -83,6 +83,76 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     payloadFields: ["userId", "todoId", "title", "dueDate", "targetType", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
   },
+  "quarterly_work.assigned": {
+    code: "quarterly_work.assigned",
+    label: "季度任务负责人变更",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "year", "quarter", "projectTitle", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "quarterly_work.status.changed": {
+    code: "quarterly_work.status.changed",
+    label: "季度任务状态变更",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "status", "previousStatus", "year", "quarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "quarterly_work.overdue": {
+    code: "quarterly_work.overdue",
+    label: "季度任务延期",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "endMonth", "overdueDays", "year", "quarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "quarterly_work.due_soon": {
+    code: "quarterly_work.due_soon",
+    label: "季度任务即将延期",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "endMonth", "daysUntilDue", "year", "quarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "project.assigned": {
+    code: "project.assigned",
+    label: "项目负责人变更",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "endQuarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "project.completed": {
+    code: "project.completed",
+    label: "项目已完成",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "valueTrackStatus", "year", "quarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
+  },
+  "project.overdue": {
+    code: "project.overdue",
+    label: "项目延期",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "endQuarter", "overdueDays", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "project.due_soon": {
+    code: "project.due_soon",
+    label: "项目即将延期",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "endQuarter", "daysUntilDue", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
+  },
+  "project.value_judgement.changed": {
+    code: "project.value_judgement.changed",
+    label: "价值判断变更",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "valueJudgement", "previousValueJudgement", "valueTrackStatus", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
+  },
+  "project.value_track.pending": {
+    code: "project.value_track.pending",
+    label: "价值跟踪待完成",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "valueTrackStatus", "valueJudgement", "daysUntilQuarterEnd", "year", "quarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
+  },
   "annual_goal.progress.weekly_pending": {
     code: "annual_goal.progress.weekly_pending",
     label: "周进度未更新",
@@ -141,6 +211,26 @@ export const SCHEDULE_SCAN_REGISTRY: Record<ScheduleScanType, { label: string; e
     label: "指标季度目标未拆解提醒",
     emitEvent: "annual_goal.quarter_target.missing",
   },
+  quarterly_work_overdue: {
+    label: "季度任务延期提醒",
+    emitEvent: "quarterly_work.overdue",
+  },
+  quarterly_work_due_soon: {
+    label: "季度任务即将延期提醒",
+    emitEvent: "quarterly_work.due_soon",
+  },
+  project_overdue: {
+    label: "项目延期提醒",
+    emitEvent: "project.overdue",
+  },
+  project_due_soon: {
+    label: "项目即将延期提醒",
+    emitEvent: "project.due_soon",
+  },
+  project_value_track_pending: {
+    label: "价值跟踪待完成提醒",
+    emitEvent: "project.value_track.pending",
+  },
 };
 
 export const RECIPIENT_RULE_LABELS: Record<RecipientRuleType, string> = {
@@ -177,5 +267,6 @@ export function resolveEventModule(code: string): NotificationModule {
   const module = getNotificationEvent(code)?.module;
   if (module && isNotificationModule(module)) return module;
   if (code.startsWith("annual_goal.")) return "指标管理";
+  if (code.startsWith("quarterly_work.") || code.startsWith("project.") || code.startsWith("todo.")) return "产品管理";
   return "KPI管理";
 }

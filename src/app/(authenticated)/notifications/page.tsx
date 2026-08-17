@@ -18,12 +18,17 @@ import {
   SCHEDULE_SCAN_REGISTRY,
 } from "@/server/notifications/event-registry";
 import { NotificationsContent } from "./content";
+import { ensurePresetNotificationScenarios } from "@/server/notifications/preset-scenarios";
 
 export default async function NotifsPage() {
   const currentUser = await requireCurrentUser();
   const canManage = await canManageNotificationScenario(currentUser);
   const canViewAll = canViewAllNotifications(currentUser);
   const { resolveDepartmentOrgNodeId, orgFilter } = await getNotificationPageOrgData(currentUser);
+
+  if (canManage) {
+    await ensurePresetNotificationScenarios();
+  }
 
   const [notifications, allNotifications, scenarios, users, groupBots] = await Promise.all([
     prisma.notification.findMany({
