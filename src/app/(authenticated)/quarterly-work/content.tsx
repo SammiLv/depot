@@ -834,6 +834,20 @@ function ProjectEditForm({
   const [errorMessage, setErrorMessage] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
+  const taskWorkloadSum = useMemo(
+    () => data.columns.flatMap((column) => column.items).reduce((sum, work) => {
+      if (work.projectId === item.id && work.workloadPersonDay !== null && work.workloadPersonDay !== undefined) {
+        return sum + work.workloadPersonDay;
+      }
+      return sum;
+    }, 0),
+    [data.columns, item.id],
+  );
+  const [workloadPersonDay, setWorkloadPersonDay] = useState<string>(() => {
+    if (item.workloadPersonDay !== null && item.workloadPersonDay !== undefined) return String(item.workloadPersonDay);
+    const rounded = Math.round(taskWorkloadSum * 10) / 10;
+    return rounded > 0 ? String(rounded) : "";
+  });
 
   const quarterOptions = useMemo(() => {
     const now = new Date();
@@ -936,11 +950,14 @@ function ProjectEditForm({
             name="workloadPersonDay"
             type="number"
             step="0.1"
+            min="0"
             required={workloadRequired}
-            defaultValue={item.workloadPersonDay ?? ""}
+            value={workloadPersonDay}
+            onChange={(event) => setWorkloadPersonDay(event.target.value)}
             placeholder="请输入工作量"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
+          <div className="mt-1 text-xs text-muted-foreground">任务工作量合计：{taskWorkloadSum > 0 ? taskWorkloadSum : "—"}</div>
         </FormRow>
         <FormRow label="其他成本">
           <textarea
