@@ -575,6 +575,7 @@ model QuarterlyWork {
   taskResult      String?
   executionSummary String?
   taskDescription String?
+  workloadPersonDay Float?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?

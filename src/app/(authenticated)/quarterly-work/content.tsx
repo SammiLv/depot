@@ -685,6 +685,18 @@ function QuarterlyWorkForm({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
+        <FormRow label={workStatus === "COMPLETED" ? "工作量(人天) *" : "工作量(人天)"} align="center">
+          <input
+            name="workloadPersonDay"
+            type="number"
+            step="0.1"
+            min="0"
+            required={workStatus === "COMPLETED"}
+            defaultValue={item?.workloadPersonDay ?? ""}
+            placeholder="请输入工作量"
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
         <FormRow label="任务状态" align="center">
           <select
             name="status"
@@ -2569,13 +2581,14 @@ export function QuarterlyWorkContent({ data }: Props) {
             </>
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
+                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
                   <div>任务名称</div>
                   <div>所属项目</div>
                   <div>负责人</div>
                   <div>任务周期</div>
                   <div>剩余/超期</div>
                   <div>任务目标</div>
+                  <div>工作量(人天)</div>
                   <div>任务状态</div>
                   <div>任务结果</div>
                   <div>创建时间</div>
@@ -2585,7 +2598,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                 <div className="divide-y divide-border">
                   {filteredTaskColumns.flatMap((column) => column.items).length ? (
                     filteredTaskColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -2594,6 +2607,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           {item.remainingWeeksLabel ?? "—"}
                         </div>
                         <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.description || "—"}</div>
+                        <div className="text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
                         <div className="text-muted-foreground">{columnTitleByStatus[item.status]}</div>
                         <div className="text-muted-foreground">{item.taskResult || "—"}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>

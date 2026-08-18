@@ -387,6 +387,10 @@ export async function createQuarterlyWork(formData: FormData) {
   const taskResult = parseTaskResult(formData.get("taskResult"));
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
+  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  if (status === "COMPLETED" && workloadPersonDay === null) {
+    throw new Error("任务状态为已完成时，工作量(人天)为必填项");
+  }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -424,6 +428,7 @@ export async function createQuarterlyWork(formData: FormData) {
       status,
       taskResult,
       executionSummary,
+      workloadPersonDay,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       createdById: currentUser.id,
@@ -458,6 +463,10 @@ export async function updateQuarterlyWork(formData: FormData) {
   const taskResult = parseTaskResult(formData.get("taskResult"));
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
+  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  if (status === "COMPLETED" && workloadPersonDay === null) {
+    throw new Error("任务状态为已完成时，工作量(人天)为必填项");
+  }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -481,6 +490,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       taskDescription: true,
       taskResult: true,
       executionSummary: true,
+      workloadPersonDay: true,
     },
   });
 
@@ -521,6 +531,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       status,
       taskResult,
       executionSummary,
+      workloadPersonDay,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       completedAt: getCompletedAtByStatus(status),
@@ -552,6 +563,7 @@ export async function updateQuarterlyWork(formData: FormData) {
     { label: "任务状态", previous: WORK_STATUS_LABELS[existingWork.status], next: WORK_STATUS_LABELS[status] },
     { label: "任务结果", previous: existingWork.taskResult, next: taskResult },
     { label: "任务执行概况", previous: existingWork.executionSummary, next: executionSummary },
+    { label: "工作量(人天)", previous: existingWork.workloadPersonDay, next: workloadPersonDay },
   ]);
   if (updateRemark) {
     await writeOperationLog(prisma, {
