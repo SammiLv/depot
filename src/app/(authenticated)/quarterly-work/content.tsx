@@ -16,11 +16,13 @@ import {
   VALUE_TRACK_STATUSES,
   isValueJudgement,
 } from "@/server/quarterly-work/value-track-constants";
+import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
+import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
-import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2, Search } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2, Search, ScrollText } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
-type BoardTab = "goal" | "project" | "board" | "value";
+type BoardTab = "goal" | "project" | "board" | "value" | "log";
 type ViewMode = "card" | "list";
 type ColumnStatus = Props["data"]["columns"][number]["status"];
 type ProjectStatus = Props["data"]["projectColumns"][number]["status"];
@@ -65,12 +67,13 @@ const columnTitleByStatus: Record<ColumnStatus, string> = {
 const projectTitleByStatus: Record<ProjectStatus, string> = {
   NOT_STARTED: "未启动",
   IN_PROGRESS: "进行中",
+  LAUNCHED: "已上线",
   COMPLETED: "已完成",
   CLOSED: "关闭",
 };
 
 const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
-const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
+const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"];
 const valueOverviewCardColumns = [
   { key: "未观测", label: "未观测", tone: "default" as const },
   { key: "观测中", label: "观测中", tone: "primary" as const },
@@ -189,6 +192,45 @@ function matchesFuzzySearch(text: string, query: string) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
   return text.toLowerCase().includes(normalizedQuery);
+}
+
+type OperationLogItem = Props["data"]["operationLogs"][number];
+
+function OperationLogDialog({
+  logs,
+  targetTitle,
+  onClose,
+}: {
+  logs: OperationLogItem[];
+  targetTitle: string;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open onClose={onClose} title={`操作日志：${targetTitle}`}>
+      {logs.length ? (
+        <div className="overflow-hidden rounded-xl border border-border">
+          <div className="grid grid-cols-[0.8fr_0.7fr_1fr_2fr] gap-3 border-b border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+            <div>操作人</div>
+            <div>操作内容</div>
+            <div>时间</div>
+            <div>操作备注</div>
+          </div>
+          <div className="divide-y divide-border">
+            {logs.map((log) => (
+              <div key={log.id} className="grid grid-cols-[0.8fr_0.7fr_1fr_2fr] gap-3 px-4 py-3 text-sm">
+                <div className="text-muted-foreground">{log.operator}</div>
+                <div className="text-muted-foreground">{log.action}</div>
+                <div className="text-muted-foreground">{formatDateTimeLabel(log.createdAt)}</div>
+                <div className="whitespace-pre-wrap break-words text-foreground">{log.remark || "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="py-10 text-center text-sm text-muted-foreground">暂无操作日志</div>
+      )}
+    </Dialog>
+  );
 }
 
 function BoardSearchBar({
@@ -537,6 +579,10 @@ function QuarterlyWorkForm({
   const initialProjectId = item?.projectId ?? defaultProjectId ?? data.projectOptions[0]?.id ?? "";
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const selectedProject = selectedProjectId ? projectOptionById.get(selectedProjectId) ?? null : null;
+  const [workStatus, setWorkStatus] = useState<ColumnStatus>(
+    item?.status ?? (editableStatuses.includes(status) ? status : "NOT_STARTED")
+  );
+  const executionSummaryRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
     [data.memberOptions]
@@ -633,13 +679,38 @@ function QuarterlyWorkForm({
         <FormRow label="任务状态" align="center">
           <select
             name="status"
-            defaultValue={item?.status ?? status}
+            required
+            value={workStatus}
+            onChange={(event) => setWorkStatus(event.target.value as ColumnStatus)}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {statusOptions.map((option) => (
               <option key={option} value={option}>{columnTitleByStatus[option]}</option>
             ))}
           </select>
+        </FormRow>
+        <FormRow label="任务结果 *" align="center">
+          <select
+            name="taskResult"
+            required
+            defaultValue={item?.taskResult ?? ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择任务结果</option>
+            {TASK_RESULTS.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </FormRow>
+        <FormRow label={executionSummaryRequired ? "任务执行概况 *" : "任务执行概况"}>
+          <textarea
+            name="executionSummary"
+            rows={3}
+            required={executionSummaryRequired}
+            defaultValue={item?.executionSummary ?? ""}
+            placeholder="请输入任务最终执行情况的描述"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
         </FormRow>
     </>
   );
@@ -741,7 +812,7 @@ function ProjectEditForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
-  const workloadRequired = projectStatus === "COMPLETED";
+  const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
 
   const quarterOptions = useMemo(() => {
     const now = new Date();
@@ -875,7 +946,7 @@ function ProjectEditForm({
       </StickyFormScroll>
       <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-          项目变更为已完成或关闭时，将同步更新其下所有任务状态。
+          项目变更为已完成或关闭时，将同步更新其下所有任务状态，且不再有价值跟踪等后续事项。
         </div>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -912,6 +983,8 @@ function ProjectCreateForm({
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
+  const [createProjectStatus, setCreateProjectStatus] = useState<ProjectStatus>(defaultStatus ?? "NOT_STARTED");
+  const createWorkloadRequired = createProjectStatus === "LAUNCHED" || createProjectStatus === "COMPLETED";
 
   const quarterOptions = useMemo(() => {
     const now = new Date();
@@ -1024,10 +1097,23 @@ function ProjectCreateForm({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
+        <FormRow label={createWorkloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
+          <input
+            name="workloadPersonDay"
+            type="number"
+            step="0.1"
+            min="0"
+            required={createWorkloadRequired}
+            placeholder="请输入工作量"
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
         <FormRow label="项目状态" align="center">
           <select
             name="status"
-            defaultValue={defaultStatus ?? "NOT_STARTED"}
+            required
+            value={createProjectStatus}
+            onChange={(event) => setCreateProjectStatus(event.target.value as ProjectStatus)}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {editableProjectStatuses.map((option) => (
@@ -1256,16 +1342,16 @@ function ValueTrackStatusFields({
 
 function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props["data"]; defaultProjectId?: string; onClose: () => void }) {
   const router = useRouter();
-  const completedProjectMap = useMemo(
-    () => new Map(data.completedProjectOptions.map((project) => [project.id, project])),
-    [data.completedProjectOptions]
+  const launchedProjectMap = useMemo(
+    () => new Map(data.launchedProjectOptions.map((project) => [project.id, project])),
+    [data.launchedProjectOptions]
   );
   const projectPickerOptions = useMemo(
-    () => data.completedProjectOptions.map((project) => ({ id: project.id, label: project.title })),
-    [data.completedProjectOptions]
+    () => data.launchedProjectOptions.map((project) => ({ id: project.id, label: project.title })),
+    [data.launchedProjectOptions]
   );
-  const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId ?? data.completedProjectOptions[0]?.id ?? "");
-  const selectedProject = selectedProjectId ? completedProjectMap.get(selectedProjectId) ?? null : null;
+  const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId ?? data.launchedProjectOptions[0]?.id ?? "");
+  const selectedProject = selectedProjectId ? launchedProjectMap.get(selectedProjectId) ?? null : null;
 
   return (
     <form action={async (fd: FormData) => {
@@ -1282,8 +1368,8 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
             onChange={setSelectedProjectId}
           />
         </FormRow>
-        <FormRow label="项目完成时间" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.completedAt)}</div>
+        <FormRow label="项目上线时间" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.launchedAt)}</div>
         </FormRow>
         <FormRow label="预期收益">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? "-"}</div>
@@ -1371,8 +1457,8 @@ function ValueOverviewEditForm({
         <FormRow label="负责人" align="center">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.owner}</div>
         </FormRow>
-        <FormRow label="完成时间" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(item.completedAt)}</div>
+        <FormRow label="上线时间" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(item.launchedAt)}</div>
         </FormRow>
         <FormRow label="预期收益">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
@@ -1747,6 +1833,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [boardDeleteDialog, setBoardDeleteDialog] = useState<BoardDeleteState>(null);
   const [createProjectDialog, setCreateProjectDialog] = useState<ProjectStatus | null>(null);
   const [createProjectProductGoalIds, setCreateProjectProductGoalIds] = useState<string[]>([]);
+  const [operationLogDialog, setOperationLogDialog] = useState<{ targetId: string; targetTitle: string } | null>(null);
   const canManageProductGoal = data.permissions.canManageProductGoal;
   const canManageProjectAndValueTracking = data.permissions.canManageProjectAndValueTracking;
   const canManageProductTask = data.permissions.canManageProductTask;
@@ -1754,7 +1841,6 @@ export function QuarterlyWorkContent({ data }: Props) {
   const canCreateProject = data.canCreate && canManageProjectAndValueTracking;
   const canCreateTask = data.canCreate && canManageProductTask;
   const canCreateValueTrack = data.canCreate && canManageProjectAndValueTracking;
-  const allItems = useMemo(() => data.columns.flatMap((column) => column.items), [data.columns]);
   const teamDepartmentMap = useMemo(
     () => new Map(data.teamOptions.map((team) => [team.id, team.departmentOrgNodeId])),
     [data.teamOptions]
@@ -1860,6 +1946,13 @@ export function QuarterlyWorkContent({ data }: Props) {
     );
     return [...items].sort((left, right) => new Date(right.trackedAt).getTime() - new Date(left.trackedAt).getTime());
   }, [visibleValueTrackItems, tabSearchQuery]);
+  const filteredOperationLogs = useMemo(
+    () => data.operationLogs.filter((log) => {
+      if (!matchesDepartmentAndTeamScope(log, departmentTab, teamTab, teamDepartmentMap)) return false;
+      return matchesFuzzySearch(`${log.targetTitle} ${log.remark ?? ""} ${log.operator}`, tabSearchQuery);
+    }),
+    [data.operationLogs, departmentTab, teamTab, teamDepartmentMap, tabSearchQuery],
+  );
   const applyTabSearch = () => {
     setTabSearchQuery(tabSearchInput.trim());
   };
@@ -1902,19 +1995,6 @@ export function QuarterlyWorkContent({ data }: Props) {
   };
   const getMemberOptionsForForm = (preserveOwnerId?: string | null) =>
     resolveMemberOptionsForForm(data.memberOptions, departmentTab, teamDepartmentMap, preserveOwnerId);
-  const visibleReminders = useMemo(
-    () => data.updateReminders.filter((reminder) => {
-      const teamOrgNodeId = allItems.find((item) => item.id === reminder.id)?.teamOrgNodeId ?? null;
-      const departmentOrgNodeId = allItems.find((item) => item.id === reminder.id)?.departmentOrgNodeId ?? null;
-      if (!belongsToSelectedDepartment(teamOrgNodeId, departmentOrgNodeId)) return false;
-      return teamTab === "all" ? true : teamOrgNodeId === teamTab;
-    }),
-    [allItems, data.updateReminders, belongsToSelectedDepartment, teamTab]
-  );
-  const filteredReminders = useMemo(
-    () => visibleReminders.filter((reminder) => matchesFuzzySearch(reminder.task, tabSearchQuery)),
-    [visibleReminders, tabSearchQuery],
-  );
   const tabSearchBarProps = {
     inputValue: tabSearchInput,
     onInputChange: setTabSearchInput,
@@ -1928,7 +2008,7 @@ export function QuarterlyWorkContent({ data }: Props) {
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
           <h1 className="text-3xl font-semibold tracking-tight">产品管理</h1>
-          <p className="mt-2 text-sm text-muted-foreground">按小组规划年度产品目标、季度工作 · 月度拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
+          <p className="mt-2 text-sm text-muted-foreground">按小组规划年度产品目标、项目规划 · 任务拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
         </div>
 
         {data.isSystemAdmin ? (
@@ -1976,6 +2056,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                 { k: "project" as const, label: "项目看板" },
                 { k: "board" as const, label: "任务看板" },
                 { k: "value" as const, label: "需求价值跟踪" },
+                { k: "log" as const, label: "操作日志" },
               ].map((t) => (
                 <button
                   key={t.k}
@@ -2092,6 +2173,14 @@ export function QuarterlyWorkContent({ data }: Props) {
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setOperationLogDialog({ targetId: item.id, targetTitle: item.title })}
+                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                aria-label={`查看${item.title}的操作日志`}
+                              >
+                                <ScrollText className="h-4 w-4" />
+                              </button>
                               {canCreateProject ? (
                                 <button
                                   type="button"
@@ -2166,28 +2255,36 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="text-right">
-                          {canManageProductGoal ? (
-                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                              <button
-                                type="button"
-                                onClick={() => setProductGoalDialog(item)}
-                                className="text-primary hover:underline"
-                                aria-label={`编辑${item.title}`}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setProductGoalDeleteDialog(item)}
-                                className="text-destructive hover:underline"
-                                aria-label={`删除${item.title}`}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                          <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                            <button
+                              type="button"
+                              onClick={() => setOperationLogDialog({ targetId: item.id, targetTitle: item.title })}
+                              className="text-primary hover:underline"
+                              aria-label={`查看${item.title}的操作日志`}
+                            >
+                              日志
+                            </button>
+                            {canManageProductGoal ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setProductGoalDialog(item)}
+                                  className="text-primary hover:underline"
+                                  aria-label={`编辑${item.title}`}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setProductGoalDeleteDialog(item)}
+                                  className="text-destructive hover:underline"
+                                  aria-label={`删除${item.title}`}
+                                >
+                                  删除
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     ))
@@ -2240,6 +2337,14 @@ export function QuarterlyWorkContent({ data }: Props) {
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setOperationLogDialog({ targetId: item.id, targetTitle: item.title })}
+                                className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                aria-label={`查看${item.title}的操作日志`}
+                              >
+                                <ScrollText className="h-4 w-4" />
+                              </button>
                               {canCreateTask ? (
                                 <button
                                   type="button"
@@ -2302,7 +2407,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div className="min-w-0">工作量(人天)</div>
                   <div className="min-w-0">项目状态</div>
                   <div className="min-w-0">创建时间</div>
-                  <div className="min-w-0">完成时间</div>
+                  <div className="min-w-0">上线/完成时间</div>
                   <div className="min-w-0 text-right">操作</div>
                 </div>
                 <div className="divide-y divide-border">
@@ -2317,30 +2422,38 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="min-w-0 text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
                         <div className="min-w-0 break-words text-muted-foreground">{projectTitleByStatus[item.status]}</div>
                         <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
-                        <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
+                        <div className="min-w-0 break-words text-muted-foreground">{formatDateTimeLabel(item.launchedAt ?? item.completedAt)}</div>
                         <div className="min-w-0 text-right">
-                          {canManageProjectAndValueTracking ? (
-                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                              <button
-                                type="button"
-                                onClick={() => setProjectDialog({ item, title: projectTitleByStatus[item.status] })}
-                                className="text-primary hover:underline"
-                                aria-label={`编辑${item.title}`}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setProjectDeleteDialog(item)}
-                                className="text-destructive hover:underline"
-                                aria-label={`删除${item.title}`}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                          <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                            <button
+                              type="button"
+                              onClick={() => setOperationLogDialog({ targetId: item.id, targetTitle: item.title })}
+                              className="text-primary hover:underline"
+                              aria-label={`查看${item.title}的操作日志`}
+                            >
+                              日志
+                            </button>
+                            {canManageProjectAndValueTracking ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setProjectDialog({ item, title: projectTitleByStatus[item.status] })}
+                                  className="text-primary hover:underline"
+                                  aria-label={`编辑${item.title}`}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setProjectDeleteDialog(item)}
+                                  className="text-destructive hover:underline"
+                                  aria-label={`删除${item.title}`}
+                                >
+                                  删除
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     ))
@@ -2389,29 +2502,40 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 <div className="text-sm font-medium leading-snug">{it.title}</div>
                                 <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
                               </div>
-                              {canManageProductTask ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditDialog({ item: it, title: c.title })}
-                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                    aria-label={`编辑${it.title}`}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setBoardDeleteDialog(it)}
-                                    className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
-                                    aria-label={`删除${it.title}`}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              ) : null}
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setOperationLogDialog({ targetId: it.id, targetTitle: it.title })}
+                                  className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                  aria-label={`查看${it.title}的操作日志`}
+                                >
+                                  <ScrollText className="h-4 w-4" />
+                                </button>
+                                {canManageProductTask ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditDialog({ item: it, title: c.title })}
+                                      className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                      aria-label={`编辑${it.title}`}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setBoardDeleteDialog(it)}
+                                      className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                      aria-label={`删除${it.title}`}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
                             </div>
                             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                               <span>{it.owner}</span>
+                              {it.taskResult ? <span className="text-foreground">{it.taskResult}</span> : null}
                               <span className={it.remainingWeeksLabel?.startsWith("超期") ? "text-destructive" : "text-muted-foreground"}>{it.remainingWeeksLabel ?? "—"}</span>
                             </div>
                             {it.progress !== undefined && (
@@ -2433,30 +2557,10 @@ export function QuarterlyWorkContent({ data }: Props) {
                   </div>
                 ))}
               </div>
-
-              {filteredReminders.length > 0 && (
-                <Card className="mt-6">
-                  <h3 className="mb-3 font-semibold">本周更新提醒</h3>
-                  <div className="space-y-2">
-                    {filteredReminders.map((r, i) => (
-                      <div key={i} className="flex items-center justify-between border-b border-border py-2 last:border-0">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">{r.who[0]}</div>
-                          <div>
-                            <div className="text-sm font-medium">{r.task}</div>
-                            <div className="text-xs text-muted-foreground">{r.who}</div>
-                          </div>
-                        </div>
-                        <Badge tone={r.tone}>{r.status}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
             </>
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
+                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
                   <div>任务名称</div>
                   <div>所属项目</div>
                   <div>负责人</div>
@@ -2464,6 +2568,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div>剩余/超期</div>
                   <div>任务目标</div>
                   <div>任务状态</div>
+                  <div>任务结果</div>
                   <div>创建时间</div>
                   <div>完成时间</div>
                   <div className="text-right">操作</div>
@@ -2471,7 +2576,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                 <div className="divide-y divide-border">
                   {filteredTaskColumns.flatMap((column) => column.items).length ? (
                     filteredTaskColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -2481,31 +2586,40 @@ export function QuarterlyWorkContent({ data }: Props) {
                         </div>
                         <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.description || "—"}</div>
                         <div className="text-muted-foreground">{columnTitleByStatus[item.status]}</div>
+                        <div className="text-muted-foreground">{item.taskResult || "—"}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="text-right">
-                          {canManageProductTask ? (
-                            <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
-                              <button
-                                type="button"
-                                onClick={() => setEditDialog({ item, title: columnTitleByStatus[item.status] })}
-                                className="text-primary hover:underline"
-                                aria-label={`编辑${item.title}`}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setBoardDeleteDialog(item)}
-                                className="text-destructive hover:underline"
-                                aria-label={`删除${item.title}`}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                          <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
+                            <button
+                              type="button"
+                              onClick={() => setOperationLogDialog({ targetId: item.id, targetTitle: item.title })}
+                              className="text-primary hover:underline"
+                              aria-label={`查看${item.title}的操作日志`}
+                            >
+                              日志
+                            </button>
+                            {canManageProductTask ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditDialog({ item, title: columnTitleByStatus[item.status] })}
+                                  className="text-primary hover:underline"
+                                  aria-label={`编辑${item.title}`}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBoardDeleteDialog(item)}
+                                  className="text-destructive hover:underline"
+                                  aria-label={`删除${item.title}`}
+                                >
+                                  删除
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     ))
@@ -2518,7 +2632,7 @@ export function QuarterlyWorkContent({ data }: Props) {
               </div>
             )}
             </>
-          ) : (
+          ) : tab === "value" ? (
             <>
             <BoardSearchBar
               title="需求价值概览"
@@ -2545,7 +2659,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 <div>
                                   <div className="text-sm font-medium leading-snug">{item.title}</div>
                                   <div className="mt-1 text-xs text-muted-foreground">
-                                    {item.owner} · {formatDateTimeLabel(item.completedAt)}
+                                    {item.owner} · {formatDateTimeLabel(item.launchedAt)}
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1">
@@ -2627,7 +2741,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                     <div>跟踪状态</div>
                     <div>价值判断</div>
                     <div>项目状态</div>
-                    <div>完成时间</div>
+                    <div>上线时间</div>
                     <div className="text-right">操作</div>
                   </div>
                   <div className="divide-y divide-border">
@@ -2643,7 +2757,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                             <div className="text-muted-foreground">{item.valueTrackStatus}</div>
                             <div className="text-muted-foreground">{item.valueJudgement || "—"}</div>
                             <div className="text-muted-foreground">{projectTitleByStatus[item.status]}</div>
-                            <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
+                            <div className="text-muted-foreground">{formatDateTimeLabel(item.launchedAt)}</div>
                             <div className="text-right">
                               <div className="inline-flex flex-col items-end gap-1 whitespace-nowrap text-sm">
                                 {canManageProjectAndValueTracking ? (
@@ -2744,6 +2858,42 @@ export function QuarterlyWorkContent({ data }: Props) {
             </div>
           )}
             </>
+          ) : (
+            <>
+            <BoardSearchBar
+              title="操作日志"
+              placeholder="搜索对象名称、操作内容或操作人"
+              {...tabSearchBarProps}
+            />
+            <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+              <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1fr_0.7fr_1.2fr_0.8fr_0.7fr_2.2fr] gap-4 text-xs text-muted-foreground">
+                <div>时间</div>
+                <div>对象类型</div>
+                <div>对象名称</div>
+                <div>操作人</div>
+                <div>操作内容</div>
+                <div>操作备注</div>
+              </div>
+              <div className="divide-y divide-border">
+                {filteredOperationLogs.length ? (
+                  filteredOperationLogs.map((log) => (
+                    <div key={log.id} className="px-5 py-4 grid grid-cols-[1fr_0.7fr_1.2fr_0.8fr_0.7fr_2.2fr] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                      <div className="text-muted-foreground">{formatDateTimeLabel(log.createdAt)}</div>
+                      <div className="text-muted-foreground">{OPERATION_LOG_TARGET_TYPE_LABELS[log.targetType as OperationLogTargetType] ?? log.targetType}</div>
+                      <div className="font-medium text-foreground break-words">{log.targetTitle}</div>
+                      <div className="text-muted-foreground">{log.operator}</div>
+                      <div className="text-muted-foreground">{log.action}</div>
+                      <div className="text-muted-foreground whitespace-pre-wrap break-words">{log.remark || "—"}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                    {tabSearchQuery ? "暂无匹配的操作日志" : "暂无操作日志数据"}
+                  </div>
+                )}
+              </div>
+            </div>
+            </>
           )}
         </div>
       </Card>
@@ -2802,6 +2952,14 @@ export function QuarterlyWorkContent({ data }: Props) {
           />
         ) : null}
       </Dialog>
+
+      {operationLogDialog ? (
+        <OperationLogDialog
+          logs={data.operationLogs.filter((log) => log.targetId === operationLogDialog.targetId)}
+          targetTitle={operationLogDialog.targetTitle}
+          onClose={() => setOperationLogDialog(null)}
+        />
+      ) : null}
 
       <Dialog open={!!productGoalDialog} onClose={() => setProductGoalDialog(null)} title="编辑产品目标" stickyLayout>
         {productGoalDialog ? (

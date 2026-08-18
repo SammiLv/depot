@@ -128,6 +128,34 @@ export async function emitProjectAssigned(projectId: string) {
   });
 }
 
+export async function emitProjectLaunched(projectId: string) {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, deletedAt: null },
+    select: {
+      id: true,
+      title: true,
+      ownerId: true,
+      endQuarter: true,
+      launchedAt: true,
+      valueTrackStatus: true,
+    },
+  });
+  if (!project) return;
+
+  const launchedAt = project.launchedAt ?? new Date();
+  await emitNotificationEvent("project.launched", {
+    ...(await buildOwnerPayload(project.ownerId)),
+    title: project.title,
+    endQuarter: project.endQuarter,
+    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
+    year: launchedAt.getFullYear(),
+    quarter: Math.floor(launchedAt.getMonth() / 3) + 1,
+    targetType: "Project",
+    targetId: project.id,
+    eventAt: launchedAt.toISOString(),
+  });
+}
+
 export async function emitProjectCompleted(projectId: string) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, deletedAt: null },

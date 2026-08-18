@@ -250,7 +250,7 @@ export async function runProjectValueTrackPendingScan(scenarioId: string, daysBe
   const projects = await prisma.project.findMany({
     where: {
       deletedAt: null,
-      status: "COMPLETED",
+      status: "LAUNCHED",
       OR: [
         { valueTrackStatus: null },
         { valueTrackStatus: { not: VALUE_TRACK_STATUS_COMPLETED } },
@@ -262,7 +262,7 @@ export async function runProjectValueTrackPendingScan(scenarioId: string, daysBe
       ownerId: true,
       valueTrackStatus: true,
       valueJudgement: true,
-      completedAt: true,
+      launchedAt: true,
     },
     take: 500,
   });

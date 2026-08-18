@@ -57,7 +57,7 @@ export default async function ValueTrackingPage() {
       workloadPersonDay: true,
       valueJudgement: true,
       valueTrackStatus: true,
-      completedAt: true,
+      launchedAt: true,
     },
   });
   const projectMap = new Map(projects.map((project) => [project.id, project]));
@@ -83,7 +83,7 @@ export default async function ValueTrackingPage() {
                   <div>
                     <div className="font-semibold">{project?.title ?? "—"}</div>
                     <div className="mt-0.5 text-xs text-muted-foreground">
-                      负责人：{project ? ownerMap.get(project.ownerId) ?? "—" : "—"} · 完成时间：{formatDateLabel(project?.completedAt ?? null)}
+                      负责人：{project ? ownerMap.get(project.ownerId) ?? "—" : "—"} · 上线时间：{formatDateLabel(project?.launchedAt ?? null)}
                     </div>
                   </div>
                   <Badge tone={meta.tone}>ROI {meta.roi}%</Badge>

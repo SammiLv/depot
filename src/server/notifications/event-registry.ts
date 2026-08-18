@@ -118,6 +118,13 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     payloadFields: ["title", "ownerId", "ownerName", "endQuarter", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
   },
+  "project.launched": {
+    code: "project.launched",
+    label: "项目已上线",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "valueTrackStatus", "year", "quarter", "targetId"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
+  },
   "project.completed": {
     code: "project.completed",
     label: "项目已完成",

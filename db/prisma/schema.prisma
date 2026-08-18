@@ -109,6 +109,7 @@ enum WorkStatus {
 enum ProjectStatus {
   NOT_STARTED
   IN_PROGRESS
+  LAUNCHED
   COMPLETED
   CLOSED
 }
@@ -494,6 +495,7 @@ model Project {
   ownerId           String
   orgNodeId         String?
   status            ProjectStatus @default(NOT_STARTED)
+  launchedAt        DateTime?
   completedAt       DateTime?
   workloadPersonDay Float?
   otherCost         String?
@@ -570,6 +572,8 @@ model QuarterlyWork {
   endDate         DateTime?
   createdById     String
   completedAt     DateTime?
+  taskResult      String?
+  executionSummary String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
@@ -627,6 +631,20 @@ model RequirementValueTrack {
 
   @@index([projectId])
   @@index([trackedAt])
+}
+
+model OperationLog {
+  id          String   @id @default(cuid())
+  targetType  String
+  targetId    String
+  targetTitle String
+  action      String
+  operatorId  String
+  remark      String?
+  createdAt   DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
 }
 
 model KpiTemplate {
