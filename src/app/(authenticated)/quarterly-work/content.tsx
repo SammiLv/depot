@@ -583,6 +583,7 @@ function QuarterlyWorkForm({
     item?.status ?? (editableStatuses.includes(status) ? status : "NOT_STARTED")
   );
   const executionSummaryRequired = workStatus === "COMPLETED";
+  const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
     [data.memberOptions]
@@ -710,10 +711,10 @@ function QuarterlyWorkForm({
             ))}
           </select>
         </FormRow>
-        <FormRow label="任务结果 *" align="center">
+        <FormRow label={taskResultRequired ? "任务结果 *" : "任务结果"} align="center">
           <select
             name="taskResult"
-            required
+            required={taskResultRequired}
             defaultValue={item?.taskResult ?? ""}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >

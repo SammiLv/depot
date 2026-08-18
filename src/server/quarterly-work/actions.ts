@@ -182,12 +182,12 @@ function getCompletedAtByStatus(status: WorkStatus) {
   return status === "COMPLETED" ? new Date() : null;
 }
 
-function parseTaskResult(value: FormDataEntryValue | null) {
+function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
   const text = (value as string | null)?.trim();
-  if (!text || !(TASK_RESULTS as readonly string[]).includes(text)) {
+  if (status === "COMPLETED" && (!text || !(TASK_RESULTS as readonly string[]).includes(text))) {
     throw new Error("任务结果为必填项");
   }
-  return text as TaskResult;
+  return text || null;
 }
 
 function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkStatus) {
@@ -384,7 +384,7 @@ export async function createQuarterlyWork(formData: FormData) {
   const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
   const endMonth = parseOptionalMonth(formData.get("endMonth"), "结束月份");
   const status = parseStatus(formData.get("status"));
-  const taskResult = parseTaskResult(formData.get("taskResult"));
+  const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
@@ -460,7 +460,7 @@ export async function updateQuarterlyWork(formData: FormData) {
   const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
   const endMonth = parseOptionalMonth(formData.get("endMonth"), "结束月份");
   const status = parseStatus(formData.get("status"));
-  const taskResult = parseTaskResult(formData.get("taskResult"));
+  const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
