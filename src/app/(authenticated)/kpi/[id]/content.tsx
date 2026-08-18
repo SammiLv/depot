@@ -64,6 +64,12 @@ type Props = {
       attendanceScore: number;
       finalTotal: number;
     };
+    talentDeductionReminder: {
+      assessment: null | { earnedScore: number; maxScore: number; penalty: number; message: string; canViewDetail: boolean; href: string };
+      incident: null | { penalty: number; cCount: number; dCount: number; hasSevereIncident: boolean; message: string; canViewDetail: boolean; href: string };
+      hasReminder: boolean;
+      loadFailed: boolean;
+    };
     summary: {
       self: {
         workSummary: string;
@@ -460,7 +466,25 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-border bg-muted/20">
-                      <td className="px-5 py-4 text-sm font-semibold" colSpan={3}>汇总</td>
+                      <td className="px-5 py-4 text-sm font-semibold" colSpan={3}>
+                        <div>汇总</div>
+                        <div className="mt-2 space-y-1 font-normal text-xs text-amber-700 dark:text-amber-300">
+                          {data.talentDeductionReminder.loadFailed ? <div className="text-destructive">人才扣分信息读取失败，不影响当前 KPI 评分数据。</div> : null}
+                          {!data.talentDeductionReminder.loadFailed && data.talentDeductionReminder.assessment ? (
+                            <div>
+                              {data.talentDeductionReminder.assessment.message}
+                              {data.talentDeductionReminder.assessment.canViewDetail ? <Link href={data.talentDeductionReminder.assessment.href} className="ml-2 text-primary">查看依据</Link> : null}
+                            </div>
+                          ) : !data.talentDeductionReminder.loadFailed ? <div className="text-muted-foreground">业务考核：暂无已确认结果</div> : null}
+                          {!data.talentDeductionReminder.loadFailed && data.talentDeductionReminder.incident ? (
+                            <div>
+                              {data.talentDeductionReminder.incident.message}
+                              {data.talentDeductionReminder.incident.canViewDetail ? <Link href={data.talentDeductionReminder.incident.href} className="ml-2 text-primary">查看依据</Link> : null}
+                            </div>
+                          ) : !data.talentDeductionReminder.loadFailed ? <div className="text-muted-foreground">工作事故：本季度暂无扣分结果</div> : null}
+                          <div className="text-muted-foreground">请与本指标其他扣分合并填写；系统不会自动修改评分。</div>
+                        </div>
+                      </td>
                       <td className="px-4 py-4"><ScoreInput value={formatScore(data.totals.scoreTotal)} /></td>
                       <td className="px-4 py-4"><ScoreInput value={formatScore(derivedTotals.selfTotal)} /></td>
                       <td className="px-4 py-4"><ScoreInput value={formatScore(derivedTotals.leaderTotal)} /></td>

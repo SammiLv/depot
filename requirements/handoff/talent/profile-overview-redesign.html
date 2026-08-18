@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>人才画像 · 画像概览 redesign</title>
+  <style>
+    :root {
+      --bg: #f8f9fb;
+      --card-bg: #ffffff;
+      --border: #e5e7eb;
+      --text-main: #1f2937;
+      --text-secondary: #6b7280;
+      --primary: #2563eb;
+      --primary-light: #eff6ff;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      margin: 0;
+      padding: 24px;
+    }
+    .drawer {
+      max-width: 720px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.12);
+      overflow: hidden;
+    }
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: #fafbfc;
+    }
+    .avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .header-info h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .tag-level {
+      background: #f3f4f6;
+      color: #374151;
+    }
+    .tag-grid {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .tag-plain {
+      background: #f3f4f6;
+      color: #4b5563;
+    }
+    .tabs {
+      display: flex;
+      gap: 24px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      padding: 14px 0;
+      font-size: 14px;
+      color: var(--text-secondary);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+    .tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      font-weight: 500;
+    }
+    .drawer-body {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 12px;
+      color: var(--text-main);
+    }
+
+    /* 基础信息 */
+    .basic-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: #fafbfc;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    .basic-info .avatar {
+      width: 48px;
+      height: 48px;
+      font-size: 18px;
+    }
+    .basic-info .name-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .basic-info .name-row strong {
+      font-size: 17px;
+      font-weight: 600;
+    }
+    .basic-info .detail-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .basic-info .detail-row span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* 综合表现 */
+    .performance-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .perf-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .perf-card .label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .perf-card .value {
+      font-size: 22px;
+      font-weight: 600;
+    }
+    .perf-card .hint {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    /* 人才履历 */
+    .history-list {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .history-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .history-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+    }
+    .history-icon.yes { background: #ecfdf5; color: var(--success); }
+    .history-icon.no { background: #fef2f2; color: var(--danger); }
+    .history-icon.warn { background: #fffbeb; color: var(--warning); }
+    .history-icon.info { background: #eff6ff; color: var(--primary); }
+    .history-text {
+      flex: 1;
+    }
+    .history-title {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .history-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+    .history-status {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .history-status.yes { color: var(--success); }
+    .history-status.no { color: var(--danger); }
+    .history-status.warn { color: var(--warning); }
+
+    /* 能力表现 */
+    .ability-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .ability-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .ability-card.full-width {
+      grid-column: 1 / -1;
+    }
+    .ability-card .label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+    .chart-placeholder {
+      height: 120px;
+      background: repeating-linear-gradient(
+        45deg,
+        #f9fafb,
+        #f9fafb 8px,
+        #f3f4f6 8px,
+        #f3f4f6 16px
+      );
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+    .match-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .match-track {
+      flex: 1;
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .match-fill {
+      height: 100%;
+      width: 80%;
+      background: var(--primary);
+      border-radius: 999px;
+    }
+    .match-value {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+    .match-detail {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="drawer">
+    <!-- 抽屉头部 -->
+    <div class="drawer-header">
+      <div class="avatar">采</div>
+      <div class="header-info">
+        <h2>采购组组长</h2>
+        <div class="meta-line">
+          <span class="tag tag-level">R4-1</span>
+          <span class="tag tag-grid">中坚力量</span>
+          <span class="tag tag-plain">采购组 · 组长</span>
+          <span class="tag tag-plain">在职 0 年</span>
+          <span class="tag tag-plain">合同到期 2027-04-07</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签 -->
+    <div class="tabs">
+      <div class="tab active">画像概览</div>
+      <div class="tab">人才盘点</div>
+      <div class="tab">晋升能力</div>
+      <div class="tab">决策履历</div>
+    </div>
+
+    <!-- 画像概览内容 -->
+    <div class="drawer-body">
+      <!-- 1. 近期表现 -->
+      <section>
+        <h3 class="section-title">近期表现</h3>
+        <div class="performance-grid">
+          <div class="perf-card">
+            <div class="label">人才盘点</div>
+            <div class="value">A级</div>
+            <div class="hint">20分</div>
+          </div>
+          <div class="perf-card">
+            <div class="label">有效 KPI</div>
+            <div class="value">101分</div>
+            <div class="hint">2026年Q2</div>
+          </div>
+          <div class="perf-card">
+            <div class="label">业务考核</div>
+            <div class="value">6/6</div>
+            <div class="hint">全部及格</div>
+          </div>
+          <div class="perf-card">
+            <div class="label">工作事故</div>
+            <div class="value">0</div>
+            <div class="hint">最近一次</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. 人才履历 -->
+      <section>
+        <h3 class="section-title">人才履历</h3>
+        <div class="history-list">
+          <div class="history-item">
+            <div class="history-icon warn">C</div>
+            <div class="history-text">
+              <div class="history-title">聘期内人才盘点 2 次 C 级</div>
+              <div class="history-desc">当前聘期内累计出现 2 次 C 级盘点结果</div>
+            </div>
+            <div class="history-status warn">是</div>
+          </div>
+          <div class="history-item">
+            <div class="history-icon no">C</div>
+            <div class="history-text">
+              <div class="history-title">聘期内人才盘点连续 2 次 C 级</div>
+              <div class="history-desc">当前聘期内存在连续 2 次 C 级盘点结果</div>
+            </div>
+            <div class="history-status no">是</div>
+          </div>
+          <div class="history-item">
+            <div class="history-icon info">C</div>
+            <div class="history-text">
+              <div class="history-title">最近一次人才盘点为 C 级</div>
+              <div class="history-desc">最近一期盘点结果为 C 级</div>
+            </div>
+            <div class="history-status warn">是</div>
+          </div>
+          <div class="history-item">
+            <div class="history-icon yes">晋</div>
+            <div class="history-text">
+              <div class="history-title">当前聘期内是否有晋升</div>
+              <div class="history-desc">当前聘期内已发生正式晋升记录</div>
+            </div>
+            <div class="history-status yes">是</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. 能力表现 -->
+      <section>
+        <h3 class="section-title">能力表现</h3>
+        <div class="ability-grid">
+          <div class="ability-card">
+            <div class="label">聘期内 KPI 历史趋势</div>
+            <div class="chart-placeholder">KPI 趋势图占位</div>
+          </div>
+          <div class="ability-card">
+            <div class="label">聘期内人才盘点趋势</div>
+            <div class="chart-placeholder">盘点趋势图占位</div>
+          </div>
+          <div class="ability-card full-width">
+            <div class="label">能力模型匹配度</div>
+            <div class="match-bar">
+              <div class="match-track"><div class="match-fill" style="width: 80%"></div></div>
+              <div class="match-value">80%</div>
+            </div>
+            <div class="match-detail">已满足 待配置 的 8 / 10 项要求</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

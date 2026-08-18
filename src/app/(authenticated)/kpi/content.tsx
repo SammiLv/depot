@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Badge, Button, Card, Progress, avatarColor } from "@/components/ui-kit";
+import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deleteKpiTemplate, deletePersonalKpi } from "@/server/kpi/actions";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
@@ -1588,6 +1588,7 @@ export function KpiContent({ data }: Props) {
                     <th className="px-5 py-3 font-medium">阶段</th>
                     <th className="w-48 px-5 py-3 font-medium">完成度</th>
                     <th className="px-5 py-3 font-medium">得分</th>
+                    <th className="px-5 py-3 font-medium">KPI 等级</th>
                     <th className="px-5 py-3 text-right font-medium">操作</th>
                   </tr>
                 </thead>
@@ -1596,16 +1597,14 @@ export function KpiContent({ data }: Props) {
                     rows.map((r) => (
                       <tr key={r.id} className="border-t border-border transition hover:bg-muted/30">
                         <td className="px-5 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium text-white ${avatarColor(r.userName)}`}>{r.userName[0]}</div>
-                            <span className="text-sm font-medium">{r.userName}</span>
-                          </div>
+                          <span className="text-sm font-medium">{r.userName}</span>
                         </td>
                         <td className="px-5 py-3 text-sm text-muted-foreground">{r.teamName}</td>
                         <td className="px-5 py-3 text-sm tabular-nums">{r.itemCount}</td>
                         <td className="px-5 py-3"><Badge tone={r.tone}>{r.status}</Badge></td>
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
                         <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
+                        <td className="px-5 py-3 text-sm font-medium tabular-nums">{r.rating ?? "—"}</td>
                         <td className="px-5 py-3 text-right">
                           <div className="flex items-center justify-end gap-3">
                             <Link href={`/kpi/${r.id}?mode=view`} className="text-sm text-primary hover:underline">查看</Link>
@@ -1628,7 +1627,7 @@ export function KpiContent({ data }: Props) {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
+                      <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
                     </tr>
                   )}
                 </tbody>

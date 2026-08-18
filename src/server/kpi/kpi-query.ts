@@ -11,6 +11,7 @@ import {
   kpiProgressStageLabels,
   kpiProgressStageOrder,
 } from "@/server/kpi/approval-workflow";
+import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
 
 
 type DataScopeInput = {
@@ -59,6 +60,7 @@ type KpiPageData = {
     tone: "primary" | "warning" | "success" | "default" | "info";
     progress: number;
     score: string;
+    rating: string | null;
     availableActions: {
       canSelfReview: boolean;
       canLeaderScore: boolean;
@@ -611,7 +613,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     throw new Error("季度 KPI 不存在或无权限查看");
   }
 
-  const [user, items, orgNodes, actionLogs, approvalSteps, actors] = await Promise.all([
+  const [user, items, orgNodes, actionLogs, approvalSteps, actors, talentDeductionReminder] = await Promise.all([
     prisma.user.findFirst({
       where: { id: personalKpi.userId },
       select: { id: true, name: true, title: true, orgNodeId: true },
@@ -675,6 +677,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       },
       select: { id: true, name: true },
     }),
+    getTalentKpiDeductionReminder(currentUser, personalKpi.userId, personalKpi.year, personalKpi.quarter),
   ]);
 
   const actorNameById = new Map(actors.map((actor) => [actor.id, actor.name] as const));
@@ -816,6 +819,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       attendanceScore,
       finalTotal,
     },
+    talentDeductionReminder,
     summary: {
       self: {
         workSummary: selfSummary.first,
@@ -1101,6 +1105,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       tone: getKpiTone(personalKpi.status),
       progress,
       score: `${personalKpi.finalScore ?? personalKpi.managerScore ?? personalKpi.leaderScore ?? personalKpi.selfScore ?? 0}`,
+      rating: personalKpi.finalRatingName ?? null,
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),
         canLeaderScore: hasApprovalChainByKpiId.get(personalKpi.id)

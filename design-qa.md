@@ -1,61 +1,48 @@
-# KPI 审批策略配置界面视觉验收
+# 人才档案列表小屏列宽视觉验收
 
-- Source visual truth: `/var/folders/ts/_kyh18mx3x7495xj0_x1gfrh0000gn/T/codex-clipboard-4c9b93a7-5b10-41c2-97d0-13986e55cc02.png`
-- Source pixels: `1742 x 1230`
-- Previous implementation reference: `/var/folders/ts/_kyh18mx3x7495xj0_x1gfrh0000gn/T/codex-clipboard-4ab4a5b2-95e6-4cd2-ac31-ac14614a63b7.png`
-- Previous implementation pixels: `1968 x 1486`
-- Latest toolbar source: `/var/folders/ts/_kyh18mx3x7495xj0_x1gfrh0000gn/T/codex-clipboard-7540456f-90c1-43d1-aa63-cd718b05ff9f.png`
-- Text-button style source: `/var/folders/ts/_kyh18mx3x7495xj0_x1gfrh0000gn/T/codex-clipboard-494fae4a-11ee-4b23-bf02-ad16be92013f.png`
-- Intended viewport: desktop Chrome, approximately `1968 x 1486`
-- Density normalization: not performed; reference images represent different screens and are used only for component interaction/style direction.
-- State: KPI 审批策略弹窗，审批节点或审批人下拉面板展开。
+- Source visual truth: `/var/folders/ts/_kyh18mx3x7495xj0_x1gfrh0000gn/T/codex-clipboard-e060803c-92db-42b4-b711-dffa20d20673.png`
+- Source pixels: `2048 x 1180`
+- Implementation screenshot: `outputs/talent-profile-columns-1280.png`
+- Implementation pixels / CSS viewport: `1280 x 720`
+- Density normalization: 源图为高分辨率桌面截图，实施图按浏览器原生 1x 密度在 `1280 x 720` 小屏桌面视口验收；比较聚焦人才档案表格区域。
+- State: 人才履历主界面，默认选中“人才档案”。
 
 ## Full-view comparison evidence
 
-Source shows an app-rendered dropdown panel with a search field, scrollable options, selected-row highlight, and checkmark. The implementation replaces both native selects with the same DOM-rendered interaction structure while retaining the existing KPI modal layout and tokens.
+保持原有页面结构、筛选、状态与操作不变，仅重新分配人才档案表格各列宽度。员工/组织与岗位名称两列已收窄，当前聘期和操作列获得更多空间，整个页面在 1280 像素视口没有横向滚动。
 
 ## Focused region comparison evidence
 
-Code-level focused inspection confirms the two target controls now use a shared searchable dropdown component with the existing `bg-card`, `border-border`, `text-primary`, rounded-corner, shadow, and Lucide check/chevron conventions. A browser-rendered focused screenshot could not be captured because the in-app browser was redirected to `/login`.
+- 当前聘期列实测宽度 `243px`，日期文本容器宽度 `222px`、高度 `20px`，`white-space: nowrap`，完整聘期 `2024-07-16 至 2027-07-15` 保持单行。
+- 员工/组织列实测宽度 `135px`，岗位名称列实测宽度 `99px`，两列相邻且不再存在明显闲置空间。
+- `document.scrollWidth <= document.clientWidth`，未产生页面横向滚动。
+- 浏览器日志中无 error 或 warning。
 
 ## Findings
 
-- [P2] Browser-rendered open state not captured
-  - Location: KPI approval policy modal, approval-node and approver controls.
-  - Evidence: local URL redirects the verification browser to the login page; no authenticated implementation screenshot is available.
-  - Impact: exact overlay position, clipping, and visual fidelity cannot be conclusively compared with the reference.
-  - Fix: sign in to the local 3004 environment, open either dropdown, and capture the same desktop viewport.
+没有未解决的 P0、P1 或 P2 问题。
 
 ## Required fidelity surfaces
 
-- Fonts and typography: existing project typography tokens are preserved; rendered comparison blocked by authentication.
-- Spacing and layout rhythm: existing three-column form grid is preserved; rendered overlay comparison blocked.
-- Colors and visual tokens: existing project semantic tokens are reused.
-- Image quality and asset fidelity: no raster assets are required; existing Lucide icons are reused.
-- Copy and content: search placeholders, automatic approver copy, option labels, and empty states are implemented.
+- Fonts and typography: 继续使用既有字体、字号、字重；聘期日期只调整为不换行。
+- Spacing and layout rhythm: 收紧前两列，将空间转移到当前聘期与操作列，行高和内边距保持不变。
+- Colors and visual tokens: 未修改任何颜色或语义状态样式。
+- Image quality and asset fidelity: 页面未新增或修改图片资产与图标。
+- Copy and content: 字段名称和业务文案保持不变。
 
 ## Comparison history
 
-- Initial implementation replaced native selects with DOM-rendered searchable dropdowns.
-- Follow-up semantics fix makes the approver field read-only in cascade mode, clears stale explicit users when switching modes, and rejects invalid cascade overrides on the server.
-- TypeScript compilation, 34 KPI unit tests, production build, and whitespace checks passed.
-- Post-fix visual evidence remains unavailable because the verification browser is unauthenticated.
-- 2026-08-03 follow-up replaced the flat approval-node checkbox list with an expandable organization tree. It includes search, layer-by-layer expand/collapse, current-layer selection, department/leaf shortcuts, selected-count feedback, and automatic ancestor/descendant conflict removal.
-- Department policy trees are restricted to the policy subtree plus explicit public ancestors, preventing unrelated department branches from appearing below the company node.
-- Latest follow-up compresses the selector controls into one horizontal toolbar with a short search field and seven borderless text actions. Department/leaf shortcuts and the separate layer summary were removed as requested.
-- Approval policy summaries now use a table with headers for strategy name, description, scope, approval steps, status, and actions. Each policy occupies one row, while multiple ordered steps remain grouped inside the approval-step cell.
+1. 源图中当前聘期日期在小屏换行，员工/组织和岗位名称之间空间偏大。
+2. 调整七列表格的栅格比例，并为聘期日期增加单行约束。
+3. 在 `1280 x 720` 视口复验，聘期完整单行、前两列间距收紧、页面无横向滚动。
 
 ## Implementation checklist
 
-- [x] Replace both native selects.
-- [x] Keep the expanded panel in page DOM so external screenshot tools do not collapse it.
-- [x] Add search, selected state, checkmark, Escape close, and outside-click close.
-- [x] Fix cascade mode to automatic approvers only and prevent explicit-user overrides in both UI and server validation.
-- [ ] Capture authenticated open-state screenshot and verify clipping/positioning.
-- [x] Add an expandable and searchable organization tree for approval-node selection.
-- [x] Add current-layer, all-department, and all-leaf bulk selection.
-- [x] Keep saved results as explicit organization node IDs and preserve server-side conflict validation.
-- [ ] Capture the authenticated organization-tree state and compare desktop spacing, scroll height, and expanded hierarchy against the current KPI modal.
-- [ ] Capture the authenticated policy table and verify column widths, long scope wrapping, multi-step row height, and horizontal overflow.
+- [x] 收窄员工/组织列。
+- [x] 收窄岗位名称列。
+- [x] 扩宽当前聘期列并禁止日期换行。
+- [x] 保留操作列足够宽度，按钮文案不换行。
+- [x] 验证小屏无页面横向滚动。
+- [x] 验证浏览器无错误和警告。
 
-final result: blocked
+final result: passed

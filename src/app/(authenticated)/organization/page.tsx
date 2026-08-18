@@ -1,4 +1,5 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
+import type { OrgPermissionAbilityKey } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { prisma } from "@/server/db/prisma";
 import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
@@ -286,7 +287,7 @@ export default async function OrgPage({
     })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
   }));
 
-  const kpiPermissionPresentation = {
+  const kpiPermissionPresentation: Partial<Record<OrgPermissionAbilityKey, { name: string; description: string }>> = {
     VIEW_KPI: {
       name: "查看 KPI",
       description: "允许查看 KPI 列表与详情。",
@@ -323,7 +324,7 @@ export default async function OrgPage({
       name: "终审",
       description: "允许执行 KPI 终审。",
     },
-  } satisfies Record<string, { name: string; description: string }>;
+  };
 
   const kpiPermissionMap = new Map(kpiPermissionGrants
     .filter((row) => row.subjectType === "ROLE")
@@ -331,8 +332,8 @@ export default async function OrgPage({
   const buildKpiPermissions = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => kpiOrdinaryPermissionAbilityKeys.map((abilityKey) => ({
     id: abilityKey,
     code: abilityKey,
-    name: kpiPermissionPresentation[abilityKey].name,
-    description: kpiPermissionPresentation[abilityKey].description,
+    name: kpiPermissionPresentation[abilityKey]?.name ?? abilityKey,
+    description: kpiPermissionPresentation[abilityKey]?.description ?? "",
     cells: Object.fromEntries(roleTypes.map((roleType) => {
       const scopeByRole = roleType === "ADMIN" ? "ALL" : roleType === "DEPARTMENT_MANAGER" ? "SUBTREE" : roleType === "TEAM_LEADER" ? "NODE" : "SELF";
       const systemRow = kpiPermissionMap.get(`${scopeByRole}:${""}:${roleType}:${abilityKey}`);

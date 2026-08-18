@@ -862,7 +862,8 @@ export async function createKpiUserPermissionGrant(formData: FormData) {
   if (!["NODE", "SUBTREE"].includes(grantScopeType)) {
     throw new Error("授权范围类型无效");
   }
-  if (abilityKeys.some((abilityKey) => !kpiOrdinaryPermissionAbilityKeys.includes(abilityKey))) {
+  const validKpiAbilityKeys = new Set<OrgPermissionAbilityKey>(kpiOrdinaryPermissionAbilityKeys);
+  if (abilityKeys.some((abilityKey) => !validKpiAbilityKeys.has(abilityKey))) {
     throw new Error("KPI 权限不存在");
   }
 

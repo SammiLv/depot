@@ -21,6 +21,7 @@ import {
   type KpiEditableStage,
 } from "@/server/kpi/approval-workflow";
 import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
+import { resolveKpiRating } from "@/server/talent/decision-rule-config";
 
 const assignmentPriority: Record<"USER" | "ORG_NODE" | "ROLE", number> = {
   USER: 3,
@@ -1435,6 +1436,35 @@ function assertRequiredScoringSummary(editableStage: KpiEditableStage, summary: 
   }
 }
 
+async function resolveActiveKpiRatingSnapshot(
+  tx: Prisma.TransactionClient,
+  score: number,
+  orgNodeId: string | null | undefined,
+) {
+  if (!Number.isFinite(score) || !orgNodeId) return null;
+  const rule = await tx.kpiRatingRuleVersion.findFirst({
+    where: { departmentOrgNodeId: orgNodeId, status: "ACTIVE", deletedAt: null },
+    orderBy: { publishedAt: "desc" },
+  });
+  if (!rule) return null;
+  const bands = await tx.kpiRatingBand.findMany({ where: { ruleVersionId: rule.id } });
+  const rating = resolveKpiRating(score, bands);
+  if (!rating) return null;
+  return {
+    finalRatingName: rating.name,
+    ratingRuleVersionId: rule.id,
+    ratingSnapshotJson: JSON.stringify({
+      ruleVersionId: rule.id,
+      ruleName: rule.name,
+      ruleVersion: rule.version,
+      quarterlyKpiTotalScore: rule.quarterlyKpiTotalScore,
+      bands,
+      score,
+      ratingName: rating.name,
+    }),
+  };
+}
+
 async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringAction) {
   const personalKpiId = requiredString(formData.get("personalKpiId"), "季度 KPI");
   const currentUser = await requireCurrentUser();
@@ -1450,6 +1480,7 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       select: {
         id: true,
         status: true,
+        orgNodeId: true,
         selfComment: true,
         leaderComment: true,
         managerComment: true,
@@ -1596,6 +1627,11 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       }
     }
 
+    const finalScore = managerTotal + attendanceScore;
+    const ratingSnapshot = nextStatus === "COMPLETED"
+      ? await resolveActiveKpiRatingSnapshot(tx, finalScore, personalKpi.orgNodeId)
+      : null;
+
     await tx.personalKpi.update({
       where: { id: personalKpiId },
       data: {
@@ -1603,7 +1639,10 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         selfScore: selfTotal,
         leaderScore: leaderTotal,
         managerScore: managerTotal,
-        finalScore: managerTotal + attendanceScore,
+        finalScore,
+        finalRatingName: ratingSnapshot?.finalRatingName ?? null,
+        ratingRuleVersionId: ratingSnapshot?.ratingRuleVersionId ?? null,
+        ratingSnapshotJson: ratingSnapshot?.ratingSnapshotJson ?? null,
         selfComment: editableStage === "SELF"
           ? serializeStructuredSummary("季度工作任务总结", summary.workSummary, "季度工作能力总结", summary.abilitySummary)
           : personalKpi.selfComment,

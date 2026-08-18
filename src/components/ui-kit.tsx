@@ -14,9 +14,9 @@ export function PageHeader({ title, description, action }: { title: string; desc
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Card({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div className={`rounded-xl bg-card border border-border p-5 ${className}`} style={{ boxShadow: "var(--shadow-card)" }}>
+    <div onClick={onClick} className={`rounded-xl bg-card border border-border p-5 ${className}`} style={{ boxShadow: "var(--shadow-card)" }}>
       {children}
     </div>
   );
@@ -63,7 +63,7 @@ export { avatarColor } from "@/lib/avatar-color";
 
 export function Badge({ children, tone = "default" }: { children: ReactNode; tone?: keyof typeof badgeMap }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${badgeMap[tone]}`}>
+    <span className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs font-medium ${badgeMap[tone]}`}>
       {children}
     </span>
   );

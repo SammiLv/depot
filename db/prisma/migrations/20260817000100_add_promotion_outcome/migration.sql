@@ -1,0 +1,1 @@
+ALTER TABLE "PromotionRecord" ADD COLUMN "outcome" TEXT NOT NULL DEFAULT 'SUCCESS';

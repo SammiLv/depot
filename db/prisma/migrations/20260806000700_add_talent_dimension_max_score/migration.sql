@@ -1,0 +1,1 @@
+ALTER TABLE "TalentReviewDimension" ADD COLUMN "maxScore" REAL NOT NULL DEFAULT 5;

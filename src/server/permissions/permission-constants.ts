@@ -3,6 +3,7 @@ import type { OrgPermissionAbilityKey, OrgPermissionGrantScopeType, OrgPermissio
 export const orgPermissionModuleKeys = {
   annualGoal: "ANNUAL_GOAL",
   kpi: "KPI",
+  talent: "TALENT",
 } satisfies Record<string, OrgPermissionModuleKey>;
 
 export const kpiAbilityKeys = {
@@ -17,6 +18,26 @@ export const kpiAbilityKeys = {
   scoreFinal: "SCORE_FINAL",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
+export const talentAbilityKeys = {
+  viewProfile: "VIEW_TALENT_PROFILE",
+  editProfile: "EDIT_TALENT_PROFILE",
+  viewReview: "VIEW_TALENT_REVIEW",
+  manageReview: "MANAGE_TALENT_REVIEW",
+  calibrateReview: "CALIBRATE_TALENT_REVIEW",
+  viewCareerModel: "VIEW_CAREER_MODEL",
+  manageCareerModel: "MANAGE_CAREER_MODEL",
+  viewBusinessAssessment: "VIEW_BUSINESS_ASSESSMENT",
+  manageBusinessAssessment: "MANAGE_BUSINESS_ASSESSMENT",
+  viewWorkIncident: "VIEW_WORK_INCIDENT",
+  manageWorkIncident: "MANAGE_WORK_INCIDENT",
+  viewRecommendation: "VIEW_RECOMMENDATION",
+  manageRecommendation: "MANAGE_RECOMMENDATION",
+  viewHistory: "VIEW_TALENT_HISTORY",
+  manageHistory: "MANAGE_TALENT_HISTORY",
+  viewSensitive: "VIEW_TALENT_SENSITIVE",
+  manageConfig: "MANAGE_TALENT_CONFIG",
+} satisfies Record<string, OrgPermissionAbilityKey>;
+
 export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, number> = {
   SELF: 0,
   NODE: 1,
@@ -26,14 +47,14 @@ export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, num
 
 export const manageableRoleTypes: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
 
-export const kpiOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
+export const kpiOrdinaryPermissionAbilityKeys = [
   kpiAbilityKeys.viewKpi,
   kpiAbilityKeys.initializeKpi,
   kpiAbilityKeys.viewKpiTemplate,
   kpiAbilityKeys.manageKpiTemplate,
   kpiAbilityKeys.toggleKpiTemplate,
   kpiAbilityKeys.scoreSelf,
-];
+] satisfies OrgPermissionAbilityKey[];
 
 export const kpiDefaultPermissionGrants: Array<{
   moduleKey: OrgPermissionModuleKey;
@@ -147,4 +168,67 @@ export const kpiDefaultPermissionGrants: Array<{
     roleType: "MEMBER",
     orgNodeSeedKey: "TEAM",
   },
+];
+
+export const talentOrdinaryPermissionAbilityKeys = [
+  talentAbilityKeys.viewProfile,
+  talentAbilityKeys.viewReview,
+  talentAbilityKeys.viewCareerModel,
+  talentAbilityKeys.viewBusinessAssessment,
+  talentAbilityKeys.viewWorkIncident,
+  talentAbilityKeys.viewHistory,
+] satisfies OrgPermissionAbilityKey[];
+
+type DefaultPermissionGrant = {
+  moduleKey: OrgPermissionModuleKey;
+  abilityKey: OrgPermissionAbilityKey;
+  scopeType: OrgPermissionGrantScopeType;
+  subjectType: "ROLE";
+  roleType: RoleType;
+  orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
+};
+
+export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
+  ...Object.values(talentAbilityKeys).map((abilityKey) => ({
+    moduleKey: orgPermissionModuleKeys.talent,
+    abilityKey,
+    scopeType: "ALL" as const,
+    subjectType: "ROLE" as const,
+    roleType: "ADMIN" as const,
+    orgNodeSeedKey: null,
+  })),
+  ...Object.values(talentAbilityKeys).map((abilityKey) => ({
+    moduleKey: orgPermissionModuleKeys.talent,
+    abilityKey,
+    scopeType: "SUBTREE" as const,
+    subjectType: "ROLE" as const,
+    roleType: "DEPARTMENT_MANAGER" as const,
+    orgNodeSeedKey: "DEPARTMENT" as const,
+  })),
+  ...[
+    talentAbilityKeys.viewProfile,
+    talentAbilityKeys.viewReview,
+    talentAbilityKeys.manageReview,
+    talentAbilityKeys.viewCareerModel,
+    talentAbilityKeys.viewBusinessAssessment,
+    talentAbilityKeys.viewWorkIncident,
+    talentAbilityKeys.viewRecommendation,
+    talentAbilityKeys.manageRecommendation,
+    talentAbilityKeys.viewHistory,
+  ].map((abilityKey) => ({
+    moduleKey: orgPermissionModuleKeys.talent,
+    abilityKey,
+    scopeType: "NODE" as const,
+    subjectType: "ROLE" as const,
+    roleType: "TEAM_LEADER" as const,
+    orgNodeSeedKey: "TEAM" as const,
+  })),
+  ...talentOrdinaryPermissionAbilityKeys.map((abilityKey) => ({
+    moduleKey: orgPermissionModuleKeys.talent,
+    abilityKey,
+    scopeType: "SELF" as const,
+    subjectType: "ROLE" as const,
+    roleType: "MEMBER" as const,
+    orgNodeSeedKey: "TEAM" as const,
+  })),
 ];

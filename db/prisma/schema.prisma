@@ -27,6 +27,7 @@ enum PermissionScopeType {
 enum OrgPermissionModuleKey {
   ANNUAL_GOAL
   KPI
+  TALENT
 }
 
 enum OrgPermissionAbilityKey {
@@ -39,6 +40,23 @@ enum OrgPermissionAbilityKey {
   SCORE_LEADER
   SCORE_MANAGER
   SCORE_FINAL
+  VIEW_TALENT_PROFILE
+  EDIT_TALENT_PROFILE
+  VIEW_TALENT_REVIEW
+  MANAGE_TALENT_REVIEW
+  CALIBRATE_TALENT_REVIEW
+  VIEW_CAREER_MODEL
+  MANAGE_CAREER_MODEL
+  VIEW_BUSINESS_ASSESSMENT
+  MANAGE_BUSINESS_ASSESSMENT
+  VIEW_WORK_INCIDENT
+  MANAGE_WORK_INCIDENT
+  VIEW_RECOMMENDATION
+  MANAGE_RECOMMENDATION
+  VIEW_TALENT_HISTORY
+  MANAGE_TALENT_HISTORY
+  VIEW_TALENT_SENSITIVE
+  MANAGE_TALENT_CONFIG
 }
 
 enum OrgPermissionGrantScopeType {
@@ -141,6 +159,249 @@ enum KpiApprovalNodeMode {
   NONE
   ORG_NODE_OWNER
   CASCADE_TO_DEPARTMENT
+}
+
+enum TalentVersionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum TalentRestrictionRuleStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+}
+
+enum TalentRestrictionRevisionStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  RETIRED
+  WITHDRAWN
+}
+
+enum TalentRuleCategory {
+  WORK_INCIDENT
+  QUARTERLY_KPI
+  BUSINESS_ASSESSMENT
+  TALENT_REVIEW
+  EMPLOYEE_PROFILE
+}
+
+enum TalentRuleFieldSource {
+  WORK_INCIDENT
+  QUARTERLY_KPI
+  BUSINESS_ASSESSMENT
+  TALENT_REVIEW
+  EMPLOYEE_PROFILE
+}
+
+enum TalentRuleFieldDataType {
+  ENUM
+  TRISTATE_BOOLEAN
+}
+
+enum TalentRuleOperator {
+  EQUALS
+}
+
+enum TalentRuleOutputType {
+  KPI_PROCESSING
+  REWARD_PROCESSING
+  SALARY_RESTRICTION
+  PROMOTION_RESTRICTION
+  ANNUAL_BONUS_PROCESSING
+  TRAINING_OR_TRANSFER
+  SALARY_REDUCTION
+  CONTRACT_PROCESSING
+}
+
+enum TalentRuleDurationUnit {
+  DAY
+  MONTH
+  QUARTER
+  YEAR
+}
+
+enum TalentRecordStatus {
+  DRAFT
+  CONFIRMED
+  VOIDED
+}
+
+enum PromotionOutcome {
+  SUCCESS
+  REJECTED
+  FAILED
+}
+
+enum TalentHistorySourceType {
+  RECOMMENDATION
+  COMPANY_SYSTEM
+  MANUAL_IMPORT
+  MANUAL_ENTRY
+}
+
+enum TalentImportType {
+  EMPLOYEE_FOUNDATION
+  CONTRACT_HISTORY
+  PROMOTION_HISTORY
+  TALENT_REVIEW
+  BUSINESS_ASSESSMENT
+  TALENT_HISTORY
+}
+
+enum TalentImportBatchStatus {
+  UPLOADED
+  MAPPED
+  VALIDATED
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum TalentImportRowStatus {
+  PENDING
+  VALID
+  INVALID
+  IMPORTED
+  SKIPPED
+}
+
+enum TalentReviewCycleStatus {
+  DRAFT
+  IN_PROGRESS
+  CALIBRATING
+  CONFIRMED
+  ARCHIVED
+}
+
+enum TalentReviewParticipantStatus {
+  PENDING
+  EVALUATED
+  CONFIRMED
+}
+
+enum BusinessAssessmentScoringType {
+  NUMERIC
+  GRADE
+}
+
+enum BusinessAssessmentPassingScopeType {
+  ORG_NODE
+  USER
+}
+
+enum BusinessAssessmentAttemptResult {
+  INITIAL_PASS
+  RETEST_PASS
+  FINAL_FAIL
+}
+
+enum WorkIncidentLevel {
+  S
+  A
+  B
+  C
+  D
+}
+
+enum WorkIncidentStatus {
+  DRAFT
+  CONFIRMED
+  VOIDED
+}
+
+enum TalentRestrictionType {
+  PROMOTION
+  SALARY_ADJUSTMENT
+  QUARTERLY_REWARD
+  ANNUAL_REWARD
+  TERMINATION
+}
+
+enum TalentRestrictionStatus {
+  ACTIVE
+  EXPIRED
+  RELEASED
+  VOIDED
+}
+
+enum TalentRestrictionSourceType {
+  WORK_INCIDENT
+  TALENT_REVIEW
+  KPI
+  BUSINESS_ASSESSMENT
+  MANUAL
+}
+
+enum TalentRewardLevel {
+  COMPANY
+  DEPARTMENT
+}
+
+enum TalentRewardForm {
+  COIN
+  CASH
+}
+
+enum TalentRewardRecipient {
+  INDIVIDUAL
+  PROJECT
+}
+
+enum TalentRewardCycle {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  OTHER
+}
+
+enum TalentDecisionType {
+  PROMOTION
+  CONTRACT_RENEWAL
+  SALARY_ADJUSTMENT
+  REWARD
+  QUARTERLY_REWARD
+  ANNUAL_REWARD
+  DEVELOPMENT
+  TERMINATION
+}
+
+enum TalentRecommendationStatus {
+  DRAFT
+  PROPOSED
+  DEFERRED
+  NOT_RECOMMENDED
+  HANDED_OFF
+  CLOSED
+}
+
+enum TalentDecisionCycleStatus {
+  PENDING_CALCULATION
+  PENDING_CONFIRMATION
+  CONFIRMED
+}
+
+enum TalentDecisionEvidenceStatus {
+  READY
+  INCOMPLETE
+}
+
+enum CompanyFeedbackStatus {
+  PENDING
+  ADOPTED
+  ADJUSTED_ADOPTION
+  REJECTED
+  DEFERRED
+}
+
+enum EmploymentContractOutcome {
+  RENEWED
+  NOT_RENEWED
+  EXTENDED
+  TERMINATED
 }
 
 model User {
@@ -569,14 +830,14 @@ model WeeklyWorkUpdate {
 }
 
 model RequirementValueTrack {
-  id                    String    @id @default(cuid())
-  projectId             String
-  trackingResult        String
-  followUpOptimization  String?
-  trackedAt             DateTime  @default(now())
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  deletedAt             DateTime?
+  id                   String    @id @default(cuid())
+  projectId            String
+  trackingResult       String
+  followUpOptimization String?
+  trackedAt            DateTime  @default(now())
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
 
   @@index([projectId])
   @@index([trackedAt])
@@ -726,6 +987,9 @@ model PersonalKpi {
   leaderScore                       Float?
   managerScore                      Float?
   finalScore                        Float?
+  finalRatingName                   String?
+  ratingRuleVersionId               String?
+  ratingSnapshotJson                String?
   selfComment                       String?
   leaderComment                     String?
   managerComment                    String?
@@ -742,6 +1006,7 @@ model PersonalKpi {
   @@index([userId])
   @@index([orgNodeId])
   @@index([approvalPolicyId])
+  @@index([ratingRuleVersionId])
 }
 
 model PersonalKpiItem {
@@ -802,29 +1067,1103 @@ model PersonalKpiActionLog {
 }
 
 model PersonalKpiApprovalStep {
-  id             String                   @id @default(cuid())
-  personalKpiId  String
-  policyStepId   String?
-  stepOrder      Int
-  stageKey       String
-  stepLabel      String?
-  nodeMode       KpiApprovalNodeMode?
+  id                  String                   @id @default(cuid())
+  personalKpiId       String
+  policyStepId        String?
+  stepOrder           Int
+  stageKey            String
+  stepLabel           String?
+  nodeMode            KpiApprovalNodeMode?
   configuredOrgNodeId String?
-  ancestorDepth  Int?
-  resolverType   KpiApprovalResolverType?
-  resolverUserId String?
-  orgNodeId      String?
-  approverId     String
-  status         String                   @default("PENDING")
-  comment        String?
-  actedAt        DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime                 @default(now())
+  ancestorDepth       Int?
+  resolverType        KpiApprovalResolverType?
+  resolverUserId      String?
+  orgNodeId           String?
+  approverId          String
+  status              String                   @default("PENDING")
+  comment             String?
+  actedAt             DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime                 @default(now())
 
   @@index([personalKpiId, stepOrder])
   @@index([policyStepId])
   @@index([configuredOrgNodeId])
   @@index([approverId, status])
+}
+
+model CareerTrack {
+  id                  String    @id @default(cuid())
+  code                String
+  name                String
+  departmentOrgNodeId String
+  description         String?
+  sortOrder           Int       @default(0)
+  isActive            Boolean   @default(true)
+  createdById         String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  @@unique([departmentOrgNodeId, code])
+  @@index([departmentOrgNodeId, isActive])
+  @@index([deletedAt])
+}
+
+model JobFamily {
+  id            String    @id @default(cuid())
+  careerTrackId String
+  code          String
+  name          String
+  description   String?
+  sortOrder     Int       @default(0)
+  isActive      Boolean   @default(true)
+  createdById   String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  @@unique([careerTrackId, code])
+  @@index([careerTrackId, isActive])
+  @@index([deletedAt])
+}
+
+model JobRole {
+  id          String    @id @default(cuid())
+  jobFamilyId String
+  code        String
+  name        String
+  description String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([jobFamilyId, code])
+  @@index([jobFamilyId, isActive])
+  @@index([deletedAt])
+}
+
+model JobLevelGroup {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  name        String
+  rankOrder   Int
+  description String?
+  isActive    Boolean   @default(true)
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([rankOrder])
+  @@index([isActive, deletedAt])
+}
+
+model JobLevel {
+  id              String    @id @default(cuid())
+  jobLevelGroupId String
+  code            String
+  name            String
+  stepOrder       Int
+  displayOrder    Int       @default(0)
+  isActive        Boolean   @default(true)
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@unique([jobLevelGroupId, code])
+  @@unique([jobLevelGroupId, stepOrder])
+  @@index([displayOrder])
+  @@index([isActive, deletedAt])
+}
+
+model CompetencyItem {
+  id               String    @id @default(cuid())
+  code             String    @unique
+  name             String
+  category         String
+  description      String?
+  measurementGuide String?
+  isActive         Boolean   @default(true)
+  createdById      String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  @@index([category, isActive])
+  @@index([deletedAt])
+}
+
+model CompetencyPackage {
+  id          String              @id @default(cuid())
+  code        String
+  name        String
+  description String?
+  status      TalentVersionStatus @default(DRAFT)
+  version     Int                 @default(1)
+  createdById String
+  publishedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([code, version])
+  @@index([status, deletedAt])
+}
+
+model CompetencyPackageItem {
+  id               String   @id @default(cuid())
+  packageId        String
+  competencyItemId String
+  weight           Float    @default(0)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([packageId, competencyItemId])
+  @@index([competencyItemId])
+}
+
+model CompetencyModelVersion {
+  id               String              @id @default(cuid())
+  code             String
+  name             String
+  jobRoleId        String
+  targetJobLevelId String
+  status           TalentVersionStatus @default(DRAFT)
+  version          Int                 @default(1)
+  description      String?
+  createdById      String
+  publishedAt      DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  deletedAt        DateTime?
+
+  @@unique([jobRoleId, targetJobLevelId, version])
+  @@index([code, status])
+  @@index([deletedAt])
+}
+
+model JobLevelRequirement {
+  id                  String   @id @default(cuid())
+  modelVersionId      String
+  competencyItemId    String
+  requiredLevel       Int
+  weight              Float    @default(0)
+  isMandatory         Boolean  @default(false)
+  evidenceRequirement String?
+  sortOrder           Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([modelVersionId, competencyItemId])
+  @@index([competencyItemId])
+}
+
+model PromotionPath {
+  id             String    @id @default(cuid())
+  jobRoleId      String
+  fromJobLevelId String
+  toJobLevelId   String
+  isActive       Boolean   @default(true)
+  sortOrder      Int       @default(0)
+  createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([jobRoleId, fromJobLevelId, toJobLevelId])
+  @@index([isActive, deletedAt])
+}
+
+model TalentReviewTemplateVersion {
+  id                  String              @id @default(cuid())
+  code                String
+  name                String
+  departmentOrgNodeId String
+  version             Int                 @default(1)
+  status              TalentVersionStatus @default(DRAFT)
+  description         String?
+  createdById         String
+  publishedAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  deletedAt           DateTime?
+
+  @@unique([departmentOrgNodeId, code, version])
+  @@index([departmentOrgNodeId, status])
+  @@index([deletedAt])
+}
+
+model TalentReviewDimension {
+  id                String   @id @default(cuid())
+  templateVersionId String
+  code              String
+  name              String
+  category          String
+  weight            Float    @default(1)
+  maxScore          Float    @default(5)
+  sortOrder         Int      @default(0)
+  isRequired        Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([templateVersionId, code])
+  @@index([templateVersionId, sortOrder])
+}
+
+model TalentRatingOption {
+  id                String   @id @default(cuid())
+  templateVersionId String
+  code              String
+  label             String
+  numericScore      Float
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([templateVersionId, code])
+  @@index([templateVersionId, sortOrder])
+}
+
+model TalentGradeThreshold {
+  id                String   @id @default(cuid())
+  templateVersionId String
+  gradeCode         String
+  label             String
+  minScore          Float
+  maxScore          Float
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([templateVersionId, gradeCode])
+  @@index([templateVersionId, sortOrder])
+}
+
+model TalentNineBoxRule {
+  id                String   @id @default(cuid())
+  templateVersionId String
+  code              String
+  label             String
+  potentialMin      Float
+  potentialMax      Float
+  performanceMin    Float
+  performanceMax    Float
+  colorToken        String
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([templateVersionId, code])
+  @@index([templateVersionId, sortOrder])
+}
+
+model TalentReviewCycle {
+  id                  String                  @id @default(cuid())
+  year                Int
+  halfYear            Int                     @map("quarter")
+  name                String
+  departmentOrgNodeId String
+  templateVersionId   String
+  status              TalentReviewCycleStatus @default(DRAFT)
+  startedAt           DateTime?
+  confirmedAt         DateTime?
+  archivedAt          DateTime?
+  createdById         String
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  deletedAt           DateTime?
+
+  @@index([templateVersionId])
+  @@index([status, deletedAt])
+}
+
+model TalentReviewParticipant {
+  id                 String                        @id @default(cuid())
+  cycleId            String
+  userId             String
+  periodYear         Int
+  periodHalfYear     Int
+  orgNodeIdSnapshot  String?
+  jobRoleIdSnapshot  String?
+  jobLevelIdSnapshot String?
+  status             TalentReviewParticipantStatus @default(PENDING)
+  reviewerId         String?
+  confirmedById      String?
+  confirmedAt        DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+
+  @@unique([cycleId, userId])
+  @@unique([userId, periodYear, periodHalfYear])
+  @@index([reviewerId, status])
+}
+
+model TalentReviewDimensionResult {
+  id            String   @id @default(cuid())
+  participantId String
+  dimensionId   String
+  ratingCode    String
+  numericScore  Float
+  comment       String?
+  evaluatorId   String
+  evaluatedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([participantId, dimensionId])
+  @@index([evaluatorId, evaluatedAt])
+}
+
+model TalentReviewResult {
+  id                    String    @id @default(cuid())
+  participantId         String    @unique
+  totalScore            Float
+  gradeCode             String
+  potentialScore        Float
+  performanceScore      Float
+  nineBoxCode           String?
+  talentType            String?
+  backupUserId          String?
+  appointmentSuggestion String?
+  managerComment        String?
+  calculatedAt          DateTime  @default(now())
+  confirmedAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([gradeCode])
+  @@index([nineBoxCode])
+}
+
+model BusinessAssessmentCycle {
+  id                   String                        @id @default(cuid())
+  year                 Int
+  quarter              Int
+  name                 String
+  departmentOrgNodeId  String
+  status               TalentRecordStatus            @default(DRAFT)
+  totalKpiScore        Float                         @default(6)
+  initialPassPercent   Float                         @default(100)
+  retestPassPercent    Float                         @default(50)
+  finalFailPercent     Float                         @default(0)
+  defaultScoringType   BusinessAssessmentScoringType @default(NUMERIC)
+  passingNumericScore  Float                         @default(80)
+  requiredGradeCode    String                        @default("A")
+  passingStandardsJson String                        @default("[]")
+  /// 本次业务考核统一使用的考试时间段；所有员工和科目共享。
+  assessmentStartDate  DateTime?
+  assessmentEndDate    DateTime?
+  ruleId               String?
+  createdById          String
+  confirmedById        String?
+  confirmedAt          DateTime?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+  deletedAt            DateTime?
+
+  @@unique([departmentOrgNodeId, year, quarter])
+  @@index([status, deletedAt])
+}
+
+model BusinessAssessmentRule {
+  id                  String                        @id @default(cuid())
+  scopeKey            String                        @unique @default("GLOBAL")
+  totalKpiScore       Float                         @default(6)
+  allocationMode      String                        @default("EQUAL")
+  initialPassPercent  Float                         @default(100)
+  retestPassPercent   Float                         @default(50)
+  finalFailPercent    Float                         @default(0)
+  defaultScoringType  BusinessAssessmentScoringType @default(NUMERIC)
+  passingNumericScore Float                         @default(80)
+  requiredGradeCode   String                        @default("A")
+  departmentOrgNodeId String?
+  year                Int?
+  quarter             Int?
+  name                String                        @default("业务考核规则")
+  version             Int                           @default(1)
+  status              TalentRecordStatus            @default(DRAFT)
+  publishedById       String?
+  publishedAt         DateTime?
+  deletedAt           DateTime?
+  updatedById         String?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+}
+
+model BusinessAssessmentRuleSubject {
+  id          String                        @id @default(cuid())
+  ruleId      String
+  code        String
+  name        String
+  scoringType BusinessAssessmentScoringType
+  sortOrder   Int                           @default(0)
+  createdAt   DateTime                      @default(now())
+  updatedAt   DateTime                      @updatedAt
+
+  @@unique([ruleId, code])
+  @@index([ruleId, sortOrder])
+}
+
+model BusinessAssessmentPassingStandard {
+  id                  String                             @id @default(cuid())
+  scopeType           BusinessAssessmentPassingScopeType
+  scopeId             String
+  ruleSubjectId       String?
+  scoringType         BusinessAssessmentScoringType
+  passingNumericScore Float?
+  requiredGradeCode   String?
+  updatedById         String?
+  createdAt           DateTime                           @default(now())
+  updatedAt           DateTime                           @updatedAt
+
+  @@unique([ruleSubjectId, scopeType, scopeId])
+  @@index([ruleSubjectId, scopeType, scopeId])
+}
+
+model BusinessAssessmentSubject {
+  id                  String                        @id @default(cuid())
+  cycleId             String
+  code                String
+  name                String
+  scoringType         BusinessAssessmentScoringType
+  passingNumericScore Float?
+  requiredGradeCode   String?
+  maxScore            Float?
+  sortOrder           Int                           @default(0)
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  @@unique([cycleId, code])
+  @@index([cycleId, sortOrder])
+}
+
+model BusinessAssessmentResult {
+  id                  String                          @id @default(cuid())
+  cycleId             String
+  subjectId           String
+  userId              String
+  rawFinalValue       String
+  attemptResult       BusinessAssessmentAttemptResult
+  isPassed            Boolean
+  earnedScore         Float
+  sourceImportRowId   String?
+  /// 兼容历史导入数据；统一考试时间段以 BusinessAssessmentCycle 为准。
+  assessmentStartDate DateTime?
+  assessmentEndDate   DateTime?
+  /// 兼容更早的单日考核数据。
+  assessmentDate      DateTime?
+  remark              String?
+  evidenceUrl         String?
+  confirmedAt         DateTime?
+  createdAt           DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+
+  @@unique([cycleId, subjectId, userId])
+  @@index([userId, cycleId])
+  @@index([sourceImportRowId])
+}
+
+model BusinessAssessmentSummary {
+  id                 String   @id @default(cuid())
+  cycleId            String
+  userId             String
+  subjectCount       Int
+  passedSubjectCount Int
+  earnedScore        Float
+  maxScore           Float    @default(6)
+  isOverallPassed    Boolean
+  calculatedAt       DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([cycleId, userId])
+  @@index([userId, cycleId])
+}
+
+model WorkIncident {
+  id                  String             @id @default(cuid())
+  incidentNo          String             @unique
+  title               String
+  description         String
+  occurredAt          DateTime
+  departmentOrgNodeId String
+  level               WorkIncidentLevel
+  status              WorkIncidentStatus @default(DRAFT)
+  confirmedById       String?
+  confirmedAt         DateTime?
+  voidedById          String?
+  voidedAt            DateTime?
+  voidReason          String?
+  externalReferenceNo String?
+  createdById         String
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([departmentOrgNodeId, occurredAt])
+  @@index([status, level])
+}
+
+model WorkIncidentResponsiblePerson {
+  id                 String   @id @default(cuid())
+  incidentId         String
+  userId             String
+  responsibilityRate Float    @default(100)
+  isPrimary          Boolean  @default(true)
+  confirmedFact      String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([incidentId, userId])
+  @@index([userId])
+}
+
+model WorkIncidentAction {
+  id            String    @id @default(cuid())
+  incidentId    String
+  actionType    String
+  description   String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdById   String
+  createdAt     DateTime  @default(now())
+
+  @@index([incidentId])
+}
+
+model IncidentRestriction {
+  id               String                      @id @default(cuid())
+  incidentId       String
+  userId           String
+  /// 兼容旧 NO_PROMOTION_RAISE / NO_QUARTER_REWARD 等字符串；新写入同时保存 controlledType。
+  restrictionType  String
+  controlledType   TalentRestrictionType?
+  status           TalentRestrictionStatus     @default(ACTIVE)
+  sourceType       TalentRestrictionSourceType @default(WORK_INCIDENT)
+  sourceRecordId   String?
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  isActive         Boolean                     @default(true)
+  ruleVersionId    String?
+  ruleSnapshotJson String?
+  releaseReason    String?
+  releasedById     String?
+  releasedAt       DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  @@unique([incidentId, userId, restrictionType])
+  @@index([userId, isActive])
+  @@index([userId, controlledType, status])
+  @@index([sourceType, sourceRecordId])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+model WorkIncidentQuarterSummary {
+  id                String   @id @default(cuid())
+  userId            String
+  year              Int
+  quarter           Int
+  cCount            Int      @default(0)
+  dCount            Int      @default(0)
+  hasSevereIncident Boolean  @default(false)
+  kpiPenalty        Float    @default(0)
+  calculatedAt      DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([userId, year, quarter])
+  @@index([year, quarter])
+}
+
+model WorkIncidentRuleVersion {
+  id                  String              @id @default(cuid())
+  departmentOrgNodeId String
+  name                String
+  version             Int                 @default(1)
+  status              TalentVersionStatus @default(DRAFT)
+  policyVersion       String              @default("V3.0")
+  matrixJson          String
+  description         String?
+  createdById         String
+  publishedById       String?
+  publishedAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  deletedAt           DateTime?
+
+  @@unique([departmentOrgNodeId, name, version])
+  @@index([departmentOrgNodeId, status])
+  @@index([deletedAt])
+}
+
+model TalentDecisionRecommendation {
+  id                        String                     @id @default(cuid())
+  recommendationNo          String                     @unique
+  userId                    String
+  departmentOrgNodeId       String
+  decisionType              TalentDecisionType
+  status                    TalentRecommendationStatus @default(DRAFT)
+  recommendationContentJson String
+  ruleVersionId             String?
+  evidenceSnapshotJson      String
+  qualificationResultJson   String
+  companyFeedbackStatus     CompanyFeedbackStatus      @default(PENDING)
+  companyFeedbackContent    String?
+  externalProcessNo         String?
+  proposedById              String
+  proposedAt                DateTime                   @default(now())
+  closedById                String?
+  closedAt                  DateTime?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  deletedAt                 DateTime?
+
+  @@index([userId, decisionType, createdAt])
+  @@index([departmentOrgNodeId, status])
+  @@index([externalProcessNo])
+  @@index([deletedAt])
+}
+
+model TalentDecisionCycle {
+  id                   String                    @id @default(cuid())
+  name                 String
+  departmentOrgNodeId  String
+  year                 Int
+  decisionMonth        Int
+  observationStartDate DateTime
+  observationEndDate   DateTime
+  decisionDate         DateTime
+  dataCutoffDate       DateTime
+  status               TalentDecisionCycleStatus @default(PENDING_CALCULATION)
+  ruleVersionId        String
+  ruleSnapshotJson     String
+  createdById          String
+  calculatedById       String?
+  calculatedAt         DateTime?
+  confirmedById        String?
+  confirmedAt          DateTime?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  deletedAt            DateTime?
+
+  @@unique([departmentOrgNodeId, year, decisionMonth])
+  @@index([departmentOrgNodeId, status])
+  @@index([year, decisionMonth])
+  @@index([ruleVersionId])
+  @@index([deletedAt])
+}
+
+model TalentDecisionEmployeeResult {
+  id                     String                       @id @default(cuid())
+  cycleId                String
+  userId                 String
+  orgNodeIdSnapshot      String?
+  jobRoleIdSnapshot      String?
+  jobLevelIdSnapshot     String?
+  evidenceStatus         TalentDecisionEvidenceStatus @default(INCOMPLETE)
+  missingItemsJson       String                       @default("[]")
+  kpiCount               Int                          @default(0)
+  assessmentCount        Int                          @default(0)
+  activeRestrictionCount Int                          @default(0)
+  evidenceSnapshotJson   String
+  ruleSnapshotJson       String
+  calculatedById         String
+  calculatedAt           DateTime                     @default(now())
+  frozenAt               DateTime?
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+
+  @@unique([cycleId, userId])
+  @@index([cycleId, evidenceStatus])
+  @@index([userId, calculatedAt])
+}
+
+model KpiRatingRuleVersion {
+  id                   String              @id @default(cuid())
+  departmentOrgNodeId  String
+  name                 String
+  version              Int                 @default(1)
+  status               TalentVersionStatus @default(DRAFT)
+  effectiveFrom        DateTime?
+  effectiveTo          DateTime?
+  quarterlyKpiTotalScore Float?
+  createdById          String
+  publishedById        String?
+  publishedAt          DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  deletedAt            DateTime?
+
+  @@unique([departmentOrgNodeId, name, version])
+  @@index([departmentOrgNodeId, status])
+  @@index([effectiveFrom, effectiveTo])
+  @@index([deletedAt])
+}
+
+model KpiRatingBand {
+  id            String   @id @default(cuid())
+  ruleVersionId String
+  name          String
+  minScore      Float
+  maxScore      Float?
+  isUnbounded   Boolean  @default(false)
+  description   String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([ruleVersionId, name])
+  @@unique([ruleVersionId, sortOrder])
+  @@index([ruleVersionId, minScore])
+}
+
+model KpiRatingAdjustmentLog {
+  id                   String   @id @default(cuid())
+  personalKpiId        String
+  fromRuleVersionId    String?
+  toRuleVersionId      String
+  originalRatingName   String?
+  adjustedRatingName   String
+  originalSnapshotJson String?
+  adjustedSnapshotJson String
+  reason               String
+  adjustedById         String
+  adjustedAt           DateTime @default(now())
+
+  @@index([personalKpiId, adjustedAt])
+  @@index([toRuleVersionId])
+}
+
+model TalentRestrictionRule {
+  id                  String                      @id @default(cuid())
+  code                String                      @unique
+  name                String
+  category            TalentRuleCategory
+  departmentOrgNodeId String
+  status              TalentRestrictionRuleStatus @default(DRAFT)
+  currentRevisionId   String?
+  createdById         String
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  deletedAt           DateTime?
+
+  @@unique([departmentOrgNodeId, name])
+  @@index([departmentOrgNodeId, category, status])
+  @@index([currentRevisionId])
+  @@index([deletedAt])
+}
+
+model TalentRestrictionRuleRevision {
+  id            String                          @id @default(cuid())
+  ruleId        String
+  revisionNo    Int
+  status        TalentRestrictionRevisionStatus @default(DRAFT)
+  policyBasis   String?
+  description   String?
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  priority      Int                             @default(100)
+  revisionNote  String?
+  createdById   String
+  publishedById String?
+  publishedAt   DateTime?
+  createdAt     DateTime                        @default(now())
+  updatedAt     DateTime                        @updatedAt
+
+  @@unique([ruleId, revisionNo])
+  @@index([ruleId, status])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+model TalentRuleFieldDefinition {
+  id              String                  @id @default(cuid())
+  code            String                  @unique
+  displayName     String
+  source          TalentRuleFieldSource
+  sourceFieldPath String
+  dataType        TalentRuleFieldDataType
+  enumValuesJson  String
+  operatorsJson   String                  @default("[\"EQUALS\"]")
+  description     String?
+  ownerModule     String
+  isEnabled       Boolean                 @default(true)
+  isSystem        Boolean                 @default(true)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@unique([source, sourceFieldPath])
+  @@index([source, isEnabled])
+}
+
+model TalentRestrictionRuleCondition {
+  id                  String             @id @default(cuid())
+  revisionId          String             @unique
+  fieldDefinitionId   String
+  operator            TalentRuleOperator @default(EQUALS)
+  comparisonValueJson String
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([fieldDefinitionId, operator])
+}
+
+model TalentRestrictionRuleOutput {
+  id               String                  @id @default(cuid())
+  revisionId       String
+  outputType       TalentRuleOutputType
+  handlingCode     String
+  numericValue     Float?
+  durationValue    Int?
+  durationUnit     TalentRuleDurationUnit?
+  effectPeriodCode String?
+  parametersJson   String                  @default("{}")
+  description      String?
+  sortOrder        Int                     @default(0)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@unique([revisionId, sortOrder])
+  @@index([revisionId, outputType])
+}
+
+model PromotionRecord {
+  id                String                  @id @default(cuid())
+  recordNo          String                  @unique
+  userId            String
+  fromJobRoleId     String?
+  toJobRoleId       String?
+  fromJobLevelId    String?
+  toJobLevelId      String?
+  promotionType     String?
+  outcome           PromotionOutcome         @default(SUCCESS)
+  reason            String?
+  effectiveDate     DateTime
+  recommendationId  String?
+  sourceType        TalentHistorySourceType @default(MANUAL_ENTRY)
+  externalProcessNo String?
+  resultStatus      TalentRecordStatus      @default(CONFIRMED)
+  confirmedById     String?
+  confirmedAt       DateTime?
+  voidReason        String?
+  createdById       String
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  deletedAt         DateTime?
+
+  @@index([userId, effectiveDate])
+  @@index([recommendationId])
+  @@index([externalProcessNo])
+  @@index([resultStatus, deletedAt])
+}
+
+model SalaryAdjustmentRecord {
+  id                String                  @id @default(cuid())
+  recordNo          String                  @unique
+  userId            String
+  beforeSalary      Int?
+  afterSalary       Int?
+  adjustmentAmount  Int?
+  adjustmentRate    Float?
+  reason            String?
+  effectiveDate     DateTime
+  recommendationId  String?
+  sourceType        TalentHistorySourceType @default(MANUAL_ENTRY)
+  externalProcessNo String?
+  resultStatus      TalentRecordStatus      @default(CONFIRMED)
+  confirmedById     String?
+  confirmedAt       DateTime?
+  voidReason        String?
+  createdById       String
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  deletedAt         DateTime?
+
+  @@index([userId, effectiveDate])
+  @@index([recommendationId])
+  @@index([externalProcessNo])
+  @@index([resultStatus, deletedAt])
+}
+
+model RewardRecord {
+  id                  String                  @id @default(cuid())
+  recordNo            String                  @unique
+  userId              String
+  rewardLevel         TalentRewardLevel
+  rewardForm          TalentRewardForm
+  rewardRecipient     TalentRewardRecipient
+  rewardCycle         TalentRewardCycle
+  rewardPeriodYear    Int
+  rewardPeriodMonth   Int?
+  rewardPeriodQuarter Int?
+  rewardName          String
+  rewardAmount        Int
+  rewardDescription   String?
+  effectiveDate       DateTime
+  recommendationId    String?
+  sourceType          TalentHistorySourceType @default(MANUAL_ENTRY)
+  externalProcessNo   String?
+  resultStatus        TalentRecordStatus      @default(CONFIRMED)
+  confirmedById       String?
+  confirmedAt         DateTime?
+  voidReason          String?
+  createdById         String
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  deletedAt           DateTime?
+
+  @@index([userId, effectiveDate])
+  @@index([recommendationId])
+  @@index([externalProcessNo])
+  @@index([resultStatus, deletedAt])
+  @@index([rewardCycle, rewardPeriodYear, rewardPeriodMonth, rewardPeriodQuarter])
+}
+
+model EmployeeTalentProfile {
+  id                                         String    @id @default(cuid())
+  userId                                     String    @unique
+  jobRoleId                                  String?
+  entryJobLevelId                            String?
+  jobLevelId                                 String?
+  managerUserId                              String?
+  startingSalary                             Int?
+  currentSalary                              Int?
+  salaryCurrency                             String    @default("CNY")
+  currentContractStartAt                     DateTime?
+  currentContractEndAt                       DateTime?
+  currentContractSequence                    Int?
+  hasTwoCReviewsInCurrentContract            Boolean?
+  hasConsecutiveTwoCReviewsInCurrentContract Boolean?
+  isLatestPreRenewalReviewC                  Boolean?
+  hasFormalPromotionInCurrentContract        Boolean?
+  decisionFactsUpdatedAt                     DateTime?
+  decisionFactsUpdateNote                    String?
+  profileNote                                String?
+  updatedById                                String
+  createdAt                                  DateTime  @default(now())
+  updatedAt                                  DateTime  @updatedAt
+  deletedAt                                  DateTime?
+
+  @@index([jobRoleId])
+  @@index([entryJobLevelId])
+  @@index([jobLevelId])
+  @@index([managerUserId])
+  @@index([deletedAt])
+}
+
+model EmploymentContractTerm {
+  id                String                     @id @default(cuid())
+  userId            String
+  contractNo        String?
+  startDate         DateTime
+  endDate           DateTime
+  renewalSequence   Int                        @default(1)
+  outcome           EmploymentContractOutcome?
+  resultStatus      TalentRecordStatus         @default(DRAFT)
+  recommendationId  String?
+  sourceType        TalentHistorySourceType    @default(MANUAL_ENTRY)
+  externalProcessNo String?
+  confirmedById     String?
+  confirmedAt       DateTime?
+  voidReason        String?
+  createdById       String
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  deletedAt         DateTime?
+
+  @@unique([userId, startDate, renewalSequence])
+  @@index([userId, endDate])
+  @@index([recommendationId])
+  @@index([externalProcessNo])
+  @@index([resultStatus, deletedAt])
+}
+
+model SalaryCapConfig {
+  id                  String              @id @default(cuid())
+  departmentOrgNodeId String
+  jobLevelGroupId     String
+  jobLevelId          String?
+  maxSalary           Int
+  currency            String              @default("CNY")
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+  version             Int                 @default(1)
+  versionStatus       TalentVersionStatus @default(DRAFT)
+  createdById         String
+  publishedAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  deletedAt           DateTime?
+
+  @@unique([departmentOrgNodeId, jobLevelGroupId, jobLevelId, version])
+  @@index([departmentOrgNodeId, effectiveFrom])
+  @@index([jobLevelGroupId])
+  @@index([jobLevelId])
+  @@index([versionStatus, deletedAt])
+}
+
+model TalentImportBatch {
+  id                  String                  @id @default(cuid())
+  importType          TalentImportType
+  fileName            String
+  fileSha256          String
+  status              TalentImportBatchStatus @default(UPLOADED)
+  year                Int?
+  quarter             Int?
+  departmentOrgNodeId String?
+  mappingJson         String?
+  summaryJson         String?
+  errorFilePath       String?
+  createdById         String
+  confirmedById       String?
+  confirmedAt         DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  deletedAt           DateTime?
+
+  @@index([importType, status])
+  @@index([departmentOrgNodeId, createdAt])
+  @@index([fileSha256])
+  @@index([deletedAt])
+}
+
+model TalentImportRow {
+  id                 String                @id @default(cuid())
+  batchId            String
+  rowNumber          Int
+  rawDataJson        String
+  normalizedDataJson String?
+  userId             String?
+  status             TalentImportRowStatus @default(PENDING)
+  errorMessagesJson  String?
+  importedTargetType String?
+  importedTargetId   String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, status])
+  @@index([userId])
+  @@index([importedTargetType, importedTargetId])
+}
+
+model TalentActionLog {
+  id         String   @id @default(cuid())
+  targetType String
+  targetId   String
+  action     String
+  actorId    String
+  beforeJson String?
+  afterJson  String?
+  remark     String?
+  actedAt    DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId, actedAt])
+  @@index([actorId])
 }
 
 model Notification {

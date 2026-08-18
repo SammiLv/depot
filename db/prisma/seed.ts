@@ -4,7 +4,7 @@ import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualMetricCalculationType, PrismaClient, RoleType } from "@prisma/client";
 import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
-import { kpiDefaultPermissionGrants } from "../../src/server/permissions/permission-constants";
+import { kpiDefaultPermissionGrants, talentDefaultPermissionGrants } from "../../src/server/permissions/permission-constants";
 
 function resolveDatabaseUrl() {
   if (!process.env.DATABASE_URL || process.env.DATABASE_URL === "file:./dev.db") {
@@ -309,7 +309,7 @@ async function main() {
     ["annual-goals", "年度指标", "/annual-goals", 20, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER]],
     ["quarterly-work", "季度工作", "/quarterly-work", 30, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
     ["kpi", "KPI 管理", "/kpi", 40, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
-    ["talent", "人才发展", "/talent", 50, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER]],
+    ["talent", "人才发展", "/talent", 50, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
     ["todos", "我的待办", "/todos", 60, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
     ["notifications", "通知中心", "/notifications", 70, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
     ["organization", "组织与权限", "/organization", 80, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER]],
@@ -390,7 +390,7 @@ async function main() {
     }
   }
 
-  for (const grant of kpiDefaultPermissionGrants) {
+  for (const grant of [...kpiDefaultPermissionGrants, ...talentDefaultPermissionGrants]) {
     const orgNodeIds = grant.orgNodeSeedKey === null
       ? [null]
       : grant.orgNodeSeedKey === "ROOT"

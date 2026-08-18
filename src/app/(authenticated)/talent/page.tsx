@@ -1,111 +1,221 @@
-import { Badge, Card, PageHeader } from "@/components/ui-kit";
-import { avatarColor } from "@/lib/avatar-color";
-import { Award, AlertCircle, Calendar, Star } from "lucide-react";
+import { requireCurrentUser } from "@/server/auth/current-user";
+import { prisma } from "@/server/db/prisma";
+import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query";
+import { getTalentHistoryData, getTalentRecommendationData } from "@/server/talent/decision-history-query";
+import { getWorkIncidentPageData } from "@/server/talent/incident-query";
+import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
+import { getRemainingPromotionOpportunityCount } from "@/server/talent/employee-profile";
+import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
+import { getTalentReviewConfig, getTalentReviewCycleDetail, getTalentReviewCycles } from "@/server/talent/review-query";
+import { getTalentDecisionRuleConfiguration } from "@/server/talent/decision-rule-query";
+import { getProfileOverviewExtras } from "@/server/talent/profile-overview-query";
+import TalentPageContent from "./content";
+import type { TalentOperationWorkspaceData } from "./operation-workspace-types";
+import type { ReviewWorkspaceData } from "./review-workspace-types";
 
-const people = [
-  { n: "周明轩", t: "B端组", title: "高级产品经理", level: "P6", years: 4, perf: ["A", "A", "B+", "A"], grid: "高潜高绩", tone: "success" as const },
-  { n: "吴雨桐", t: "C端组", title: "产品经理", level: "P5", years: 2, perf: ["B+", "A", "A"], grid: "潜力新星", tone: "primary" as const },
-  { n: "郑雅琪", t: "设计组", title: "高级设计师", level: "P6", years: 5, perf: ["A", "A+", "A"], grid: "高潜高绩", tone: "success" as const },
-  { n: "孙宇航", t: "采购组", title: "采购经理", level: "P6", years: 6, perf: ["B+", "B+", "B"], grid: "中坚力量", tone: "info" as const },
-  { n: "王梓涵", t: "B端组", title: "组长", level: "M1", years: 7, perf: ["A", "A", "A"], grid: "核心骨干", tone: "brand" as const },
-];
+function startOfQuarter(date: Date) {
+  const quarter = Math.floor(date.getMonth() / 3);
+  return new Date(date.getFullYear(), quarter * 3, 1);
+}
 
-export default function TalentPage() {
+function endOfQuarter(date: Date) {
+  const quarter = Math.floor(date.getMonth() / 3);
+  return new Date(date.getFullYear(), quarter * 3 + 3, 0, 23, 59, 59, 999);
+}
+
+export default async function TalentPage() {
+  const user = await requireCurrentUser();
+  const [config, cycles, assessment, incident, decision, history, employeeProfiles, career, competency, decisionRules] = await Promise.all([
+    getTalentReviewConfig(user),
+    getTalentReviewCycles(user),
+    getBusinessAssessmentPageData(user),
+    getWorkIncidentPageData(user),
+    getTalentRecommendationData(user),
+    getTalentHistoryData(user),
+    getEmployeeProfileManagementData(user),
+    getCareerConfiguration(user),
+    getCompetencyConfiguration(user),
+    getTalentDecisionRuleConfiguration(user),
+  ]);
+  const details = (await Promise.all(cycles.cycles.map((cycle) => getTalentReviewCycleDetail(user, cycle.id))))
+    .filter((detail): detail is NonNullable<typeof detail> => Boolean(detail))
+    .map((detail) => ({ ...detail, cycleId: detail.cycle.id, cycleStatus: detail.cycle.status }));
+
+  const participantUserIds = [...new Set(details.flatMap((detail) => detail.participants.map((participant) => participant.userId)))].filter(Boolean);
+  const now = new Date();
+  const ninetyDaysLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yearEnd = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  const quarterStart = startOfQuarter(now);
+  const quarterEnd = endOfQuarter(now);
+
+  const [latestKpis, latestAssessmentSummaries, assessmentCycles, contractsExpiringSoonProfiles, recentPromotionRecords, currentQuarterRewardRecords, employeeProfilesForPromotion] = await Promise.all([
+    prisma.personalKpi.findMany({
+      where: { userId: { in: participantUserIds }, status: "COMPLETED", deletedAt: null },
+      orderBy: [{ year: "desc" }, { quarter: "desc" }],
+      select: { userId: true, year: true, quarter: true, finalScore: true, finalRatingName: true },
+    }),
+    prisma.businessAssessmentSummary.findMany({
+      where: { userId: { in: participantUserIds } },
+      select: { id: true, userId: true, cycleId: true, earnedScore: true, maxScore: true, isOverallPassed: true },
+    }),
+    prisma.businessAssessmentCycle.findMany({
+      where: { deletedAt: null },
+      select: { id: true, year: true, quarter: true },
+    }),
+    prisma.employeeTalentProfile.findMany({
+      where: {
+        userId: { in: participantUserIds },
+        deletedAt: null,
+        currentContractEndAt: { gte: now, lte: ninetyDaysLater },
+      },
+      select: { userId: true },
+    }),
+    prisma.promotionRecord.findMany({
+      where: {
+        userId: { in: participantUserIds },
+        deletedAt: null,
+        outcome: "SUCCESS",
+        resultStatus: "CONFIRMED",
+        effectiveDate: { gte: yearStart, lte: yearEnd },
+      },
+      select: { userId: true, effectiveDate: true },
+    }),
+    prisma.rewardRecord.findMany({
+      where: {
+        userId: { in: participantUserIds },
+        deletedAt: null,
+        resultStatus: "CONFIRMED",
+        effectiveDate: { gte: quarterStart, lte: quarterEnd },
+      },
+      select: { userId: true },
+    }),
+    prisma.employeeTalentProfile.findMany({
+      where: { userId: { in: participantUserIds }, deletedAt: null },
+      select: { userId: true, currentContractEndAt: true, hasFormalPromotionInCurrentContract: true },
+    }),
+  ]);
+
+  const cycleById = new Map(assessmentCycles.map((cycle) => [cycle.id, cycle]));
+
+  const overviewCycle = cycles.cycles[0];
+  const overviewDepartmentOrgNodeId = overviewCycle?.departmentOrgNodeId;
+  const overviewTemplateVersionId = overviewCycle?.templateVersionId;
+
+  const [activeKpiRule, reviewDimensions] = await Promise.all([
+    overviewDepartmentOrgNodeId
+      ? prisma.kpiRatingRuleVersion.findFirst({
+          where: { departmentOrgNodeId: overviewDepartmentOrgNodeId, status: "ACTIVE", deletedAt: null },
+          orderBy: { publishedAt: "desc" },
+          select: { quarterlyKpiTotalScore: true },
+        })
+      : Promise.resolve(null),
+    overviewTemplateVersionId
+      ? prisma.talentReviewDimension.findMany({
+          where: { templateVersionId: overviewTemplateVersionId },
+          select: { maxScore: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const kpiTotalScore = activeKpiRule?.quarterlyKpiTotalScore ?? 110;
+  const reviewTotalScore = reviewDimensions.reduce((sum, dimension) => sum + (dimension.maxScore ?? 0), 0) || 30;
+
+  const profileExtrasByUserId: Record<string, Awaited<ReturnType<typeof getProfileOverviewExtras>>> = {};
+  if (participantUserIds.length > 0) {
+    const extrasList = await Promise.all(
+      participantUserIds.map((userId) => getProfileOverviewExtras(userId, { kpiTotalScore, reviewTotalScore }).catch(() => null)),
+    );
+    participantUserIds.forEach((userId, index) => {
+      const extras = extrasList[index];
+      if (extras) profileExtrasByUserId[userId] = extras;
+    });
+  }
+
+  const lowPromotionOpportunityProfiles = employeeProfilesForPromotion.filter((profile) => {
+    if (!profile.currentContractEndAt) return false;
+    if (profile.hasFormalPromotionInCurrentContract === true) return false;
+    const count = getRemainingPromotionOpportunityCount(profile.currentContractEndAt, now);
+    return count !== null && count <= 2;
+  });
+  const lowPromotionOpportunityCount = lowPromotionOpportunityProfiles.length;
+
+  const latestPromotionRecord = recentPromotionRecords.length > 0
+    ? recentPromotionRecords.reduce((latest, record) => (record.effectiveDate > latest.effectiveDate ? record : latest))
+    : null;
+  const recentPromotionHalfYear = latestPromotionRecord
+    ? (latestPromotionRecord.effectiveDate.getMonth() < 6 ? "first" : "second")
+    : "first";
+  const recentPromotionUserIds = [...new Set(
+    recentPromotionRecords
+      .filter((record) => {
+        const month = record.effectiveDate.getMonth();
+        const halfYear = month < 6 ? "first" : "second";
+        return halfYear === recentPromotionHalfYear;
+      })
+      .map((record) => record.userId),
+  )];
+
+  const contractsExpiringSoonUserIds = contractsExpiringSoonProfiles.map((profile) => profile.userId);
+  const currentQuarterRewardUserIds = [...new Set(currentQuarterRewardRecords.map((record) => record.userId))];
+
+  const statUserIds = [...new Set([
+    ...contractsExpiringSoonUserIds,
+    ...lowPromotionOpportunityProfiles.map((profile) => profile.userId),
+    ...recentPromotionUserIds,
+    ...currentQuarterRewardUserIds,
+  ])];
+  const statUsers = statUserIds.length > 0
+    ? await prisma.user.findMany({ where: { id: { in: statUserIds } }, select: { id: true, name: true } })
+    : [];
+  const userNameById = new Map(statUsers.map((row) => [row.id, row.name]));
+
+  const contractsExpiringSoonNames = contractsExpiringSoonUserIds.map((id) => userNameById.get(id) ?? id);
+  const lowPromotionOpportunityNames = lowPromotionOpportunityProfiles.map((profile) => userNameById.get(profile.userId) ?? profile.userId);
+  const recentPromotionNames = recentPromotionUserIds.map((id) => userNameById.get(id) ?? id);
+  const currentQuarterRewardNames = currentQuarterRewardUserIds.map((id) => userNameById.get(id) ?? id);
+
+  const latestKpiByUserId: Record<string, (typeof latestKpis)[number]> = {};
+  for (const kpi of latestKpis) {
+    if (!latestKpiByUserId[kpi.userId]) {
+      latestKpiByUserId[kpi.userId] = kpi;
+    }
+  }
+
+  const latestAssessmentByUserId: Record<string, (typeof latestAssessmentSummaries)[number] & { cycle: { year: number; quarter: number } | null }> = {};
+  const sortedSummaries = [...latestAssessmentSummaries]
+    .map((summary) => ({ ...summary, cycle: cycleById.get(summary.cycleId) ?? null }))
+    .sort((left, right) => {
+      const leftYear = left.cycle?.year ?? 0;
+      const rightYear = right.cycle?.year ?? 0;
+      if (leftYear !== rightYear) return rightYear - leftYear;
+      return (right.cycle?.quarter ?? 0) - (left.cycle?.quarter ?? 0);
+    });
+  for (const summary of sortedSummaries) {
+    if (!latestAssessmentByUserId[summary.userId]) {
+      latestAssessmentByUserId[summary.userId] = summary;
+    }
+  }
+
+  const reviewWorkspace = JSON.parse(JSON.stringify({ config, cycles, details })) as ReviewWorkspaceData;
+  const operationWorkspace = JSON.parse(JSON.stringify({ assessment, incident, decision, history, employeeProfiles, career, competency, decisionRules })) as TalentOperationWorkspaceData;
   return (
-    <>
-      <PageHeader title="人才发展" description="人才画像 · 9 宫格盘点 · 晋升与合同预警 · 奖励台账" />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="lg:col-span-2">
-          <h3 className="font-semibold mb-4">9 宫格人才盘点</h3>
-          <div className="grid grid-cols-3 gap-2 aspect-[3/2]">
-            {[
-              { label: "潜力新星", n: 1, tone: "primary" }, { label: "高潜中绩", n: 2, tone: "info" }, { label: "高潜高绩", n: 2, tone: "success" },
-              { label: "待发展", n: 1, tone: "default" }, { label: "中坚力量", n: 3, tone: "info" }, { label: "核心骨干", n: 2, tone: "brand" },
-              { label: "观察", n: 0, tone: "default" }, { label: "稳定贡献", n: 2, tone: "default" }, { label: "明星员工", n: 2, tone: "success" },
-            ].map((b, i) => {
-              const map: Record<string, string> = {
-                default: "bg-muted/60", primary: "bg-primary/10 border-primary/30",
-                info: "bg-info/10 border-info/30", success: "bg-success/10 border-success/30",
-                brand: "bg-brand/10 border-brand/30",
-              };
-              return (
-                <div key={i} className={`rounded-lg border border-transparent p-3 flex flex-col justify-between ${map[b.tone]}`}>
-                  <span className="text-xs text-muted-foreground">{b.label}</span>
-                  <span className="text-2xl font-semibold tabular-nums self-end">{b.n}</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-            <span>← 绩效低</span><span>↑ 潜力高</span><span>绩效高 →</span>
-          </div>
-        </Card>
-
-        <div className="space-y-4">
-          <Card>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-warning/20 text-warning-foreground flex items-center justify-center"><AlertCircle className="w-5 h-5" /></div>
-              <div className="flex-1">
-                <div className="text-xs text-muted-foreground">合同到期</div>
-                <div className="text-xl font-semibold">3 人</div>
-              </div>
-              <span className="text-xs text-primary cursor-pointer">查看</span>
-            </div>
-          </Card>
-          <Card>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Calendar className="w-5 h-5" /></div>
-              <div className="flex-1">
-                <div className="text-xs text-muted-foreground">晋升候选</div>
-                <div className="text-xl font-semibold">5 人</div>
-              </div>
-              <span className="text-xs text-primary cursor-pointer">查看</span>
-            </div>
-          </Card>
-          <Card>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-brand/15 text-brand flex items-center justify-center"><Award className="w-5 h-5" /></div>
-              <div className="flex-1">
-                <div className="text-xs text-muted-foreground">本季奖励</div>
-                <div className="text-xl font-semibold">7 条</div>
-              </div>
-              <span className="text-xs text-primary cursor-pointer">查看</span>
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      <Card className="!p-0 overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="font-semibold">人才画像</h3>
-        </div>
-        <div className="divide-y divide-border">
-          {people.map((p) => (
-            <div key={p.n} className="px-5 py-4 flex items-center gap-4 hover:bg-muted/30 transition">
-              <div className={`w-12 h-12 rounded-full text-white font-medium flex items-center justify-center ${avatarColor(p.n)}`}>{p.n[0]}</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{p.n}</span>
-                  <Badge tone="default">{p.level}</Badge>
-                  <Badge tone={p.tone}>{p.grid}</Badge>
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">{p.title} · {p.t} · 在职 {p.years} 年</div>
-              </div>
-              <div className="hidden md:flex items-center gap-1">
-                {p.perf.map((s, i) => (
-                  <span key={i} className="w-8 h-8 rounded-md bg-muted text-xs font-semibold flex items-center justify-center">{s}</span>
-                ))}
-              </div>
-              <div className="flex items-center gap-1 text-warning-foreground">
-                <Star className="w-4 h-4 fill-current" />
-                <span className="text-sm font-medium">4.6</span>
-              </div>
-              <button className="text-xs text-primary hover:underline">详情</button>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </>
+    <TalentPageContent
+      reviewWorkspace={reviewWorkspace}
+      operationWorkspace={operationWorkspace}
+      latestKpiByUserId={latestKpiByUserId}
+      latestAssessmentByUserId={latestAssessmentByUserId}
+      statCards={{
+        contractsExpiringSoon: contractsExpiringSoonProfiles.length,
+        contractsExpiringSoonNames,
+        recentPromotions: recentPromotionUserIds.length,
+        recentPromotionHalfYear,
+        recentPromotionNames,
+        lowPromotionOpportunityCount,
+        lowPromotionOpportunityNames,
+        currentQuarterRewards: currentQuarterRewardUserIds.length,
+        currentQuarterRewardNames,
+      }}
+      profileExtrasByUserId={profileExtrasByUserId}
+    />
   );
 }

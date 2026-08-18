@@ -19,6 +19,7 @@
     "test:permissions:integration": "bash scripts/test-permission-matrix-sync.sh",
     "test:permissions:all": "npm run test:permissions && npm run test:permissions:integration",
     "test:kpi": "node --import tsx --test src/server/kpi/approval-policy.test.ts src/server/kpi/approval-policy-admin.test.ts src/server/kpi/approval-snapshot.test.ts src/server/kpi/approval-workflow.test.ts src/server/kpi/approval-org-tree.test.ts",
+    "test:talent": "node --import tsx --test src/server/talent/*.test.ts",
     "prisma:generate": "prisma generate --schema db/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema db/prisma/schema.prisma",
     "prisma:studio": "prisma studio --schema db/prisma/schema.prisma",
