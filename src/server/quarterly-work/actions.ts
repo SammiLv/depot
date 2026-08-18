@@ -386,6 +386,7 @@ export async function createQuarterlyWork(formData: FormData) {
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"));
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
+  const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -418,6 +419,7 @@ export async function createQuarterlyWork(formData: FormData) {
       endMonth: periodEndMonth,
       title,
       description,
+      taskDescription,
       expectedOutcome,
       status,
       taskResult,
@@ -455,6 +457,7 @@ export async function updateQuarterlyWork(formData: FormData) {
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"));
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
+  const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -475,6 +478,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       ownerId: true,
       title: true,
       description: true,
+      taskDescription: true,
       taskResult: true,
       executionSummary: true,
     },
@@ -509,6 +513,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       projectId: project.id,
       title,
       description,
+      taskDescription,
       expectedOutcome,
       startMonth: periodStartMonth,
       endMonth: periodEndMonth,
@@ -543,6 +548,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       next: `${periodStartMonth}月~${periodEndMonth}月`,
     },
     { label: "任务目标", previous: existingWork.description, next: description },
+    { label: "任务描述", previous: existingWork.taskDescription, next: taskDescription },
     { label: "任务状态", previous: WORK_STATUS_LABELS[existingWork.status], next: WORK_STATUS_LABELS[status] },
     { label: "任务结果", previous: existingWork.taskResult, next: taskResult },
     { label: "任务执行概况", previous: existingWork.executionSummary, next: executionSummary },

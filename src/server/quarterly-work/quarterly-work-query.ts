@@ -40,6 +40,7 @@ type BoardItem = {
   endMonth: number | null;
   status: WorkStatus;
   description: string | null;
+  taskDescription: string | null;
   expectedOutcome: string | null;
   taskResult: string | null;
   executionSummary: string | null;
@@ -558,6 +559,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       endMonth: work.endMonth,
       status: work.status,
       description: work.description,
+      taskDescription: work.taskDescription,
       expectedOutcome: work.expectedOutcome,
       taskResult: work.taskResult,
       executionSummary: work.executionSummary,

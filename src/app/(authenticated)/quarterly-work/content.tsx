@@ -666,6 +666,15 @@ function QuarterlyWorkForm({
             </select>
           </div>
         </FormRow>
+        <FormRow label="任务描述">
+          <textarea
+            name="taskDescription"
+            rows={3}
+            defaultValue={item?.taskDescription ?? ""}
+            placeholder="请输入任务描述"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
         <FormRow label="任务目标 *">
           <textarea
             name="description"
