@@ -2907,7 +2907,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
       </Card>
 
-      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增任务">
+      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增任务" stickyLayout>
         {createDialog && (
           <QuarterlyWorkForm
             data={data}
@@ -2918,6 +2918,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             memberOptions={getMemberOptionsForForm()}
             onClose={() => setCreateDialog(null)}
             onSuccess={handleFormSuccess}
+            stickyLayout
           />
         )}
       </Dialog>
