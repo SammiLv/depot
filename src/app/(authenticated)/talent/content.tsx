@@ -386,7 +386,7 @@ export default function TalentPageContent({
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left font-medium px-5 py-3">员工</th><th className="text-left font-medium px-4 py-3">当前职级</th><th className="text-left font-medium px-4 py-3">人才盘点</th><th className="text-left font-medium px-4 py-3">有效 KPI</th><th className="text-left font-medium px-4 py-3">业务考核</th><th className="text-left font-medium px-4 py-3">当前建议</th><th className="text-right font-medium px-5 py-3">操作</th></tr></thead>
+            <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left font-medium px-5 py-3">员工</th><th className="text-left font-medium px-4 py-3">当前职级</th><th className="text-left font-medium px-4 py-3">人才盘点</th><th className="text-left font-medium px-4 py-3">有效 KPI</th><th className="text-left font-medium px-4 py-3">业务考核</th><th className="text-left font-medium px-4 py-3">能力匹配度</th><th className="text-left font-medium px-4 py-3">当前建议</th><th className="text-right font-medium px-5 py-3">操作</th></tr></thead>
             <tbody className="divide-y divide-border">
               {filtered.map((person) => <tr key={person.id} className="hover:bg-muted/25 transition-colors cursor-pointer" onClick={() => openPerson(person)}>
                 <td className="px-5 py-3.5"><div><div className="font-medium">{person.name}</div><div className="mt-0.5 text-xs text-muted-foreground">{person.title} · {person.team}</div></div></td>
@@ -394,10 +394,11 @@ export default function TalentPageContent({
                 <td className="px-4 py-3.5"><div className="flex items-center gap-2"><Badge tone={person.tone}>{person.grid}</Badge><span className="text-xs text-muted-foreground">{person.reviewLevel === "待评价" ? "尚未完成评价" : `${person.score}分 / ${person.reviewLevel}`}</span></div></td>
                 <td className="px-4 py-3.5">{person.hasKpi ? <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${scoreTone(person.kpi)}`}>{person.kpi} 分{person.kpiRating ? ` / ${person.kpiRating}` : null}</span> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
                 <td className="px-4 py-3.5">{person.hasAssessment ? <><span className="font-medium">{person.assessment}</span><span className="text-xs text-muted-foreground"> / {person.assessmentMax}分</span></> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
+                <td className="px-4 py-3.5">{person.profileExtras?.abilityMatchScore != null ? <span className="text-sm font-medium text-primary">{person.profileExtras.abilityMatchScore}%</span> : <span className="text-xs text-muted-foreground">—</span>}</td>
                 <td className="px-4 py-3.5"><span className="text-xs">{person.recommendation}</span></td>
                 <td className="px-5 py-3.5 text-right"><button onClick={(event) => { event.stopPropagation(); openPerson(person); }} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">查看画像<ChevronRight className="w-3.5 h-3.5" /></button></td>
               </tr>)}
-              {filtered.length === 0 && <tr><td colSpan={7} className="px-5 py-14 text-center text-sm text-muted-foreground">没有匹配的员工，请调整筛选条件</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-muted-foreground">没有匹配的员工，请调整筛选条件</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1606,7 +1607,7 @@ function Overview({ person }: { person: Person; setTab: (tab: Tab) => void }) {
       <Card className="!p-4 mt-3">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium">能力模型匹配度</div>
+            <div className="text-sm font-medium">能力匹配度</div>
             <div className="text-xs text-muted-foreground mt-1">(当前聘期内 KPI 均值 / 季度 KPI 总分) × 60% + (当前聘期内盘点均值 / 盘点模型总分) × 40%</div>
           </div>
           <div className="text-2xl font-semibold text-primary">{extras?.abilityMatchScore != null ? `${extras.abilityMatchScore}%` : "—"}</div>
