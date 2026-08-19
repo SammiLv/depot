@@ -16,9 +16,29 @@ type HistoryRecordFormProps = {
   levels: Array<{ id: string; code: string }>;
 };
 
+type CommonReward = {
+  level: RewardLevel;
+  form: RewardForm;
+  recipient: RewardRecipient;
+  cycle: RewardCycle;
+  name: string;
+  periodYear: number;
+  periodQuarter: number;
+  periodMonthValue: string;
+};
+
 const inputClass = "h-9 w-full min-w-0 rounded-lg border border-border bg-background px-2 text-sm";
 const typeLabels: Record<HistoryType, string> = { PROMOTION: "晋升", SALARY_ADJUSTMENT: "加薪", CONTRACT_RENEWAL: "续签", REWARD: "奖励" };
 const fieldName = (userId: string, key: string) => `${key}:${userId}`;
+const awardNames = Object.keys(companyCoinAwardBaseAmounts);
+
+function getCurrentPeriodDefaults() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const quarter = Math.floor(now.getMonth() / 3) + 1;
+  const month = `${year}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return { year, quarter, month };
+}
 
 export function HistoryRecordForm({ users, recommendations, levels }: HistoryRecordFormProps) {
   const [decisionType, setDecisionType] = useState<HistoryType>("PROMOTION");
@@ -27,6 +47,17 @@ export function HistoryRecordForm({ users, recommendations, levels }: HistoryRec
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const selectedUsers = users.filter((row) => selectedUserIds.includes(row.id));
+  const periodDefaults = getCurrentPeriodDefaults();
+  const [commonReward, setCommonReward] = useState<CommonReward>({
+    level: "COMPANY",
+    form: "COIN",
+    recipient: "INDIVIDUAL",
+    cycle: "QUARTERLY",
+    name: awardNames[0] ?? "",
+    periodYear: periodDefaults.year,
+    periodQuarter: periodDefaults.quarter,
+    periodMonthValue: periodDefaults.month,
+  });
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -71,20 +102,22 @@ export function HistoryRecordForm({ users, recommendations, levels }: HistoryRec
 
     {selectedUserIds.map((userId) => <input key={userId} type="hidden" name="selectedUserIds" value={userId}/>)}
 
+    {decisionType === "REWARD" && selectedUsers.length > 0 ? <CommonRewardFields value={commonReward} onChange={setCommonReward}/> : null}
+
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h4 className="font-medium">{typeLabels[decisionType]}信息 · {selectedUsers.length} 人</h4><span className="text-xs text-muted-foreground">每位员工生成独立记录编号；一次提交整批保存</span></div>
-      {!selectedUsers.length ? <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">请先选择至少一位员工</div> : <BatchHistoryTable decisionType={decisionType} users={selectedUsers} recommendations={recommendations} levels={levels} sourceType={sourceType}/>} 
+      {!selectedUsers.length ? <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">请先选择至少一位员工</div> : <BatchHistoryTable decisionType={decisionType} users={selectedUsers} recommendations={recommendations} levels={levels} sourceType={sourceType} commonReward={commonReward}/>}
     </div>
     <Button type="submit" disabled={!selectedUsers.length} className="h-9 w-full rounded-lg text-sm font-semibold">批量保存 {selectedUsers.length} 条{typeLabels[decisionType]}履历</Button>
   </form>;
 }
 
-function BatchHistoryTable({ decisionType, users, recommendations, levels, sourceType }: { decisionType: HistoryType; users: HistoryUser[]; recommendations: Recommendation[]; levels: Array<{ id: string; code: string }>; sourceType: HistorySource }) {
+function BatchHistoryTable({ decisionType, users, recommendations, levels, sourceType, commonReward }: { decisionType: HistoryType; users: HistoryUser[]; recommendations: Recommendation[]; levels: Array<{ id: string; code: string }>; sourceType: HistorySource; commonReward: CommonReward }) {
   const configs = {
     PROMOTION: { columns: "md:grid-cols-[.9fr_1fr_1fr_.8fr_1fr_1.2fr_1.3fr]", headers: ["员工", "当前职级", "目标职级", "晋升结果", "晋升类型", "关联人才建议", "公司流程号 / 原因"] },
     SALARY_ADJUSTMENT: { columns: "md:grid-cols-[1fr_1.1fr_1.1fr_1.4fr_1.2fr]", headers: ["员工", "加薪后薪资", "关联人才建议", "公司流程号", "加薪原因"] },
     CONTRACT_RENEWAL: { columns: "md:grid-cols-[1fr_1fr_.7fr_1fr_1.2fr_1.1fr]", headers: ["员工", "新聘期结束日期", "聘期期数", "续签结果", "关联人才建议", "公司流程号"] },
-    REWARD: { columns: "md:grid-cols-[.9fr_.7fr_.7fr_.7fr_.7fr_1.2fr_1.1fr_.8fr_1.1fr_1.2fr]", headers: ["员工", "奖励层级", "奖励形式", "奖励对象", "奖励周期", "奖励期间", "奖励名称", "奖励金额（元）", "关联人才建议", "公司流程号 / 说明"] },
+    REWARD: { columns: "md:grid-cols-[1fr_.8fr_1fr_1.2fr]", headers: ["员工", "奖励金额（元）", "关联人才建议", "公司流程号 / 说明"] },
   } as const;
   const config = configs[decisionType];
 
@@ -98,7 +131,7 @@ function BatchHistoryTable({ decisionType, users, recommendations, levels, sourc
         {decisionType === "CONTRACT_RENEWAL" ? <RenewalFields user={user} recommendation={recommendation}/> : null}
         {decisionType === "PROMOTION" ? <PromotionFields user={user} recommendation={recommendation} levels={levels}/> : null}
         {decisionType === "SALARY_ADJUSTMENT" ? <SalaryFields user={user} recommendation={recommendation}/> : null}
-        {decisionType === "REWARD" ? <RewardFields user={user} recommendation={recommendation}/> : null}
+        {decisionType === "REWARD" ? <RewardFields user={user} recommendation={recommendation} commonReward={commonReward}/> : null}
       </div>;
     })}
   </div>;
@@ -134,33 +167,37 @@ function RenewalFields({ user, recommendation }: { user: HistoryUser; recommenda
   </>;
 }
 
-function RewardFields({ user, recommendation }: { user: HistoryUser; recommendation: React.ReactNode }) {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
-  const currentMonth = `${currentYear}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const years = Array.from({ length: 11 }, (_, index) => currentYear - 5 + index);
-  const awardNames = Object.keys(companyCoinAwardBaseAmounts);
-  const [rewardLevel, setRewardLevel] = useState<RewardLevel>("COMPANY");
-  const [rewardForm, setRewardForm] = useState<RewardForm>("COIN");
-  const [rewardRecipient, setRewardRecipient] = useState<RewardRecipient>("INDIVIDUAL");
-  const [rewardCycle, setRewardCycle] = useState<RewardCycle>("QUARTERLY");
-  const [rewardName, setRewardName] = useState(awardNames[0] ?? "");
-  const controlled = isControlledCompanyCoinAward(rewardLevel, rewardForm, rewardCycle);
-  const defaultAmount = controlled ? companyCoinAwardAmounts(rewardName, rewardCycle)[0] : undefined;
-  const amountKey = `${rewardLevel}-${rewardForm}-${rewardCycle}-${rewardName}`;
+function CommonRewardFields({ value, onChange }: { value: CommonReward; onChange: (value: CommonReward) => void }) {
+  const years = Array.from({ length: 11 }, (_, index) => getCurrentPeriodDefaults().year - 5 + index);
+  const controlled = isControlledCompanyCoinAward(value.level, value.form, value.cycle);
+
+  function update(partial: Partial<CommonReward>) {
+    onChange({ ...value, ...partial });
+  }
+
+  return <div className="rounded-xl border border-border p-4">
+    <div className="mb-3 text-sm font-medium">公共奖励信息</div>
+    <div className="grid gap-3 md:grid-cols-[repeat(6,minmax(0,1fr))]">
+      <HistoryField label="奖励层级"><select name="rewardLevel" required value={value.level} onChange={(event) => update({ level: event.target.value as RewardLevel })} className={inputClass}>{Object.entries(rewardLevelLabels).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></HistoryField>
+      <HistoryField label="奖励形式"><select name="rewardForm" required value={value.form} onChange={(event) => update({ form: event.target.value as RewardForm })} className={inputClass}>{Object.entries(rewardFormLabels).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></HistoryField>
+      <HistoryField label="奖励对象"><select name="rewardRecipient" required value={value.recipient} onChange={(event) => update({ recipient: event.target.value as RewardRecipient })} className={inputClass}>{Object.entries(rewardRecipientLabels).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></HistoryField>
+      <HistoryField label="奖励周期"><select name="rewardCycle" required value={value.cycle} onChange={(event) => update({ cycle: event.target.value as RewardCycle })} className={inputClass}>{Object.entries(rewardCycleLabels).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></HistoryField>
+      <HistoryField label="奖励期间">
+        {value.cycle === "MONTHLY" || value.cycle === "OTHER" ? <input name="rewardPeriodMonthValue" type="month" required value={value.periodMonthValue} onChange={(event) => update({ periodMonthValue: event.target.value })} className={inputClass}/> : null}
+        {value.cycle === "QUARTERLY" ? <div className="grid grid-cols-2 gap-1"><select name="rewardPeriodYear" required value={value.periodYear} onChange={(event) => update({ periodYear: Number(event.target.value) })} className={inputClass}>{years.map((year) => <option key={year} value={year}>{year}年</option>)}</select><select name="rewardPeriodQuarter" required value={value.periodQuarter} onChange={(event) => update({ periodQuarter: Number(event.target.value) })} className={inputClass}>{[1, 2, 3, 4].map((quarter) => <option key={quarter} value={quarter}>Q{quarter}</option>)}</select></div> : null}
+        {value.cycle === "ANNUAL" ? <select name="rewardPeriodYear" required value={value.periodYear} onChange={(event) => update({ periodYear: Number(event.target.value) })} className={inputClass}>{years.map((year) => <option key={year} value={year}>{year}年</option>)}</select> : null}
+      </HistoryField>
+      <HistoryField label="奖励名称">{controlled ? <select name="rewardName" required value={value.name} onChange={(event) => update({ name: event.target.value })} className={inputClass}>{awardNames.map((name) => <option key={name} value={name}>{name}</option>)}</select> : <input name="rewardName" required value={value.name} onChange={(event) => update({ name: event.target.value })} placeholder="奖励名称" className={inputClass}/>}</HistoryField>
+    </div>
+  </div>;
+}
+
+function RewardFields({ user, recommendation, commonReward }: { user: HistoryUser; recommendation: React.ReactNode; commonReward: CommonReward }) {
+  const controlled = isControlledCompanyCoinAward(commonReward.level, commonReward.form, commonReward.cycle);
+  const defaultAmount = controlled ? companyCoinAwardAmounts(commonReward.name, commonReward.cycle)[0] : undefined;
+  const amountKey = `${commonReward.level}-${commonReward.form}-${commonReward.cycle}-${commonReward.name}-${user.id}`;
 
   return <>
-    <HistoryField label="奖励层级"><select name={fieldName(user.id, "rewardLevel")} required value={rewardLevel} onChange={(event) => setRewardLevel(event.target.value as RewardLevel)} className={inputClass}>{Object.entries(rewardLevelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></HistoryField>
-    <HistoryField label="奖励形式"><select name={fieldName(user.id, "rewardForm")} required value={rewardForm} onChange={(event) => setRewardForm(event.target.value as RewardForm)} className={inputClass}>{Object.entries(rewardFormLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></HistoryField>
-    <HistoryField label="奖励对象"><select name={fieldName(user.id, "rewardRecipient")} required value={rewardRecipient} onChange={(event) => setRewardRecipient(event.target.value as RewardRecipient)} className={inputClass}>{Object.entries(rewardRecipientLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></HistoryField>
-    <HistoryField label="奖励周期"><select name={fieldName(user.id, "rewardCycle")} required value={rewardCycle} onChange={(event) => setRewardCycle(event.target.value as RewardCycle)} className={inputClass}>{Object.entries(rewardCycleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></HistoryField>
-    <HistoryField label="奖励期间">
-      {rewardCycle === "MONTHLY" || rewardCycle === "OTHER" ? <input key={rewardCycle} name={fieldName(user.id, "rewardPeriodMonthValue")} type="month" required defaultValue={currentMonth} className={inputClass}/> : null}
-      {rewardCycle === "QUARTERLY" ? <div className="grid grid-cols-2 gap-1"><select name={fieldName(user.id, "rewardPeriodYear")} required defaultValue={currentYear} className={inputClass}>{years.map((year) => <option key={year} value={year}>{year}年</option>)}</select><select name={fieldName(user.id, "rewardPeriodQuarter")} required defaultValue={currentQuarter} className={inputClass}>{[1, 2, 3, 4].map((quarter) => <option key={quarter} value={quarter}>Q{quarter}</option>)}</select></div> : null}
-      {rewardCycle === "ANNUAL" ? <select name={fieldName(user.id, "rewardPeriodYear")} required defaultValue={currentYear} className={inputClass}>{years.map((year) => <option key={year} value={year}>{year}年</option>)}</select> : null}
-    </HistoryField>
-    <HistoryField label="奖励名称">{controlled ? <select name={fieldName(user.id, "rewardName")} required value={rewardName} onChange={(event) => setRewardName(event.target.value)} className={inputClass}>{awardNames.map((name) => <option key={name} value={name}>{name}</option>)}</select> : <input name={fieldName(user.id, "rewardName")} required placeholder="奖励名称" className={inputClass}/>}</HistoryField>
     <HistoryField label="奖励金额（元）"><input key={amountKey} name={fieldName(user.id, "rewardAmount")} type="number" min="1" step="1" required defaultValue={defaultAmount} placeholder="金额" className={inputClass}/></HistoryField>
     <HistoryField label="关联人才建议">{recommendation}</HistoryField>
     <HistoryField label="公司流程号 / 说明"><div className="grid gap-2"><input name={fieldName(user.id, "externalProcessNo")} placeholder="流程号" className={inputClass}/><input name={fieldName(user.id, "reason")} placeholder="奖励说明" className={inputClass}/></div></HistoryField>

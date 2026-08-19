@@ -57,6 +57,38 @@ export async function createTalentHistoryRecord(formData: FormData) {
     recommendationIds.set(userId, recommendationId);
   }
 
+  let commonRewardFields: { rewardLevel: RewardLevel; rewardForm: RewardForm; rewardRecipient: RewardRecipient; rewardCycle: RewardCycle; rewardPeriodYear: number; rewardPeriodMonth: number | null; rewardPeriodQuarter: number | null; rewardName: string } | null = null;
+  if (decisionType === "REWARD") {
+    const rewardLevel = required(formData, "rewardLevel") as RewardLevel;
+    const rewardForm = required(formData, "rewardForm") as RewardForm;
+    const rewardRecipient = required(formData, "rewardRecipient") as RewardRecipient;
+    const rewardCycle = required(formData, "rewardCycle") as RewardCycle;
+    if (!(rewardLevel in rewardLevelLabels)) throw new Error("奖励层级无效");
+    if (!(rewardForm in rewardFormLabels)) throw new Error("奖励形式无效");
+    if (!(rewardRecipient in rewardRecipientLabels)) throw new Error("奖励对象无效");
+    if (!(rewardCycle in rewardCycleLabels)) throw new Error("奖励周期无效");
+
+    let rewardPeriodYear: number;
+    let rewardPeriodMonth: number | null = null;
+    let rewardPeriodQuarter: number | null = null;
+    if (rewardCycle === "MONTHLY" || rewardCycle === "OTHER") {
+      const match = /^(\d{4})-(\d{2})$/.exec(required(formData, "rewardPeriodMonthValue"));
+      if (!match) throw new Error("请选择有效的奖励期间");
+      rewardPeriodYear = Number(match[1]);
+      rewardPeriodMonth = Number(match[2]);
+      if (rewardPeriodMonth < 1 || rewardPeriodMonth > 12) throw new Error("奖励月份无效");
+    } else {
+      rewardPeriodYear = Number(required(formData, "rewardPeriodYear"));
+      if (rewardCycle === "QUARTERLY") rewardPeriodQuarter = Number(required(formData, "rewardPeriodQuarter"));
+    }
+    if (!Number.isInteger(rewardPeriodYear) || rewardPeriodYear < 2000 || rewardPeriodYear > 2200) throw new Error("奖励年份无效");
+    if (rewardPeriodQuarter !== null && ![1, 2, 3, 4].includes(rewardPeriodQuarter)) throw new Error("奖励季度无效");
+
+    const rewardName = required(formData, "rewardName");
+    if (isControlledCompanyCoinAward(rewardLevel, rewardForm, rewardCycle) && !companyCoinAwardAmounts(rewardName, rewardCycle).length) throw new Error("请选择公司竞币奖励名称");
+    commonRewardFields = { rewardLevel, rewardForm, rewardRecipient, rewardCycle, rewardPeriodYear, rewardPeriodMonth, rewardPeriodQuarter, rewardName };
+  }
+
   await prisma.$transaction(async (tx) => {
     for (const userId of userIds) {
       const recommendationId = recommendationIds.get(userId) ?? null;
@@ -102,36 +134,11 @@ export async function createTalentHistoryRecord(formData: FormData) {
         targetId = row.id;
       }
       else if (decisionType === "REWARD") {
-        const rewardLevel = recordRequired(formData, userId, "rewardLevel", isBatch) as RewardLevel;
-        const rewardForm = recordRequired(formData, userId, "rewardForm", isBatch) as RewardForm;
-        const rewardRecipient = recordRequired(formData, userId, "rewardRecipient", isBatch) as RewardRecipient;
-        const rewardCycle = recordRequired(formData, userId, "rewardCycle", isBatch) as RewardCycle;
-        if (!(rewardLevel in rewardLevelLabels)) throw new Error("奖励层级无效");
-        if (!(rewardForm in rewardFormLabels)) throw new Error("奖励形式无效");
-        if (!(rewardRecipient in rewardRecipientLabels)) throw new Error("奖励对象无效");
-        if (!(rewardCycle in rewardCycleLabels)) throw new Error("奖励周期无效");
+        if (!commonRewardFields) throw new Error("奖励公共字段缺失");
+        const { rewardLevel, rewardForm, rewardRecipient, rewardCycle, rewardPeriodYear, rewardPeriodMonth, rewardPeriodQuarter, rewardName } = commonRewardFields;
 
-        let rewardPeriodYear: number;
-        let rewardPeriodMonth: number | null = null;
-        let rewardPeriodQuarter: number | null = null;
-        if (rewardCycle === "MONTHLY" || rewardCycle === "OTHER") {
-          const match = /^(\d{4})-(\d{2})$/.exec(recordRequired(formData, userId, "rewardPeriodMonthValue", isBatch));
-          if (!match) throw new Error("请选择有效的奖励期间");
-          rewardPeriodYear = Number(match[1]);
-          rewardPeriodMonth = Number(match[2]);
-          if (rewardPeriodMonth < 1 || rewardPeriodMonth > 12) throw new Error("奖励月份无效");
-        }
-        else {
-          rewardPeriodYear = Number(recordRequired(formData, userId, "rewardPeriodYear", isBatch));
-          if (rewardCycle === "QUARTERLY") rewardPeriodQuarter = Number(recordRequired(formData, userId, "rewardPeriodQuarter", isBatch));
-        }
-        if (!Number.isInteger(rewardPeriodYear) || rewardPeriodYear < 2000 || rewardPeriodYear > 2200) throw new Error("奖励年份无效");
-        if (rewardPeriodQuarter !== null && ![1, 2, 3, 4].includes(rewardPeriodQuarter)) throw new Error("奖励季度无效");
-
-        const rewardName = recordRequired(formData, userId, "rewardName", isBatch);
         const rewardAmount = recordOptionalNumber(formData, userId, "rewardAmount", isBatch);
         if (rewardAmount === null || !Number.isInteger(rewardAmount) || rewardAmount <= 0) throw new Error("奖励金额必须是大于0的整数");
-        if (isControlledCompanyCoinAward(rewardLevel, rewardForm, rewardCycle) && !companyCoinAwardAmounts(rewardName, rewardCycle).length) throw new Error("请选择公司竞币奖励名称");
 
         const row = await tx.rewardRecord.create({ data: { ...common, rewardLevel, rewardForm, rewardRecipient, rewardCycle, rewardPeriodYear, rewardPeriodMonth, rewardPeriodQuarter, rewardName, rewardAmount, rewardDescription: recordOptional(formData, userId, "reason", isBatch) } });
         targetType = "RewardRecord";
