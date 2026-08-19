@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deleteKpiTemplate, deletePersonalKpi } from "@/server/kpi/actions";
+import { runServerAction } from "@/lib/run-server-action";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
 
@@ -146,7 +147,7 @@ function TemplateList({
 function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: QuarterlyKpiRow; onClose: () => void; onComplete: () => void }) {
   async function handleDelete() {
     try {
-      await deletePersonalKpi(row.id);
+      await runServerAction(() => deletePersonalKpi(row.id));
       onComplete();
       onClose();
     } catch (error) {
@@ -168,7 +169,7 @@ function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: Quarterl
 function TemplateDeleteConfirm({ row, onClose, onComplete }: { row: TemplateRow; onClose: () => void; onComplete: () => void }) {
   async function handleDelete() {
     try {
-      await deleteKpiTemplate(row.id);
+      await runServerAction(() => deleteKpiTemplate(row.id));
       onComplete();
       onClose();
     } catch (error) {
@@ -434,7 +435,7 @@ function CreateTemplateDrawer({
       action={async (formData) => {
         try {
           setErrorMessage(null);
-          const result = await createKpiTemplate(formData);
+          const result = await runServerAction(() => createKpiTemplate(formData));
           onComplete(result);
           onClose();
         } catch (error) {
@@ -811,7 +812,7 @@ function TemplateEditDrawer({
         action={async (formData) => {
           try {
             setErrorMessage(null);
-            const result = await updateKpiTemplate(formData);
+            const result = await runServerAction(() => updateKpiTemplate(formData));
             onComplete(result);
             onClose();
           } catch (error) {
@@ -1135,7 +1136,7 @@ function InitializeForm({
       action={async (formData) => {
         try {
           setErrorMessage(null);
-          const result = await initializeQuarterlyKpis(formData);
+          const result = await runServerAction(() => initializeQuarterlyKpis(formData));
           onComplete(result);
           onClose();
         } catch (error) {
@@ -1209,7 +1210,7 @@ function TemplateImportForm({
       action={async (formData) => {
         try {
           setErrorMessage(null);
-          const result = await importKpiTemplates(formData);
+          const result = await runServerAction(() => importKpiTemplates(formData));
           onComplete(result);
           onClose();
         } catch (error) {
@@ -1379,7 +1380,7 @@ export function KpiContent({ data }: Props) {
   async function handleDownloadTemplate() {
     const formData = new FormData();
     formData.set("departmentOrgNodeId", departmentTab);
-    const { fileName, content } = await downloadKpiTemplateCsv(formData);
+    const { fileName, content } = await runServerAction(() => downloadKpiTemplateCsv(formData));
     const blob = base64ToBlob(
       content,
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1650,7 +1651,7 @@ export function KpiContent({ data }: Props) {
               }}
               onToggleActive={async (row) => {
                 try {
-                  await toggleKpiTemplateActive(row.id);
+                  await runServerAction(() => toggleKpiTemplateActive(row.id));
                   router.refresh();
                 } catch (error) {
                   window.alert(error instanceof Error ? error.message : "切换模板状态失败");

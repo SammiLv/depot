@@ -56,7 +56,8 @@ export default async function ValueTrackingPage() {
       otherCost: true,
       workloadPersonDay: true,
       valueJudgement: true,
-      completedAt: true,
+      valueTrackStatus: true,
+      launchedAt: true,
     },
   });
   const projectMap = new Map(projects.map((project) => [project.id, project]));
@@ -82,7 +83,7 @@ export default async function ValueTrackingPage() {
                   <div>
                     <div className="font-semibold">{project?.title ?? "—"}</div>
                     <div className="mt-0.5 text-xs text-muted-foreground">
-                      负责人：{project ? ownerMap.get(project.ownerId) ?? "—" : "—"} · 完成时间：{formatDateLabel(project?.completedAt ?? null)}
+                      负责人：{project ? ownerMap.get(project.ownerId) ?? "—" : "—"} · 上线时间：{formatDateLabel(project?.launchedAt ?? null)}
                     </div>
                   </div>
                   <Badge tone={meta.tone}>ROI {meta.roi}%</Badge>
@@ -99,6 +100,10 @@ export default async function ValueTrackingPage() {
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">工作量(人天)</div>
                     <div className="mt-0.5 font-medium">{project?.workloadPersonDay ?? "—"}</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <div className="text-xs text-muted-foreground">跟踪状态</div>
+                    <div className="mt-0.5 font-medium">{project?.valueTrackStatus ?? "未观测"}</div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">价值判断</div>

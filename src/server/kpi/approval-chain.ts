@@ -35,14 +35,14 @@ async function canApproveFinal(subjectOrgNodeId: string | null, candidate: Final
   return authorizedOrgNodeIds.includes(subjectOrgNodeId);
 }
 
-async function resolveLeader(subjectUserId: string, subjectOrgNodeId: string | null) {
+async function resolveLeaders(subjectUserId: string, subjectOrgNodeId: string | null) {
   if (!subjectOrgNodeId) {
-    return null;
+    return [] as Array<{ id: string }>;
   }
 
   const ancestorNodes = await getAncestorOrgNodes(subjectOrgNodeId);
   for (const node of ancestorNodes) {
-    const leader = await prisma.user.findFirst({
+    const leaders = await prisma.user.findMany({
       where: {
         orgNodeId: node.id,
         roleType: "TEAM_LEADER",
@@ -50,36 +50,36 @@ async function resolveLeader(subjectUserId: string, subjectOrgNodeId: string | n
         deletedAt: null,
         id: { not: subjectUserId },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { id: true },
     });
 
-    if (leader) {
-      return leader;
+    if (leaders.length) {
+      return leaders;
     }
   }
 
-  return null;
+  return [];
 }
 
-async function resolveManager(subjectOrgNodeId: string | null) {
+async function resolveManagers(subjectOrgNodeId: string | null) {
   const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(subjectOrgNodeId);
   if (!departmentOrgNodeId) {
-    return null;
+    return [] as Array<{ id: string; orgNodeId: string | null; roleType: "DEPARTMENT_MANAGER" }>;
   }
 
   const descendantOrgNodeIds = await getDescendantOrgNodeIds(departmentOrgNodeId);
   const managerOrgNodeIds = [departmentOrgNodeId, ...descendantOrgNodeIds];
-  return prisma.user.findFirst({
+  return prisma.user.findMany({
     where: {
       orgNodeId: { in: managerOrgNodeIds },
       roleType: "DEPARTMENT_MANAGER",
       isActive: true,
       deletedAt: null,
     },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, orgNodeId: true },
-  }).then((user) => user ? { ...user, roleType: "DEPARTMENT_MANAGER" as const } : null);
+  }).then((users) => users.map((user) => ({ ...user, roleType: "DEPARTMENT_MANAGER" as const })));
 }
 
 export async function resolveApprovalChain(
@@ -88,21 +88,37 @@ export async function resolveApprovalChain(
 ): Promise<ApprovalStep[]> {
   const steps: ApprovalStep[] = [];
   const seenUserIds = new Set<string>([subjectUserId]);
+  let stepOrder = 0;
 
-  const leader = await resolveLeader(subjectUserId, subjectOrgNodeId);
-  if (leader && !seenUserIds.has(leader.id)) {
-    seenUserIds.add(leader.id);
-    steps.push({ stepOrder: steps.length + 1, stageKey: "LEADER", approverId: leader.id });
+  const leaders = await resolveLeaders(subjectUserId, subjectOrgNodeId);
+  const leaderIds = leaders.map((leader) => leader.id).filter((id) => !seenUserIds.has(id));
+  if (leaderIds.length) {
+    stepOrder += 1;
+    for (const leaderId of leaderIds) {
+      seenUserIds.add(leaderId);
+      steps.push({ stepOrder, stageKey: "LEADER", approverId: leaderId });
+    }
   }
 
-  const manager = await resolveManager(subjectOrgNodeId);
-  if (manager && !seenUserIds.has(manager.id)) {
-    seenUserIds.add(manager.id);
-    steps.push({ stepOrder: steps.length + 1, stageKey: "MANAGER", approverId: manager.id });
+  const managers = await resolveManagers(subjectOrgNodeId);
+  const managerIds = managers
+    .map((manager) => manager.id)
+    .filter((id) => !seenUserIds.has(id));
+  if (managerIds.length) {
+    stepOrder += 1;
+    for (const managerId of managerIds) {
+      seenUserIds.add(managerId);
+      steps.push({ stepOrder, stageKey: "MANAGER", approverId: managerId });
+    }
   }
 
-  if (manager && manager.id !== subjectUserId && await canApproveFinal(subjectOrgNodeId, manager)) {
-    steps.push({ stepOrder: steps.length + 1, stageKey: "FINAL", approverId: manager.id });
+  const primaryManager = managers[0];
+  if (primaryManager && primaryManager.id !== subjectUserId && await canApproveFinal(subjectOrgNodeId, primaryManager)) {
+    if (!seenUserIds.has(primaryManager.id)) {
+      stepOrder += 1;
+      seenUserIds.add(primaryManager.id);
+      steps.push({ stepOrder, stageKey: "FINAL", approverId: primaryManager.id });
+    }
     return steps;
   }
 
@@ -117,7 +133,8 @@ export async function resolveApprovalChain(
   }).then((user) => user ? { ...user, roleType: "ADMIN" as const } : null);
 
   if (admin && admin.id !== subjectUserId && await canApproveFinal(subjectOrgNodeId, admin)) {
-    steps.push({ stepOrder: steps.length + 1, stageKey: "FINAL", approverId: admin.id });
+    stepOrder += 1;
+    steps.push({ stepOrder, stageKey: "FINAL", approverId: admin.id });
   }
 
   return steps;

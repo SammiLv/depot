@@ -7,7 +7,12 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
 import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
-import { kpiOrdinaryPermissionAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
+import {
+  kpiOrdinaryPermissionAbilityKeys,
+  notificationOrdinaryPermissionAbilityKeys,
+  productManagementOrdinaryPermissionAbilityKeys,
+  orgPermissionModuleKeys,
+} from "@/server/permissions/permission-constants";
 import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, Prisma, RoleType } from "@prisma/client";
 import {
   getKpiApprovalPolicyActiveScopeKey,
@@ -17,6 +22,8 @@ import {
 import {
   syncAnnualGoalPermissionMatrix,
   syncKpiPermissionMatrix,
+  syncNotificationPermissionMatrix,
+  syncProductManagementPermissionMatrix,
   syncRoleMenuPermissionMatrix,
   type PermissionMatrixSyncMode,
 } from "@/server/organization/permission-matrix-sync";
@@ -768,7 +775,115 @@ export async function saveKpiRolePermissions(formData: FormData) {
   revalidateOrganization();
 }
 
-type PermissionMatrixKind = "menu" | "annual-goal" | "kpi";
+/**
+ * 通知场景为全系统共享。系统范围写入 ALL + orgNodeId=null；部门范围可覆盖本部门角色默认权限。
+ */
+export async function saveNotificationRolePermissions(formData: FormData) {
+  const permissionsValue = formData.get("permissions") as string;
+  const scope = await resolvePermissionScope(formData);
+  await requirePermissionEditor(scope);
+  const validAbilityIds = new Set<OrgPermissionAbilityKey>(notificationOrdinaryPermissionAbilityKeys);
+  const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
+  const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.notification,
+        subjectType: "ROLE",
+        roleType: { in: permissionRoles },
+        abilityKey: { in: notificationOrdinaryPermissionAbilityKeys },
+        ...(scope.scopeType === "SYSTEM"
+          ? { orgNodeId: null, scopeType: "ALL" }
+          : { orgNodeId }),
+      },
+    });
+
+    const cellsToPersist = (scope.scopeType === "SYSTEM"
+      ? requestedCells
+      : requestedCells.filter((cell) => cell.explicit))
+      .filter((cell) => cell.allowed);
+
+    if (cellsToPersist.length > 0) {
+      await tx.orgPermissionGrant.createMany({
+        data: cellsToPersist.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.notification,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: scope.scopeType === "SYSTEM" ? "ALL" as const : kpiPermissionScopeByRole[cell.roleType],
+          subjectType: "ROLE" as const,
+          roleType: cell.roleType,
+          userId: null,
+          orgNodeId,
+          isActive: true,
+        })),
+      });
+    } else if (scope.scopeType === "SYSTEM") {
+      await tx.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.notification,
+          abilityKey: "MANAGE_NOTIFICATION_SCENARIO",
+          scopeType: "ALL",
+          subjectType: "ROLE",
+          roleType: "ADMIN",
+          userId: null,
+          orgNodeId: null,
+          isActive: true,
+        },
+      });
+    }
+  });
+
+  revalidateOrganization();
+  revalidatePath("/notifications");
+}
+
+export async function saveProductManagementRolePermissions(formData: FormData) {
+  const permissionsValue = formData.get("permissions") as string;
+  const scope = await resolvePermissionScope(formData);
+  await requirePermissionEditor(scope);
+  const validAbilityIds = new Set<OrgPermissionAbilityKey>(productManagementOrdinaryPermissionAbilityKeys);
+  const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
+  const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.productManagement,
+        subjectType: "ROLE",
+        roleType: { in: permissionRoles },
+        abilityKey: { in: productManagementOrdinaryPermissionAbilityKeys },
+        ...(scope.scopeType === "SYSTEM"
+          ? { orgNodeId: null }
+          : { orgNodeId }),
+      },
+    });
+
+    const cellsToPersist = (scope.scopeType === "SYSTEM"
+      ? requestedCells
+      : requestedCells.filter((cell) => cell.explicit))
+      .filter((cell) => cell.allowed);
+
+    if (cellsToPersist.length > 0) {
+      await tx.orgPermissionGrant.createMany({
+        data: cellsToPersist.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.productManagement,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiPermissionScopeByRole[cell.roleType],
+          subjectType: "ROLE",
+          roleType: cell.roleType,
+          userId: null,
+          orgNodeId,
+          isActive: true,
+        })),
+      });
+    }
+  });
+
+  revalidateOrganization();
+  revalidatePath("/quarterly-work");
+}
+
+type PermissionMatrixKind = "menu" | "annual-goal" | "kpi" | "notification" | "product-management";
 
 async function saveAndSyncPermissionMatrix(
   formData: FormData,
@@ -787,7 +902,9 @@ async function saveAndSyncPermissionMatrix(
   await prisma.$transaction(async (tx) => {
     if (kind === "menu") await syncRoleMenuPermissionMatrix(tx, permissions, mode);
     else if (kind === "annual-goal") await syncAnnualGoalPermissionMatrix(tx, permissions, mode);
-    else await syncKpiPermissionMatrix(tx, permissions, mode);
+    else if (kind === "kpi") await syncKpiPermissionMatrix(tx, permissions, mode);
+    else if (kind === "notification") await syncNotificationPermissionMatrix(tx, permissions, mode);
+    else await syncProductManagementPermissionMatrix(tx, permissions, mode);
   });
   revalidateOrganization();
 }
@@ -814,6 +931,22 @@ export async function saveAndApplyAnnualGoalPermissionsToAllDepartments(formData
 
 export async function saveAndApplyKpiPermissionsToAllDepartments(formData: FormData) {
   await saveAndSyncPermissionMatrix(formData, "kpi", "FULL");
+}
+
+export async function saveAndApplyNotificationPermissionChangesToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "notification", "CHANGES");
+}
+
+export async function saveAndApplyNotificationPermissionsToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "notification", "FULL");
+}
+
+export async function saveAndApplyProductManagementPermissionChangesToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "product-management", "CHANGES");
+}
+
+export async function saveAndApplyProductManagementPermissionsToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "product-management", "FULL");
 }
 
 function parseRepeatedStrings(formData: FormData, fieldName: string) {
@@ -993,6 +1126,9 @@ export async function applyRoleMenuPermissionToAllDepartments(formData: FormData
   if (!permissionId || !validRoles.includes(roleType)) {
     throw new Error("缺少必要参数");
   }
+  if (roleType === "ADMIN") {
+    throw new Error("系统管理员能力项不可同步至部门");
+  }
 
   const menu = await prisma.menuPermission.findUnique({
     where: { id: permissionId },
@@ -1000,9 +1136,6 @@ export async function applyRoleMenuPermissionToAllDepartments(formData: FormData
   });
   if (!menu) {
     throw new Error("菜单权限不存在");
-  }
-  if (roleType === "ADMIN" && ["/organization", "/dashboard"].includes(menu.path)) {
-    throw new Error("核心入口不可批量覆盖");
   }
 
   const departments = await prisma.orgNode.findMany({
@@ -1064,6 +1197,9 @@ export async function applyAnnualGoalPermissionToAllDepartments(formData: FormDa
 
   if (!permissionId || !validRoles.includes(roleType)) {
     throw new Error("缺少必要参数");
+  }
+  if (roleType === "ADMIN") {
+    throw new Error("系统管理员能力项不可同步至部门");
   }
 
   const permission = await prisma.annualGoalPermission.findUnique({
@@ -1134,6 +1270,9 @@ export async function applyKpiPermissionToAllDepartments(formData: FormData) {
   if (!permissionId || !validRoles.includes(roleType)) {
     throw new Error("缺少必要参数");
   }
+  if (roleType === "ADMIN") {
+    throw new Error("系统管理员能力项不可同步至部门");
+  }
 
   if (!new Set<OrgPermissionAbilityKey>(kpiOrdinaryPermissionAbilityKeys).has(permissionId as OrgPermissionAbilityKey)) {
     throw new Error("KPI 权限不存在");
@@ -1186,6 +1325,144 @@ export async function applyKpiPermissionToAllDepartments(formData: FormData) {
   });
 
   revalidateOrganization();
+}
+
+export async function applyNotificationPermissionToAllDepartments(formData: FormData) {
+  await requireAdmin();
+  const permissionId = formData.get("permissionId") as string;
+  const roleType = formData.get("roleType") as RoleType;
+  const allowed = formData.get("allowed") === "true";
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  if (!permissionId || !validRoles.includes(roleType)) {
+    throw new Error("缺少必要参数");
+  }
+
+  if (!new Set<OrgPermissionAbilityKey>(notificationOrdinaryPermissionAbilityKeys).has(permissionId as OrgPermissionAbilityKey)) {
+    throw new Error("通知权限不存在");
+  }
+
+  if (roleType === "ADMIN") {
+    throw new Error("管理员能力不可批量覆盖");
+  }
+
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.notification,
+        subjectType: "ROLE",
+        roleType,
+        abilityKey: permissionId as OrgPermissionAbilityKey,
+      },
+    });
+
+    if (allowed) {
+      await tx.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.notification,
+          abilityKey: permissionId as OrgPermissionAbilityKey,
+          scopeType: "ALL",
+          subjectType: "ROLE",
+          roleType,
+          userId: null,
+          orgNodeId: null,
+          isActive: true,
+        },
+      });
+
+      if (departments.length > 0) {
+        await tx.orgPermissionGrant.createMany({
+          data: departments.map((department) => ({
+            moduleKey: orgPermissionModuleKeys.notification,
+            abilityKey: permissionId as OrgPermissionAbilityKey,
+            scopeType: kpiPermissionScopeByRole[roleType],
+            subjectType: "ROLE" as const,
+            roleType,
+            userId: null,
+            orgNodeId: department.id,
+            isActive: true,
+          })),
+        });
+      }
+    }
+  });
+
+  revalidateOrganization();
+  revalidatePath("/notifications");
+}
+
+export async function applyProductManagementPermissionToAllDepartments(formData: FormData) {
+  await requireAdmin();
+  const permissionId = formData.get("permissionId") as string;
+  const roleType = formData.get("roleType") as RoleType;
+  const allowed = formData.get("allowed") === "true";
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  if (!permissionId || !validRoles.includes(roleType)) {
+    throw new Error("缺少必要参数");
+  }
+
+  if (!new Set<OrgPermissionAbilityKey>(productManagementOrdinaryPermissionAbilityKeys).has(permissionId as OrgPermissionAbilityKey)) {
+    throw new Error("产品管理权限不存在");
+  }
+
+  if (roleType === "ADMIN") {
+    throw new Error("管理员能力不可批量覆盖");
+  }
+
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.productManagement,
+        subjectType: "ROLE",
+        roleType,
+        abilityKey: permissionId as OrgPermissionAbilityKey,
+      },
+    });
+
+    if (allowed) {
+      await tx.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.productManagement,
+          abilityKey: permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiPermissionScopeByRole[roleType],
+          subjectType: "ROLE",
+          roleType,
+          userId: null,
+          orgNodeId: null,
+          isActive: true,
+        },
+      });
+
+      if (departments.length > 0) {
+        await tx.orgPermissionGrant.createMany({
+          data: departments.map((department) => ({
+            moduleKey: orgPermissionModuleKeys.productManagement,
+            abilityKey: permissionId as OrgPermissionAbilityKey,
+            scopeType: kpiPermissionScopeByRole[roleType],
+            subjectType: "ROLE" as const,
+            roleType,
+            userId: null,
+            orgNodeId: department.id,
+            isActive: true,
+          })),
+        });
+      }
+    }
+  });
+
+  revalidateOrganization();
+  revalidatePath("/quarterly-work");
 }
 
 async function requireKpiApprovalPolicyEditor(policyId: string) {

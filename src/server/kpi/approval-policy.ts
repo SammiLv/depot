@@ -71,6 +71,7 @@ export type ApprovalPolicyResolverDependencies = {
   getAncestorNodes(orgNodeId: string | null): Promise<KpiApprovalAncestorNode[]>;
   findOrgNodeById(orgNodeId: string): Promise<Omit<KpiApprovalAncestorNode, "depth"> | null>;
   findFirstActiveUserByRole(roleType: RoleType, orgNodeIds?: string[]): Promise<ApproverCandidate | null>;
+  findActiveUsersByRole(roleType: RoleType, orgNodeIds?: string[]): Promise<ApproverCandidate[]>;
   findActiveUserById(userId: string): Promise<ApproverCandidate | null>;
 };
 
@@ -230,7 +231,11 @@ const defaultResolverDependencies: ApprovalPolicyResolverDependencies = {
     });
   },
   async findFirstActiveUserByRole(roleType, orgNodeIds) {
-    return prisma.user.findFirst({
+    const users = await defaultResolverDependencies.findActiveUsersByRole(roleType, orgNodeIds);
+    return users[0] ?? null;
+  },
+  async findActiveUsersByRole(roleType, orgNodeIds) {
+    return prisma.user.findMany({
       where: {
         roleType,
         isActive: true,
@@ -276,9 +281,9 @@ async function resolveTeamLeader(
     : [findAncestorAtDepth(ancestorNodes, step.ancestorDepth)].filter((node): node is KpiApprovalAncestorNode => Boolean(node));
 
   for (const node of candidateNodes) {
-    const approver = await dependencies.findFirstActiveUserByRole("TEAM_LEADER", [node.id]);
-    if (approver) {
-      return { approver, resolvedOrgNodeId: node.id };
+    const approvers = await dependencies.findActiveUsersByRole("TEAM_LEADER", [node.id]);
+    if (approvers.length) {
+      return { approvers, resolvedOrgNodeId: node.id };
     }
   }
 
@@ -297,8 +302,28 @@ async function resolveDepartmentManager(
     return null;
   }
 
-  const approver = await dependencies.findFirstActiveUserByRole("DEPARTMENT_MANAGER", [targetNode.id]);
-  return approver ? { approver, resolvedOrgNodeId: targetNode.id } : null;
+  const approvers = await dependencies.findActiveUsersByRole("DEPARTMENT_MANAGER", [targetNode.id]);
+  return approvers.length ? { approvers, resolvedOrgNodeId: targetNode.id } : null;
+}
+
+async function resolveApproversForNode(
+  dependencies: ApprovalPolicyResolverDependencies,
+  resolverType: KpiApprovalResolverType,
+  targetNodeId: string | null,
+  explicitUserId?: string | null,
+) {
+  if (explicitUserId) {
+    const approver = await dependencies.findActiveUserById(explicitUserId);
+    return approver ? [approver] : [];
+  }
+  if (resolverType === "ADMIN") {
+    return dependencies.findActiveUsersByRole("ADMIN");
+  }
+  if (resolverType === "EXPLICIT_USER") {
+    return [];
+  }
+  if (!targetNodeId) return [];
+  return dependencies.findActiveUsersByRole(resolverType, [targetNodeId]);
 }
 
 async function resolveStepApprover(
@@ -317,9 +342,14 @@ async function resolveStepApprover(
     }
 
     if (step.resolverUserId) {
-      const approver = await dependencies.findActiveUserById(step.resolverUserId);
-      return approver ? {
-        approver,
+      const approvers = await resolveApproversForNode(
+        dependencies,
+        targetNode ? getKpiApprovalResolverTypeForNode(targetNode.nodeType) : "EXPLICIT_USER",
+        targetNode?.id ?? null,
+        step.resolverUserId,
+      );
+      return approvers.length ? {
+        approvers,
         resolvedOrgNodeId: targetNode?.id ?? null,
         resolverType: targetNode
           ? getKpiApprovalResolverTypeForNode(targetNode.nodeType)
@@ -329,11 +359,8 @@ async function resolveStepApprover(
     if (!targetNode) return null;
 
     const resolverType = getKpiApprovalResolverTypeForNode(targetNode.nodeType);
-    const approver = await dependencies.findFirstActiveUserByRole(
-      resolverType,
-      resolverType === "ADMIN" ? undefined : [targetNode.id],
-    );
-    return approver ? { approver, resolvedOrgNodeId: targetNode.id, resolverType } : null;
+    const approvers = await resolveApproversForNode(dependencies, resolverType, targetNode.id);
+    return approvers.length ? { approvers, resolvedOrgNodeId: targetNode.id, resolverType } : null;
   }
 
   if (step.resolverType === "TEAM_LEADER") {
@@ -345,19 +372,32 @@ async function resolveStepApprover(
     return resolution ? { ...resolution, resolverType: step.resolverType } : null;
   }
   if (step.resolverType === "ADMIN") {
-    const approver = await dependencies.findFirstActiveUserByRole("ADMIN");
-    return approver ? { approver, resolvedOrgNodeId: approver.orgNodeId, resolverType: step.resolverType } : null;
+    const approvers = await dependencies.findActiveUsersByRole("ADMIN");
+    return approvers.length ? {
+      approvers,
+      resolvedOrgNodeId: approvers[0]?.orgNodeId ?? null,
+      resolverType: step.resolverType,
+    } : null;
   }
   if (!step.resolverUserId) {
     return null;
   }
 
-  const approver = await dependencies.findActiveUserById(step.resolverUserId);
-  return approver ? { approver, resolvedOrgNodeId: approver.orgNodeId, resolverType: step.resolverType } : null;
+  const approvers = await resolveApproversForNode(
+    dependencies,
+    step.resolverType,
+    null,
+    step.resolverUserId,
+  );
+  return approvers.length ? {
+    approvers,
+    resolvedOrgNodeId: approvers[0]?.orgNodeId ?? null,
+    resolverType: step.resolverType,
+  } : null;
 }
 
 type StepResolution = {
-  approver: ApproverCandidate;
+  approvers: ApproverCandidate[];
   resolvedOrgNodeId: string | null;
   configuredOrgNodeId: string | null;
   resolverType: KpiApprovalResolverType;
@@ -381,15 +421,15 @@ async function resolveNodeOwnerStep(
   }
 
   const resolverType = getKpiApprovalResolverTypeForNode(targetNode.nodeType);
-  const approver = step.resolverUserId
-    ? await dependencies.findActiveUserById(step.resolverUserId)
-    : await dependencies.findFirstActiveUserByRole(
-        resolverType,
-        resolverType === "ADMIN" ? undefined : [targetNode.id],
-      );
-  if (!approver) return [];
+  const approvers = await resolveApproversForNode(
+    dependencies,
+    resolverType,
+    targetNode.id,
+    step.resolverUserId,
+  );
+  if (!approvers.length) return [];
   return [{
-    approver,
+    approvers,
     resolvedOrgNodeId: targetNode.id,
     configuredOrgNodeId: targetNode.id,
     resolverType,
@@ -412,16 +452,13 @@ async function resolveCascadeStep(
   const resolutions: StepResolution[] = [];
   for (const targetNode of targetNodes) {
     const resolverType = getKpiApprovalResolverTypeForNode(targetNode.nodeType);
-    const approver = await dependencies.findFirstActiveUserByRole(
-      resolverType,
-      resolverType === "ADMIN" ? undefined : [targetNode.id],
-    );
-    if (!approver) {
+    const approvers = await resolveApproversForNode(dependencies, resolverType, targetNode.id);
+    if (!approvers.length) {
       if (step.allowSkipWhenNoApprover) continue;
       throw new Error(`KPI 审批步骤“${step.label}”的组织节点“${targetNode.name ?? targetNode.id}”未找到有效负责人`);
     }
     resolutions.push({
-      approver,
+      approvers,
       resolvedOrgNodeId: targetNode.id,
       configuredOrgNodeId: null,
       resolverType,
@@ -510,23 +547,33 @@ export async function resolveKpiApprovalPolicySteps(
     }
 
     for (const resolution of resolutions) {
-      if (step.skipIfSelf && resolution.approver.id === input.subjectUserId) continue;
-      if (step.skipIfDuplicateApprover && seenApproverIds.has(resolution.approver.id)) continue;
-
-      seenApproverIds.add(resolution.approver.id);
-      resolvedSteps.push({
-        stepOrder: resolvedSteps.length + 1,
-        policyStepOrder: step.stepOrder,
-        policyStepId: step.id,
-        stepLabel: resolution.stepLabel,
-        nodeMode: step.nodeMode ?? null,
-        configuredOrgNodeId: resolution.configuredOrgNodeId,
-        ancestorDepth: step.ancestorDepth,
-        resolverType: resolution.resolverType,
-        resolverUserId: step.resolverUserId,
-        orgNodeId: resolution.resolvedOrgNodeId,
-        approverId: resolution.approver.id,
+      const eligibleApprovers = resolution.approvers.filter((approver) => {
+        if (step.skipIfSelf && approver.id === input.subjectUserId) return false;
+        if (step.skipIfDuplicateApprover && seenApproverIds.has(approver.id)) return false;
+        return true;
       });
+      if (!eligibleApprovers.length) continue;
+
+      const stepOrder = resolvedSteps.length > 0
+        ? Math.max(...resolvedSteps.map((item) => item.stepOrder)) + 1
+        : 1;
+
+      for (const approver of eligibleApprovers) {
+        seenApproverIds.add(approver.id);
+        resolvedSteps.push({
+          stepOrder,
+          policyStepOrder: step.stepOrder,
+          policyStepId: step.id,
+          stepLabel: resolution.stepLabel,
+          nodeMode: step.nodeMode ?? null,
+          configuredOrgNodeId: resolution.configuredOrgNodeId,
+          ancestorDepth: step.ancestorDepth,
+          resolverType: resolution.resolverType,
+          resolverUserId: step.resolverUserId,
+          orgNodeId: resolution.resolvedOrgNodeId,
+          approverId: approver.id,
+        });
+      }
     }
   }
 

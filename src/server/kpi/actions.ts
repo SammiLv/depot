@@ -22,6 +22,8 @@ import {
 } from "@/server/kpi/approval-workflow";
 import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
 import { resolveKpiRating } from "@/server/talent/decision-rule-config";
+import { findUserPendingApprovalStep, getMinPendingStepOrder } from "@/server/kpi/approval-step-utils";
+import { emitNotificationEvent } from "@/server/notifications/emit";
 
 const assignmentPriority: Record<"USER" | "ORG_NODE" | "ROLE", number> = {
   USER: 3,
@@ -1417,8 +1419,12 @@ function calculatePenaltyTotal(values: Array<number | null | undefined>) {
   return values.reduce<number>((sum, value) => sum + Math.abs(Math.min(value ?? 0, 0)), 0);
 }
 
-function assertRequiredScoringSummary(editableStage: KpiEditableStage, summary: SummaryFields) {
-  if (editableStage === "SELF") {
+function assertRequiredScoringSummary(
+  editableStage: KpiEditableStage,
+  summary: SummaryFields,
+  action: KpiScoringAction,
+) {
+  if (editableStage === "SELF" && action === "submit") {
     if (!summary.workSummary.trim()) {
       throw new Error("季度工作任务总结不能为空");
     }
@@ -1426,7 +1432,7 @@ function assertRequiredScoringSummary(editableStage: KpiEditableStage, summary: 
       throw new Error("季度工作能力总结不能为空");
     }
   }
-  if (editableStage === "LEADER") {
+  if ((editableStage === "LEADER" || editableStage === "MANAGER") && action === "approve") {
     if (!summary.praise.trim()) {
       throw new Error("表扬不能为空");
     }
@@ -1481,6 +1487,9 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         id: true,
         status: true,
         orgNodeId: true,
+        year: true,
+        quarter: true,
+        userId: true,
         selfComment: true,
         leaderComment: true,
         managerComment: true,
@@ -1494,18 +1503,33 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       throw new Error("季度 KPI 不存在或无权限操作");
     }
 
+    const subjectUser = await tx.user.findFirst({
+      where: { id: personalKpi.userId, deletedAt: null },
+      select: { name: true },
+    });
+
     const approvalStepCount = await tx.personalKpiApprovalStep.count({ where: { personalKpiId } });
     const hasApprovalChain = approvalStepCount > 0;
-    const currentApprovalStep = !isSelfReviewStatus(personalKpi.status) && hasApprovalChain
-      ? await tx.personalKpiApprovalStep.findFirst({
-          where: { personalKpiId, status: "PENDING" },
+    const approvalSteps = hasApprovalChain
+      ? await tx.personalKpiApprovalStep.findMany({
+          where: { personalKpiId },
           orderBy: { stepOrder: "asc" },
         })
+      : [];
+    const currentApprovalStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
+      ? findUserPendingApprovalStep(approvalSteps, currentUser.id)
+      : null;
+    const activeStageStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
+      ? (() => {
+          const minOrder = getMinPendingStepOrder(approvalSteps);
+          if (minOrder == null) return null;
+          return approvalSteps.find((step) => step.stepOrder === minOrder && step.status === "PENDING") ?? null;
+        })()
       : null;
     const editableStage = isSelfReviewStatus(personalKpi.status)
       ? "SELF"
       : hasApprovalChain
-        ? getEditableStageFromApprovalStep(currentApprovalStep?.stageKey)
+        ? getEditableStageFromApprovalStep(currentApprovalStep?.stageKey ?? activeStageStep?.stageKey)
         : getEditableStageFromApprovalStep(
             personalKpi.status === "PENDING_LEADER_SCORE"
               ? "LEADER"
@@ -1525,10 +1549,10 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       throw new Error("当前 KPI 阶段不支持评分操作");
     }
     if (action !== "save" && action !== "reject") {
-      assertRequiredScoringSummary(editableStage, summary);
+      assertRequiredScoringSummary(editableStage, summary, action);
     }
     if (editableStage !== "SELF" && hasApprovalChain) {
-      if (!currentApprovalStep || currentApprovalStep.approverId !== currentUser.id) {
+      if (!currentApprovalStep) {
         throw new Error("你不是当前阶段的审批人");
       }
     } else {
@@ -1611,7 +1635,13 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       nextStatus = await transitionKpiApprovalChain(tx, {
         personalKpiId,
         action,
-        currentStep: currentApprovalStep,
+        currentStep: currentApprovalStep
+          ? {
+              id: currentApprovalStep.id,
+              stageKey: currentApprovalStep.stageKey,
+              stepOrder: currentApprovalStep.stepOrder,
+            }
+          : null,
         comment: rejectRemark,
       });
     } else {
@@ -1621,7 +1651,13 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         nextStatus = await transitionKpiApprovalChain(tx, {
           personalKpiId,
           action,
-          currentStep: currentApprovalStep,
+          currentStep: currentApprovalStep
+          ? {
+              id: currentApprovalStep.id,
+              stageKey: currentApprovalStep.stageKey,
+              stepOrder: currentApprovalStep.stepOrder,
+            }
+          : null,
           comment: getApprovalStepComment(editableStage, summary),
         });
       }
@@ -1631,6 +1667,8 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
     const ratingSnapshot = nextStatus === "COMPLETED"
       ? await resolveActiveKpiRatingSnapshot(tx, finalScore, personalKpi.orgNodeId)
       : null;
+    const submittedAt = action === "submit" ? new Date() : null;
+    const eventAt = action !== "save" ? new Date() : null;
 
     await tx.personalKpi.update({
       where: { id: personalKpiId },
@@ -1646,13 +1684,13 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         selfComment: editableStage === "SELF"
           ? serializeStructuredSummary("季度工作任务总结", summary.workSummary, "季度工作能力总结", summary.abilitySummary)
           : personalKpi.selfComment,
-        leaderComment: editableStage === "LEADER"
+        leaderComment: editableStage === "LEADER" && action !== "reject"
           ? serializeStructuredSummary("表扬", summary.praise, "机会", summary.opportunity)
           : personalKpi.leaderComment,
-        managerComment: editableStage === "MANAGER"
+        managerComment: editableStage === "MANAGER" && action !== "reject"
           ? serializeStructuredSummary("表扬", summary.praise, "机会", summary.opportunity)
           : personalKpi.managerComment,
-        submittedAt: action === "submit" ? new Date() : undefined,
+        submittedAt: submittedAt ?? undefined,
         completedAt: nextStatus === "COMPLETED" ? new Date() : null,
       },
     });
@@ -1666,14 +1704,82 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       });
     }
 
-    return { personalKpiId, nextStatus };
+    const nextApprover = nextStatus !== "COMPLETED" && !isSelfReviewStatus(nextStatus)
+      ? await tx.personalKpiApprovalStep.findFirst({
+          where: { personalKpiId, status: "PENDING" },
+          orderBy: { stepOrder: "asc" },
+          select: { approverId: true },
+        })
+      : null;
+
+    return {
+      personalKpiId,
+      nextStatus,
+      previousStatus: personalKpi.status,
+      action,
+      editableStage,
+      year: personalKpi.year,
+      quarter: personalKpi.quarter,
+      userId: personalKpi.userId,
+      userName: subjectUser?.name ?? "",
+      rejectRemark,
+      currentApproverId: nextApprover?.approverId ?? null,
+      submittedAt,
+      eventAt,
+      actorId: currentUser.id,
+    };
   });
+
+  if (result.action !== "save") {
+    const basePayload = {
+      userId: result.userId,
+      subjectUserId: result.userId,
+      userName: result.userName,
+      kpiId: result.personalKpiId,
+      targetType: "PersonalKpi",
+      targetId: result.personalKpiId,
+      year: result.year,
+      quarter: result.quarter,
+      status: result.nextStatus,
+      submitterId: result.userId,
+      currentApproverId: result.currentApproverId ?? undefined,
+      comment: result.rejectRemark ?? undefined,
+      submittedAt: result.submittedAt?.toISOString(),
+      eventAt: result.eventAt?.toISOString(),
+    };
+
+    if (result.action === "submit" && result.editableStage === "SELF") {
+      await emitNotificationEvent("kpi.scoring.submitted", basePayload);
+      if (!isSelfReviewStatus(result.nextStatus)) {
+        await emitNotificationEvent("kpi.approval.pending", basePayload);
+      }
+    } else if (result.action === "approve") {
+      await emitNotificationEvent("kpi.approval.approved", basePayload);
+      if (result.nextStatus === "COMPLETED") {
+        await emitNotificationEvent("kpi.completed", basePayload);
+      } else if (!isSelfReviewStatus(result.nextStatus)) {
+        await emitNotificationEvent("kpi.approval.pending", basePayload);
+      }
+    } else if (result.action === "reject") {
+      await emitNotificationEvent("kpi.approval.rejected", basePayload);
+      if (isSelfReviewStatus(result.nextStatus)) {
+        await emitNotificationEvent("kpi.self_review.pending", basePayload);
+      } else {
+        await emitNotificationEvent("kpi.approval.pending", basePayload);
+      }
+    } else if (result.action === "submit" && result.nextStatus === "COMPLETED") {
+      await emitNotificationEvent("kpi.completed", basePayload);
+    } else if (result.action === "submit" && result.currentApproverId) {
+      await emitNotificationEvent("kpi.approval.pending", basePayload);
+    }
+  }
 
   revalidatePath("/kpi");
   revalidatePath("/dashboard");
   revalidatePath(`/kpi/${personalKpiId}`);
+  revalidatePath("/notifications");
 
-  return result;
+  return { personalKpiId: result.personalKpiId, nextStatus: result.nextStatus };
 }
 
 export async function savePersonalKpiScoring(formData: FormData) {
@@ -1739,6 +1845,7 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
   const createdUsers: string[] = [];
   const existingUsers: string[] = [];
   const skippedUsers: string[] = [];
+  const createdKpis: Array<{ kpiId: string; userId: string; userName: string }> = [];
 
   for (const user of users) {
     if (activeExistingUserIds.has(user.id)) {
@@ -1759,7 +1866,7 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
       subjectOrgNodeId: user.orgNodeId,
     });
 
-    await prisma.$transaction(async (tx) => {
+    const createdKpi = await prisma.$transaction(async (tx) => {
       if (deletedExistingKpiId) {
         const deletedItemIds = (await tx.personalKpiItem.findMany({
           where: { personalKpiId: deletedExistingKpiId },
@@ -1784,7 +1891,7 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
         });
       }
 
-      await createPersonalKpiSnapshot(tx, {
+      return createPersonalKpiSnapshot(tx, {
         year,
         quarter,
         userId: user.id,
@@ -1797,10 +1904,28 @@ export async function initializeQuarterlyKpis(formData: FormData): Promise<Initi
     });
 
     createdUsers.push(user.name);
+    createdKpis.push({ kpiId: createdKpi.id, userId: user.id, userName: user.name });
+  }
+
+  for (const created of createdKpis) {
+    const payload = {
+      userId: created.userId,
+      subjectUserId: created.userId,
+      userName: created.userName,
+      kpiId: created.kpiId,
+      targetType: "PersonalKpi",
+      targetId: created.kpiId,
+      year,
+      quarter,
+      status: "DRAFT",
+    };
+    await emitNotificationEvent("kpi.initialized", payload);
+    await emitNotificationEvent("kpi.self_review.pending", payload);
   }
 
   revalidatePath("/kpi");
   revalidatePath("/dashboard");
+  revalidatePath("/notifications");
 
   return {
     year,

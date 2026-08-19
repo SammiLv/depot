@@ -1,0 +1,527 @@
+import { prisma } from "@/server/db/prisma";
+import { computeNextRunAt, parseScheduleConfig } from "@/server/notifications/schedule-utils";
+import { resolveEventModule } from "@/server/notifications/event-registry";
+import type { ScheduleConfig } from "@/server/notifications/types";
+
+const initializationReminderSchedule = {
+  frequency: "weekly" as const,
+  timeOfDay: "09:00",
+  weekdays: [1],
+  scanType: "kpi_initialization_pending" as const,
+  daysBefore: 0,
+  timezone: "Asia/Shanghai",
+};
+
+const selfReviewSchedule = {
+  frequency: "daily" as const,
+  timeOfDay: "09:00",
+  weekdays: [1, 2, 3, 4, 5],
+  scanType: "kpi_self_review_pending" as const,
+  daysBefore: 0,
+  timezone: "Asia/Shanghai",
+};
+
+const annualGoalWeeklySchedule = {
+  frequency: "weekly" as const,
+  timeOfDay: "09:00",
+  weekdays: [1],
+  scanType: "annual_goal_weekly_progress_pending" as const,
+  daysBefore: 1,
+  timezone: "Asia/Shanghai",
+};
+
+const annualGoalQuarterTargetSchedule = {
+  frequency: "weekly" as const,
+  timeOfDay: "09:00",
+  weekdays: [1],
+  scanType: "annual_goal_quarter_target_missing" as const,
+  daysBefore: 0,
+  timezone: "Asia/Shanghai",
+};
+
+const weeklyMondaySchedule = {
+  frequency: "weekly" as const,
+  timeOfDay: "09:00",
+  weekdays: [1],
+  timezone: "Asia/Shanghai",
+};
+
+const quarterlyWorkOverdueSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "quarterly_work_overdue" as const,
+  daysBefore: 0,
+};
+
+const quarterlyWorkDueSoonSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "quarterly_work_due_soon" as const,
+  daysBefore: 7,
+};
+
+const projectOverdueSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "project_overdue" as const,
+  daysBefore: 0,
+};
+
+const projectDueSoonSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "project_due_soon" as const,
+  daysBefore: 14,
+};
+
+const projectValueTrackPendingSchedule = {
+  ...weeklyMondaySchedule,
+  scanType: "project_value_track_pending" as const,
+  daysBefore: 7,
+};
+
+const PRESET_SCENARIOS = [
+  {
+    name: "季度 KPI 初始化提醒",
+    description: "每季度扫描各部门：若本季度已生成 KPI 份数少于部门人数（不含主管），则通知部门主管完成初始化",
+    module: resolveEventModule("kpi.initialization.pending"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "kpi.initialization.pending",
+    scheduleConfig: initializationReminderSchedule,
+    nextRunAt: computeNextRunAt(initializationReminderSchedule),
+    recipientConfig: { rules: [{ type: "DEPARTMENT_MANAGER" }], dedupeWindowHours: 24 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "KPI_TODO",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{year}}年Q{{quarter}} KPI 待初始化（{{pendingCount}}人）",
+      contentTemplate: "{{departmentName}} 仍有 {{pendingCount}} 名成员未生成本季度 KPI，请尽快完成初始化。",
+      messageUrlTemplate: "{{appUrl}}/kpi",
+    },
+    isActive: true,
+    sortOrder: 5,
+  },
+  {
+    name: "KPI 初始化提醒自评",
+    description: "季度 KPI 初始化后，通知被考核人开始自评",
+    module: resolveEventModule("kpi.initialized"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "kpi.initialized",
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "KPI_TODO",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{year}}年Q{{quarter}} KPI 已开启，请开始自评",
+      contentTemplate: "{{userName}}，您的季度 KPI 已初始化，请及时完成自评。",
+      messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+    },
+    isActive: true,
+    sortOrder: 10,
+  },
+  {
+    name: "KPI 提交后通知审批人",
+    description: "自评提交后通知当前审批人处理",
+    module: resolveEventModule("kpi.approval.pending"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "kpi.approval.pending",
+    recipientConfig: { rules: [{ type: "CURRENT_APPROVER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "APPROVAL_TODO",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{userName}} 的 {{year}}年Q{{quarter}} KPI 待您处理",
+      contentTemplate: "请及时完成评分或审批。",
+      messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+    },
+    isActive: true,
+    sortOrder: 20,
+  },
+  {
+    name: "KPI 审批驳回通知",
+    description: "审批驳回后通知被考核人修改",
+    module: resolveEventModule("kpi.approval.rejected"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "kpi.approval.rejected",
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "KPI_TODO",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{year}}年Q{{quarter}} KPI 已驳回，请修改后重提",
+      contentTemplate: "{{userName}}，驳回原因：{{comment}}",
+      messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+    },
+    isActive: true,
+    sortOrder: 30,
+  },
+  {
+    name: "KPI 终评完成通知",
+    description: "KPI 完成后通知被考核人",
+    module: resolveEventModule("kpi.completed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "kpi.completed",
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "KPI_TODO",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{year}}年Q{{quarter}} KPI 已完成终评",
+      contentTemplate: "{{userName}}，您的季度 KPI 已完成，可前往查看结果。",
+      messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+    },
+    isActive: true,
+    sortOrder: 40,
+  },
+  {
+    name: "每日提醒未完成自评",
+    description: "每天 09:00 扫描仍处于自评阶段的 KPI",
+    module: resolveEventModule("kpi.self_review.pending"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "kpi.self_review.pending",
+    scheduleConfig: selfReviewSchedule,
+    nextRunAt: computeNextRunAt(selfReviewSchedule),
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 20 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "KPI_TODO",
+      dingtalkNotifyType: 5,
+      titleTemplate: "提醒：{{year}}年Q{{quarter}} KPI 自评尚未完成",
+      contentTemplate: "{{userName}}，请尽快完成自评提交。",
+      messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+    },
+    isActive: true,
+    sortOrder: 50,
+  },
+  {
+    name: "周进度未更新提醒",
+    description: "每周扫描小组承接的季度指标：若当前季度进度距扫描时间已超过 1 天未更新，则通知指标责任人",
+    module: resolveEventModule("annual_goal.progress.weekly_pending"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "annual_goal.progress.weekly_pending",
+    scheduleConfig: annualGoalWeeklySchedule,
+    nextRunAt: computeNextRunAt(annualGoalWeeklySchedule),
+    recipientConfig: { rules: [{ type: "METRIC_RESPONSIBLE" }], dedupeWindowHours: 24 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{year}}年Q{{quarter}} {{metricName}} 周进度未更新",
+      contentTemplate: "已超过 {{daysSinceUpdate}} 天未更新进度，请及时维护。",
+      messageUrlTemplate: "{{appUrl}}/annual-goals?year={{year}}",
+    },
+    isActive: true,
+    sortOrder: 60,
+  },
+  {
+    name: "季度目标未拆解提醒",
+    description: "每周一扫描 ACTIVE 方案下小组承接指标缺少季度拆解的情况",
+    module: resolveEventModule("annual_goal.quarter_target.missing"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "annual_goal.quarter_target.missing",
+    scheduleConfig: annualGoalQuarterTargetSchedule,
+    nextRunAt: computeNextRunAt(annualGoalQuarterTargetSchedule),
+    recipientConfig: {
+      rules: [{ type: "TEAM_LEADERS_OF_TEAM" }, { type: "METRIC_RESPONSIBLE" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{year}}年 {{metricName}} 季度目标未拆解",
+      contentTemplate: "{{teamName}} 承接的指标仍缺少完整季度目标，请尽快拆解。",
+      messageUrlTemplate: "{{appUrl}}/annual-goals?year={{year}}",
+    },
+    isActive: true,
+    sortOrder: 70,
+  },
+  {
+    name: "指标目标值变更通知",
+    description: "部门指标、元指标或季度目标的目标值发生变更时通知相关责任人",
+    module: resolveEventModule("annual_goal.target.changed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "annual_goal.target.changed",
+    recipientConfig: { rules: [{ type: "METRIC_RESPONSIBLE_OR_DEPT_MANAGER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{metricName}} 目标值已变更",
+      contentTemplate: "目标值由 {{previousTargetValue}} 调整为 {{targetValue}}。",
+      messageUrlTemplate: "{{appUrl}}/annual-goals?year={{year}}",
+    },
+    isActive: true,
+    sortOrder: 80,
+  },
+  {
+    name: "小组指标待配置责任人",
+    description: "小组新建指标承接但未配置责任人时通知组长",
+    module: resolveEventModule("annual_goal.team.responsible_pending"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "annual_goal.team.responsible_pending",
+    recipientConfig: { rules: [{ type: "TEAM_LEADERS_OF_TEAM" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{teamName}} 有指标待配置责任人",
+      contentTemplate: "承接指标 {{metricNames}} 尚未配置责任人，请尽快维护。",
+      messageUrlTemplate: "{{appUrl}}/annual-goals?year={{year}}",
+    },
+    isActive: true,
+    sortOrder: 90,
+  },
+  {
+    name: "指标风险状态变更",
+    description: "指标或元指标风险状态升为滞后/风险时通知相关责任人",
+    module: resolveEventModule("annual_goal.risk.changed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "annual_goal.risk.changed",
+    recipientConfig: { rules: [{ type: "METRIC_RESPONSIBLE_OR_DEPT_MANAGER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{metricName}} 风险状态已变更",
+      contentTemplate: "风险状态由 {{previousRiskStatus}} 调整为 {{riskStatus}}。",
+      messageUrlTemplate: "{{appUrl}}/annual-goals?year={{year}}",
+    },
+    isActive: true,
+    sortOrder: 100,
+  },
+  {
+    name: "季度任务负责人变更通知",
+    description: "新增任务或变更任务负责人时通知新负责人",
+    module: resolveEventModule("quarterly_work.assigned"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "quarterly_work.assigned",
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "您被指派为任务负责人：{{title}}",
+      contentTemplate: "{{ownerName}}，请及时跟进「{{title}}」。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 110,
+  },
+  {
+    name: "项目上线提醒价值跟踪",
+    description: "项目上线后通知负责人启动价值跟踪",
+    module: resolveEventModule("project.launched"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "project.launched",
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 0,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目已上线，请开始价值跟踪：{{title}}",
+      contentTemplate: "{{ownerName}}，「{{title}}」已上线，请及时维护跟踪状态与价值判断。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 115,
+  },
+  {
+    name: "项目完成提醒价值跟踪",
+    description: "项目完成后通知负责人与部门主管",
+    module: resolveEventModule("project.completed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "project.completed",
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 0,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目已完成：{{title}}",
+      contentTemplate: "{{ownerName}}，「{{title}}」已完成，项目后续事项全部结束。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 120,
+  },
+  {
+    name: "价值判断未达预期提醒",
+    description: "价值判断变更为未达预期时通知负责人、组长和主管",
+    module: resolveEventModule("project.value_judgement.changed"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "project.value_judgement.changed",
+    conditionConfig: {
+      conditions: [{ field: "valueJudgement", operator: "eq", value: "未达预期" }],
+    },
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 0,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "价值判断未达预期：{{title}}",
+      contentTemplate: "「{{title}}」的价值判断已变更为未达预期，请关注后续优化。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+    },
+    isActive: true,
+    sortOrder: 130,
+  },
+  {
+    name: "季度任务延期提醒",
+    description: "每周一扫描结束月份已过且仍未完成的任务",
+    module: resolveEventModule("quarterly_work.overdue"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "quarterly_work.overdue",
+    scheduleConfig: quarterlyWorkOverdueSchedule,
+    nextRunAt: computeNextRunAt(quarterlyWorkOverdueSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "任务已延期：{{title}}",
+      contentTemplate: "「{{title}}」已超过结束月份 {{overdueDays}} 天，请尽快更新进展。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 140,
+  },
+  {
+    name: "季度任务即将延期提醒",
+    description: "每周一扫描距离任务结束月份不足 1 周的未完成任务",
+    module: resolveEventModule("quarterly_work.due_soon"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "quarterly_work.due_soon",
+    scheduleConfig: quarterlyWorkDueSoonSchedule,
+    nextRunAt: computeNextRunAt(quarterlyWorkDueSoonSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "任务即将延期：{{title}}",
+      contentTemplate: "「{{title}}」距结束月份还剩 {{daysUntilDue}} 天，请及时推进。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 150,
+  },
+  {
+    name: "项目延期提醒",
+    description: "每周一扫描结束季度已过且仍未完成的项目",
+    module: resolveEventModule("project.overdue"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "project.overdue",
+    scheduleConfig: projectOverdueSchedule,
+    nextRunAt: computeNextRunAt(projectOverdueSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目已延期：{{title}}",
+      contentTemplate: "「{{title}}」已超过结束季度 {{overdueDays}} 天，请尽快处理。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+    },
+    isActive: true,
+    sortOrder: 160,
+  },
+  {
+    name: "项目即将延期提醒",
+    description: "每周一扫描距离项目结束季度不足 2 周的未完成项目",
+    module: resolveEventModule("project.due_soon"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "project.due_soon",
+    scheduleConfig: projectDueSoonSchedule,
+    nextRunAt: computeNextRunAt(projectDueSoonSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "TEAM_LEADER_OF_SUBJECT" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "项目即将延期：{{title}}",
+      contentTemplate: "「{{title}}」距结束季度还剩 {{daysUntilDue}} 天，请及时推进。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+    },
+    isActive: true,
+    sortOrder: 170,
+  },
+  {
+    name: "价值跟踪待完成提醒",
+    description: "每季度末前一周扫描跟踪状态尚未变为已完成的已上线项目",
+    module: resolveEventModule("project.value_track.pending"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "project.value_track.pending",
+    scheduleConfig: projectValueTrackPendingSchedule,
+    nextRunAt: computeNextRunAt(projectValueTrackPendingSchedule),
+    recipientConfig: {
+      rules: [{ type: "SUBJECT_USER" }, { type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "请完成价值跟踪：{{title}}",
+      contentTemplate: "距本季度结束还剩 {{daysUntilQuarterEnd}} 天，「{{title}}」跟踪状态仍为{{valueTrackStatus}}，请尽快完成。",
+      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 180,
+  },
+] as const;
+
+export async function ensurePresetNotificationScenarios() {
+  for (const preset of PRESET_SCENARIOS) {
+    const existing = await prisma.notificationScenario.findFirst({
+      where: { name: preset.name },
+      select: { id: true, scheduleConfig: true },
+    });
+
+    if (!existing) {
+      await prisma.notificationScenario.create({ data: { ...preset } });
+      continue;
+    }
+
+    const updateData: {
+      description: string;
+      module: string;
+      scheduleConfig?: ScheduleConfig;
+      nextRunAt?: Date | null;
+    } = {
+      description: preset.description,
+      module: preset.module,
+    };
+
+    if ("scheduleConfig" in preset && preset.scheduleConfig) {
+      const currentSchedule = parseScheduleConfig(existing.scheduleConfig) ?? preset.scheduleConfig;
+      updateData.scheduleConfig = {
+        ...currentSchedule,
+        ...preset.scheduleConfig,
+        daysBefore: preset.scheduleConfig.daysBefore,
+      };
+      updateData.nextRunAt = computeNextRunAt(updateData.scheduleConfig);
+    }
+
+    await prisma.notificationScenario.update({
+      where: { id: existing.id },
+      data: updateData,
+    });
+  }
+}

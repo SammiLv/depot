@@ -1,7 +1,15 @@
 import { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { ensureAnnualGoalPermissions, annualGoalPermissionDefinitions } from "@/server/organization/annual-goal-permissions";
-import { kpiAbilityKeys, orgPermissionModuleKeys, talentAbilityKeys, talentOrdinaryPermissionAbilityKeys } from "@/server/permissions/permission-constants";
+import {
+  kpiAbilityKeys,
+  notificationAbilityKeys,
+  orgPermissionModuleKeys,
+  talentAbilityKeys,
+  talentOrdinaryPermissionAbilityKeys,
+} from "@/server/permissions/permission-constants";
+import { ensurePresetNotificationScenarios } from "@/server/notifications/preset-scenarios";
+import { removePermissionMatrixIntegrationTestArtifacts } from "@/server/organization/integration-test-artifacts";
 
 const systemMenus = [
   ["dashboard", "首页工作台", "/dashboard", 10, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
@@ -15,12 +23,15 @@ const systemMenus = [
 ] as const;
 
 export async function ensureInitialSystemBootstrap() {
+  await removePermissionMatrixIntegrationTestArtifacts();
   await ensureSystemMenus();
   await ensureAnnualGoalPermissions();
   await ensureSystemAnnualGoalRolePermissions();
   await ensureAdminKpiPermissions();
   await ensureDefaultTalentPermissions();
   await ensureInitialTalentSalaryConfig();
+  await ensureNotificationScenarioPermissions();
+  await ensurePresetNotificationScenarios();
 }
 
 async function ensureSystemMenus() {
@@ -257,5 +268,30 @@ async function ensureInitialTalentSalaryConfig() {
         },
       });
     }
+  }
+}
+
+async function ensureNotificationScenarioPermissions() {
+  const abilityKey = notificationAbilityKeys.manageNotificationScenario;
+  const where = {
+    moduleKey: orgPermissionModuleKeys.notification,
+    abilityKey,
+    scopeType: "ALL" as const,
+    subjectType: "ROLE" as const,
+    roleType: RoleType.ADMIN,
+    userId: null,
+    orgNodeId: null,
+  };
+  const result = await prisma.orgPermissionGrant.updateMany({
+    where,
+    data: { isActive: true },
+  });
+  if (result.count === 0) {
+    await prisma.orgPermissionGrant.create({
+      data: {
+        ...where,
+        isActive: true,
+      },
+    });
   }
 }

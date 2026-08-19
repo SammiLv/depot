@@ -10,7 +10,6 @@ import {
   type ApplicableKpiApprovalPolicy,
   type ResolvedKpiApprovalStep,
 } from "@/server/kpi/approval-policy";
-import { getInitialApprovalStepStatus } from "@/server/kpi/approval-workflow";
 
 export type KpiApprovalSnapshotStep = {
   stepOrder: number;
@@ -101,7 +100,8 @@ export function buildPersonalKpiApprovalStepData(
   personalKpiId: string,
   snapshot: KpiApprovalSnapshot,
 ) {
-  return snapshot.steps.map((step, index) => ({
+  const minStepOrder = Math.min(...snapshot.steps.map((step) => step.stepOrder));
+  return snapshot.steps.map((step) => ({
     personalKpiId,
     policyStepId: step.policyStepId,
     stepOrder: step.stepOrder,
@@ -114,7 +114,7 @@ export function buildPersonalKpiApprovalStepData(
     resolverUserId: step.resolverUserId,
     orgNodeId: step.orgNodeId,
     approverId: step.approverId,
-    status: getInitialApprovalStepStatus(index),
+    status: step.stepOrder === minStepOrder ? "PENDING" as const : "WAITING" as const,
   }));
 }
 

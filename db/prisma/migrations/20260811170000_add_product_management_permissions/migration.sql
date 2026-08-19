@@ -1,0 +1,2 @@
+-- SQLite stores enum values as TEXT; OrgPermissionModuleKey / OrgPermissionAbilityKey
+-- add PRODUCT_MANAGEMENT and three manage abilities at application level.

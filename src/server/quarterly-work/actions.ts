@@ -4,24 +4,51 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import {
+  requireManageProductGoal,
+  requireManageProductTask,
+  requireManageProjectAndValueTracking,
+} from "@/server/quarterly-work/permission";
+import {
+  emitProjectAssigned,
+  emitProjectCompleted,
+  emitProjectLaunched,
+  emitProjectValueChanged,
+  emitQuarterlyWorkAssigned,
+  emitQuarterlyWorkStatusChanged,
+} from "@/server/notifications/quarterly-work-notifications";
+import {
+  TASK_RESULTS,
+  type TaskResult,
+} from "@/server/quarterly-work/task-result-constants";
+import {
+  OPERATION_LOG_ACTION_CREATE,
+  OPERATION_LOG_ACTION_DELETE,
+  OPERATION_LOG_ACTION_UPDATE,
+  PROJECT_STATUS_LABELS,
+  WORK_STATUS_LABELS,
+  buildFieldChangeRemark,
+  resolveUserNames,
+  writeOperationLog,
+} from "@/server/quarterly-work/operation-log";
 import type { ProjectStatus, WorkStatus } from "@prisma/client";
+import {
+  VALUE_JUDGEMENTS,
+  VALUE_TRACK_STATUS_NOT_OBSERVED,
+  VALUE_TRACK_STATUS_OBSERVING,
+  VALUE_TRACK_STATUSES,
+  type ValueJudgement,
+  type ValueTrackStatus,
+} from "@/server/quarterly-work/value-track-constants";
 
-const editableRoles = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"] as const;
+type ScopeUser = Awaited<ReturnType<typeof requireCurrentUser>>;
 const creatableStatuses: WorkStatus[] = ["NOT_STARTED", "IN_PROGRESS", "DELAYED_COMPLETED", "COMPLETED", "CLOSED"];
 const manuallyEditableStatuses: WorkStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
-const projectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
+const projectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"];
 
 function revalidateQuarterlyWork() {
   revalidatePath("/quarterly-work");
   revalidatePath("/dashboard");
-}
-
-async function requireQuarterlyWorkEditor() {
-  const user = await requireCurrentUser();
-  if (!editableRoles.includes(user.roleType as (typeof editableRoles)[number])) {
-    throw new Error("当前角色不能维护季度工作");
-  }
-  return user;
 }
 
 function requiredString(value: FormDataEntryValue | null, fieldName: string) {
@@ -43,6 +70,47 @@ function parseOptionalFloat(value: FormDataEntryValue | null) {
 function parseOptionalId(value: FormDataEntryValue | null) {
   const text = (value as string | null)?.trim();
   return text || null;
+}
+
+function parseRequiredProductGoalIds(formData: FormData) {
+  const ids = [...new Set(
+    formData.getAll("productGoalIds")
+      .map((value) => String(value).trim())
+      .filter(Boolean),
+  )];
+  if (!ids.length) throw new Error("产品目标为必填项，请至少选择一个");
+  return ids;
+}
+
+async function validateProductGoalIds(
+  productGoalIds: string[],
+  scopeWhere: ReturnType<typeof getProjectManagementScopeWhere>,
+) {
+  const goals = await prisma.productGoal.findMany({
+    where: {
+      id: { in: productGoalIds },
+      ...scopeWhere,
+    },
+    select: { id: true },
+  });
+  if (goals.length !== productGoalIds.length) {
+    throw new Error("产品目标不存在或无权限选择");
+  }
+}
+
+async function replaceProjectProductGoals(
+  tx: Pick<typeof prisma, "projectProductGoal">,
+  projectId: string,
+  productGoalIds: string[],
+) {
+  await tx.projectProductGoal.deleteMany({ where: { projectId } });
+  await tx.projectProductGoal.createMany({
+    data: productGoalIds.map((productGoalId, index) => ({
+      projectId,
+      productGoalId,
+      sortOrder: (index + 1) * 10,
+    })),
+  });
 }
 
 function parseRequiredYear(value: FormDataEntryValue | null, fieldName: string) {
@@ -114,20 +182,64 @@ function getCompletedAtByStatus(status: WorkStatus) {
   return status === "COMPLETED" ? new Date() : null;
 }
 
+function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
+  const text = (value as string | null)?.trim();
+  if (status === "COMPLETED" && (!text || !(TASK_RESULTS as readonly string[]).includes(text))) {
+    throw new Error("任务结果为必填项");
+  }
+  return text || null;
+}
+
+function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkStatus) {
+  const text = (value as string | null)?.trim() || null;
+  if (status === "COMPLETED" && !text) {
+    throw new Error("任务状态为已完成时，任务执行概况为必填项");
+  }
+  return text;
+}
+
 function getProjectCompletedAtByStatus(status: ProjectStatus) {
   return status === "COMPLETED" ? new Date() : null;
 }
 
-const VALUE_JUDGEMENT_NOT_OBSERVED = "未观测";
+function getProjectLaunchedAtByStatus(status: ProjectStatus, existingLaunchedAt: Date | null) {
+  if (status === "LAUNCHED") return existingLaunchedAt ?? new Date();
+  // 已完成/已关闭属于已上线之后的终态，保留上线时间作为历史
+  if (status === "COMPLETED" || status === "CLOSED") return existingLaunchedAt;
+  // 回退到未开始/进行中时清空上线时间
+  return null;
+}
 
-function getValueJudgementForCompletedStatus(status: ProjectStatus, previousStatus?: ProjectStatus | null) {
-  if (status === "COMPLETED" && previousStatus !== "COMPLETED") {
-    return VALUE_JUDGEMENT_NOT_OBSERVED;
+function getValueTrackInitForLaunchedStatus(status: ProjectStatus, previousStatus?: ProjectStatus | null) {
+  if (status === "LAUNCHED" && previousStatus !== "LAUNCHED") {
+    return {
+      valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED,
+      valueJudgement: null,
+    };
   }
   return undefined;
 }
 
-function getProjectManagementScopeWhere(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
+function parseValueTrackStatus(value: FormDataEntryValue | null, fallback?: ValueTrackStatus) {
+  const text = (value as string | null)?.trim() || fallback;
+  if (!text || !(VALUE_TRACK_STATUSES as readonly string[]).includes(text)) {
+    throw new Error("价值跟踪状态不正确");
+  }
+  return text as ValueTrackStatus;
+}
+
+function parseValueJudgement(value: FormDataEntryValue | null, status: ValueTrackStatus) {
+  const text = (value as string | null)?.trim() || null;
+  if (status === VALUE_TRACK_STATUS_NOT_OBSERVED) {
+    return null;
+  }
+  if (!text || !(VALUE_JUDGEMENTS as readonly string[]).includes(text)) {
+    throw new Error("价值判断为必填项");
+  }
+  return text as ValueJudgement;
+}
+
+function getProjectManagementScopeWhere(currentUser: ScopeUser, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
   if (currentUser.roleType === "ADMIN") {
     return { deletedAt: null };
   }
@@ -139,7 +251,7 @@ function getProjectManagementScopeWhere(currentUser: Awaited<ReturnType<typeof r
   return { ownerId: currentUser.id, deletedAt: null };
 }
 
-async function getProjectManagementDepartmentScope(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>) {
+async function getProjectManagementDepartmentScope(currentUser: ScopeUser) {
   if (currentUser.roleType === "ADMIN") {
     return { departmentOrgNodeId: null, scopedOrgNodeIds: null };
   }
@@ -153,7 +265,7 @@ async function getProjectManagementDepartmentScope(currentUser: Awaited<ReturnTy
 }
 
 async function assertDepartmentOrgNodeAccessible(
-  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>,
+  currentUser: ScopeUser,
   departmentOrgNodeId: string,
 ) {
   const department = await prisma.orgNode.findFirst({
@@ -173,7 +285,7 @@ async function assertDepartmentOrgNodeAccessible(
 }
 
 async function findEditableOwner(
-  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>,
+  currentUser: ScopeUser,
   ownerId: string,
   departmentOrgNodeId: string,
 ) {
@@ -199,7 +311,7 @@ function parseDepartmentOrgNodeId(value: FormDataEntryValue | null) {
   return departmentOrgNodeId;
 }
 
-async function findEditableProject(currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>, projectId: string) {
+async function findEditableProject(currentUser: ScopeUser, projectId: string) {
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const project = await prisma.project.findFirst({
     where: {
@@ -220,7 +332,7 @@ async function findEditableProject(currentUser: Awaited<ReturnType<typeof requir
 }
 
 async function ensureProjectForWork(params: {
-  currentUser: Awaited<ReturnType<typeof requireQuarterlyWorkEditor>>;
+  currentUser: ScopeUser;
   projectId: string | null;
   title: string;
   description: string;
@@ -244,7 +356,9 @@ async function ensureProjectForWork(params: {
       status: projectStatus,
       createdById: params.currentUser.id,
       completedAt: getProjectCompletedAtByStatus(projectStatus),
-      ...(projectStatus === "COMPLETED" ? { valueJudgement: VALUE_JUDGEMENT_NOT_OBSERVED } : {}),
+      ...(projectStatus === "COMPLETED"
+        ? { valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED, valueJudgement: null }
+        : {}),
     },
     select: { id: true, status: true },
   });
@@ -257,18 +371,26 @@ async function syncProjectStatusFromWork(projectId: string, status: WorkStatus) 
     where: { id: projectId },
     data: {
       status: "IN_PROGRESS",
+      launchedAt: null,
       completedAt: null,
     },
   });
 }
 
 export async function createQuarterlyWork(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductTask();
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
   const endMonth = parseOptionalMonth(formData.get("endMonth"), "结束月份");
   const status = parseStatus(formData.get("status"));
+  const taskResult = parseTaskResult(formData.get("taskResult"), status);
+  const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
+  const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
+  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  if (status === "COMPLETED" && workloadPersonDay === null) {
+    throw new Error("任务状态为已完成时，工作量(人天)为必填项");
+  }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -292,7 +414,7 @@ export async function createQuarterlyWork(formData: FormData) {
     workStatus: status,
   });
 
-  await prisma.quarterlyWork.create({
+  const work = await prisma.quarterlyWork.create({
     data: {
       projectId: project.id,
       year,
@@ -301,28 +423,50 @@ export async function createQuarterlyWork(formData: FormData) {
       endMonth: periodEndMonth,
       title,
       description,
+      taskDescription,
       expectedOutcome,
       status,
+      taskResult,
+      executionSummary,
+      workloadPersonDay,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       createdById: currentUser.id,
       completedAt: getCompletedAtByStatus(status),
     },
+    select: { id: true },
   });
 
   await syncProjectStatusFromWork(project.id, status);
+  await emitQuarterlyWorkAssigned(work.id);
+
+  await writeOperationLog(prisma, {
+    targetType: "QUARTERLY_WORK",
+    targetId: work.id,
+    targetTitle: title,
+    action: OPERATION_LOG_ACTION_CREATE,
+    operatorId: currentUser.id,
+    remark: `新增任务「${title}」`,
+  });
 
   revalidateQuarterlyWork();
 }
 
 export async function updateQuarterlyWork(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductTask();
   const workId = parseWorkId(formData.get("workId"));
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
   const endMonth = parseOptionalMonth(formData.get("endMonth"), "结束月份");
   const status = parseStatus(formData.get("status"));
+  const taskResult = parseTaskResult(formData.get("taskResult"), status);
+  const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
+  const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
+  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  if (status === "COMPLETED" && workloadPersonDay === null) {
+    throw new Error("任务状态为已完成时，工作量(人天)为必填项");
+  }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -334,7 +478,20 @@ export async function updateQuarterlyWork(formData: FormData) {
       id: workId,
       ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, status: true, projectId: true, startMonth: true },
+    select: {
+      id: true,
+      status: true,
+      projectId: true,
+      startMonth: true,
+      endMonth: true,
+      ownerId: true,
+      title: true,
+      description: true,
+      taskDescription: true,
+      taskResult: true,
+      executionSummary: true,
+      workloadPersonDay: true,
+    },
   });
 
   if (!existingWork) throw new Error("季度工作不存在或无权限编辑");
@@ -366,11 +523,15 @@ export async function updateQuarterlyWork(formData: FormData) {
       projectId: project.id,
       title,
       description,
+      taskDescription,
       expectedOutcome,
       startMonth: periodStartMonth,
       endMonth: periodEndMonth,
       quarter,
       status,
+      taskResult,
+      executionSummary,
+      workloadPersonDay,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       completedAt: getCompletedAtByStatus(status),
@@ -382,11 +543,51 @@ export async function updateQuarterlyWork(formData: FormData) {
     await syncProjectStatusFromWork(previousProjectId, status);
   }
 
+  const userNameById = await resolveUserNames([existingWork.ownerId, owner.id]);
+  const projectTitles = await prisma.project.findMany({
+    where: { id: { in: [...new Set([previousProjectId, project.id])] } },
+    select: { id: true, title: true },
+  });
+  const projectTitleById = new Map(projectTitles.map((item) => [item.id, item.title]));
+  const updateRemark = buildFieldChangeRemark([
+    { label: "任务名称", previous: existingWork.title, next: title },
+    { label: "所属项目", previous: projectTitleById.get(previousProjectId), next: projectTitleById.get(project.id) },
+    { label: "负责人", previous: userNameById.get(existingWork.ownerId), next: userNameById.get(owner.id) },
+    {
+      label: "任务周期",
+      previous: existingWork.startMonth ? `${existingWork.startMonth}月~${existingWork.endMonth ?? existingWork.startMonth}月` : null,
+      next: `${periodStartMonth}月~${periodEndMonth}月`,
+    },
+    { label: "任务目标", previous: existingWork.description, next: description },
+    { label: "任务描述", previous: existingWork.taskDescription, next: taskDescription },
+    { label: "任务状态", previous: WORK_STATUS_LABELS[existingWork.status], next: WORK_STATUS_LABELS[status] },
+    { label: "任务结果", previous: existingWork.taskResult, next: taskResult },
+    { label: "任务执行概况", previous: existingWork.executionSummary, next: executionSummary },
+    { label: "工作量(人天)", previous: existingWork.workloadPersonDay, next: workloadPersonDay },
+  ]);
+  if (updateRemark) {
+    await writeOperationLog(prisma, {
+      targetType: "QUARTERLY_WORK",
+      targetId: workId,
+      targetTitle: title,
+      action: OPERATION_LOG_ACTION_UPDATE,
+      operatorId: currentUser.id,
+      remark: updateRemark,
+    });
+  }
+
+  if (existingWork.ownerId !== owner.id) {
+    await emitQuarterlyWorkAssigned(workId);
+  }
+  if (existingWork.status !== status) {
+    await emitQuarterlyWorkStatusChanged(workId, existingWork.status);
+  }
+
   revalidateQuarterlyWork();
 }
 
 export async function updateProjectStatus(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const status = parseProjectStatus(formData.get("status"));
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -396,20 +597,27 @@ export async function updateProjectStatus(formData: FormData) {
       id: projectId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, status: true },
+    select: { id: true, status: true, title: true, launchedAt: true, workloadPersonDay: true },
   });
 
   if (!project) throw new Error("项目不存在或无权限编辑");
 
-  const valueJudgement = getValueJudgementForCompletedStatus(status, project.status);
+  const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
+  const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
+  const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
+
+  if (becameLaunched && project.workloadPersonDay === null) {
+    throw new Error("项目变更为已上线前，请先编辑项目填写工作量(人天)");
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
       where: { id: project.id },
       data: {
         status,
+        launchedAt: getProjectLaunchedAtByStatus(status, project.launchedAt),
         completedAt: getProjectCompletedAtByStatus(status),
-        ...(valueJudgement ? { valueJudgement } : {}),
+        ...(valueTrackInit ?? {}),
       },
     });
 
@@ -424,13 +632,31 @@ export async function updateProjectStatus(formData: FormData) {
     }
   });
 
+  if (becameLaunched) {
+    await emitProjectLaunched(project.id);
+  }
+  if (becameCompleted) {
+    await emitProjectCompleted(project.id);
+  }
+
+  if (project.status !== status) {
+    await writeOperationLog(prisma, {
+      targetType: "PROJECT",
+      targetId: project.id,
+      targetTitle: project.title,
+      action: OPERATION_LOG_ACTION_UPDATE,
+      operatorId: currentUser.id,
+      remark: `项目状态从『${PROJECT_STATUS_LABELS[project.status] ?? project.status}』改为『${PROJECT_STATUS_LABELS[status] ?? status}』`,
+    });
+  }
+
   revalidateQuarterlyWork();
 }
 
 export async function createProject(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const title = requiredString(formData.get("title"), "项目名称");
-  const productGoalId = parseOptionalId(formData.get("productGoalId"));
+  const productGoalIds = parseRequiredProductGoalIds(formData);
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const description = requiredString(formData.get("description"), "项目描述");
@@ -439,42 +665,61 @@ export async function createProject(formData: FormData) {
   const startQuarter = parseRequiredQuarter(formData.get("startQuarter"), "起始季度");
   const endQuarter = parseRequiredQuarter(formData.get("endQuarter"), "结束季度");
   assertQuarterRange(startQuarter, endQuarter);
+  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  if ((status === "LAUNCHED" || status === "COMPLETED") && workloadPersonDay === null) {
+    throw new Error("项目状态为已上线或已完成时，工作量(人天)为必填项");
+  }
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
+  const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
+  await validateProductGoalIds(productGoalIds, scopeWhere);
 
-  if (productGoalId) {
-    const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
-    const productGoal = await prisma.productGoal.findFirst({
-      where: {
-        id: productGoalId,
-        ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+  const created = await prisma.$transaction(async (tx) => {
+    const project = await tx.project.create({
+      data: {
+        title,
+        description,
+        expectedOutcome,
+        startQuarter,
+        endQuarter,
+        ownerId: owner.id,
+        orgNodeId: owner.orgNodeId,
+        status,
+        workloadPersonDay,
+        createdById: currentUser.id,
+        launchedAt: status === "LAUNCHED" ? new Date() : null,
+        completedAt: getProjectCompletedAtByStatus(status),
+        ...(status === "LAUNCHED"
+          ? { valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED, valueJudgement: null }
+          : {}),
       },
-      select: { id: true },
     });
-    if (!productGoal) throw new Error("产品目标不存在或无权限选择");
+    await replaceProjectProductGoals(tx, project.id, productGoalIds);
+    return project;
+  });
+
+  await emitProjectAssigned(created.id);
+  if (created.status === "LAUNCHED") {
+    await emitProjectLaunched(created.id);
+  }
+  if (created.status === "COMPLETED") {
+    await emitProjectCompleted(created.id);
   }
 
-  await prisma.project.create({
-    data: {
-      title,
-      productGoalId,
-      description,
-      expectedOutcome,
-      startQuarter,
-      endQuarter,
-      ownerId: owner.id,
-      orgNodeId: owner.orgNodeId,
-      status,
-      createdById: currentUser.id,
-      completedAt: getProjectCompletedAtByStatus(status),
-      ...(status === "COMPLETED" ? { valueJudgement: VALUE_JUDGEMENT_NOT_OBSERVED } : {}),
-    },
+  await writeOperationLog(prisma, {
+    targetType: "PROJECT",
+    targetId: created.id,
+    targetTitle: title,
+    action: OPERATION_LOG_ACTION_CREATE,
+    operatorId: currentUser.id,
+    remark: `新增项目「${title}」`,
   });
 
   revalidateQuarterlyWork();
 }
 
 export async function createProductGoal(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductGoal();
   const title = requiredString(formData.get("title"), "产品目标名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
@@ -484,7 +729,7 @@ export async function createProductGoal(formData: FormData) {
   const status = parseProjectStatus(formData.get("status") ?? "NOT_STARTED");
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
 
-  await prisma.productGoal.create({
+  const createdGoal = await prisma.productGoal.create({
     data: {
       title,
       year,
@@ -496,13 +741,23 @@ export async function createProductGoal(formData: FormData) {
       createdById: currentUser.id,
       completedAt: getProjectCompletedAtByStatus(status),
     },
+    select: { id: true },
+  });
+
+  await writeOperationLog(prisma, {
+    targetType: "PRODUCT_GOAL",
+    targetId: createdGoal.id,
+    targetTitle: title,
+    action: OPERATION_LOG_ACTION_CREATE,
+    operatorId: currentUser.id,
+    remark: `新增产品目标「${title}」`,
   });
 
   revalidateQuarterlyWork();
 }
 
 export async function updateProductGoal(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductGoal();
   const productGoalId = requiredString(formData.get("productGoalId"), "产品目标");
   const title = requiredString(formData.get("title"), "产品目标名称");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
@@ -518,7 +773,7 @@ export async function updateProductGoal(formData: FormData) {
       id: productGoalId,
       ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true },
+    select: { id: true, title: true, year: true, description: true, expectedOutcome: true, ownerId: true, status: true },
   });
   if (!productGoal) throw new Error("产品目标不存在或无权限编辑");
 
@@ -538,16 +793,37 @@ export async function updateProductGoal(formData: FormData) {
     },
   });
 
+  const goalOwnerNameById = await resolveUserNames([productGoal.ownerId, owner.id]);
+  const goalUpdateRemark = buildFieldChangeRemark([
+    { label: "产品目标名称", previous: productGoal.title, next: title },
+    { label: "年份", previous: productGoal.year, next: year },
+    { label: "负责人", previous: goalOwnerNameById.get(productGoal.ownerId), next: goalOwnerNameById.get(owner.id) },
+    { label: "产品目标描述", previous: productGoal.description, next: description },
+    { label: "预期收益", previous: productGoal.expectedOutcome, next: expectedOutcome },
+    { label: "产品目标状态", previous: PROJECT_STATUS_LABELS[productGoal.status], next: PROJECT_STATUS_LABELS[status] },
+  ]);
+  if (goalUpdateRemark) {
+    await writeOperationLog(prisma, {
+      targetType: "PRODUCT_GOAL",
+      targetId: productGoal.id,
+      targetTitle: title,
+      action: OPERATION_LOG_ACTION_UPDATE,
+      operatorId: currentUser.id,
+      remark: goalUpdateRemark,
+    });
+  }
+
   revalidateQuarterlyWork();
 }
 
 export async function createValueTrack(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
-  const valueJudgement = requiredString(formData.get("valueJudgement"), "价值判断");
+  const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"), VALUE_TRACK_STATUS_OBSERVING);
+  const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
   const trackingResult = requiredString(formData.get("trackingResult"), "跟踪结果描述");
   const followUpOptimization = (formData.get("followUpOptimization") as string | null)?.trim() || null;
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -555,13 +831,13 @@ export async function createValueTrack(formData: FormData) {
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      status: "COMPLETED",
+      status: "LAUNCHED",
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true },
+    select: { id: true, title: true, valueJudgement: true, valueTrackStatus: true, workloadPersonDay: true, otherCost: true, actualValue: true },
   });
 
-  if (!project) throw new Error("项目不存在、未完成或无权限选择");
+  if (!project) throw new Error("项目不存在、未上线或无权限选择");
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
@@ -571,6 +847,7 @@ export async function createValueTrack(formData: FormData) {
         otherCost,
         actualValue,
         valueJudgement,
+        valueTrackStatus,
       },
     });
 
@@ -583,15 +860,40 @@ export async function createValueTrack(formData: FormData) {
     });
   });
 
+  await emitProjectValueChanged(project.id, {
+    valueJudgement: project.valueJudgement,
+    valueTrackStatus: project.valueTrackStatus,
+  });
+
+  const createTrackRemark = [
+    "新增价值跟踪记录",
+    buildFieldChangeRemark([
+      { label: "工作量(人天)", previous: project.workloadPersonDay, next: workloadPersonDay },
+      { label: "其他成本", previous: project.otherCost, next: otherCost },
+      { label: "实际收益", previous: project.actualValue, next: actualValue },
+      { label: "跟踪状态", previous: project.valueTrackStatus, next: valueTrackStatus },
+      { label: "价值判断", previous: project.valueJudgement, next: valueJudgement },
+    ]),
+  ].filter(Boolean).join("：");
+  await writeOperationLog(prisma, {
+    targetType: "PROJECT",
+    targetId: project.id,
+    targetTitle: project.title,
+    action: OPERATION_LOG_ACTION_UPDATE,
+    operatorId: currentUser.id,
+    remark: createTrackRemark,
+  });
+
   revalidateQuarterlyWork();
   revalidatePath("/value-tracking");
 }
 
 export async function updateValueTrack(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const trackId = requiredString(formData.get("trackId"), "价值跟踪");
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
-  const valueJudgement = requiredString(formData.get("valueJudgement"), "价值判断");
+  const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"), VALUE_TRACK_STATUS_OBSERVING);
+  const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
   const trackingResult = requiredString(formData.get("trackingResult"), "跟踪结果描述");
   const followUpOptimization = (formData.get("followUpOptimization") as string | null)?.trim() || null;
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -602,15 +904,20 @@ export async function updateValueTrack(formData: FormData) {
       deletedAt: null,
       projectId: {
         in: (await prisma.project.findMany({
-          where: { ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds), status: "COMPLETED" },
+          where: { ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds), status: "LAUNCHED" },
           select: { id: true },
         })).map((project) => project.id),
       },
     },
-    select: { id: true, projectId: true },
+    select: { id: true, projectId: true, trackingResult: true },
   });
 
   if (!track) throw new Error("价值跟踪不存在或无权限编辑");
+
+  const existingProject = await prisma.project.findFirst({
+    where: { id: track.projectId },
+    select: { title: true, actualValue: true, valueJudgement: true, valueTrackStatus: true },
+  });
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
@@ -618,6 +925,7 @@ export async function updateValueTrack(formData: FormData) {
       data: {
         actualValue,
         valueJudgement,
+        valueTrackStatus,
       },
     });
 
@@ -630,17 +938,41 @@ export async function updateValueTrack(formData: FormData) {
     });
   });
 
+  await emitProjectValueChanged(track.projectId, {
+    valueJudgement: existingProject?.valueJudgement,
+    valueTrackStatus: existingProject?.valueTrackStatus,
+  });
+
+  const updateTrackRemark = [
+    "编辑价值跟踪记录",
+    buildFieldChangeRemark([
+      { label: "跟踪结果描述", previous: track.trackingResult, next: trackingResult },
+      { label: "实际收益", previous: existingProject?.actualValue, next: actualValue },
+      { label: "跟踪状态", previous: existingProject?.valueTrackStatus, next: valueTrackStatus },
+      { label: "价值判断", previous: existingProject?.valueJudgement, next: valueJudgement },
+    ]),
+  ].filter(Boolean).join("：");
+  await writeOperationLog(prisma, {
+    targetType: "PROJECT",
+    targetId: track.projectId,
+    targetTitle: existingProject?.title ?? "",
+    action: OPERATION_LOG_ACTION_UPDATE,
+    operatorId: currentUser.id,
+    remark: updateTrackRemark,
+  });
+
   revalidateQuarterlyWork();
   revalidatePath("/value-tracking");
 }
 
 export async function updateProjectValue(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
-  const valueJudgement = requiredString(formData.get("valueJudgement"), "价值判断");
+  const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"));
+  const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   if (workloadPersonDay === null) {
@@ -650,13 +982,13 @@ export async function updateProjectValue(formData: FormData) {
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      status: "COMPLETED",
+      status: "LAUNCHED",
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true },
+    select: { id: true, title: true, valueJudgement: true, valueTrackStatus: true, workloadPersonDay: true, otherCost: true, actualValue: true },
   });
 
-  if (!project) throw new Error("项目不存在、未完成或无权限编辑");
+  if (!project) throw new Error("项目不存在、未上线或无权限编辑");
 
   await prisma.project.update({
     where: { id: project.id },
@@ -665,15 +997,39 @@ export async function updateProjectValue(formData: FormData) {
       otherCost,
       actualValue,
       valueJudgement,
+      valueTrackStatus,
     },
   });
+
+  await emitProjectValueChanged(project.id, {
+    valueJudgement: project.valueJudgement,
+    valueTrackStatus: project.valueTrackStatus,
+  });
+
+  const valueUpdateRemark = buildFieldChangeRemark([
+    { label: "工作量(人天)", previous: project.workloadPersonDay, next: workloadPersonDay },
+    { label: "其他成本", previous: project.otherCost, next: otherCost },
+    { label: "实际收益", previous: project.actualValue, next: actualValue },
+    { label: "跟踪状态", previous: project.valueTrackStatus, next: valueTrackStatus },
+    { label: "价值判断", previous: project.valueJudgement, next: valueJudgement },
+  ]);
+  if (valueUpdateRemark) {
+    await writeOperationLog(prisma, {
+      targetType: "PROJECT",
+      targetId: project.id,
+      targetTitle: project.title,
+      action: OPERATION_LOG_ACTION_UPDATE,
+      operatorId: currentUser.id,
+      remark: valueUpdateRemark,
+    });
+  }
 
   revalidateQuarterlyWork();
   revalidatePath("/value-tracking");
 }
 
 export async function deleteValueTrack(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const trackId = requiredString(formData.get("trackId"), "价值跟踪");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -688,7 +1044,7 @@ export async function deleteValueTrack(formData: FormData) {
         })).map((project) => project.id),
       },
     },
-    select: { id: true },
+    select: { id: true, projectId: true },
   });
 
   if (!track) throw new Error("价值跟踪不存在或无权限删除");
@@ -698,12 +1054,25 @@ export async function deleteValueTrack(formData: FormData) {
     data: { deletedAt: new Date() },
   });
 
+  const trackProject = await prisma.project.findUnique({
+    where: { id: track.projectId },
+    select: { title: true },
+  });
+  await writeOperationLog(prisma, {
+    targetType: "PROJECT",
+    targetId: track.projectId,
+    targetTitle: trackProject?.title ?? "",
+    action: OPERATION_LOG_ACTION_UPDATE,
+    operatorId: currentUser.id,
+    remark: "删除价值跟踪记录",
+  });
+
   revalidateQuarterlyWork();
   revalidatePath("/value-tracking");
 }
 
 export async function deleteQuarterlyWork(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductTask();
   const workId = requiredString(formData.get("workId"), "任务");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -712,7 +1081,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
       id: workId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true },
+    select: { id: true, title: true },
   });
 
   if (!work) throw new Error("任务不存在或无权限删除");
@@ -722,11 +1091,20 @@ export async function deleteQuarterlyWork(formData: FormData) {
     data: { deletedAt: new Date() },
   });
 
+  await writeOperationLog(prisma, {
+    targetType: "QUARTERLY_WORK",
+    targetId: work.id,
+    targetTitle: work.title,
+    action: OPERATION_LOG_ACTION_DELETE,
+    operatorId: currentUser.id,
+    remark: `删除任务「${work.title}」`,
+  });
+
   revalidateQuarterlyWork();
 }
 
 export async function deleteProject(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -735,7 +1113,7 @@ export async function deleteProject(formData: FormData) {
       id: projectId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true },
+    select: { id: true, title: true },
   });
 
   if (!project) throw new Error("项目不存在或无权限删除");
@@ -755,6 +1133,15 @@ export async function deleteProject(formData: FormData) {
       where: { id: project.id },
       data: { deletedAt: new Date() },
     });
+
+    await writeOperationLog(tx, {
+      targetType: "PROJECT",
+      targetId: project.id,
+      targetTitle: project.title,
+      action: OPERATION_LOG_ACTION_DELETE,
+      operatorId: currentUser.id,
+      remark: `删除项目「${project.title}」`,
+    });
   });
 
   revalidateQuarterlyWork();
@@ -762,7 +1149,7 @@ export async function deleteProject(formData: FormData) {
 }
 
 export async function deleteProductGoal(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProductGoal();
   const productGoalId = requiredString(formData.get("productGoalId"), "产品目标");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
@@ -771,20 +1158,26 @@ export async function deleteProductGoal(formData: FormData) {
       id: productGoalId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true },
+    select: { id: true, title: true },
   });
 
   if (!productGoal) throw new Error("产品目标不存在或无权限删除");
 
   await prisma.$transaction(async (tx) => {
-    await tx.project.updateMany({
-      where: { productGoalId: productGoal.id, deletedAt: null },
-      data: { productGoalId: null },
-    });
+    await tx.projectProductGoal.deleteMany({ where: { productGoalId: productGoal.id } });
 
     await tx.productGoal.update({
       where: { id: productGoal.id },
       data: { deletedAt: new Date() },
+    });
+
+    await writeOperationLog(tx, {
+      targetType: "PRODUCT_GOAL",
+      targetId: productGoal.id,
+      targetTitle: productGoal.title,
+      action: OPERATION_LOG_ACTION_DELETE,
+      operatorId: currentUser.id,
+      remark: `删除产品目标「${productGoal.title}」`,
     });
   });
 
@@ -792,10 +1185,10 @@ export async function deleteProductGoal(formData: FormData) {
 }
 
 export async function updateProject(formData: FormData) {
-  const currentUser = await requireQuarterlyWorkEditor();
+  const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const title = requiredString(formData.get("title"), "项目名称");
-  const productGoalId = parseOptionalId(formData.get("productGoalId"));
+  const productGoalIds = parseRequiredProductGoalIds(formData);
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const status = parseProjectStatus(formData.get("status"));
@@ -806,37 +1199,42 @@ export async function updateProject(formData: FormData) {
   const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
   const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
 
-  if (status === "COMPLETED" && workloadPersonDay === null) {
-    throw new Error("项目状态为已完成时，工作量(人天)为必填项");
+  if ((status === "LAUNCHED" || status === "COMPLETED") && workloadPersonDay === null) {
+    throw new Error("项目状态为已上线或已完成时，工作量(人天)为必填项");
   }
 
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds) },
-    select: { id: true, status: true },
+    where: { id: projectId, ...scopeWhere },
+    select: {
+      id: true,
+      status: true,
+      ownerId: true,
+      launchedAt: true,
+      title: true,
+      description: true,
+      expectedOutcome: true,
+      startQuarter: true,
+      endQuarter: true,
+      workloadPersonDay: true,
+      otherCost: true,
+    },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
 
-  if (productGoalId) {
-    const productGoal = await prisma.productGoal.findFirst({
-      where: {
-        id: productGoalId,
-        ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
-      },
-      select: { id: true },
-    });
-    if (!productGoal) throw new Error("产品目标不存在或无权限选择");
-  }
+  await validateProductGoalIds(productGoalIds, scopeWhere);
 
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
-  const valueJudgement = getValueJudgementForCompletedStatus(status, project.status);
+  const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
+  const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
+  const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
       where: { id: project.id },
       data: {
         title,
-        productGoalId,
         description,
         expectedOutcome,
         workloadPersonDay,
@@ -846,10 +1244,12 @@ export async function updateProject(formData: FormData) {
         status,
         ownerId: owner.id,
         orgNodeId: owner.orgNodeId,
+        launchedAt: getProjectLaunchedAtByStatus(status, project.launchedAt),
         completedAt: getProjectCompletedAtByStatus(status),
-        ...(valueJudgement ? { valueJudgement } : {}),
+        ...(valueTrackInit ?? {}),
       },
     });
+    await replaceProjectProductGoals(tx, project.id, productGoalIds);
 
     if (status === "COMPLETED" || status === "CLOSED") {
       await tx.quarterlyWork.updateMany({
@@ -861,6 +1261,42 @@ export async function updateProject(formData: FormData) {
       });
     }
   });
+
+  if (project.ownerId !== owner.id) {
+    await emitProjectAssigned(project.id);
+  }
+  if (becameLaunched) {
+    await emitProjectLaunched(project.id);
+  }
+  if (becameCompleted) {
+    await emitProjectCompleted(project.id);
+  }
+
+  const projectOwnerNameById = await resolveUserNames([project.ownerId, owner.id]);
+  const projectUpdateRemark = buildFieldChangeRemark([
+    { label: "项目名称", previous: project.title, next: title },
+    { label: "负责人", previous: projectOwnerNameById.get(project.ownerId), next: projectOwnerNameById.get(owner.id) },
+    { label: "项目状态", previous: PROJECT_STATUS_LABELS[project.status], next: PROJECT_STATUS_LABELS[status] },
+    {
+      label: "规划周期",
+      previous: project.startQuarter ? `${project.startQuarter}~${project.endQuarter ?? project.startQuarter}` : null,
+      next: startQuarter ? `${startQuarter}~${endQuarter ?? startQuarter}` : null,
+    },
+    { label: "项目描述", previous: project.description, next: description },
+    { label: "预期收益", previous: project.expectedOutcome, next: expectedOutcome },
+    { label: "工作量(人天)", previous: project.workloadPersonDay, next: workloadPersonDay },
+    { label: "其他成本", previous: project.otherCost, next: otherCost },
+  ]);
+  if (projectUpdateRemark) {
+    await writeOperationLog(prisma, {
+      targetType: "PROJECT",
+      targetId: project.id,
+      targetTitle: title,
+      action: OPERATION_LOG_ACTION_UPDATE,
+      operatorId: currentUser.id,
+      remark: projectUpdateRemark,
+    });
+  }
 
   revalidateQuarterlyWork();
 }
