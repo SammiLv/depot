@@ -1640,12 +1640,12 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
   const min = minValue ?? Math.min(0, dataMin);
   const max = maxValue ?? Math.max(dataMax, min + 1);
   const range = max - min || 1;
-  const leftPadding = 40;
-  const rightPadding = 16;
-  const topPadding = 28;
-  const bottomPadding = 28;
+  const leftPadding = 48;
+  const rightPadding = 48;
+  const topPadding = 36;
+  const bottomPadding = 36;
   const width = 600;
-  const height = 180;
+  const height = 200;
   const chartWidth = width - leftPadding - rightPadding;
   const chartHeight = height - topPadding - bottomPadding;
   const points = data.map((item, index) => {
@@ -1656,7 +1656,7 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
   const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   const yTicks = 5;
   return <div className="w-full overflow-x-auto">
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[500px]" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[520px]" preserveAspectRatio="xMidYMid meet">
       {/* grid lines and y-axis labels */}
       {Array.from({ length: yTicks + 1 }).map((_, index) => {
         const ratio = index / yTicks;
@@ -1664,17 +1664,26 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
         const value = Math.round(max - ratio * range);
         return <g key={index}>
           <line x1={leftPadding} y1={y} x2={width - rightPadding} y2={y} stroke="#e5e7eb" strokeWidth={1} />
-          <text x={leftPadding - 8} y={y + 3} textAnchor="end" className="text-[10px] fill-muted-foreground">{value}</text>
+          <text x={leftPadding - 10} y={y + 3} textAnchor="end" className="text-[10px] fill-muted-foreground">{value}</text>
         </g>;
       })}
       {/* line */}
       <path d={linePath} fill="none" stroke={color} strokeWidth={2} />
       {/* points and labels */}
-      {points.map((point, index) => <g key={index}>
-        <circle cx={point.x} cy={point.y} r={4} fill={color} stroke="white" strokeWidth={2} />
-        <text x={point.x} y={point.y - 10} textAnchor="middle" className="text-[10px] fill-foreground">{point.display ?? point.value}</text>
-        <text x={point.x} y={height - 8} textAnchor="middle" className="text-[10px] fill-muted-foreground">{point.label}</text>
-      </g>)}
+      {points.map((point, index) => {
+        const isFirst = index === 0;
+        const isLast = index === data.length - 1;
+        const valueAnchor = isFirst ? "start" : isLast ? "end" : "middle";
+        const valueDx = isFirst ? 6 : isLast ? -6 : 0;
+        const labelAnchor = isFirst ? "start" : isLast ? "end" : "middle";
+        const labelDx = isFirst ? 4 : isLast ? -4 : 0;
+        const valueY = point.y - 14 < topPadding ? point.y + 14 : point.y - 10;
+        return <g key={index}>
+          <circle cx={point.x} cy={point.y} r={4} fill={color} stroke="white" strokeWidth={2} />
+          <text x={point.x} y={valueY} dx={valueDx} textAnchor={valueAnchor} className="text-[10px] fill-foreground">{point.display ?? point.value}</text>
+          <text x={point.x} y={height - 10} dx={labelDx} textAnchor={labelAnchor} className="text-[10px] fill-muted-foreground">{point.label}</text>
+        </g>;
+      })}
     </svg>
   </div>;
 }
