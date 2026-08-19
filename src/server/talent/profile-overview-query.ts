@@ -106,12 +106,14 @@ export async function getProfileOverviewExtras(
   let abilityMatchScore: number | null = null;
   if (contractStartAt && contractEndAt) {
     const kpiInContract = kpiRecords.filter((record) => {
-      const recordDate = new Date(record.year, (record.quarter - 1) * 3 + 1, 1);
+      // 季度结果以季度末作为生效时点（Q2 -> 6月30日），确保季度完整结束后才计入当前聘期
+      const recordDate = new Date(Date.UTC(record.year, record.quarter * 3, 0, 12, 0, 0));
       return recordDate >= contractStartAt && recordDate <= contractEndAt;
     });
     const reviewsInContract = reviewParticipants.filter((participant) => {
-      const month = participant.periodHalfYear === 1 ? 3 : 9;
-      const resultDate = new Date(participant.periodYear, month, 1);
+      // 半年度盘点以上半年末/下半年末作为生效时点（上半年 -> 6月30日）
+      const month = participant.periodHalfYear === 1 ? 6 : 12;
+      const resultDate = new Date(Date.UTC(participant.periodYear, month, 0, 12, 0, 0));
       return resultDate >= contractStartAt && resultDate <= contractEndAt;
     });
 
