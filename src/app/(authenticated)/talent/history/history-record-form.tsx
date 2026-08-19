@@ -117,7 +117,7 @@ function BatchHistoryTable({ decisionType, users, recommendations, levels, sourc
     PROMOTION: { columns: "md:grid-cols-[.9fr_1fr_1fr_.8fr_1fr_1.2fr_1.3fr]", headers: ["员工", "当前职级", "目标职级", "晋升结果", "晋升类型", "关联人才建议", "公司流程号 / 原因"] },
     SALARY_ADJUSTMENT: { columns: "md:grid-cols-[1fr_1.1fr_1.1fr_1.4fr_1.2fr]", headers: ["员工", "加薪后薪资", "关联人才建议", "公司流程号", "加薪原因"] },
     CONTRACT_RENEWAL: { columns: "md:grid-cols-[1fr_1fr_.7fr_1fr_1.2fr_1.1fr]", headers: ["员工", "新聘期结束日期", "聘期期数", "续签结果", "关联人才建议", "公司流程号"] },
-    REWARD: { columns: "md:grid-cols-[1fr_.8fr_1fr_1.2fr]", headers: ["员工", "奖励金额（元）", "关联人才建议", "公司流程号 / 说明"] },
+    REWARD: { columns: "md:grid-cols-[1fr_.8fr_1fr_1.2fr]", headers: ["员工", "奖励金额（元）", "关联人才建议", "奖励说明"] },
   } as const;
   const config = configs[decisionType];
 
@@ -200,7 +200,7 @@ function RewardFields({ user, recommendation, commonReward }: { user: HistoryUse
   return <>
     <HistoryField label="奖励金额（元）"><input key={amountKey} name={fieldName(user.id, "rewardAmount")} type="number" min="1" step="1" required defaultValue={defaultAmount} placeholder="金额" className={inputClass}/></HistoryField>
     <HistoryField label="关联人才建议">{recommendation}</HistoryField>
-    <HistoryField label="公司流程号 / 说明"><div className="grid gap-2"><input name={fieldName(user.id, "externalProcessNo")} placeholder="流程号" className={inputClass}/><input name={fieldName(user.id, "reason")} placeholder="奖励说明" className={inputClass}/></div></HistoryField>
+    <HistoryField label="奖励说明"><input name={fieldName(user.id, "reason")} placeholder="奖励说明" className={inputClass}/></HistoryField>
   </>;
 }
 
