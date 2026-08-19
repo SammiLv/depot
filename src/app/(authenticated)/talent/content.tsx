@@ -1648,8 +1648,9 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
   const height = 200;
   const chartWidth = width - leftPadding - rightPadding;
   const chartHeight = height - topPadding - bottomPadding;
+  const singlePoint = data.length === 1;
   const points = data.map((item, index) => {
-    const x = leftPadding + (index / (data.length - 1)) * chartWidth;
+    const x = singlePoint ? leftPadding + chartWidth / 2 : leftPadding + (index / (data.length - 1)) * chartWidth;
     const y = height - bottomPadding - ((item.value - min) / range) * chartHeight;
     return { x, y, value: item.value, label: item.label, display: item.display };
   });
@@ -1673,10 +1674,10 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
       {points.map((point, index) => {
         const isFirst = index === 0;
         const isLast = index === data.length - 1;
-        const valueAnchor = isFirst ? "start" : isLast ? "end" : "middle";
-        const valueDx = isFirst ? 6 : isLast ? -6 : 0;
-        const labelAnchor = isFirst ? "start" : isLast ? "end" : "middle";
-        const labelDx = isFirst ? 4 : isLast ? -4 : 0;
+        const valueAnchor = singlePoint ? "middle" : isFirst ? "start" : isLast ? "end" : "middle";
+        const valueDx = singlePoint ? 0 : isFirst ? 6 : isLast ? -6 : 0;
+        const labelAnchor = singlePoint ? "middle" : isFirst ? "start" : isLast ? "end" : "middle";
+        const labelDx = singlePoint ? 0 : isFirst ? 4 : isLast ? -4 : 0;
         const valueY = point.y - 14 < topPadding ? point.y + 14 : point.y - 10;
         return <g key={index}>
           <circle cx={point.x} cy={point.y} r={4} fill={color} stroke="white" strokeWidth={2} />
