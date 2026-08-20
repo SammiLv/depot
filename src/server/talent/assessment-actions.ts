@@ -7,7 +7,7 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { resolveAuthorizedOrgNodeIds, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
-import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
+import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import {
   allocateSubjectScores,
   earnedAssessmentScore,
@@ -19,8 +19,8 @@ import {
 
 function required(formData: FormData, key: string) { const value = String(formData.get(key) ?? "").trim(); if (!value) throw new Error(`${key} 不能为空`); return value; }
 function numberValue(formData: FormData, key: string) { const value = Number(required(formData, key)); if (!Number.isFinite(value)) throw new Error(`${key} 必须是数字`); return value; }
-async function manager() { const user = await requireCurrentUser(); const permission = await resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.manageBusinessAssessment); if (!permission.hasPermission) throw new Error("没有业务考核管理权限"); return user; }
-async function assertDepartment(user: Awaited<ReturnType<typeof requireCurrentUser>>, departmentOrgNodeId: string) { const ids = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.talent, talentAbilityKeys.manageBusinessAssessment); if (ids !== null && !ids.includes(departmentOrgNodeId)) throw new Error("不能管理该部门的业务考核"); }
+async function manager() { const user = await requireCurrentUser(); const permission = await resolvePermissionCoverage(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment); if (!permission.hasPermission) throw new Error("没有业务考核管理权限"); return user; }
+async function assertDepartment(user: Awaited<ReturnType<typeof requireCurrentUser>>, departmentOrgNodeId: string) { const ids = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment); if (ids !== null && !ids.includes(departmentOrgNodeId)) throw new Error("不能管理该部门的业务考核"); }
 
 export type BusinessAssessmentRuleActionState = {
   status: "idle" | "success" | "error";
@@ -321,7 +321,7 @@ export async function saveBusinessAssessmentRule(
       updatedById: user.id,
     };
     const standards = parsePassingStandards(formData);
-    const managedOrgNodeIds = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.talent, talentAbilityKeys.manageBusinessAssessment);
+    const managedOrgNodeIds = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment);
     const [validTeams, validUsers] = await Promise.all([
       prisma.orgNode.findMany({ where: { nodeType: "TEAM", ...(managedOrgNodeIds === null ? {} : { id: { in: managedOrgNodeIds } }) }, select: { id: true } }),
       prisma.user.findMany({ where: { isActive: true, deletedAt: null, roleType: { in: ["TEAM_LEADER", "MEMBER"] }, ...(managedOrgNodeIds === null ? {} : { orgNodeId: { in: managedOrgNodeIds } }) }, select: { id: true } }),

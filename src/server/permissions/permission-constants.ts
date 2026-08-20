@@ -18,6 +18,8 @@ export const kpiAbilityKeys = {
   scoreLeader: "SCORE_LEADER",
   scoreManager: "SCORE_MANAGER",
   scoreFinal: "SCORE_FINAL",
+  manageBusinessAssessment: "MANAGE_BUSINESS_ASSESSMENT",
+  manageWorkIncident: "MANAGE_WORK_INCIDENT",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
 export const talentAbilityKeys = {
@@ -66,6 +68,8 @@ export const kpiOrdinaryPermissionAbilityKeys = [
   kpiAbilityKeys.manageKpiTemplate,
   kpiAbilityKeys.toggleKpiTemplate,
   kpiAbilityKeys.scoreSelf,
+  kpiAbilityKeys.manageBusinessAssessment,
+  kpiAbilityKeys.manageWorkIncident,
 ] satisfies OrgPermissionAbilityKey[];
 
 export const kpiDefaultPermissionGrants: Array<{
@@ -210,23 +214,32 @@ type DefaultPermissionGrant = {
   orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
 };
 
+const migratedToKpiTalentAbilityKeys = new Set<OrgPermissionAbilityKey>([
+  talentAbilityKeys.manageBusinessAssessment,
+  talentAbilityKeys.manageWorkIncident,
+]);
+
 export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
-  ...Object.values(talentAbilityKeys).map((abilityKey) => ({
-    moduleKey: orgPermissionModuleKeys.talent,
-    abilityKey,
-    scopeType: "ALL" as const,
-    subjectType: "ROLE" as const,
-    roleType: "ADMIN" as const,
-    orgNodeSeedKey: null,
-  })),
-  ...Object.values(talentAbilityKeys).map((abilityKey) => ({
-    moduleKey: orgPermissionModuleKeys.talent,
-    abilityKey,
-    scopeType: "SUBTREE" as const,
-    subjectType: "ROLE" as const,
-    roleType: "DEPARTMENT_MANAGER" as const,
-    orgNodeSeedKey: "DEPARTMENT" as const,
-  })),
+  ...Object.values(talentAbilityKeys)
+    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
+    .map((abilityKey) => ({
+      moduleKey: orgPermissionModuleKeys.talent,
+      abilityKey,
+      scopeType: "ALL" as const,
+      subjectType: "ROLE" as const,
+      roleType: "ADMIN" as const,
+      orgNodeSeedKey: null,
+    })),
+  ...Object.values(talentAbilityKeys)
+    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
+    .map((abilityKey) => ({
+      moduleKey: orgPermissionModuleKeys.talent,
+      abilityKey,
+      scopeType: "SUBTREE" as const,
+      subjectType: "ROLE" as const,
+      roleType: "DEPARTMENT_MANAGER" as const,
+      orgNodeSeedKey: "DEPARTMENT" as const,
+    })),
   ...[
     talentAbilityKeys.viewProfile,
     talentAbilityKeys.viewReview,

@@ -19,7 +19,9 @@ import {
   saveDefaultTalentNineBoxRules,
   updateTalentReviewTemplate,
   updateTalentReviewDimension,
+  updateTalentAbilityCalculationWeights,
 } from "@/server/talent/review-actions";
+import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-template-dialog";
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
 import type { AssessmentWorkspaceData, TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
 import type { CareerWorkspaceData, CompetencyWorkspaceData } from "./operation-workspace-types";
@@ -70,10 +72,8 @@ import {
   type RestrictionRuleDraftActionState,
 } from "@/server/talent/restriction-rule-actions";
 import {
-  BusinessAssessmentQuarterlyWorkspace,
   TalentDecisionWorkspace,
   TalentHistoryWorkspace,
-  WorkIncidentWorkspace,
 } from "./operation-workspaces";
 import {
   AlertCircle,
@@ -101,7 +101,6 @@ import {
   SlidersHorizontal,
   Trash2,
   TrendingUp,
-  Upload,
   UserRound,
   WalletCards,
   X,
@@ -112,8 +111,8 @@ import { useRouter } from "next/navigation";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
-type Section = "overview" | "review" | "assessment" | "incident" | "decision" | "history" | "config";
-type ModalKind = "assessment-import" | "incident-create" | "decision-create" | "config-edit" | null;
+type Section = "overview" | "review" | "decision" | "history" | "config";
+
 type ConfigKey = "review" | "career" | "competency" | "salary" | "assessment" | "incident" | "kpi-rating" | "decision-rules";
 
 type ProfileExtras = {
@@ -129,6 +128,8 @@ type ProfileExtras = {
   abilityMatchScore: number | null;
   kpiTotalScore: number;
   reviewTotalScore: number;
+  kpiWeight: number;
+  reviewWeight: number;
 };
 
 type Person = {
@@ -241,7 +242,6 @@ export default function TalentPageContent({
   const [section, setSection] = useState<Section>("overview");
   const [historyInitialCategory, setHistoryInitialCategory] = useState<"profiles" | "promotion" | "contract" | "salary" | "reward">("profiles");
   const [activeConfig, setActiveConfig] = useState<ConfigKey | null>(null);
-  const [modal, setModal] = useState<ModalKind>(null);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
   const overviewDetail = reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
   const overviewTemplateId = overviewCycle?.templateVersionId ?? reviewWorkspace.config.templates.find((item) => item.status === "ACTIVE")?.id;
@@ -328,13 +328,12 @@ export default function TalentPageContent({
     <Card className="!p-6">
       <PageHeader
         title="人才发展"
-        description="人才画像 · 人才盘点 · 业务考核与事故 · 人才决策"
+        description="人才画像 · 人才盘点 · 人才决策"
       />
 
       <div className="flex items-center gap-1 border-b border-border mb-5 overflow-x-auto">
         {([
-          ["overview", "人才总览"], ["review", "人才盘点"], ["assessment", "业务考核"],
-          ["incident", "工作事故"], ["decision", "人才决策"], ["history", "人才履历"], ["config", "规则配置"],
+          ["overview", "人才总览"], ["review", "人才盘点"], ["decision", "人才决策"], ["history", "人才履历"], ["config", "规则配置"],
         ] as [Section, string][]).map(([key, label]) => <button key={key} onClick={() => { setSection(key); if (key === "config") setActiveConfig(null); }} className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${section === key ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
       </div>
 
@@ -406,14 +405,11 @@ export default function TalentPageContent({
       </>}
 
       {section === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
-      {section === "assessment" && <BusinessAssessmentQuarterlyWorkspace data={operationWorkspace.assessment} />}
-      {section === "incident" && <WorkIncidentWorkspace data={operationWorkspace.incident} />}
       {section === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
       {section === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
       {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} assessment={operationWorkspace.assessment} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
 
       {selected && <PersonDrawer person={selected} tab={tab} setTab={setTab} onClose={() => setSelected(null)} onNotice={showNotice} />}
-      {modal && <OperationModal kind={modal} onClose={() => setModal(null)} onSubmit={() => { setModal(null); showNotice("模拟数据已保存，本次不会写入数据库"); }} />}
       {notice && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] rounded-lg bg-slate-900 text-white px-4 py-3 shadow-xl text-sm flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" />{notice}</div>}
     </Card>
   );
@@ -495,23 +491,6 @@ function ReviewCycleDetailPanel({ detail, onBack }: { detail: ReviewCycleDetail;
 
 function reviewStatusLabel(status: string) { return ({ IN_PROGRESS: "进行中", CALIBRATING: "校准中", CONFIRMED: "已完成" } as Record<string, string>)[status] ?? status; }
 
-function AssessmentWorkbench({ onNotice }: { onImport: () => void; onNotice: (message: string) => void }) {
-  const rows = [
-    { name: "周明轩", subjects: "PPT演讲、系统演示、产品知识", result: "全部及格", score: "6 / 6", sync: "KPI可查询" },
-    { name: "吴雨桐", subjects: "PPT演讲、系统演示、产品知识", result: "1科补考及格", score: "5 / 6", sync: "KPI可查询" },
-    { name: "李隽贤", subjects: "PPT演讲、系统演示、产品知识", result: "1科补考不及格", score: "3 / 6", sync: "KPI可查询" },
-  ];
-  return <div><WorkbenchHeader title="业务考核" description="只管理最终考试结果；支持等级评分、分数评分和补考结果导入" action={<Link href="/talent/assessments" className={primaryActionLinkClass}><Upload className="w-4 h-4" />新建业务考核</Link>} /><div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 mb-4 flex items-center gap-3"><Database className="w-5 h-5 text-blue-600" /><div className="text-xs"><span className="font-medium text-foreground">当前计分规则：</span><span className="text-muted-foreground">总分 6 分，按科目均摊；首次及格得满分，补考及格得一半，最终不及格得 0 分。</span></div></div><Card className="!p-0 overflow-hidden"><div className="px-5 py-4 border-b border-border flex items-center justify-between"><div><h4 className="font-medium">2026 年 Q2 考核结果</h4><p className="text-xs text-muted-foreground mt-1">3 个考试科目 · 每科 2 分</p></div><Badge tone="success">已导入 18 人</Badge></div><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">员工</th><th className="text-left px-4 py-3 font-medium">考试科目</th><th className="text-left px-4 py-3 font-medium">最终结果</th><th className="text-left px-4 py-3 font-medium">KPI得分</th><th className="text-left px-4 py-3 font-medium">查询状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{rows.map((item) => <tr key={item.name}><td className="px-5 py-4 font-medium">{item.name}</td><td className="px-4 py-4 text-xs text-muted-foreground">{item.subjects}</td><td className="px-4 py-4"><Badge tone={item.result === "全部及格" ? "success" : item.result.includes("不及格") ? "danger" : "warning"}>{item.result}</Badge></td><td className="px-4 py-4 font-medium">{item.score}</td><td className="px-4 py-4 text-xs">{item.sync}</td><td className="px-5 py-4 text-right"><button onClick={() => onNotice(`已查看 ${item.name} 的科目结果`)} className="text-xs text-primary">查看结果</button></td></tr>)}</tbody></table></Card></div>;
-}
-
-function IncidentWorkbench() {
-  const incidents = [
-    { date: "2026-07-12", name: "示例员工A", level: "D", title: "一般工作规范事故", penalty: "工作事故项扣 10 分", status: "KPI可查询" },
-    { date: "2026-05-08", name: "示例员工B", level: "C", title: "项目交付责任事故", penalty: "工作事故项扣 40 分", status: "KPI可查询" },
-  ];
-  return <div><WorkbenchHeader title="工作事故" description="保存事故事实、等级和限制期，并向 KPI 工作事故项提供扣分结果" action={<Link href="/talent/incidents" className={primaryActionLinkClass}><Plus className="w-4 h-4" />进入事故管理</Link>} /><div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"><Metric label="本季度事故" value="2 起" hint="C级 1起 · D级 1起" /><Metric label="KPI累计扣分" value="-50 分" hint="工作事故指标项" /><Metric label="限制期内员工" value="2 人" hint="影响晋升、加薪、奖励" /></div><Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">发生日期</th><th className="text-left px-4 py-3 font-medium">责任人</th><th className="text-left px-4 py-3 font-medium">等级</th><th className="text-left px-4 py-3 font-medium">事故摘要</th><th className="text-left px-4 py-3 font-medium">KPI结果</th><th className="text-left px-4 py-3 font-medium">状态</th></tr></thead><tbody className="divide-y divide-border">{incidents.map((item) => <tr key={item.date + item.name}><td className="px-5 py-4 text-xs">{item.date}</td><td className="px-4 py-4 font-medium">{item.name}</td><td className="px-4 py-4"><Badge tone={item.level === "C" ? "danger" : "warning"}>{item.level}级</Badge></td><td className="px-4 py-4 text-xs">{item.title}</td><td className="px-4 py-4 text-xs font-medium">{item.penalty}</td><td className="px-4 py-4"><Badge tone="success">{item.status}</Badge></td></tr>)}</tbody></table></Card></div>;
-}
-
 function DecisionWorkbench() {
   const suggestions = [
     { id: "JY-2026-031", name: "周明轩", type: "晋升", suggestion: "R3-2 → R3-3", basis: "盘点S · KPI 103 · 考核6分", result: "已采纳", date: "2026-09-01" },
@@ -537,7 +516,7 @@ function TalentHistoryWorkbench() {
 
 function ConfigWorkbench({ data, career, competency, assessment, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; assessment: AssessmentWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
   const configs: Array<{ key: ConfigKey; icon: typeof SlidersHorizontal; title: string; detail: string; version: string }> = [
-    { key: "review", icon: SlidersHorizontal, title: "人才盘点模型", detail: "六维模型 · S/A/B/C/D评分 · 九宫格规则", version: "V1.0 已启用" },
+    { key: "review", icon: SlidersHorizontal, title: "人才能力评估", detail: "配置人才能力测算权重与人才盘点评价模型", version: "V1.0 已启用" },
     { key: "career", icon: Route, title: "职业发展通道", detail: "岗位族、岗位、职级组和 R3-1 等职级档", version: "V1.0 已启用" },
     { key: "competency", icon: ClipboardList, title: "职业能力模型", detail: "按岗位与目标职级配置晋升能力要求", version: "支持草稿与发布" },
     { key: "salary", icon: WalletCards, title: "薪资与职级上限", detail: "R1 至 R6 薪资上限及细分职级继承规则", version: "V1.0 已启用" },
@@ -552,7 +531,7 @@ function ConfigWorkbench({ data, career, competency, assessment, decisionRules, 
 
 function InlineConfigPanel({ data, career, competency, assessment, decisionRules, configKey, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; assessment: AssessmentWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; configKey: ConfigKey; onBack: () => void; onNotice: (message: string) => void }) {
   const meta: Record<ConfigKey, { title: string; description: string }> = {
-    review: { title: "人才盘点模型", description: "配置评价维度、评分档、等级区间和九宫格规则" },
+    review: { title: "人才能力评估", description: "配置人才能力测算权重与人才盘点评价模型" },
     career: { title: "职业发展通道", description: "配置职业通道、岗位序列、具体岗位和细分职级" },
     competency: { title: "职业能力模型", description: "按岗位与目标职级配置晋升能力要求" },
     salary: { title: "薪资与职级上限", description: "维护职级段薪资上限和细分职级覆盖规则" },
@@ -1350,6 +1329,7 @@ function CareerLevelRows({ data }: { data: CareerWorkspaceData }) {
 }
 
 function ReviewModelConfiguration({ data }: { data: ReviewWorkspaceData }) {
+  const [moduleTab, setModuleTab] = useState<"ability" | "review">("ability");
   const [selectedId, setSelectedId] = useState(data.config.templates[0]?.id ?? "");
   const [screen, setScreen] = useState<"list" | "create" | "detail">("list");
   const [ruleTab, setRuleTab] = useState<"dimension" | "rating" | "threshold" | "box">("dimension");
@@ -1361,9 +1341,71 @@ function ReviewModelConfiguration({ data }: { data: ReviewWorkspaceData }) {
   const thresholds = data.config.thresholds.filter((item) => item.templateVersionId === selected?.id);
   const boxes = data.config.nineBoxRules.filter((item) => item.templateVersionId === selected?.id);
   const isDraft = selected?.status === "DRAFT";
-  if (screen === "list") return <div><div className="mb-4 flex justify-end"><Button className={actionButtonClass} onClick={() => setScreen("create")}><Plus className="h-4 w-4"/>新建模型版本</Button></div><div className="space-y-2">{data.config.templates.map((item) => <button key={item.id} onClick={() => { setSelectedId(item.id); setScreen("detail"); }} className="flex w-full items-center justify-between rounded-xl border border-border p-4 text-left hover:border-primary/40"><div><div className="font-medium">{item.name} · V{item.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentName.get(item.departmentOrgNodeId)}</div></div><div className="flex items-center gap-3"><Badge tone={item.status === "ACTIVE" ? "success" : item.status === "DRAFT" ? "warning" : "default"}>{item.status === "ACTIVE" ? "已发布" : item.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><span className="text-xs text-primary">{item.status === "DRAFT" ? "编辑" : "查看"} ›</span></div></button>)}{!data.config.templates.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无模型版本</div>}</div></div>;
-  if (screen === "create") return <div><WorkbenchHeader title="新建人才盘点模型" description="新建后形成独立草稿版本" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="模型基本信息"><form action={createTalentReviewTemplate} className="space-y-3"><select name="departmentOrgNodeId" required className={inputClass}>{data.config.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input name="name" required placeholder="模型名称" className={inputClass}/><input name="description" placeholder="模型用途或本版本说明" className={inputClass}/><p className="text-xs leading-5 text-muted-foreground">模型编号和初始版本由系统自动生成；后续调整通过“复制为新草稿版本”进行。</p><Button type="submit" className={actionButtonClass} disabled={data.config.departments.length === 0}><Plus className="w-4 h-4"/>保存为草稿</Button></form></ConfigBlock></div>;
-  return <div className="space-y-4"><WorkbenchHeader title="人才盘点模型详情" description="草稿可编辑，已发布和历史版本只读" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/>
+  const moduleTabs = (
+    <div className="border-b border-border">
+      <div className="flex gap-6">
+        <button onClick={() => setModuleTab("ability")} className={`pb-2 text-sm border-b-2 transition-colors ${moduleTab === "ability" ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>人才能力测算模型</button>
+        <button onClick={() => setModuleTab("review")} className={`pb-2 text-sm border-b-2 transition-colors ${moduleTab === "review" ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>人才盘点模型</button>
+      </div>
+    </div>
+  );
+  if (moduleTab === "ability") {
+    const [showCreate, setShowCreate] = useState(false);
+    return (
+      <div className="space-y-4">
+        {moduleTabs}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">人才能力测算模型版本</h3>
+            <p className="text-xs text-muted-foreground mt-1">每个版本独立维护 KPI 与人才盘点的权重配比；仅草稿版本可编辑权重。</p>
+          </div>
+          <Button className={actionButtonClass} onClick={() => setShowCreate((value) => !value)}><Plus className="h-4 w-4" />{showCreate ? "取消新建" : "新建模型版本"}</Button>
+        </div>
+        {showCreate && (
+          <ConfigBlock title="新建模型版本">
+            <form action={createTalentReviewTemplate} onSubmit={() => setShowCreate(false)} className="space-y-3">
+              <select name="departmentOrgNodeId" required className={inputClass}>{data.config.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+              <input name="name" required placeholder="模型名称" className={inputClass}/>
+              <input name="description" placeholder="模型用途或本版本说明" className={inputClass}/>
+              <p className="text-xs leading-5 text-muted-foreground">模型编号和初始版本由系统自动生成；新建后默认权重为 KPI 60% + 人才盘点 40%。</p>
+              <Button type="submit" className={actionButtonClass} disabled={data.config.departments.length === 0}><Plus className="w-4 h-4"/>保存为草稿</Button>
+            </form>
+          </ConfigBlock>
+        )}
+        <AbilityTemplateVersionList templates={data.config.templates} departments={data.config.departments} selectedId={selected?.id} onSelect={setSelectedId} />
+        {selected ? (
+          <Card className="space-y-4">
+            <div>
+              <h3 className="font-semibold">{selected.name} V{selected.version} · 人才能力测算权重</h3>
+              <p className="text-xs text-muted-foreground mt-1">配置该版本在人才画像中“能力匹配度”的 KPI 与人才盘点权重，两者之和须为 100%。</p>
+            </div>
+            <form action={updateTalentAbilityCalculationWeights} className="space-y-4">
+              <input type="hidden" name="id" value={selected.id} />
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">KPI 权重</span>
+                  <input name="kpiWeight" type="number" min="0" max="1" step="0.01" required defaultValue={selected.kpiWeight} disabled={!isDraft} className={inputClass} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">人才盘点权重</span>
+                  <input name="reviewWeight" type="number" min="0" max="1" step="0.01" required defaultValue={selected.reviewWeight} disabled={!isDraft} className={inputClass} />
+                </label>
+              </div>
+              <div className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground leading-5">
+                当前公式：能力匹配度 =（当前聘期内 KPI 均值 / 季度 KPI 总分）× {Math.round(selected.kpiWeight * 100)}% +（当前聘期内盘点均值 / 盘点模型总分 {modelFullScore}）× {Math.round(selected.reviewWeight * 100)}%
+              </div>
+              {isDraft ? <Button type="submit" className={actionButtonClass}><Save className="h-4 w-4" />保存权重</Button> : <div className="text-xs text-muted-foreground">仅草稿版本可编辑权重；如需调整请复制为新草稿版本。</div>}
+            </form>
+          </Card>
+        ) : (
+          <Card className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">暂无模型版本，请点击右上角“新建模型版本”创建。</Card>
+        )}
+      </div>
+    );
+  }
+  if (screen === "list") return <div className="space-y-4">{moduleTabs}<div><div className="mb-4 flex justify-end"><Button className={actionButtonClass} onClick={() => setScreen("create")}><Plus className="h-4 w-4"/>新建模型版本</Button></div><div className="space-y-2">{data.config.templates.map((item) => <div key={item.id} className="flex w-full items-center justify-between rounded-xl border border-border p-4 hover:border-primary/40"><button onClick={() => { setSelectedId(item.id); setScreen("detail"); }} className="min-w-0 flex-1 text-left"><div><div className="font-medium">{item.name} · V{item.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentName.get(item.departmentOrgNodeId)}</div></div></button><div className="flex items-center gap-3"><Badge tone={item.status === "ACTIVE" ? "success" : item.status === "DRAFT" ? "warning" : "default"}>{item.status === "ACTIVE" ? "已发布" : item.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><span className="text-xs text-primary">{item.status === "DRAFT" ? "编辑" : "查看"} ›</span>{item.status === "DRAFT" && <DeleteDraftTemplateDialog id={item.id} name={`${item.name} V${item.version}`}/>}</div></div>)}{!data.config.templates.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无模型版本</div>}</div></div></div>;
+  if (screen === "create") return <div className="space-y-4">{moduleTabs}<WorkbenchHeader title="新建人才盘点模型" description="新建后形成独立草稿版本" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="模型基本信息"><form action={createTalentReviewTemplate} className="space-y-3"><select name="departmentOrgNodeId" required className={inputClass}>{data.config.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input name="name" required placeholder="模型名称" className={inputClass}/><input name="description" placeholder="模型用途或本版本说明" className={inputClass}/><p className="text-xs leading-5 text-muted-foreground">模型编号和初始版本由系统自动生成；后续调整通过“复制为新草稿版本”进行。</p><Button type="submit" className={actionButtonClass} disabled={data.config.departments.length === 0}><Plus className="w-4 h-4"/>保存为草稿</Button></form></ConfigBlock></div>;
+  return <div className="space-y-4">{moduleTabs}<WorkbenchHeader title="人才盘点模型详情" description="草稿可编辑，已发布和历史版本只读" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/>
     {!selected ? <Card className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">规则版本不存在</Card> : <div className="space-y-4">
       <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-semibold">{selected.name} V{selected.version}</h3><Badge tone={selected.status === "ACTIVE" ? "success" : selected.status === "DRAFT" ? "warning" : "default"}>{selected.status === "ACTIVE" ? "已发布" : selected.status === "DRAFT" ? "草稿可编辑" : "历史版本"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{departmentName.get(selected.departmentOrgNodeId)} · 模型版本 V{selected.version}</p></div><div className="flex gap-2">{isDraft ? <><form action={initializeDefaultTalentReviewTemplate}><input type="hidden" name="templateVersionId" value={selected.id}/><Button type="submit" className={actionButtonClass} variant="outline" disabled={dimensions.length > 0}>初始化默认规则</Button></form><PublishTemplateForm templateId={selected.id}/></> : <form action={cloneTalentReviewTemplateVersion}><input type="hidden" name="sourceId" value={selected.id}/><Button type="submit" className={actionButtonClass}><Plus className="w-4 h-4"/>复制为新草稿版本</Button></form>}</div></div>
         {isDraft ? <form action={updateTalentReviewTemplate} className="mt-4 grid gap-2 md:grid-cols-[1fr_2fr_auto]"><input type="hidden" name="id" value={selected.id}/><input name="name" defaultValue={selected.name} required className={inputClass}/><input name="description" defaultValue={selected.description ?? ""} placeholder="本版本调整说明" className={inputClass}/><Button type="submit" className={actionButtonClass} variant="outline"><Save className="w-4 h-4"/>保存基础信息</Button></form> : <div className="mt-4 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">已发布版本不可直接修改；如需调整，请复制为新草稿版本。历史盘点继续使用原版本快照。</div>}
@@ -1378,11 +1420,40 @@ function ReviewModelConfiguration({ data }: { data: ReviewWorkspaceData }) {
   </div>;
 }
 
+function AbilityTemplateVersionList({ templates, departments, selectedId, onSelect }: { templates: ReviewWorkspaceData["config"]["templates"]; departments: ReviewWorkspaceData["config"]["departments"]; selectedId?: string; onSelect: (id: string) => void }) {
+  const departmentName = new Map(departments.map((item) => [item.id, item.name]));
+  if (templates.length === 0) return <Card className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">暂无模型版本</Card>;
+  return <div className="space-y-2">{templates.map((item) => {
+    const isSelected = item.id === selectedId;
+    const isDraft = item.status === "DRAFT";
+    return <div key={item.id} className={`rounded-xl border p-4 transition-colors ${isSelected ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <button onClick={() => onSelect(item.id)} className="min-w-0 flex-1 text-left">
+          <div className="font-medium">{item.name} · V{item.version}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{departmentName.get(item.departmentOrgNodeId)} · KPI {Math.round(item.kpiWeight * 100)}% / 盘点 {Math.round(item.reviewWeight * 100)}%</div>
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={item.status === "ACTIVE" ? "success" : item.status === "DRAFT" ? "warning" : "default"}>{item.status === "ACTIVE" ? "已发布" : item.status === "DRAFT" ? "草稿" : "历史版本"}</Badge>
+          {isDraft ? <>
+            <Button className={actionButtonClass} variant="outline" onClick={() => onSelect(item.id)}>编辑权重</Button>
+            <PublishTemplateForm templateId={item.id}/>
+            <DeleteDraftTemplateDialog id={item.id} name={`${item.name} V${item.version}`}/>
+          </> : <>
+            <form action={cloneTalentReviewTemplateVersion}><input type="hidden" name="sourceId" value={item.id}/><Button type="submit" className={actionButtonClass} variant="outline"><Plus className="h-4 w-4"/>复制为新草稿</Button></form>
+            <Button className={actionButtonClass} variant="outline" onClick={() => onSelect(item.id)}>查看</Button>
+          </>}
+        </div>
+      </div>
+    </div>;
+  })}</div>;
+}
+
 function HiddenTemplate({ id }: { id: string }) { return <input type="hidden" name="templateVersionId" value={id}/>; }
 function PublishTemplateForm({ templateId }: { templateId: string }) {
   const [state, formAction, pending] = useActionState(publishTalentReviewTemplateWithState, { status: "idle" as const, message: "", requestId: "" });
   return <><form action={formAction}><input type="hidden" name="id" value={templateId}/><Button type="submit" className={actionButtonClass} disabled={pending}>{pending ? "正在校验…" : "校验并发布"}</Button></form><ActionFeedback key={state.requestId} state={state}/></>;
 }
+
 function ActionFeedback({ state }: { state: { status: "idle" | "success" | "error"; message: string } }) {
   const [visible, setVisible] = useState(Boolean(state.message));
   useEffect(() => {
@@ -1457,30 +1528,12 @@ function ConfigBlock({ title, children }: { title: string; children: React.React
   return <Card><h3 className="mb-4 font-semibold">{title}</h3>{children}</Card>;
 }
 
-function OperationModal({ kind, onClose, onSubmit }: { kind: Exclude<ModalKind, null>; onClose: () => void; onSubmit: () => void }) {
-  const meta = {
-    "assessment-import": { title: "导入业务考核结果", description: "只导入最终结果，不记录考试过程" },
-    "incident-create": { title: "录入工作事故", description: "保存事故事实与等级，自动计算 KPI 工作事故项" },
-    "decision-create": { title: "登记正式决策结果", description: "记录公司其他管理系统产生的最终结果" },
-    "config-edit": { title: "配置规则版本", description: "此处仅演示规则配置交互，不保存到数据库" },
-  }[kind];
-  return <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"><button aria-label="关闭弹窗" onClick={onClose} className="absolute inset-0 bg-slate-950/35" /><div className="relative w-full max-w-xl rounded-2xl border border-border bg-card shadow-2xl"><div className="px-6 py-5 border-b border-border flex items-start"><div className="flex-1"><h3 className="text-lg font-semibold">{meta.title}</h3><p className="text-xs text-muted-foreground mt-1">{meta.description}</p></div><button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center"><X className="w-4 h-4" /></button></div><div className="p-6 space-y-4">{kind === "assessment-import" && <AssessmentImportForm />}{kind === "incident-create" && <IncidentForm />}{kind === "decision-create" && <DecisionForm />}{kind === "config-edit" && <ConfigForm />}</div><div className="px-6 py-4 border-t border-border flex justify-end gap-2"><Button className={actionButtonClass} variant="outline" onClick={onClose}>取消</Button><Button className={actionButtonClass} onClick={onSubmit}><Save className="w-4 h-4" />{kind === "assessment-import" ? "确认导入" : "保存"}</Button></div></div></div>;
-}
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   // Internal codes are maintained by the system and must never be exposed as user input.
   if (label.includes("编码")) return <div className="hidden" aria-hidden="true">{children}</div>;
   return <label className={`block ${label === "科目名称" ? "md:col-span-2" : ""}`}><span className="block text-xs font-medium mb-2">{label}</span>{children}</label>;
 }
 const inputClass = "w-full h-10 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:border-primary";
-
-function AssessmentImportForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="考核季度"><select className={inputClass}><option>2026年 Q3</option><option>2026年 Q2</option></select></Field><Field label="业务考核方案"><select className={inputClass}><option>产品部通用业务考核</option></select></Field></div><Field label="结果文件"><label className="h-28 rounded-xl border border-dashed border-primary/35 bg-primary/5 flex flex-col items-center justify-center cursor-pointer"><Upload className="w-6 h-6 text-primary" /><span className="text-sm mt-2">点击选择 Excel 文件</span><span className="text-[11px] text-muted-foreground mt-1">支持 .xlsx，导入前会预检员工和科目</span><input type="file" accept=".xlsx" className="hidden" /></label></Field><div className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">导入字段：员工编号、科目、评分方式、要求值、最终结果、是否补考、最终是否及格。</div></>; }
-
-function IncidentForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="责任人"><select className={inputClass}><option>请选择员工</option>{people.slice(0,5).map((person) => <option key={person.id}>{person.name}</option>)}</select></Field><Field label="事故等级"><select className={inputClass}><option>D级 · 扣10分</option><option>C级 · 扣40分</option><option>B级 · 扣满110分</option><option>A级 · 扣满110分</option><option>S级 · 扣满110分</option></select></Field><Field label="发生日期"><input type="date" defaultValue="2026-08-05" className={inputClass} /></Field><Field label="限制期至"><input type="date" className={inputClass} /></Field></div><Field label="事故摘要"><input placeholder="请输入事故名称或简要说明" className={inputClass} /></Field><Field label="事实与处理结果"><textarea placeholder="记录已确认的事故事实、责任认定及处理结果" className="w-full min-h-24 rounded-lg border border-border bg-background p-3 text-sm focus:outline-none focus:border-primary" /></Field></>; }
-
-function DecisionForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="员工"><select className={inputClass}><option>请选择员工</option>{people.slice(0,5).map((person) => <option key={person.id}>{person.name}</option>)}</select></Field><Field label="结果类型"><select className={inputClass}><option>晋升</option><option>续签</option><option>加薪</option><option>奖励</option></select></Field><Field label="关联部门建议"><select className={inputClass}><option>选择建议（可选）</option><option>2026Q2 建议晋升</option></select></Field><Field label="生效日期"><input type="date" className={inputClass} /></Field></div><Field label="公司最终结果"><input placeholder="例如：R3-2 晋升至 R3-3" className={inputClass} /></Field><Field label="结果说明"><textarea placeholder="记录公司流程编号、差异说明等" className="w-full min-h-20 rounded-lg border border-border bg-background p-3 text-sm focus:outline-none focus:border-primary" /></Field></>; }
-
-function ConfigForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="配置类型"><select className={inputClass}><option>人才盘点模型</option><option>职业发展通道</option><option>职业能力模型</option><option>薪资与职级上限</option><option>业务考核规则</option><option>工作事故等级配置</option></select></Field><Field label="版本名称"><input defaultValue="V1.1" className={inputClass} /></Field></div><Field label="适用范围"><select className={inputClass}><option>产品部全员</option><option>B端产品岗位</option><option>C端产品岗位</option><option>设计岗位</option></select></Field><Field label="版本说明"><textarea placeholder="说明本版本调整内容" className="w-full min-h-20 rounded-lg border border-border bg-background p-3 text-sm focus:outline-none focus:border-primary" /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" className="rounded border-border" />保存后立即启用此版本</label></>; }
 
 function QuickCard({ icon, tone, hoverTone, label, value, names, action }: { icon: React.ReactNode; tone: string; hoverTone: string; label: string; value: string; names: string[]; action: () => void }) {
   const displayNames = names.join("、");
@@ -1594,6 +1647,15 @@ function Overview({ person }: { person: Person; setTab: (tab: Tab) => void }) {
 
     <section>
       <h3 className="text-sm font-semibold mb-3">能力表现</h3>
+      <Card className="!p-4 mb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium">能力匹配度</div>
+            <div className="text-xs text-muted-foreground mt-1">(当前聘期内 KPI 均值 / 季度 KPI 总分) × {Math.round((extras?.kpiWeight ?? 0.6) * 100)}% + (当前聘期内盘点均值 / 盘点模型总分) × {Math.round((extras?.reviewWeight ?? 0.4) * 100)}%</div>
+          </div>
+          <div className="text-2xl font-semibold text-primary">{extras?.abilityMatchScore != null ? `${extras.abilityMatchScore}%` : "—"}</div>
+        </div>
+      </Card>
       <div className="space-y-3">
         <Card className="!p-4">
           <div className="text-sm font-medium mb-3">聘期内 KPI 历史趋势</div>
@@ -1604,15 +1666,6 @@ function Overview({ person }: { person: Person; setTab: (tab: Tab) => void }) {
           {reviewHistory.length > 0 ? <LineChart data={[...reviewHistory].reverse().map((item) => ({ label: item.period, value: item.score, display: `${item.grade ?? "—"}/${item.score}` }))} color="#3b82f6" minValue={0} maxValue={extras?.reviewTotalScore ?? 30} /> : <div className="text-xs text-muted-foreground py-6 text-center">暂无聘期内盘点数据</div>}
         </Card>
       </div>
-      <Card className="!p-4 mt-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">能力匹配度</div>
-            <div className="text-xs text-muted-foreground mt-1">(当前聘期内 KPI 均值 / 季度 KPI 总分) × 60% + (当前聘期内盘点均值 / 盘点模型总分) × 40%</div>
-          </div>
-          <div className="text-2xl font-semibold text-primary">{extras?.abilityMatchScore != null ? `${extras.abilityMatchScore}%` : "—"}</div>
-        </div>
-      </Card>
     </section>
   </div>;
 }

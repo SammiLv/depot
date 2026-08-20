@@ -8,10 +8,18 @@ import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, up
 import { runServerAction } from "@/lib/run-server-action";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
+import { BusinessAssessmentQuarterlyWorkspace, WorkIncidentWorkspace } from "../talent/operation-workspaces";
+import type { AssessmentWorkspaceData, IncidentWorkspaceData } from "../talent/operation-workspace-types";
 
 
-type Props = { data: Awaited<ReturnType<typeof getKpiData>> };
-type SectionTab = "quarterly-kpi" | "kpi-template";
+type Props = {
+  data: Awaited<ReturnType<typeof getKpiData>>;
+  assessmentData: AssessmentWorkspaceData;
+  incidentData: IncidentWorkspaceData;
+  selectedYear: number;
+  selectedQuarter: number;
+};
+type SectionTab = "quarterly-kpi" | "business-assessment" | "work-incident" | "kpi-template";
 type TeamTab = "all" | Props["data"]["teamOptions"][number]["id"];
 type TemplateRow = Props["data"]["templateRows"][number];
 
@@ -1261,7 +1269,7 @@ function TemplateImportForm({
   );
 }
 
-export function KpiContent({ data }: Props) {
+export function KpiContent({ data, assessmentData, incidentData, selectedYear, selectedQuarter }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1281,6 +1289,10 @@ export function KpiContent({ data }: Props) {
   const quarterOptions = useMemo<QuarterOption[]>(
     () => [1, 2, 3, 4].map((quarter) => ({ value: quarter, label: `Q${quarter}` })),
     []
+  );
+  const filterQuarterOptions = useMemo<QuarterOption[]>(
+    () => [{ value: 0, label: "全部" }, ...quarterOptions],
+    [quarterOptions]
   );
 
   useEffect(() => {
@@ -1448,6 +1460,8 @@ export function KpiContent({ data }: Props) {
           <div className="inline-flex rounded-lg bg-muted p-1">
             {[
               { key: "quarterly-kpi" as const, label: "季度KPI" },
+              { key: "business-assessment" as const, label: "业务考核" },
+              { key: "work-incident" as const, label: "工作事故" },
               { key: "kpi-template" as const, label: "KPI模板" },
             ].map((tab) => (
               <button
@@ -1475,12 +1489,12 @@ export function KpiContent({ data }: Props) {
             ) : null}
           </div>
 
-          {sectionTab === "quarterly-kpi" ? (
+          {sectionTab !== "kpi-template" ? (
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
                 <select
-                  value={String(data.year)}
-                  onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), data.quarter)}
+                  value={String(selectedYear)}
+                  onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), selectedQuarter)}
                   className="h-full bg-transparent outline-none"
                 >
                   {data.availableYears.map((year) => (
@@ -1490,12 +1504,12 @@ export function KpiContent({ data }: Props) {
               </label>
               <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
                 <select
-                  value={String(data.quarter)}
-                  onChange={(event) => updatePeriodFilters(data.year, Number.parseInt(event.target.value, 10))}
+                  value={String(selectedQuarter)}
+                  onChange={(event) => updatePeriodFilters(selectedYear, Number.parseInt(event.target.value, 10))}
                   className="h-full bg-transparent outline-none"
                 >
-                  {data.availableQuarters.map((quarter) => (
-                    <option key={quarter} value={quarter}>Q{quarter}季度</option>
+                  {filterQuarterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}{option.value === 0 ? "" : "季度"}</option>
                   ))}
                 </select>
               </label>
@@ -1504,8 +1518,14 @@ export function KpiContent({ data }: Props) {
 
           <div className="ml-auto text-xs text-muted-foreground">
             {sectionTab === "quarterly-kpi"
-              ? `当前看板：${data.year} Q${data.quarter}`
-              : `当前模板部门：${data.departmentOptions.find((department) => department.id === departmentTab)?.name ?? "—"}`}
+              ? `当前看板：${selectedYear} ${selectedQuarter === 0 ? "全年" : `Q${selectedQuarter}`}`
+              : sectionTab === "business-assessment"
+                ? `当前看板：${selectedYear} ${selectedQuarter === 0 ? "全年业务考核" : `Q${selectedQuarter} 业务考核`}`
+                : sectionTab === "work-incident"
+                  ? `当前看板：${selectedYear} ${selectedQuarter === 0 ? "全年工作事故" : `Q${selectedQuarter} 工作事故`}`
+                  : sectionTab === "kpi-template"
+                    ? `当前模板部门：${data.departmentOptions.find((department) => department.id === departmentTab)?.name ?? "—"}`
+                    : null}
           </div>
         </div>
 
@@ -1634,6 +1654,14 @@ export function KpiContent({ data }: Props) {
                 </tbody>
               </table>
             </Card>
+          </div>
+        ) : sectionTab === "business-assessment" ? (
+          <div className="px-5 pb-5">
+            <BusinessAssessmentQuarterlyWorkspace data={assessmentData} />
+          </div>
+        ) : sectionTab === "work-incident" ? (
+          <div className="px-5 pb-5">
+            <WorkIncidentWorkspace data={incidentData} />
           </div>
         ) : (
           <div className="px-5 pb-5">

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/server/db/prisma";
 
-export const SESSION_COOKIE_NAME = "department_mvp_user_id";
+export const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME?.trim() || "department_mvp_user_id";
 
 export async function getCurrentUser() {
   const cookieStore = await cookies();

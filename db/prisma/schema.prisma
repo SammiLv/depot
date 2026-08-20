@@ -1354,6 +1354,8 @@ model TalentReviewTemplateVersion {
   departmentOrgNodeId String
   version             Int                 @default(1)
   status              TalentVersionStatus @default(DRAFT)
+  kpiWeight           Float               @default(0.6)
+  reviewWeight        Float               @default(0.4)
   description         String?
   createdById         String
   publishedAt         DateTime?

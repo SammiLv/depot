@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/prisma";
+import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 
 export type ProfileOverviewExtras = {
   yearsOfService: number;
@@ -13,6 +14,8 @@ export type ProfileOverviewExtras = {
   abilityMatchScore: number | null;
   kpiTotalScore: number;
   reviewTotalScore: number;
+  kpiWeight: number;
+  reviewWeight: number;
 };
 
 function formatKpiPeriod(year: number, quarter: number) {
@@ -33,7 +36,8 @@ export async function getProfileOverviewExtras(
 ): Promise<ProfileOverviewExtras> {
   const now = new Date();
 
-  const [employeeProfile, earliestContract, responsiblePeople, kpiRecords, reviewParticipants] = await Promise.all([
+  const [user, employeeProfile, earliestContract, responsiblePeople, kpiRecords, reviewParticipants] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { orgNodeId: true } }),
     prisma.employeeTalentProfile.findFirst({
       where: { userId, deletedAt: null },
       select: {
@@ -65,6 +69,17 @@ export async function getProfileOverviewExtras(
       select: { id: true, periodYear: true, periodHalfYear: true },
     }),
   ]);
+
+  const departmentOrgNodeId = await findNearestDepartmentOrgNodeId(user?.orgNodeId);
+  const activeReviewTemplate = departmentOrgNodeId
+    ? await prisma.talentReviewTemplateVersion.findFirst({
+        where: { departmentOrgNodeId, status: "ACTIVE", deletedAt: null },
+        orderBy: { publishedAt: "desc" },
+        select: { kpiWeight: true, reviewWeight: true },
+      })
+    : null;
+  const kpiWeight = activeReviewTemplate?.kpiWeight ?? 0.6;
+  const reviewWeight = activeReviewTemplate?.reviewWeight ?? 0.4;
 
   const incidentIds = responsiblePeople.map((row) => row.incidentId);
   const latestIncident = incidentIds.length > 0
@@ -102,7 +117,7 @@ export async function getProfileOverviewExtras(
     })
     .filter((item) => item.score > 0 || item.grade);
 
-  // 能力模型匹配度：当前聘期内 KPI 均值/kpiTotalScore*60% + 当前聘期内人才盘点均值/reviewTotalScore*40%
+  // 能力模型匹配度：当前聘期内 KPI 均值/kpiTotalScore*kpiWeight + 当前聘期内人才盘点均值/reviewTotalScore*reviewWeight
   let abilityMatchScore: number | null = null;
   if (contractStartAt && contractEndAt) {
     const kpiInContract = kpiRecords.filter((record) => {
@@ -128,8 +143,8 @@ export async function getProfileOverviewExtras(
       : 0;
 
     if (options.kpiTotalScore > 0 && options.reviewTotalScore > 0 && (kpiInContract.length > 0 || reviewsInContract.length > 0)) {
-      const kpiRatio = kpiInContract.length > 0 ? (kpiMean / options.kpiTotalScore) * 0.6 : 0;
-      const reviewRatio = reviewsInContract.length > 0 ? (reviewMean / options.reviewTotalScore) * 0.4 : 0;
+      const kpiRatio = kpiInContract.length > 0 ? (kpiMean / options.kpiTotalScore) * kpiWeight : 0;
+      const reviewRatio = reviewsInContract.length > 0 ? (reviewMean / options.reviewTotalScore) * reviewWeight : 0;
       abilityMatchScore = Math.round((kpiRatio + reviewRatio) * 100);
     }
   }
@@ -151,5 +166,7 @@ export async function getProfileOverviewExtras(
     abilityMatchScore,
     kpiTotalScore: options.kpiTotalScore,
     reviewTotalScore: options.reviewTotalScore,
+    kpiWeight,
+    reviewWeight,
   };
 }

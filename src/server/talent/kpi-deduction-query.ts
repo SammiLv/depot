@@ -1,14 +1,16 @@
 import type { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { buildUserWhereByPermission } from "@/server/permissions/permission-resolver";
-import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 
 type Viewer = { id: string; roleType: RoleType; orgNodeId?: string | null };
 
-async function canViewTarget(viewer: Viewer, userId: string, abilityKey: (typeof talentAbilityKeys)[keyof typeof talentAbilityKeys]) {
-  const where = await buildUserWhereByPermission(viewer, orgPermissionModuleKeys.talent, abilityKey);
-  return Boolean(await prisma.user.findFirst({ where: { ...where, id: userId }, select: { id: true } }));
+async function canViewTarget(viewer: Viewer, userId: string) {
+  if (viewer.roleType === "ADMIN") return true;
+  const [viewerDepartment, targetDepartment] = await Promise.all([
+    findNearestDepartmentOrgNodeId(viewer.orgNodeId),
+    prisma.user.findUnique({ where: { id: userId }, select: { orgNodeId: true } }).then((user) => findNearestDepartmentOrgNodeId(user?.orgNodeId)),
+  ]);
+  return viewerDepartment != null && viewerDepartment === targetDepartment;
 }
 
 async function loadTalentKpiDeductionReminder(viewer: Viewer, userId: string, year: number, quarter: number) {
@@ -17,8 +19,8 @@ async function loadTalentKpiDeductionReminder(viewer: Viewer, userId: string, ye
   const [cycle, incidentSummary, canViewAssessment, canViewIncident] = await Promise.all([
     departmentOrgNodeId ? prisma.businessAssessmentCycle.findFirst({ where: { year, quarter, departmentOrgNodeId, status: "CONFIRMED", deletedAt: null }, select: { id: true, totalKpiScore: true } }) : null,
     prisma.workIncidentQuarterSummary.findUnique({ where: { userId_year_quarter: { userId, year, quarter } } }),
-    canViewTarget(viewer, userId, talentAbilityKeys.viewBusinessAssessment),
-    canViewTarget(viewer, userId, talentAbilityKeys.viewWorkIncident),
+    canViewTarget(viewer, userId),
+    canViewTarget(viewer, userId),
   ]);
   const assessmentSummary = cycle ? await prisma.businessAssessmentSummary.findUnique({ where: { cycleId_userId: { cycleId: cycle.id, userId } } }) : null;
   const assessment = assessmentSummary ? {

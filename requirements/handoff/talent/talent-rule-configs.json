@@ -210,6 +210,38 @@
             "colorToken": "danger",
             "sortOrder": 90
           }
+        ],
+        "ratingOptions": [
+          {
+            "code": "S",
+            "label": "杰出",
+            "numericScore": 5,
+            "sortOrder": 10
+          },
+          {
+            "code": "A",
+            "label": "优秀",
+            "numericScore": 4,
+            "sortOrder": 20
+          },
+          {
+            "code": "B",
+            "label": "普通",
+            "numericScore": 3,
+            "sortOrder": 30
+          },
+          {
+            "code": "C",
+            "label": "略差",
+            "numericScore": 2,
+            "sortOrder": 40
+          },
+          {
+            "code": "D",
+            "label": "淘汰",
+            "numericScore": 1,
+            "sortOrder": 50
+          }
         ]
       }
     ],

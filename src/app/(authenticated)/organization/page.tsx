@@ -342,6 +342,14 @@ export default async function OrgPage({
       name: "终审",
       description: "允许执行 KPI 终审。",
     },
+    MANAGE_BUSINESS_ASSESSMENT: {
+      name: "维护业务考核",
+      description: "允许在 KPI 管理中创建、编辑、导入和删除业务考核批次及结果。",
+    },
+    MANAGE_WORK_INCIDENT: {
+      name: "维护工作事故",
+      description: "允许在 KPI 管理中录入、作废工作事故记录。",
+    },
   };
 
   const notificationPermissionPresentation = {
