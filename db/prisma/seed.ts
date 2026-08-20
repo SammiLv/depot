@@ -200,6 +200,77 @@ async function ensureSeedPasswordTestAccountsIfMissing() {
   }
 }
 
+async function ensureOrgPermissionGrants() {
+  const root = await prisma.orgNode.findFirst({ where: { nodeType: "ROOT" }, select: { id: true } });
+  const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+  const teams = await prisma.orgNode.findMany({ where: { nodeType: "TEAM" }, select: { id: true } });
+
+  if (!root || departments.length === 0) {
+    console.warn("[seed] 缺少组织根节点或部门，跳过默认权限补全");
+    return;
+  }
+
+  const allGrants = [
+    ...kpiDefaultPermissionGrants,
+    ...talentDefaultPermissionGrants,
+    ...notificationDefaultPermissionGrants,
+    ...productManagementDefaultPermissionGrants,
+  ];
+
+  let created = 0;
+  let updated = 0;
+  for (const grant of allGrants) {
+    const orgNodeIds = grant.orgNodeSeedKey === null
+      ? [null]
+      : grant.orgNodeSeedKey === "ROOT"
+        ? [root.id]
+        : grant.orgNodeSeedKey === "DEPARTMENT"
+          ? departments.map((d) => d.id)
+          : teams.map((t) => t.id);
+
+    for (const orgNodeId of orgNodeIds) {
+      const existing = await prisma.orgPermissionGrant.findFirst({
+        where: {
+          moduleKey: grant.moduleKey,
+          abilityKey: grant.abilityKey,
+          scopeType: grant.scopeType,
+          subjectType: grant.subjectType,
+          roleType: grant.roleType,
+          userId: null,
+          orgNodeId,
+        },
+      });
+      if (existing) {
+        if (!existing.isActive) {
+          await prisma.orgPermissionGrant.update({
+            where: { id: existing.id },
+            data: { isActive: true },
+          });
+          updated++;
+        }
+        continue;
+      }
+      await prisma.orgPermissionGrant.create({
+        data: {
+          moduleKey: grant.moduleKey,
+          abilityKey: grant.abilityKey,
+          scopeType: grant.scopeType,
+          subjectType: grant.subjectType,
+          roleType: grant.roleType,
+          userId: null,
+          orgNodeId,
+          isActive: true,
+        },
+      });
+      created++;
+    }
+  }
+
+  if (created > 0 || updated > 0) {
+    console.info(`[seed] 已补全默认组织权限：新建 ${created} 条，更新 ${updated} 条`);
+  }
+}
+
 function createOrgNodeId() {
   return randomUUID();
 }
@@ -313,6 +384,7 @@ async function main() {
   const fullReset = process.env.SEED_FULL_RESET === "true";
   if (!fullReset) {
     console.info("[seed] 增量模式：不清理通知/指标/组织；按角色检测密码测试账号，三者齐全则不补建。全量重建请使用 npm run seed:full");
+    await ensureOrgPermissionGrants();
     await ensureSeedPasswordTestAccountsIfMissing();
     await ensurePresetNotificationScenarios();
     await ensureAnnualGoalDemoData(prisma);

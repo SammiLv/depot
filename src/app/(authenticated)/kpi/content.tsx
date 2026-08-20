@@ -1585,7 +1585,6 @@ export function KpiContent({ data }: Props) {
                   <tr className="text-left text-sm text-muted-foreground">
                     <th className="px-5 py-3 font-medium">成员</th>
                     <th className="px-5 py-3 font-medium">小组</th>
-                    <th className="px-5 py-3 font-medium">KPI 数</th>
                     <th className="px-5 py-3 font-medium">阶段</th>
                     <th className="w-48 px-5 py-3 font-medium">完成度</th>
                     <th className="px-5 py-3 font-medium">得分</th>
@@ -1601,7 +1600,6 @@ export function KpiContent({ data }: Props) {
                           <span className="text-sm font-medium">{r.userName}</span>
                         </td>
                         <td className="px-5 py-3 text-sm text-muted-foreground">{r.teamName}</td>
-                        <td className="px-5 py-3 text-sm tabular-nums">{r.itemCount}</td>
                         <td className="px-5 py-3"><Badge tone={r.tone}>{r.status}</Badge></td>
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
                         <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
@@ -1628,7 +1626,7 @@ export function KpiContent({ data }: Props) {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
+                      <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
                     </tr>
                   )}
                 </tbody>

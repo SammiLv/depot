@@ -16,6 +16,13 @@ interface TalentReviewDimensionExport {
   isRequired: boolean;
 }
 
+interface TalentRatingOptionExport {
+  code: string;
+  label: string;
+  numericScore: number;
+  sortOrder: number;
+}
+
 interface TalentGradeThresholdExport {
   gradeCode: string;
   label: string;
@@ -44,6 +51,7 @@ interface TalentReviewTemplateExport {
   description: string | null;
   dimensions: TalentReviewDimensionExport[];
   gradeThresholds: TalentGradeThresholdExport[];
+  ratingOptions: TalentRatingOptionExport[];
   nineBoxRules: TalentNineBoxRuleExport[];
 }
 
@@ -589,6 +597,7 @@ async function importJobRoles(maps: Maps, roles: JobRoleExport[]) {
 async function importTalentReviewModel(maps: Maps, templates: TalentReviewTemplateExport[]) {
   let templateCount = 0;
   let dimensionCount = 0;
+  let ratingOptionCount = 0;
   let thresholdCount = 0;
   let nineBoxCount = 0;
 
@@ -640,6 +649,26 @@ async function importTalentReviewModel(maps: Maps, templates: TalentReviewTempla
       dimensionCount++;
     }
 
+    const ratingOptions = t.ratingOptions ?? [];
+    for (const r of ratingOptions) {
+      await prisma.talentRatingOption.upsert({
+        where: { templateVersionId_code: { templateVersionId: template.id, code: r.code } },
+        create: {
+          templateVersionId: template.id,
+          code: r.code,
+          label: r.label,
+          numericScore: r.numericScore,
+          sortOrder: r.sortOrder,
+        },
+        update: {
+          label: r.label,
+          numericScore: r.numericScore,
+          sortOrder: r.sortOrder,
+        },
+      });
+      ratingOptionCount++;
+    }
+
     for (const g of t.gradeThresholds) {
       await prisma.talentGradeThreshold.upsert({
         where: { templateVersionId_gradeCode: { templateVersionId: template.id, gradeCode: g.gradeCode } },
@@ -689,7 +718,7 @@ async function importTalentReviewModel(maps: Maps, templates: TalentReviewTempla
     }
   }
 
-  console.log(`[人才盘点模板] ${templateCount} 模板, ${dimensionCount} 维度, ${thresholdCount} 等级阈值, ${nineBoxCount} 九宫格规则`);
+  console.log(`[人才盘点模板] ${templateCount} 模板, ${dimensionCount} 维度, ${ratingOptionCount} 评分档, ${thresholdCount} 等级阈值, ${nineBoxCount} 九宫格规则`);
 }
 
 async function importKpiRating(maps: Maps, versions: KpiRatingRuleVersionExport[]) {
