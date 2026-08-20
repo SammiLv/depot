@@ -444,6 +444,51 @@ function parseScheduleConfig(value: unknown): ScheduleConfig {
   };
 }
 
+function WeekdaySelector({
+  value,
+  onChange,
+}: {
+  value: number[];
+  onChange: (weekdays: number[]) => void;
+}) {
+  const weekdays = [
+    { value: 1, label: "周一" },
+    { value: 2, label: "周二" },
+    { value: 3, label: "周三" },
+    { value: 4, label: "周四" },
+    { value: 5, label: "周五" },
+    { value: 6, label: "周六" },
+    { value: 0, label: "周日" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-2">
+      {weekdays.map((day) => {
+        const selected = value.includes(day.value);
+        return (
+          <button
+            key={day.value}
+            type="button"
+            onClick={() => {
+              if (selected) {
+                onChange(value.filter((v) => v !== day.value));
+              } else {
+                onChange([...value, day.value].sort((a, b) => a - b));
+              }
+            }}
+            className={`rounded-lg px-3 py-1.5 text-sm border transition ${
+              selected
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-muted-foreground border-border hover:border-primary/50"
+            }`}
+          >
+            {day.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 const securityTypeLabels: Record<GroupBotRow["securityType"], string> = {
   KEYWORD: "关键词",
   SIGN: "加签",
@@ -765,6 +810,7 @@ function ScenarioForm({
                 onChange={(event) => setScheduleConfig((prev) => ({
                   ...prev,
                   frequency: event.target.value as "daily" | "weekly",
+                  weekdays: event.target.value === "weekly" ? [1] : [1, 2, 3, 4, 5, 6, 0],
                 }))}
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               >
@@ -781,6 +827,18 @@ function ScenarioForm({
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               />
             </div>
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium">执行日期（周一 ~ 周日）</label>
+            <WeekdaySelector
+              value={scheduleConfig.weekdays ?? []}
+              onChange={(weekdays) => setScheduleConfig((prev) => ({ ...prev, weekdays }))}
+            />
+            {scheduleConfig.frequency === "weekly" && (!scheduleConfig.weekdays || scheduleConfig.weekdays.length === 0) ? (
+              <p className="text-xs text-destructive">每周执行至少选择一天</p>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium mb-1">
                 {scheduleConfig.scanType === "annual_goal_weekly_progress_pending" ? "未更新天数" : "提前天数"}

@@ -84,8 +84,12 @@ async function main() {
   );
   const talentReviewTemplateIds = new Set(talentReviewTemplates.map((t) => t.id));
 
-  const [talentReviewDimensions, talentGradeThresholds, talentNineBoxRules] = await Promise.all([
+  const [talentReviewDimensions, talentRatingOptions, talentGradeThresholds, talentNineBoxRules] = await Promise.all([
     prisma.talentReviewDimension.findMany({
+      where: { templateVersionId: { in: Array.from(talentReviewTemplateIds) } },
+      orderBy: [{ templateVersionId: "asc" }, { sortOrder: "asc" }],
+    }),
+    prisma.talentRatingOption.findMany({
       where: { templateVersionId: { in: Array.from(talentReviewTemplateIds) } },
       orderBy: [{ templateVersionId: "asc" }, { sortOrder: "asc" }],
     }),
@@ -125,6 +129,14 @@ async function main() {
         minScore: g.minScore,
         maxScore: g.maxScore,
         sortOrder: g.sortOrder,
+      })),
+    ratingOptions: talentRatingOptions
+      .filter((r) => r.templateVersionId === t.id)
+      .map((r) => ({
+        code: r.code,
+        label: r.label,
+        numericScore: r.numericScore,
+        sortOrder: r.sortOrder,
       })),
     nineBoxRules: talentNineBoxRules
       .filter((n) => n.templateVersionId === t.id)

@@ -1056,9 +1056,16 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     const user = userMap.get(personalKpi.userId);
     const items = itemsByKpi.get(personalKpi.id) ?? [];
     const totalScore = items.reduce((sum, item) => sum + item.score, 0);
-    const progress = totalScore > 0
-      ? Math.round((items.reduce((sum, item) => sum + (item.selfScore ?? 0), 0) / totalScore) * 100)
-      : 0;
+    const progress = (() => {
+      if (personalKpi.status === "COMPLETED") return 100;
+      if (items.length === 0) return 0;
+      if (totalScore <= 0) return 0;
+      const scoredTotal = items.reduce((sum, item) => {
+        const score = item.finalScore ?? item.managerScore ?? item.leaderScore ?? item.selfScore ?? 0;
+        return sum + score;
+      }, 0);
+      return Math.min(100, Math.round((scoredTotal / totalScore) * 100));
+    })();
     const teamOrgNodeId = getTeamOrgNodeIdForRecord(personalKpi.orgNodeId, relationships.nearestTeamOrgNodeIdByNodeId);
     const departmentOrgNodeId = rowUserDepartmentOrgNodeIdByUserId.get(personalKpi.userId)
       ?? getDepartmentOrgNodeIdForRecord(personalKpi.orgNodeId, relationships.nearestDepartmentOrgNodeIdByNodeId)

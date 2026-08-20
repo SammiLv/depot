@@ -46,7 +46,7 @@ export function computeNextRunAt(
     advanceOneDay();
   }
 
-  if (schedule.frequency === "weekly") {
+  if (schedule.frequency === "weekly" || schedule.frequency === "daily") {
     const weekdays = (schedule.weekdays?.length ? schedule.weekdays : [1]).map((day) => Number(day));
     for (let i = 0; i < 14; i += 1) {
       if (weekdays.includes(candidate.getDay())) break;
