@@ -1,7 +1,8 @@
 "use client";
 
 import { Badge, Button, Card } from "@/components/ui-kit";
-import { addBusinessAssessmentSubject, createBusinessAssessmentCycle, createBusinessAssessmentCycleWithState, deleteBusinessAssessmentCycleWithState, importBusinessAssessmentResults, importBusinessAssessmentResultsWithState, updateBusinessAssessmentCyclePeriodWithState, updateBusinessAssessmentCycleRuleWithState, updateBusinessAssessmentResultWithState } from "@/server/talent/assessment-actions";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
+import { deleteBusinessAssessmentCycleWithState, importBusinessAssessmentResultsWithState, updateBusinessAssessmentCyclePeriodWithState, updateBusinessAssessmentResultWithState } from "@/server/talent/assessment-actions";
 import type { BusinessAssessmentOperationState } from "@/server/talent/assessment-actions";
 import { createTalentDecisionRecommendation, updateTalentRecommendationFeedback } from "@/server/talent/decision-actions";
 import { deleteEmployeeTalentProfile, type EmployeeProfileActionState } from "@/server/talent/employee-profile-actions";
@@ -14,6 +15,7 @@ import { useRouter } from "next/navigation";
 import type { AssessmentWorkspaceData, DecisionWorkspaceData, EmployeeProfileWorkspaceData, HistoryWorkspaceData, IncidentWorkspaceData } from "./operation-workspace-types";
 import { EmployeeProfileEditor } from "./employees/profile-content";
 import { HistoryRecordForm } from "./history/history-record-form";
+import { BusinessAssessmentCycleCreateForm } from "./business-assessment-cycle-create";
 
 const inputClass = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
 const actionClass = "h-9 rounded-lg px-4 text-sm font-semibold";
@@ -34,7 +36,7 @@ function Empty({ children }: { children: React.ReactNode }) { return <div classN
 const initialAssessmentOperationState: BusinessAssessmentOperationState = { status: "idle", message: "" };
 const initialProfileDeleteState: EmployeeProfileActionState = { status: "idle", message: "", savedUserId: "", requestId: "" };
 
-function OperationFeedback({ state }: { state: BusinessAssessmentOperationState }) {
+export function OperationFeedback({ state }: { state: BusinessAssessmentOperationState }) {
   if (!state.message) return null;
   return <div role="status" aria-live="polite" className={`mt-2 rounded-lg px-3 py-2 text-xs ${state.status === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
     <p className="font-medium">{state.message}</p>
@@ -47,37 +49,13 @@ function OperationFeedback({ state }: { state: BusinessAssessmentOperationState 
   </div>;
 }
 
-export function BusinessAssessmentWorkspace({ data }: { data: AssessmentWorkspaceData }) {
-  const [managing, setManaging] = useState(false);
-  const [subjectScoringType, setSubjectScoringType] = useState<"NUMERIC" | "GRADE">(data.rule.defaultScoringType);
-  const userName = new Map(data.users.map((row) => [row.id, row.name]));
-  const ruleSummary = `总分 ${data.rule.totalKpiScore} 分，按科目均摊；首次及格 ${data.rule.initialPassPercent}%，补考及格 ${data.rule.retestPassPercent}%，补考不及格 ${data.rule.finalFailPercent}%。`;
-  if (!managing) return <div><Header title="业务考核" description="只管理最终考试结果；支持等级评分、分数评分和补考结果导入" action={data.canManage ? <Button className={actionClass} onClick={() => setManaging(true)}><Upload className="h-4 w-4" />新建业务考核</Button> : undefined}/><div className="mb-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-xs text-muted-foreground"><span className="font-medium text-foreground">当前计分规则：</span>{ruleSummary}</div><AssessmentTable data={data} userName={userName}/></div>;
-  return <div><Header title="业务考核管理" description="创建业务考核、配置科目并导入最终结果" action={<BackButton onClick={() => setManaging(false)} label="返回业务考核"/>}/>{data.canManage && <><div className="grid gap-4 lg:grid-cols-2"><Card><h3 className="mb-3 font-semibold">创建业务考核</h3><form action={createBusinessAssessmentCycle} className="grid gap-2 sm:grid-cols-2"><select name="departmentOrgNodeId" required className={inputClass}>{data.departments.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select><input name="name" required placeholder="考核名称" className={inputClass}/><input name="year" type="number" defaultValue={new Date().getFullYear()} className={inputClass}/><select name="quarter" className={inputClass}>{[1,2,3,4].map((q) => <option key={q} value={q}>Q{q}</option>)}</select><Button className={`${actionClass} sm:col-span-2`}>创建业务考核</Button></form></Card><Card><h3 className="mb-3 font-semibold">配置科目</h3><form action={addBusinessAssessmentSubject} className="grid gap-2 sm:grid-cols-2"><select name="cycleId" required className={inputClass}>{data.cycles.filter((row) => row.status === "DRAFT").map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select><input name="code" required placeholder="科目编码" className={inputClass}/><input name="name" required placeholder="科目名称" className={inputClass}/><select name="scoringType" value={subjectScoringType} onChange={(event) => setSubjectScoringType(event.target.value as "NUMERIC" | "GRADE")} className={inputClass}><option value="NUMERIC">分数评分</option><option value="GRADE">等级评分</option></select>{subjectScoringType === "NUMERIC" ? <><input name="passingNumericScore" type="number" min="0" max="100" defaultValue={data.rule.passingNumericScore} placeholder="及格分" className={inputClass}/><input type="hidden" name="requiredGradeCode" value={data.rule.requiredGradeCode}/></> : <><select name="requiredGradeCode" defaultValue={data.rule.requiredGradeCode} className={inputClass}>{["S","A","B","C","D"].map((grade) => <option key={grade} value={grade}>达到 {grade} 级及以上</option>)}</select><input type="hidden" name="passingNumericScore" value={data.rule.passingNumericScore}/></>}<input name="sortOrder" type="number" defaultValue="10" className={inputClass}/><Button className={actionClass}>新增并重新摊分</Button></form></Card></div><Card className="mt-4"><h3 className="font-semibold">导入最终结果</h3><p className="mb-3 mt-1 text-xs text-muted-foreground">整批预检通过后才写入；只保留各科最终结果。</p><form action={importBusinessAssessmentResults} className="flex flex-wrap gap-2"><select name="cycleId" required className={`${inputClass} min-w-60`}>{data.cycles.filter((row) => row.status === "DRAFT").map((row) => <option key={row.id} value={row.id}>{row.year} Q{row.quarter} · {row.name}</option>)}</select><input name="file" type="file" accept=".xlsx,.xls,.csv" required className={`${inputClass} h-auto flex-1 py-1.5`}/><Button className={actionClass}>预检并导入</Button></form></Card></>}<div className="mt-4"><AssessmentTable data={data} userName={userName}/></div></div>;
-}
-
 export function BusinessAssessmentQuarterlyWorkspace({ data }: { data: AssessmentWorkspaceData }) {
   const [workspace, setWorkspace] = useState<{ kind: "list" | "create" } | { kind: "import" | "view" | "edit"; cycleId: string }>({ kind: "list" });
-  const [createState, createAction, creating] = useActionState(createBusinessAssessmentCycleWithState, initialAssessmentOperationState);
   const [importState, importAction, importing] = useActionState(importBusinessAssessmentResultsWithState, initialAssessmentOperationState);
   const [resultState, resultAction, savingResult] = useActionState(updateBusinessAssessmentResultWithState, initialAssessmentOperationState);
-  const [ruleState, ruleAction, updatingRule] = useActionState(updateBusinessAssessmentCycleRuleWithState, initialAssessmentOperationState);
   const [periodState, periodAction, updatingPeriod] = useActionState(updateBusinessAssessmentCyclePeriodWithState, initialAssessmentOperationState);
-  const [deleteState, deleteAction, deleting] = useActionState(deleteBusinessAssessmentCycleWithState, initialAssessmentOperationState);
   const userName = new Map(data.users.map((row) => [row.id, row.name]));
-  const publishedRules = data.rules.filter((row) => row.status === "CONFIRMED");
-  const availableRules = publishedRules.filter((rule) => !data.cycles.some((cycle) => cycle.departmentOrgNodeId === rule.departmentOrgNodeId && cycle.year === rule.year && cycle.quarter === rule.quarter));
-  const latestRule = publishedRules[0];
   const selectedCycle = "cycleId" in workspace ? data.cycles.find((row) => row.id === workspace.cycleId) : undefined;
-  const ruleSummary = latestRule
-    ? `${latestRule.year}年 Q${latestRule.quarter} · 总分 ${latestRule.totalKpiScore} 分；科目 ${data.ruleSubjects.filter((row) => row.ruleId === latestRule.id).length} 个，评分方式和小组及格线按发布版本执行。`
-    : "暂无已发布的季度业务考核规则。";
-
-  useEffect(() => {
-    if (createState.status !== "success") return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWorkspace({ kind: "list" });
-  }, [createState]);
 
   useEffect(() => {
     if (importState.status !== "success") return;
@@ -89,39 +67,16 @@ export function BusinessAssessmentQuarterlyWorkspace({ data }: { data: Assessmen
     return <div>
       <Header
         title="业务考核"
-        description="按季度管理考核批次；只保存各科最终考核结果"
+        description="按季度管理考核批次；新建时配置本季度考核科目与小组及格标准，只保存各科最终考核结果"
         action={data.canManage ? <Button className={actionClass} onClick={() => setWorkspace({ kind: "create" })}><Plus className="h-4 w-4" />新建业务考核</Button> : undefined}
       />
-      <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">最新已发布规则：</span>{ruleSummary}
-      </div>
-      <AssessmentTable data={data} userName={userName} onOpen={(kind, cycleId) => setWorkspace({ kind, cycleId })} deleteAction={deleteAction} deleting={deleting}/>
-      <OperationFeedback state={deleteState}/>
+      <AssessmentTable data={data} userName={userName} onOpen={(kind, cycleId) => setWorkspace({ kind, cycleId })}/>
     </div>;
   }
 
   if (workspace.kind === "create") return <div>
-    <Header title="新建业务考核" description="选择已发布的季度规则创建业务考核，创建后将冻结科目、评分方式和小组及格标准" action={<BackButton onClick={() => setWorkspace({ kind: "list" })}/>}/>
-    {data.canManage && <Card>
-        <h3 className="font-semibold">创建业务考核</h3>
-        <p className="mb-3 mt-1 text-xs text-muted-foreground">季度、部门、科目及小组及格线均来自所选规则，创建后不受后续规则修改影响。</p>
-        <form action={createAction} className="space-y-2">
-          <select name="ruleId" required className={`${inputClass} w-full`} defaultValue="">
-            <option value="" disabled>请选择已发布的季度规则</option>
-            {availableRules.map((rule) => <option key={rule.id} value={rule.id}>
-              {data.departments.find((department) => department.id === rule.departmentOrgNodeId)?.name} · {rule.year}年 Q{rule.quarter} · V{rule.version}
-            </option>)}
-          </select>
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
-            <label><span className="mb-1 block text-xs text-muted-foreground">考核开始日期</span><input name="assessmentStartDate" type="date" required aria-label="考核开始日期" className={`${inputClass} w-full`}/></label>
-            <span className="hidden text-xs text-muted-foreground sm:block">至</span>
-            <label><span className="mb-1 block text-xs text-muted-foreground">考核结束日期</span><input name="assessmentEndDate" type="date" required aria-label="考核结束日期" className={`${inputClass} w-full`}/></label>
-          </div>
-          <p className="text-xs text-muted-foreground">考核时间段对本次业务考核的所有员工和科目统一生效。</p>
-          <Button type="submit" className={`${actionClass} w-full`} disabled={creating || !availableRules.length}>{creating ? "创建中" : "创建业务考核"}</Button>
-        </form>
-        <OperationFeedback state={createState}/>
-      </Card>}
+    <Header title="新建业务考核" description="配置本季度考核科目与小组及格标准，创建后随本次考核冻结；总分与摊分比例按「人才发展-规则配置-绩效管理规则」中本部门已发布版本冻结" action={<BackButton onClick={() => setWorkspace({ kind: "list" })}/>}/>
+    {data.canManage && <BusinessAssessmentCycleCreateForm data={data} onSuccess={() => setWorkspace({ kind: "list" })}/>}
   </div>;
 
   if (!selectedCycle) return <div><Header title="业务考核" description="所选业务考核不存在或已删除" action={<BackButton onClick={() => setWorkspace({ kind: "list" })}/>}/><Empty>未找到业务考核</Empty></div>;
@@ -152,33 +107,14 @@ export function BusinessAssessmentQuarterlyWorkspace({ data }: { data: Assessmen
   const cycleSummaries = data.summaries.filter((row) => row.cycleId === selectedCycle.id);
 
   if (workspace.kind === "edit") {
-    const frozenRule = data.rules.find((rule) => rule.id === selectedCycle.ruleId);
-    const compatibleRules = data.rules.filter((rule) => rule.departmentOrgNodeId === selectedCycle.departmentOrgNodeId
-      && rule.year === selectedCycle.year
-      && rule.quarter === selectedCycle.quarter
-      && Boolean(rule.publishedAt)
-      && (rule.status === "CONFIRMED" || rule.status === "VOIDED"));
     return <div>
-      <Header title="维护员工成绩" description="可更新使用规则并调整员工各科最终成绩；保存后自动重新计算业务考核得分" action={<BackButton onClick={() => setWorkspace({ kind: "list" })}/>}/>
+      <Header title="维护员工成绩" description="考核规则已随创建冻结；可调整考核时间段和员工各科最终成绩，保存后自动重新计算业务考核得分" action={<BackButton onClick={() => setWorkspace({ kind: "list" })}/>}/>
       <Card>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <ReadOnlyField label="业务考核" value={selectedCycle.name}/>
           <ReadOnlyField label="考核季度" value={`${selectedCycle.year}年 Q${selectedCycle.quarter}`}/>
           <ReadOnlyField label="当前状态" value={assessmentStatusLabel(selectedCycle.status)}/>
-          <form action={ruleAction} className="space-y-2">
-            <input type="hidden" name="cycleId" value={selectedCycle.id}/>
-            <label className="block text-xs text-muted-foreground">使用规则</label>
-            <div className="flex gap-2">
-              <select name="ruleId" required defaultValue={selectedCycle.ruleId ?? ""} className={`${inputClass} min-w-0 flex-1`}>
-                {!selectedCycle.ruleId && <option value="">请选择已发布规则</option>}
-                {compatibleRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.name} V{rule.version}</option>)}
-                {frozenRule && !compatibleRules.some((rule) => rule.id === frozenRule.id) && <option value={frozenRule.id}>{frozenRule.name} V{frozenRule.version}</option>}
-              </select>
-              <Button type="submit" variant="outline" className={`${actionClass} shrink-0`} disabled={updatingRule || compatibleRules.every((rule) => rule.id === selectedCycle.ruleId)}>{updatingRule ? "更新中" : "更新"}</Button>
-            </div>
-          </form>
         </div>
-        <OperationFeedback state={ruleState}/>
         <form action={periodAction} className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-[1fr_auto_1fr_auto] sm:items-end">
           <input type="hidden" name="cycleId" value={selectedCycle.id}/>
           <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核开始日期</span><input name="assessmentStartDate" type="date" required defaultValue={selectedCycle.assessmentStartDate?.slice(0, 10) ?? ""} className={`${inputClass} w-full`}/></label>
@@ -255,9 +191,9 @@ function assessmentStatusLabel(status: string) {
   return "进行中";
 }
 
-function AssessmentTable({ data, userName, onOpen, deleteAction, deleting = false }: { data: AssessmentWorkspaceData; userName: Map<string, string>; onOpen?: (kind: "import" | "view" | "edit", cycleId: string) => void; deleteAction?: (payload: FormData) => void; deleting?: boolean }) {
+function AssessmentTable({ data, userName, onOpen }: { data: AssessmentWorkspaceData; userName: Map<string, string>; onOpen?: (kind: "import" | "view" | "edit", cycleId: string) => void }) {
   const headers = ["业务考核", "科目与摊分", "员工结果", "状态", ...(onOpen ? ["操作"] : [])];
-  return <Card className="!p-0 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-muted/40"><tr>{headers.map((item) => <th key={item} className={`p-4 text-xs font-medium ${item === "操作" ? "text-right" : "text-left"}`}>{item}</th>)}</tr></thead><tbody className="divide-y divide-border">{data.cycles.map((cycle) => { const subjects = data.subjects.filter((row) => row.cycleId === cycle.id); const summaries = data.summaries.filter((row) => row.cycleId === cycle.id); const inProgress = cycle.status === "DRAFT"; const canMaintainScores = cycle.status !== "VOIDED"; return <tr key={cycle.id}><td className="p-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground">{cycle.year} Q{cycle.quarter} · 总分{cycle.totalKpiScore}</div></td><td className="p-4 text-xs">{subjects.length ? subjects.map((row) => `${row.name} ${row.maxScore ?? 0}分`).join("、") : "待配置"}</td><td className="p-4"><div className="space-y-1">{summaries.slice(0,5).map((row) => <div key={row.id} className="text-xs">{userName.get(row.userId) ?? "员工已停用"}：{row.earnedScore}/{row.maxScore}</div>)}{summaries.length > 5 && <div className="text-xs text-muted-foreground">共 {summaries.length} 人</div>}</div></td><td className="p-4"><Badge tone={cycle.status === "CONFIRMED" ? "success" : cycle.status === "VOIDED" ? "default" : "primary"}>{assessmentStatusLabel(cycle.status)}</Badge></td>{onOpen && <td className="p-4"><div className="flex items-center justify-end gap-3 whitespace-nowrap">{data.canManage && <button type="button" disabled={!inProgress} onClick={() => onOpen("import", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={inProgress ? "导入考核结果" : "已完成的业务考核不能再次导入"}><Upload className="h-3.5 w-3.5"/>导入考核结果</button>}<button type="button" onClick={() => onOpen("view", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary"><Eye className="h-3.5 w-3.5"/>查看</button>{data.canManage && <button type="button" disabled={!canMaintainScores} onClick={() => onOpen("edit", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={canMaintainScores ? "维护员工成绩" : "已作废的业务考核不能维护成绩"}><Pencil className="h-3.5 w-3.5"/>编辑</button>}{data.canManage && deleteAction && <form action={deleteAction} onSubmit={(event) => { if (!window.confirm(`确认删除“${cycle.name}”吗？此操作不可恢复。`)) event.preventDefault(); }}><input type="hidden" name="cycleId" value={cycle.id}/><button type="submit" disabled={!inProgress || deleting} className="inline-flex items-center gap-1 text-xs text-red-600 disabled:cursor-not-allowed disabled:text-muted-foreground" title={inProgress ? "删除业务考核" : "已完成的业务考核不能删除"}><Trash2 className="h-3.5 w-3.5"/>删除</button></form>}</div></td>}</tr>; })}</tbody></table></div>{data.cycles.length === 0 && <Empty>暂无业务考核</Empty>}</Card>;
+  return <Card className="!p-0 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-muted/40"><tr>{headers.map((item) => <th key={item} className={`p-4 text-xs font-medium ${item === "操作" ? "text-right" : "text-left"}`}>{item}</th>)}</tr></thead><tbody className="divide-y divide-border">{data.cycles.map((cycle) => { const subjects = data.subjects.filter((row) => row.cycleId === cycle.id); const summaries = data.summaries.filter((row) => row.cycleId === cycle.id); const inProgress = cycle.status === "DRAFT"; const canMaintainScores = cycle.status !== "VOIDED"; return <tr key={cycle.id}><td className="p-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground">{cycle.year} Q{cycle.quarter} · 总分{cycle.totalKpiScore}</div></td><td className="p-4 text-xs">{subjects.length ? subjects.map((row) => `${row.name} ${row.maxScore ?? 0}分`).join("、") : "待配置"}</td><td className="p-4"><div className="space-y-1">{summaries.slice(0,5).map((row) => <div key={row.id} className="text-xs">{userName.get(row.userId) ?? "员工已停用"}：{row.earnedScore}/{row.maxScore}</div>)}{summaries.length > 5 && <div className="text-xs text-muted-foreground">共 {summaries.length} 人</div>}</div></td><td className="p-4"><Badge tone={cycle.status === "CONFIRMED" ? "success" : cycle.status === "VOIDED" ? "default" : "primary"}>{assessmentStatusLabel(cycle.status)}</Badge></td>{onOpen && <td className="p-4"><div className="flex items-center justify-end gap-3 whitespace-nowrap">{data.canManage && <button type="button" disabled={!inProgress} onClick={() => onOpen("import", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={inProgress ? "导入考核结果" : "已完成的业务考核不能再次导入"}><Upload className="h-3.5 w-3.5"/>导入考核结果</button>}<button type="button" onClick={() => onOpen("view", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary"><Eye className="h-3.5 w-3.5"/>查看</button>{data.canManage && <button type="button" disabled={!canMaintainScores} onClick={() => onOpen("edit", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={canMaintainScores ? "维护员工成绩" : "已作废的业务考核不能维护成绩"}><Pencil className="h-3.5 w-3.5"/>编辑</button>}{data.canManage && <ConfirmDeleteButton action={deleteBusinessAssessmentCycleWithState} initialState={initialAssessmentOperationState} hidden={{ cycleId: cycle.id }} title="删除业务考核" description={`确认删除“${cycle.name}”吗？此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>} triggerClassName="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-muted-foreground" disabled={!inProgress} triggerTitle={inProgress ? "删除业务考核" : "已完成的业务考核不能删除"}/>}</div></td>}</tr>; })}</tbody></table></div>{data.cycles.length === 0 && <Empty>暂无业务考核</Empty>}</Card>;
 }
 
 export function WorkIncidentWorkspace({ data }: { data: IncidentWorkspaceData }) {

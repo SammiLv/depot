@@ -1860,6 +1860,11 @@ model KpiRatingRuleVersion {
   effectiveFrom        DateTime?
   effectiveTo          DateTime?
   quarterlyKpiTotalScore Float?
+  /// 业务考核计分规则，随版本冻结；草稿可编辑，发布后只读。新建业务考核时按部门已发布版本冻结快照。
+  businessAssessmentTotalScore    Float              @default(6)
+  baInitialPassPercent            Float              @default(100)
+  baRetestPassPercent             Float              @default(50)
+  baFinalFailPercent              Float              @default(0)
   createdById          String
   publishedById        String?
   publishedAt          DateTime?

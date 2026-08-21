@@ -96,10 +96,10 @@ async function fieldWithDepartmentOptions<T extends { source: TalentRuleCategory
       where: { departmentOrgNodeId, status: "ACTIVE", deletedAt: null },
       orderBy: [{ publishedAt: "desc" }, { updatedAt: "desc" }],
     });
-    if (!activeVersion) throw new Error("当前部门尚未发布绩效等级规则");
+    if (!activeVersion) throw new Error("当前部门尚未发布绩效管理规则");
     const bands = await prisma.kpiRatingBand.findMany({ where: { ruleVersionId: activeVersion.id }, orderBy: { sortOrder: "asc" } });
     options = kpiRatingBandOptions(bands);
-    configurationName = "绩效等级规则";
+    configurationName = "绩效管理规则";
   } else if (field.source === "TALENT_REVIEW") {
     const activeTemplate = await prisma.talentReviewTemplateVersion.findFirst({
       where: { departmentOrgNodeId, status: "ACTIVE", deletedAt: null },

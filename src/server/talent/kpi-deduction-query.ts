@@ -29,7 +29,7 @@ async function loadTalentKpiDeductionReminder(viewer: Viewer, userId: string, ye
     penalty: Number((assessmentSummary.earnedScore - assessmentSummary.maxScore).toFixed(4)),
     message: `业务考核：实得 ${assessmentSummary.earnedScore}/${assessmentSummary.maxScore} 分，建议扣 ${Math.abs(assessmentSummary.earnedScore - assessmentSummary.maxScore)} 分`,
     canViewDetail: canViewAssessment,
-    href: `/talent/assessments?year=${year}&quarter=${quarter}&userId=${userId}`,
+    href: `/kpi?year=${year}&quarter=${quarter}&tab=business-assessment`,
   } : null;
   const incident = incidentSummary && incidentSummary.kpiPenalty < 0 ? {
     penalty: incidentSummary.kpiPenalty,
