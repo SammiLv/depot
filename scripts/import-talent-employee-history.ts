@@ -741,7 +741,9 @@ async function importRewardHistory(
     const parsed = parseRewardResult(resultStr);
     if (!parsed) continue;
 
-    const recordNo = `REWARD_${userId.slice(-8)}_${effectiveDate.toISOString().slice(0, 10)}_${parsed.rewardName.replace(/\s+/g, "_")}`;
+    // recordNo 需对"同一人同一天同名"的多条奖励（如同时获部门现金奖和公司竞币奖）也能区分，
+    // 否则去重检查会误杀后续行，且重复执行时生成的新 recordNo 与旧数据对不上导致重复导入。
+    const recordNo = `REWARD_${userId.slice(-8)}_${effectiveDate.toISOString().slice(0, 10)}_${parsed.rewardLevel}_${parsed.rewardForm}_${parsed.rewardAmount}_${parsed.rewardName.replace(/\s+/g, "_")}`;
     const existingReward = await prisma.rewardRecord.findUnique({ where: { recordNo } });
     if (existingReward) continue;
 
