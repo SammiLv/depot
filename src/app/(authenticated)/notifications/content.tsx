@@ -23,6 +23,29 @@ import {
 } from "@/server/notifications/schedule-utils";
 import type { ScheduleConfig, ScheduleScanType } from "@/server/notifications/types";
 import { SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
+
+type NotificationDeleteState = { status: "idle" | "success" | "error"; message: string };
+const initialNotificationDeleteState: NotificationDeleteState = { status: "idle", message: "" };
+
+// deleteNotificationScenario / deleteNotificationGroupBot 是无状态 action（失败抛错），包一层适配删除确认弹窗。
+async function deleteScenarioWithState(_state: NotificationDeleteState, formData: FormData): Promise<NotificationDeleteState> {
+  try {
+    await runServerAction(() => deleteNotificationScenario(formData));
+    return { status: "success", message: "场景已删除" };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : "场景删除失败" };
+  }
+}
+
+async function deleteGroupBotWithState(_state: NotificationDeleteState, formData: FormData): Promise<NotificationDeleteState> {
+  try {
+    await runServerAction(() => deleteNotificationGroupBot(formData));
+    return { status: "success", message: "群机器人配置已删除" };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : "群机器人配置删除失败" };
+  }
+}
 
 function Button({ className = "", size = "md", ...props }: ComponentProps<typeof UiButton>) {
   return <UiButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
@@ -1445,15 +1468,15 @@ export function NotificationsContent({
                               <input type="hidden" name="id" value={scenario.id} />
                               <button type="submit" className="text-primary hover:underline">测试</button>
                             </form>
-                            <form
-                              action={async (formData) => {
-                                if (!window.confirm("确认删除该场景？")) return;
-                                await runServerAction(() => deleteNotificationScenario(formData));
-                              }}
-                            >
-                              <input type="hidden" name="id" value={scenario.id} />
-                              <button type="submit" className="text-destructive hover:underline">删除</button>
-                            </form>
+                            <ConfirmDeleteButton
+                              action={deleteScenarioWithState}
+                              initialState={initialNotificationDeleteState}
+                              hidden={{ id: scenario.id }}
+                              title="删除场景"
+                              description="确认删除该场景？删除后不可恢复。"
+                              trigger="删除"
+                              triggerClassName="text-destructive hover:underline"
+                            />
                           </div>
                         ) : (
                           <span className="text-muted-foreground">-</span>
@@ -1526,15 +1549,15 @@ export function NotificationsContent({
                             >
                               编辑
                             </button>
-                            <form
-                              action={async (formData) => {
-                                if (!window.confirm(`确认删除群「${bot.name}」的配置？`)) return;
-                                await runServerAction(() => deleteNotificationGroupBot(formData));
-                              }}
-                            >
-                              <input type="hidden" name="id" value={bot.id} />
-                              <button type="submit" className="text-destructive hover:underline">删除</button>
-                            </form>
+                            <ConfirmDeleteButton
+                              action={deleteGroupBotWithState}
+                              initialState={initialNotificationDeleteState}
+                              hidden={{ id: bot.id }}
+                              title="删除群机器人配置"
+                              description={`确认删除群「${bot.name}」的配置？删除后不可恢复。`}
+                              trigger="删除"
+                              triggerClassName="text-destructive hover:underline"
+                            />
                           </div>
                         ) : (
                           <span className="text-muted-foreground">-</span>
