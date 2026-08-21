@@ -13,7 +13,7 @@ import {
 } from "@/server/notifications/permission";
 import { runScheduleScenarioScan } from "@/server/notifications/scheduler";
 import { summarizeDeliveryLogs } from "@/server/notifications/test-result";
-import { computeNextRunAt, formatScheduleNextRunHint, parseScheduleConfig, previewScheduleNextRun } from "@/server/notifications/schedule-utils";
+import { computeNextRunAt, formatScheduleNextRunHint, parseScheduleConfig, previewScheduleNextRun, scheduleScanUsesDaysBefore } from "@/server/notifications/schedule-utils";
 import type {
   ChannelConfig,
   ConditionConfig,
@@ -119,6 +119,9 @@ function parseScenarioForm(formData: FormData) {
       parseJsonField<ScheduleConfig>(requiredString(formData.get("scheduleConfig"), "定时配置"), "定时配置"),
     );
     if (!scheduleConfig) throw new Error("定时配置不完整");
+    if (!scheduleScanUsesDaysBefore(scheduleConfig.scanType)) {
+      scheduleConfig = { ...scheduleConfig, daysBefore: 0 };
+    }
     if (!SCHEDULE_SCAN_REGISTRY[scheduleConfig.scanType]) {
       throw new Error("不支持的扫描类型");
     }
