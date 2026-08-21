@@ -17,6 +17,9 @@ import { AlertTriangle, Bell, Check, CheckCircle2, ChevronDown, Plus, Search, X 
 import {
   formatScheduleNextRunHint,
   previewScheduleNextRun,
+  scheduleScanDaysBeforeHint,
+  scheduleScanDaysBeforeLabel,
+  scheduleScanUsesDaysBefore,
 } from "@/server/notifications/schedule-utils";
 import type { ScheduleConfig, ScheduleScanType } from "@/server/notifications/types";
 import { SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
@@ -795,7 +798,14 @@ function ScenarioForm({
               <label className="block text-sm font-medium mb-1">扫描类型</label>
               <select
                 value={scheduleConfig.scanType}
-                onChange={(event) => setScheduleConfig((prev) => ({ ...prev, scanType: event.target.value as ScheduleScanType }))}
+                onChange={(event) => {
+                  const scanType = event.target.value as ScheduleScanType;
+                  setScheduleConfig((prev) => ({
+                    ...prev,
+                    scanType,
+                    daysBefore: scheduleScanUsesDaysBefore(scanType) ? prev.daysBefore || 7 : 0,
+                  }));
+                }}
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               >
                 {scanOptions.map((option) => (
@@ -838,28 +848,34 @@ function ScenarioForm({
               <p className="text-xs text-destructive">每周执行至少选择一天</p>
             ) : null}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                {scheduleConfig.scanType === "annual_goal_weekly_progress_pending" ? "未更新天数" : "提前天数"}
-              </label>
-              <input
-                type="number"
-                min={1}
-                value={scheduleConfig.daysBefore}
-                onChange={(event) => setScheduleConfig((prev) => ({
-                  ...prev,
-                  daysBefore: Math.max(1, Number(event.target.value) || 1),
-                }))}
-                className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
-              />
-              {scheduleConfig.scanType === "annual_goal_weekly_progress_pending" ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  扫描小组承接的当前季度指标：距本次扫描时间超过该天数仍未更新进度时通知责任人。
-                </p>
-              ) : null}
+          {scheduleScanUsesDaysBefore(scheduleConfig.scanType) ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  {scheduleScanDaysBeforeLabel(scheduleConfig.scanType)}
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={scheduleConfig.daysBefore}
+                  onChange={(event) => setScheduleConfig((prev) => ({
+                    ...prev,
+                    daysBefore: Math.max(1, Number(event.target.value) || 1),
+                  }))}
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
+                />
+                {scheduleScanDaysBeforeHint(scheduleConfig.scanType) ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {scheduleScanDaysBeforeHint(scheduleConfig.scanType)}
+                  </p>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : scheduleScanDaysBeforeHint(scheduleConfig.scanType) ? (
+            <p className="text-xs text-muted-foreground">
+              {scheduleScanDaysBeforeHint(scheduleConfig.scanType)}
+            </p>
+          ) : null}
           {schedulePreview ? (
             <p className={`text-xs leading-relaxed ${schedulePreview.includes("立即补跑") || schedulePreview.includes("推迟到") ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
               {schedulePreview}

@@ -1,4 +1,41 @@
-import type { ScheduleConfig } from "@/server/notifications/types";
+import { SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
+import type { ScheduleConfig, ScheduleScanType } from "@/server/notifications/types";
+
+const SCHEDULE_SCANS_WITHOUT_DAYS_BEFORE = new Set<ScheduleScanType>([
+  "kpi_initialization_pending",
+  "annual_goal_quarter_target_missing",
+  "quarterly_work_overdue",
+  "project_overdue",
+]);
+
+export function scheduleScanUsesDaysBefore(scanType: ScheduleScanType): boolean {
+  return !SCHEDULE_SCANS_WITHOUT_DAYS_BEFORE.has(scanType);
+}
+
+export function scheduleScanDaysBeforeLabel(scanType: ScheduleScanType): string {
+  if (scanType === "annual_goal_weekly_progress_pending") return "未更新天数";
+  if (scanType === "project_value_track_pending") return "季度末提前天数";
+  return "提前天数";
+}
+
+export function scheduleScanDaysBeforeHint(scanType: ScheduleScanType): string | null {
+  if (scanType === "annual_goal_weekly_progress_pending") {
+    return "扫描小组承接的当前季度指标：距本次扫描时间超过该天数仍未更新进度时通知责任人。";
+  }
+  if (scanType === "quarterly_work_due_soon") {
+    return "到执行时间后，扫描距离任务结束月份不足该天数的未完成任务并提醒。";
+  }
+  if (scanType === "project_due_soon") {
+    return "到执行时间后，扫描距离项目结束季度不足该天数的未完成项目并提醒。";
+  }
+  if (scanType === "project_value_track_pending") {
+    return "到执行时间后，扫描距本季度结束不足该天数且价值跟踪尚未完成的项目并提醒。";
+  }
+  if (scanType === "quarterly_work_overdue" || scanType === "project_overdue") {
+    return "到执行时间后直接扫描已延期的记录，无需设置提前天数。";
+  }
+  return null;
+}
 
 function parseTimeOfDay(timeOfDay: string) {
   const match = /^(\d{1,2}):(\d{2})$/.exec(timeOfDay.trim());
@@ -106,21 +143,14 @@ export function formatScheduleNextRunHint(preview: ScheduleNextRunPreview, timeO
 export function parseScheduleConfig(value: unknown): ScheduleConfig | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const raw = value as Partial<ScheduleConfig>;
-  if (
-    raw.scanType !== "kpi_initialization_pending"
-    && raw.scanType !== "kpi_self_review_pending"
-    && raw.scanType !== "todo_due"
-    && raw.scanType !== "annual_goal_weekly_progress_pending"
-    && raw.scanType !== "annual_goal_quarter_target_missing"
-  ) {
-    return null;
-  }
+  const scanType = raw.scanType;
+  if (!scanType || !(scanType in SCHEDULE_SCAN_REGISTRY)) return null;
   if (raw.frequency !== "daily" && raw.frequency !== "weekly") return null;
   return {
     frequency: raw.frequency,
     timeOfDay: typeof raw.timeOfDay === "string" ? raw.timeOfDay : "09:00",
     weekdays: Array.isArray(raw.weekdays) ? raw.weekdays.map(Number) : undefined,
-    scanType: raw.scanType,
+    scanType: scanType as ScheduleScanType,
     daysBefore: typeof raw.daysBefore === "number" ? raw.daysBefore : Number(raw.daysBefore ?? 0) || 0,
     timezone: typeof raw.timezone === "string" ? raw.timezone : "Asia/Shanghai",
   };
