@@ -182,9 +182,6 @@ async function ensureDefaultTalentPermissions() {
     talentAbilityKeys.viewProfile,
     talentAbilityKeys.viewReview,
     talentAbilityKeys.manageReview,
-    talentAbilityKeys.viewCareerModel,
-    talentAbilityKeys.viewBusinessAssessment,
-    talentAbilityKeys.viewWorkIncident,
     talentAbilityKeys.viewRecommendation,
     talentAbilityKeys.manageRecommendation,
     talentAbilityKeys.viewHistory,
@@ -196,6 +193,20 @@ async function ensureDefaultTalentPermissions() {
     for (const abilityKey of talentOrdinaryPermissionAbilityKeys) {
       await ensureTalentRoleGrant(RoleType.MEMBER, "SELF", team.id, abilityKey);
     }
+  }
+}
+
+// 幂等保障（老库升级用）：自动补发新增能力点 VIEW_TALENT_CONFIG 的默认授权
+//（管理员 ALL + 各部门主管 SUBTREE）。只覆盖这一个新 key，不回填其它能力点，
+// 避免覆盖管理员在权限矩阵里对存量 key 的主动调整。服务启动时调用，可重复执行。
+export async function ensureTalentViewConfigPermissionGrants() {
+  await ensureTalentRoleGrant(RoleType.ADMIN, "ALL", null, talentAbilityKeys.viewConfig);
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+  for (const department of departments) {
+    await ensureTalentRoleGrant(RoleType.DEPARTMENT_MANAGER, "SUBTREE", department.id, talentAbilityKeys.viewConfig);
   }
 }
 

@@ -9,7 +9,7 @@ import { getTalentReviewConfig } from "@/server/talent/review-query";
 const input = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
 const submit = "h-9 rounded-full bg-primary px-4 text-sm text-primary-foreground";
 export default async function Page() {
-  const user = await requireCurrentUser(); const permission = await resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig); if (!permission.hasPermission) redirect("/talent");
+  const user = await requireCurrentUser(); const permission = await resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig); if (!permission.hasPermission) redirect("/talent");
   const data = await getTalentReviewConfig(user); const drafts = data.templates.filter((row) => row.status === "DRAFT"); const departmentName = new Map(data.departments.map((row) => [row.id, row.name]));
   const draftSelect = (name = "templateVersionId") => <select name={name} required className={input}>{drafts.map((row) => <option key={row.id} value={row.id}>{row.name} V{row.version}</option>)}</select>;
   return <Card className="!p-6"><PageHeader title="人才盘点模型配置" description="六维、评分档、等级区间和九宫格均可配置；发布后只读" action={<Link href="/talent" className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-semibold transition-colors hover:bg-muted">返回人才发展</Link>}/>

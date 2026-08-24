@@ -5,7 +5,7 @@ import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { runServerAction } from "@/lib/run-server-action";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree, Search } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyNotificationPermissionToAllDepartments, applyProductManagementPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveNotificationRolePermissions, saveProductManagementRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyNotificationPermissionChangesToAllDepartments, saveAndApplyProductManagementPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments, saveAndApplyNotificationPermissionsToAllDepartments, saveAndApplyProductManagementPermissionsToAllDepartments } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyNotificationPermissionToAllDepartments, applyProductManagementPermissionToAllDepartments, applyTalentPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveNotificationRolePermissions, saveProductManagementRolePermissions, saveTalentRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyNotificationPermissionChangesToAllDepartments, saveAndApplyProductManagementPermissionChangesToAllDepartments, saveAndApplyTalentPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments, saveAndApplyNotificationPermissionsToAllDepartments, saveAndApplyProductManagementPermissionsToAllDepartments, saveAndApplyTalentPermissionsToAllDepartments } from "@/server/organization/actions";
 import {
   buildKpiApprovalOrgTreeIndex,
   getKpiApprovalOrgNodeIdsAtDepth,
@@ -106,6 +106,14 @@ type ScopedProductManagementPermission = {
   cells: Record<RoleType, PermissionCellState>;
 };
 
+type ScopedTalentPermission = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  cells: Record<RoleType, PermissionCellState>;
+};
+
 type KpiUserPermissionGrant = {
   id: string;
   userId: string;
@@ -157,7 +165,7 @@ type PermissionScopeOption = {
 };
 
 type ApplyAllDialogData = {
-  kind: "menu" | "annual-goal" | "kpi" | "notification" | "product-management";
+  kind: "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "talent";
   permissionId: string;
   permissionName: string;
   roleType: RoleType;
@@ -166,7 +174,7 @@ type ApplyAllDialogData = {
 };
 
 type PermissionMatrixSyncDialogData = {
-  kind: "menu" | "annual-goal" | "kpi" | "notification" | "product-management";
+  kind: "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "talent";
   mode: "CHANGES" | "FULL";
   moduleName: string;
   permissions: string;
@@ -192,7 +200,7 @@ type Props = {
   scopeOptions: PermissionScopeOption[];
   initialScope: { scopeType: PermissionScopeType; departmentOrgNodeId: string };
   initialTab: "organization" | "permissions";
-  initialPermissionSection: "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "approval-policy";
+  initialPermissionSection: "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "talent" | "approval-policy";
   scopeViews: Record<string, {
     department: OrgDepartment | null;
     organizationHierarchyRoot: OrganizationEntityNode | null;
@@ -201,6 +209,7 @@ type Props = {
     kpiPermissions: ScopedKpiPermission[];
     notificationPermissions: ScopedNotificationPermission[];
     productManagementPermissions: ScopedProductManagementPermission[];
+    talentPermissions: ScopedTalentPermission[];
     kpiUserPermissionGrants: KpiUserPermissionGrant[];
     kpiApprovalPolicies: KpiApprovalPolicy[];
   }>;
@@ -1096,7 +1105,9 @@ function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogDat
         ? applyNotificationPermissionToAllDepartments
         : data.kind === "product-management"
           ? applyProductManagementPermissionToAllDepartments
-          : applyKpiPermissionToAllDepartments;
+          : data.kind === "talent"
+            ? applyTalentPermissionToAllDepartments
+            : applyKpiPermissionToAllDepartments;
 
   return (
     <form action={async (fd) => { await runServerAction(() => action(fd)); onClose(); }} className="space-y-4">
@@ -1125,6 +1136,7 @@ function PermissionMatrixSyncConfirm({ data, onClose }: { data: PermissionMatrix
     kpi: saveAndApplyKpiPermissionChangesToAllDepartments,
     notification: saveAndApplyNotificationPermissionChangesToAllDepartments,
     "product-management": saveAndApplyProductManagementPermissionChangesToAllDepartments,
+    talent: saveAndApplyTalentPermissionChangesToAllDepartments,
   };
   const fullActions = {
     menu: saveAndApplyRoleMenuPermissionsToAllDepartments,
@@ -1132,6 +1144,7 @@ function PermissionMatrixSyncConfirm({ data, onClose }: { data: PermissionMatrix
     kpi: saveAndApplyKpiPermissionsToAllDepartments,
     notification: saveAndApplyNotificationPermissionsToAllDepartments,
     "product-management": saveAndApplyProductManagementPermissionsToAllDepartments,
+    talent: saveAndApplyTalentPermissionsToAllDepartments,
   };
   const action = data.mode === "CHANGES" ? changesActions[data.kind] : fullActions[data.kind];
   return (
@@ -1644,7 +1657,7 @@ export function OrgContent({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<"organization" | "permissions">(initialTab);
-  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "approval-policy">(initialPermissionSection);
+  const [permissionSection, setPermissionSection] = useState<"menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "talent" | "approval-policy">(initialPermissionSection);
   const [organizationViewMode, setOrganizationViewMode] = useState<"list" | "tree">("tree");
   const [selectedScope, setSelectedScope] = useState(initialScope);
   const selectedScopeKey = `${selectedScope.scopeType}:${selectedScope.departmentOrgNodeId}`;
@@ -1657,6 +1670,7 @@ export function OrgContent({
     kpiPermissions,
     notificationPermissions,
     productManagementPermissions,
+    talentPermissions,
     kpiUserPermissionGrants,
     kpiApprovalPolicies,
   } = selectedScopeView;
@@ -1699,23 +1713,31 @@ export function OrgContent({
     { ...permission.cells[role.value] },
   ])));
   const [draftProductManagementCells, setDraftProductManagementCells] = useState<Record<string, PermissionCellState>>(initialProductManagementCells);
+  const initialTalentCells = Object.fromEntries(talentPermissions.flatMap((permission) => roleOptions.map((role) => [
+    `${role.value}:${permission.id}`,
+    { ...permission.cells[role.value] },
+  ])));
+  const [draftTalentCells, setDraftTalentCells] = useState<Record<string, PermissionCellState>>(initialTalentCells);
   const visibleRoleTypes = permissionRoleOptions.map((role) => role.value);
   const menuPermissionIds = menus.map((menu) => menu.id);
   const annualGoalPermissionIds = annualGoalPermissions.map((permission) => permission.id);
   const kpiPermissionIds = kpiPermissions.map((permission) => permission.id);
   const notificationPermissionIds = notificationPermissions.map((permission) => permission.id);
   const productManagementPermissionIds = productManagementPermissions.map((permission) => permission.id);
+  const talentPermissionIds = talentPermissions.map((permission) => permission.id);
   const roleMenuCellKeys = buildPermissionCellKeys(visibleRoleTypes, menuPermissionIds);
   const annualGoalCellKeys = buildPermissionCellKeys(visibleRoleTypes, annualGoalPermissionIds);
   const kpiCellKeys = buildPermissionCellKeys(visibleRoleTypes, kpiPermissionIds);
   const notificationCellKeys = buildPermissionCellKeys(visibleRoleTypes, notificationPermissionIds);
   const productManagementCellKeys = buildPermissionCellKeys(visibleRoleTypes, productManagementPermissionIds);
+  const talentCellKeys = buildPermissionCellKeys(visibleRoleTypes, talentPermissionIds);
   const lockedRoleMenuCellKeys = new Set(menus
     .filter((menu) => ["/organization", "/dashboard"].includes(menu.path))
     .map((menu) => `ADMIN:${menu.id}`));
   const lockedNotificationCellKeys = new Set<string>();
   const canEditNotificationPermissions = canManageRolePermissions;
   const canEditProductManagementPermissions = canManageRolePermissions;
+  const canEditTalentPermissions = canManageRolePermissions;
   const draftRoleMenuKeyString = JSON.stringify(draftRoleMenuCells);
   const initialRoleMenuKeyString = JSON.stringify(initialRoleMenuCells);
   const hasRoleMenuChanges = draftRoleMenuKeyString !== initialRoleMenuKeyString;
@@ -1739,6 +1761,9 @@ export function OrgContent({
   const draftProductManagementPermissionKeyString = JSON.stringify(draftProductManagementCells);
   const initialProductManagementPermissionKeyString = JSON.stringify(initialProductManagementCells);
   const hasProductManagementPermissionChanges = draftProductManagementPermissionKeyString !== initialProductManagementPermissionKeyString;
+  const draftTalentPermissionKeyString = JSON.stringify(draftTalentCells);
+  const initialTalentPermissionKeyString = JSON.stringify(initialTalentCells);
+  const hasTalentPermissionChanges = draftTalentPermissionKeyString !== initialTalentPermissionKeyString;
   const roleMenuValueChangeCount = countPermissionValueChanges(initialRoleMenuCells, draftRoleMenuCells);
   const annualGoalValueChangeCount = countPermissionValueChanges(initialAnnualGoalCells, draftAnnualGoalCells);
   const kpiValueChangeCount = countPermissionValueChanges(initialKpiCells, draftKpiCells);
@@ -1748,11 +1773,13 @@ export function OrgContent({
   const kpiSyncValueChangeCount = countDepartmentSyncValueChanges(initialKpiCells, draftKpiCells);
   const notificationSyncValueChangeCount = countDepartmentSyncValueChanges(initialNotificationCells, draftNotificationCells);
   const productManagementSyncValueChangeCount = countDepartmentSyncValueChanges(initialProductManagementCells, draftProductManagementCells);
+  const talentSyncValueChangeCount = countDepartmentSyncValueChanges(initialTalentCells, draftTalentCells);
   const roleMenuChangedItems = buildDepartmentSyncChangedItems(initialRoleMenuCells, draftRoleMenuCells, menus);
   const annualGoalChangedItems = buildDepartmentSyncChangedItems(initialAnnualGoalCells, draftAnnualGoalCells, annualGoalPermissions);
   const kpiChangedItems = buildDepartmentSyncChangedItems(initialKpiCells, draftKpiCells, kpiPermissions);
   const notificationChangedItems = buildDepartmentSyncChangedItems(initialNotificationCells, draftNotificationCells, notificationPermissions);
   const productManagementChangedItems = buildDepartmentSyncChangedItems(initialProductManagementCells, draftProductManagementCells, productManagementPermissions);
+  const talentChangedItems = buildDepartmentSyncChangedItems(initialTalentCells, draftTalentCells, talentPermissions);
   const draftKpiPayload = JSON.stringify(Object.entries(draftKpiCells).map(([key, cell]) => {
     const [roleType, permissionId] = key.split(":");
     return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
@@ -1762,6 +1789,10 @@ export function OrgContent({
     return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
   }));
   const draftProductManagementPayload = JSON.stringify(Object.entries(draftProductManagementCells).map(([key, cell]) => {
+    const [roleType, permissionId] = key.split(":");
+    return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
+  }));
+  const draftTalentPayload = JSON.stringify(Object.entries(draftTalentCells).map(([key, cell]) => {
     const [roleType, permissionId] = key.split(":");
     return { roleType, permissionId, allowed: cell.allowed, explicit: cell.explicit };
   }));
@@ -1785,6 +1816,10 @@ export function OrgContent({
   useEffect(() => {
     setDraftProductManagementCells(initialProductManagementCells);
   }, [initialProductManagementPermissionKeyString]);
+
+  useEffect(() => {
+    setDraftTalentCells(initialTalentCells);
+  }, [initialTalentPermissionKeyString]);
 
   useEffect(() => {
     setExpandedTreeNodes(buildInitialExpandedState(organizationHierarchyRoot));
@@ -1887,6 +1922,24 @@ export function OrgContent({
     });
   }
 
+  function toggleDraftTalentPermission(roleType: RoleType, permission: ScopedTalentPermission) {
+    if (!canEditTalentPermissions) return;
+    const key = `${roleType}:${permission.id}`;
+    setDraftTalentCells((current) => {
+      const cell = current[key];
+      const nextAllowed = !cell.allowed;
+      return {
+        ...current,
+        [key]: {
+          allowed: nextAllowed,
+          source: selectedScope.scopeType,
+          explicit: true,
+          inherited: false,
+        },
+      };
+    });
+  }
+
   function toggleRoleMenuCells(targetKeys: readonly string[]) {
     setDraftRoleMenuCells((current) => setPermissionCellsAllowed(
       current,
@@ -1936,6 +1989,16 @@ export function OrgContent({
     ));
   }
 
+  function toggleTalentCells(targetKeys: readonly string[]) {
+    if (!canEditTalentPermissions) return;
+    setDraftTalentCells((current) => setPermissionCellsAllowed(
+      current,
+      targetKeys,
+      getPermissionSelectionState(current, targetKeys) !== "checked",
+      selectedScope.scopeType,
+    ));
+  }
+
   function resetDraftPermissions() {
     setDraftRoleMenuCells(initialRoleMenuCells);
   }
@@ -1954,6 +2017,10 @@ export function OrgContent({
 
   function resetDraftProductManagementPermissions() {
     setDraftProductManagementCells(initialProductManagementCells);
+  }
+
+  function resetDraftTalentPermissions() {
+    setDraftTalentCells(initialTalentCells);
   }
 
   function openPermissionMatrixSync(
@@ -2106,6 +2173,7 @@ export function OrgContent({
                   { key: "annual-goal", label: "指标管理权限" },
                   { key: "product-management", label: "产品管理权限" },
                   { key: "kpi", label: "KPI 管理权限" },
+                  { key: "talent", label: "人才发展权限" },
                   { key: "notification", label: "通知中心权限" },
                   { key: "approval-policy", label: "KPI 审批策略" },
                 ].map((item) => (
@@ -2113,7 +2181,7 @@ export function OrgContent({
                     key={item.key}
                     type="button"
                     onClick={() => {
-                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "approval-policy");
+                      setPermissionSection(item.key as "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "talent" | "approval-policy");
                     }}
                     className={`px-4 py-1.5 rounded-md text-sm transition ${
                       permissionSection === item.key
@@ -2436,6 +2504,125 @@ export function OrgContent({
                                         type: "applyAllDepartments",
                                         data: {
                                           kind: "product-management",
+                                          permissionId: permission.id,
+                                          permissionName: permission.name,
+                                          roleType: role.value,
+                                          roleLabel: role.label,
+                                          allowed: enabled,
+                                        },
+                                      })}
+                                      className="absolute left-[calc(50%+18px)] top-1/2 hidden -translate-y-1/2 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm transition hover:text-foreground group-hover:inline-flex"
+                                      title="按当前系统值覆盖到全部部门"
+                                    >
+                                      <Wand2 className="w-3 h-3" />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : permissionSection === "talent" ? (
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">人才发展权限</h3>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      控制人才总览、人才盘点、人才决策、人才履历与规则配置的查看/操作权限。系统范围可批量同步至各部门，部门范围可维护本部门角色默认权限。
+                    </div>
+                    {canEditTalentPermissions && hasTalentPermissionChanges ? (
+                      <div className="text-xs text-warning mt-1">有未保存的人才发展权限调整</div>
+                    ) : null}
+                  </div>
+                  {canEditTalentPermissions ? (
+                    <PermissionMatrixSaveActions
+                      saveAction={saveTalentRolePermissions}
+                      scopeType={selectedScope.scopeType}
+                      departmentOrgNodeId={selectedScope.departmentOrgNodeId}
+                      permissions={draftTalentPayload}
+                      hasChanges={hasTalentPermissionChanges}
+                      valueChangeCount={talentSyncValueChangeCount}
+                      reset={resetDraftTalentPermissions}
+                      onSync={(mode) => openPermissionMatrixSync("talent", mode, "人才发展权限", draftTalentPayload, talentPermissions.length, talentSyncValueChangeCount, talentChangedItems)}
+                      showSync={selectedScope.scopeType === "SYSTEM"}
+                    />
+                  ) : null}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[960px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[260px]" />
+                      {permissionRoleOptions.map((role) => <col key={role.value} className="w-20" />)}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 font-medium">
+                          {canEditTalentPermissions ? (
+                            <PermissionBulkCheckbox
+                              state={getPermissionSelectionState(draftTalentCells, talentCellKeys)}
+                              label="能力项"
+                              onToggle={() => toggleTalentCells(talentCellKeys)}
+                            />
+                          ) : "能力项"}
+                        </th>
+                        {permissionRoleOptions.map((role) => {
+                          const roleCellKeys = buildPermissionCellKeys([role.value], talentPermissionIds);
+                          return (
+                            <th key={role.value} className="py-2 font-medium text-center align-middle">
+                              {canEditTalentPermissions ? (
+                                <PermissionBulkCheckbox
+                                  state={getPermissionSelectionState(draftTalentCells, roleCellKeys)}
+                                  label={role.label}
+                                  onToggle={() => toggleTalentCells(roleCellKeys)}
+                                />
+                              ) : role.label}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {talentPermissions.map((permission) => (
+                        <tr key={permission.id} className="border-t border-border">
+                          <td className="py-0 pr-4 align-middle">
+                            <div className="min-h-[72px] flex flex-col justify-center">
+                              <div className="font-medium break-words">{permission.name}</div>
+                              <div className="text-[10px] text-muted-foreground break-all">{permission.description}</div>
+                            </div>
+                          </td>
+                          {permissionRoleOptions.map((role) => {
+                            const cell = draftTalentCells[`${role.value}:${permission.id}`];
+                            const enabled = cell?.allowed ?? false;
+                            const inherited = cell?.inherited;
+                            return (
+                              <td key={role.value} className="py-0 text-center align-middle">
+                                <div className="group relative min-h-[72px] flex items-center justify-center gap-1">
+                                  {canEditTalentPermissions ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDraftTalentPermission(role.value, permission)}
+                                      className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"} ${inherited ? "ring-1 ring-warning/50" : ""} hover:ring-1 hover:ring-ring`}
+                                      title={inherited ? "当前继承自系统，点击后转为显式配置" : "调整后需点击保存生效"}
+                                    >
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : (
+                                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded ${enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                                      {enabled && <Check className="w-3.5 h-3.5" />}
+                                    </span>
+                                  )}
+                                  {isAdmin && selectedScope.scopeType === "SYSTEM" && role.value !== "ADMIN" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDialog({
+                                        type: "applyAllDepartments",
+                                        data: {
+                                          kind: "talent",
                                           permissionId: permission.id,
                                           permissionName: permission.name,
                                           roleType: role.value,

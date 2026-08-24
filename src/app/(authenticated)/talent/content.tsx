@@ -106,7 +106,7 @@ import { useRouter } from "next/navigation";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
-type Section = "overview" | "review" | "decision" | "history" | "config";
+export type Section = "overview" | "review" | "decision" | "history" | "config";
 
 type ConfigKey = "review" | "career" | "competency" | "salary" | "incident" | "kpi-rating" | "decision-rules";
 
@@ -210,6 +210,7 @@ export default function TalentPageContent({
   latestAssessmentByUserId,
   statCards,
   profileExtrasByUserId,
+  visibleSections,
 }: {
   reviewWorkspace: ReviewWorkspaceData;
   operationWorkspace: TalentOperationWorkspaceData;
@@ -227,6 +228,7 @@ export default function TalentPageContent({
     currentQuarterRewardNames: string[];
   };
   profileExtrasByUserId: Record<string, ProfileExtras>;
+  visibleSections: Section[];
 }) {
   const [gridFilter, setGridFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -234,7 +236,9 @@ export default function TalentPageContent({
   const [selected, setSelected] = useState<Person | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [notice, setNotice] = useState("");
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>(visibleSections[0] ?? "overview");
+  // 快捷入口可能跳到无权限的 tab，渲染时回退到第一个可见 tab。
+  const activeSection: Section | null = visibleSections.length === 0 ? null : (visibleSections.includes(section) ? section : visibleSections[0]);
   const [historyInitialCategory, setHistoryInitialCategory] = useState<"profiles" | "promotion" | "contract" | "salary" | "reward">("profiles");
   const [activeConfig, setActiveConfig] = useState<ConfigKey | null>(null);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
@@ -329,10 +333,12 @@ export default function TalentPageContent({
       <div className="flex items-center gap-1 border-b border-border mb-5 overflow-x-auto">
         {([
           ["overview", "人才总览"], ["review", "人才盘点"], ["decision", "人才决策"], ["history", "人才履历"], ["config", "规则配置"],
-        ] as [Section, string][]).map(([key, label]) => <button key={key} onClick={() => { setSection(key); if (key === "config") setActiveConfig(null); }} className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${section === key ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
+        ] as [Section, string][]).filter(([key]) => visibleSections.includes(key)).map(([key, label]) => <button key={key} onClick={() => { setSection(key); if (key === "config") setActiveConfig(null); }} className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${activeSection === key ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
       </div>
 
-      {section === "overview" && <>
+      {activeSection === null && <div className="py-16 text-center text-sm text-muted-foreground">暂无人才发展模块的访问权限，请联系管理员开通</div>}
+
+      {activeSection === "overview" && <>
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(280px,0.9fr)] gap-4 mb-5">
         <Card className="!p-0 overflow-hidden">
           <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -399,10 +405,10 @@ export default function TalentPageContent({
       </Card>
       </>}
 
-      {section === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
-      {section === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
-      {section === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
-      {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
+      {activeSection === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
+      {activeSection === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
+      {activeSection === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
+      {activeSection === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
 
       {selected && <PersonDrawer person={selected} tab={tab} setTab={setTab} onClose={() => setSelected(null)} onNotice={showNotice} />}
       {notice && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] rounded-lg bg-slate-900 text-white px-4 py-3 shadow-xl text-sm flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" />{notice}</div>}
@@ -445,7 +451,7 @@ function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
     </form>{activeTemplates.length === 0 && <p className="mt-2 text-xs text-amber-600">暂无已发布模型，请先到“规则配置 → 人才盘点模型”完成发布。</p>}</Card>}
     {!createPanelVisible && <>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"><Metric label="待评价" value={`${pending} 人`} hint="全部批次" /><Metric label="已评价" value={`${completed} 人`} hint="含待校准结果" /><Metric label="盘点批次" value={`${data.cycles.cycles.length} 个`} hint="历史版本独立保留" /></div>
-    <Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">盘点批次</th><th className="text-left px-4 py-3 font-medium">使用模型</th><th className="text-left px-4 py-3 font-medium">范围</th><th className="text-left px-4 py-3 font-medium">进度</th><th className="text-left px-4 py-3 font-medium">状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{data.cycles.cycles.map((cycle) => { const rows = participantRows.filter((item) => item.cycleId === cycle.id); const done = rows.filter((item) => item.status !== "PENDING").length; return <tr key={cycle.id}><td className="px-5 py-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground mt-1">{cycle.year}年{cycle.halfYear === 1 ? "上半年" : "下半年"}</div></td><td className="px-4 py-4 text-xs">{templateName.get(cycle.templateVersionId) ?? "模型已归档"}</td><td className="px-4 py-4 text-xs">{departmentName.get(cycle.departmentOrgNodeId)} · {rows.length}人</td><td className="px-4 py-4 font-medium">{done}/{rows.length}</td><td className="px-4 py-4"><Badge tone={cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "success" : "primary"}>{reviewStatusLabel(cycle.status)}</Badge></td><td className="px-5 py-4"><div className="flex items-center justify-end gap-3"><button onClick={() => setSelectedCycleId(cycle.id)} className="text-xs text-primary">{cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "查看结果" : "继续盘点"}</button>{(cycle.status !== "CONFIRMED" && cycle.status !== "ARCHIVED") && <ConfirmDeleteButton action={deleteReviewCycleWithState} initialState={initialTalentRuleState} hidden={{ cycleId: cycle.id }} title="删除盘点批次" description={`确认删除“${cycle.name}”吗？将删除 ${rows.length} 名员工的盘点数据，其中 ${done} 人已有评价结果。此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>}/>}</div></td></tr>; })}</tbody></table>{data.cycles.cycles.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无盘点批次，请先发布模型并新建批次</div>}</Card>
+    <Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">盘点批次</th><th className="text-left px-4 py-3 font-medium">使用模型</th><th className="text-left px-4 py-3 font-medium">范围</th><th className="text-left px-4 py-3 font-medium">进度</th><th className="text-left px-4 py-3 font-medium">状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{data.cycles.cycles.map((cycle) => { const rows = participantRows.filter((item) => item.cycleId === cycle.id); const done = rows.filter((item) => item.status !== "PENDING").length; return <tr key={cycle.id}><td className="px-5 py-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground mt-1">{cycle.year}年{cycle.halfYear === 1 ? "上半年" : "下半年"}</div></td><td className="px-4 py-4 text-xs">{templateName.get(cycle.templateVersionId) ?? "模型已归档"}</td><td className="px-4 py-4 text-xs">{data.cycles.scopeName ?? departmentName.get(cycle.departmentOrgNodeId)} · {rows.length}人</td><td className="px-4 py-4 font-medium">{done}/{rows.length}</td><td className="px-4 py-4"><Badge tone={cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "success" : "primary"}>{reviewStatusLabel(cycle.status)}</Badge></td><td className="px-5 py-4"><div className="flex items-center justify-end gap-3"><button onClick={() => setSelectedCycleId(cycle.id)} className="text-xs text-primary">{cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "查看结果" : "继续盘点"}</button>{(cycle.status !== "CONFIRMED" && cycle.status !== "ARCHIVED") && <ConfirmDeleteButton action={deleteReviewCycleWithState} initialState={initialTalentRuleState} hidden={{ cycleId: cycle.id }} title="删除盘点批次" description={`确认删除“${cycle.name}”吗？将删除 ${rows.length} 名员工的盘点数据，其中 ${done} 人已有评价结果。此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>}/>}</div></td></tr>; })}</tbody></table>{data.cycles.cycles.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无盘点批次，请先发布模型并新建批次</div>}</Card>
     </>}
     <ActionFeedback key={createState.requestId} state={createState}/>
   </div>;

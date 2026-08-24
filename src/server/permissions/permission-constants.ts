@@ -28,17 +28,12 @@ export const talentAbilityKeys = {
   viewReview: "VIEW_TALENT_REVIEW",
   manageReview: "MANAGE_TALENT_REVIEW",
   calibrateReview: "CALIBRATE_TALENT_REVIEW",
-  viewCareerModel: "VIEW_CAREER_MODEL",
-  manageCareerModel: "MANAGE_CAREER_MODEL",
-  viewBusinessAssessment: "VIEW_BUSINESS_ASSESSMENT",
-  manageBusinessAssessment: "MANAGE_BUSINESS_ASSESSMENT",
-  viewWorkIncident: "VIEW_WORK_INCIDENT",
-  manageWorkIncident: "MANAGE_WORK_INCIDENT",
   viewRecommendation: "VIEW_RECOMMENDATION",
   manageRecommendation: "MANAGE_RECOMMENDATION",
   viewHistory: "VIEW_TALENT_HISTORY",
   manageHistory: "MANAGE_TALENT_HISTORY",
   viewSensitive: "VIEW_TALENT_SENSITIVE",
+  viewConfig: "VIEW_TALENT_CONFIG",
   manageConfig: "MANAGE_TALENT_CONFIG",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
@@ -189,10 +184,24 @@ export const kpiDefaultPermissionGrants: Array<{
 export const talentOrdinaryPermissionAbilityKeys = [
   talentAbilityKeys.viewProfile,
   talentAbilityKeys.viewReview,
-  talentAbilityKeys.viewCareerModel,
-  talentAbilityKeys.viewBusinessAssessment,
-  talentAbilityKeys.viewWorkIncident,
   talentAbilityKeys.viewHistory,
+] satisfies OrgPermissionAbilityKey[];
+
+// 组织与权限页的「人才发展权限」矩阵能力项，按所在 tab 归类排序：
+// 人才总览 → 人才盘点 → 人才决策 → 人才履历 → 规则配置。
+export const talentMatrixPermissionAbilityKeys = [
+  talentAbilityKeys.viewProfile,
+  talentAbilityKeys.viewReview,
+  talentAbilityKeys.manageReview,
+  talentAbilityKeys.calibrateReview,
+  talentAbilityKeys.viewRecommendation,
+  talentAbilityKeys.manageRecommendation,
+  talentAbilityKeys.viewHistory,
+  talentAbilityKeys.manageHistory,
+  talentAbilityKeys.editProfile,
+  talentAbilityKeys.viewSensitive,
+  talentAbilityKeys.viewConfig,
+  talentAbilityKeys.manageConfig,
 ] satisfies OrgPermissionAbilityKey[];
 
 export const notificationOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
@@ -214,14 +223,10 @@ type DefaultPermissionGrant = {
   orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
 };
 
-const migratedToKpiTalentAbilityKeys = new Set<OrgPermissionAbilityKey>([
-  talentAbilityKeys.manageBusinessAssessment,
-  talentAbilityKeys.manageWorkIncident,
-]);
-
+// 默认矩阵：ADMIN 全部(ALL)；部门主管全部(本部门 SUBTREE，含薪资敏感字段)；
+// 组长查看类 + 盘点录入/决策操作(本组 NODE)；组员查看类(本人 SELF)。
 export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
   ...Object.values(talentAbilityKeys)
-    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
     .map((abilityKey) => ({
       moduleKey: orgPermissionModuleKeys.talent,
       abilityKey,
@@ -231,7 +236,6 @@ export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
       orgNodeSeedKey: null,
     })),
   ...Object.values(talentAbilityKeys)
-    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
     .map((abilityKey) => ({
       moduleKey: orgPermissionModuleKeys.talent,
       abilityKey,
@@ -244,9 +248,6 @@ export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
     talentAbilityKeys.viewProfile,
     talentAbilityKeys.viewReview,
     talentAbilityKeys.manageReview,
-    talentAbilityKeys.viewCareerModel,
-    talentAbilityKeys.viewBusinessAssessment,
-    talentAbilityKeys.viewWorkIncident,
     talentAbilityKeys.viewRecommendation,
     talentAbilityKeys.manageRecommendation,
     talentAbilityKeys.viewHistory,

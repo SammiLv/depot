@@ -4,6 +4,7 @@ import {
   kpiOrdinaryPermissionAbilityKeys,
   notificationOrdinaryPermissionAbilityKeys,
   productManagementOrdinaryPermissionAbilityKeys,
+  talentMatrixPermissionAbilityKeys,
   orgPermissionModuleKeys,
 } from "@/server/permissions/permission-constants";
 
@@ -205,6 +206,76 @@ export async function syncNotificationPermissionMatrix(tx: Prisma.TransactionCli
       await tx.orgPermissionGrant.createMany({
         data: departments.flatMap((department) => enabledTargets.map((cell) => ({
           moduleKey: orgPermissionModuleKeys.notification,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiScopeByRole[cell.roleType],
+          subjectType: "ROLE" as const,
+          roleType: cell.roleType,
+          userId: null,
+          orgNodeId: department.id,
+          isActive: true,
+        }))),
+      });
+    }
+  }
+  return summary(mode, departments.length, abilityIds.length, changes, targets);
+}
+
+export async function syncTalentPermissionMatrix(tx: Prisma.TransactionClient, raw: string, mode: PermissionMatrixSyncMode) {
+  const abilityIds = [...talentMatrixPermissionAbilityKeys];
+  const cells = parseCompletePermissionMatrix(raw, abilityIds);
+  const currentRows = await tx.orgPermissionGrant.findMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.talent,
+      subjectType: "ROLE",
+      orgNodeId: null,
+      roleType: { in: permissionMatrixRoles },
+      abilityKey: { in: abilityIds },
+    },
+    select: { roleType: true, abilityKey: true, isActive: true },
+  });
+  const changes = changedCells(new Map(currentRows.filter((row) => row.roleType).map((row) => [`${row.roleType}:${row.abilityKey}`, row.isActive])), cells);
+  const departments = await tx.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+
+  await tx.orgPermissionGrant.deleteMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.talent,
+      subjectType: "ROLE",
+      orgNodeId: null,
+      roleType: { in: permissionMatrixRoles },
+      abilityKey: { in: abilityIds },
+    },
+  });
+  const enabledSystem = cells.filter((cell) => cell.allowed);
+  if (enabledSystem.length) {
+    await tx.orgPermissionGrant.createMany({
+      data: enabledSystem.map((cell) => ({
+        moduleKey: orgPermissionModuleKeys.talent,
+        abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+        scopeType: kpiScopeByRole[cell.roleType],
+        subjectType: "ROLE" as const,
+        roleType: cell.roleType,
+        userId: null,
+        orgNodeId: null,
+        isActive: true,
+      })),
+    });
+  }
+
+  const targets = departmentSyncTargets(mode === "FULL" ? cells : changes);
+  if (departments.length && targets.length) {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.talent,
+        subjectType: "ROLE",
+        orgNodeId: { in: departments.map((department) => department.id) },
+        OR: targets.map((cell) => ({ roleType: cell.roleType, abilityKey: cell.permissionId as OrgPermissionAbilityKey })),
+      },
+    });
+    const enabledTargets = targets.filter((cell) => cell.allowed);
+    if (enabledTargets.length) {
+      await tx.orgPermissionGrant.createMany({
+        data: departments.flatMap((department) => enabledTargets.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.talent,
           abilityKey: cell.permissionId as OrgPermissionAbilityKey,
           scopeType: kpiScopeByRole[cell.roleType],
           subjectType: "ROLE" as const,

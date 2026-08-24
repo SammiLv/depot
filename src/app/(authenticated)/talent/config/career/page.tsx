@@ -12,7 +12,7 @@ const button = "h-9 rounded-full bg-primary px-4 text-sm font-medium text-primar
 
 export default async function CareerConfigurationPage() {
   const user = await requireCurrentUser();
-  const coverage = await resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig);
+  const coverage = await resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig);
   if (!coverage.hasPermission) redirect("/talent");
   const data = await getCareerConfiguration(user);
   const trackName = new Map(data.tracks.map((row) => [row.id, row.name]));

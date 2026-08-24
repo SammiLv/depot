@@ -21,6 +21,6 @@ export type ReviewCycleDetail = {
 };
 export type ReviewWorkspaceData = {
   config: { departments: ReviewDepartment[]; templates: ReviewTemplate[]; dimensions: ReviewDimension[]; ratings: ReviewRating[]; thresholds: ReviewThreshold[]; nineBoxRules: ReviewNineBox[] };
-  cycles: { departments: ReviewDepartment[]; cycles: ReviewCycle[]; participants: ReviewParticipant[]; templates: Pick<ReviewTemplate, "id" | "name" | "version">[]; candidates: ReviewCandidate[]; canCreateCycle: boolean };
+  cycles: { departments: ReviewDepartment[]; cycles: ReviewCycle[]; participants: ReviewParticipant[]; templates: Pick<ReviewTemplate, "id" | "name" | "version">[]; candidates: ReviewCandidate[]; canCreateCycle: boolean; scopeName: string | null };
   details: ReviewCycleDetail[];
 };

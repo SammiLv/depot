@@ -41,6 +41,7 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
   return {
     canEdit: editCoverage.hasPermission,
     canViewSensitive: sensitiveCoverage.hasPermission,
+    viewerId: viewer.id,
     levels,
     employees: users.map((user) => {
       const profile = profileByUserId.get(user.id);
@@ -66,8 +67,8 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
         currentContractSequence: profile?.currentContractSequence ?? null,
         entryJobLevelId: profile?.entryJobLevelId ?? "",
         jobLevelId: profile?.jobLevelId ?? "",
-        startingSalary: sensitiveCoverage.hasPermission ? profile?.startingSalary ?? null : null,
-        currentSalary: sensitiveCoverage.hasPermission ? profile?.currentSalary ?? null : null,
+        startingSalary: sensitiveCoverage.hasPermission || user.id === viewer.id ? profile?.startingSalary ?? null : null,
+        currentSalary: sensitiveCoverage.hasPermission || user.id === viewer.id ? profile?.currentSalary ?? null : null,
         hasTwoCReviewsInCurrentContract: serializeProfileBoolean(profile?.hasTwoCReviewsInCurrentContract),
         hasConsecutiveTwoCReviewsInCurrentContract: serializeProfileBoolean(profile?.hasConsecutiveTwoCReviewsInCurrentContract),
         isLatestPreRenewalReviewC: serializeProfileBoolean(profile?.isLatestPreRenewalReviewC),

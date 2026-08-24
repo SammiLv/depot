@@ -8,7 +8,7 @@ import { parseIncidentLevelOptions } from "./incident-level-config";
 type Viewer = { id: string; roleType: RoleType; orgNodeId: string | null };
 
 export async function getTalentDecisionRuleConfiguration(currentUser: Viewer) {
-  const authorizedOrgNodeIds = await resolveAuthorizedOrgNodeIds(currentUser, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig);
+  const authorizedOrgNodeIds = await resolveAuthorizedOrgNodeIds(currentUser, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig);
   const departments = await prisma.orgNode.findMany({
     where: authorizedOrgNodeIds === null ? { nodeType: "DEPARTMENT" } : { nodeType: "DEPARTMENT", id: { in: authorizedOrgNodeIds } },
     select: { id: true, name: true },

@@ -1,5 +1,7 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
+import { buildUserWhereByPermission, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
+import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
 import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query";
 import { getTalentHistoryData, getTalentRecommendationData } from "@/server/talent/decision-history-query";
 import { getWorkIncidentPageData } from "@/server/talent/incident-query";
@@ -25,6 +27,20 @@ function endOfQuarter(date: Date) {
 
 export default async function TalentPage() {
   const user = await requireCurrentUser();
+  const [profileCoverage, reviewCoverage, recommendationCoverage, historyCoverage, configCoverage] = await Promise.all([
+    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile),
+    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewReview),
+    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewRecommendation),
+    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewHistory),
+    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig),
+  ]);
+  const visibleSections = ([
+    ["overview", profileCoverage],
+    ["review", reviewCoverage],
+    ["decision", recommendationCoverage],
+    ["history", historyCoverage],
+    ["config", configCoverage],
+  ] as const).filter(([, coverage]) => coverage.hasPermission).map(([key]) => key);
   const [config, cycles, assessment, incident, decision, history, employeeProfiles, career, competency, decisionRules] = await Promise.all([
     getTalentReviewConfig(user),
     getTalentReviewCycles(user),
@@ -37,9 +53,25 @@ export default async function TalentPage() {
     getCompetencyConfiguration(user),
     getTalentDecisionRuleConfiguration(user),
   ]);
+  // 总览收口：盘点参与人再按 VIEW_TALENT_PROFILE 的可见用户范围过滤，下游统计/列表共用同一份 details。
+  const profileVisibleUserIds = profileCoverage.hasPermission
+    ? new Set(
+        (await prisma.user.findMany({
+          where: await buildUserWhereByPermission(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile),
+          select: { id: true },
+        })).map((row) => row.id),
+      )
+    : null;
   const details = (await Promise.all(cycles.cycles.map((cycle) => getTalentReviewCycleDetail(user, cycle.id))))
     .filter((detail): detail is NonNullable<typeof detail> => Boolean(detail))
-    .map((detail) => ({ ...detail, cycleId: detail.cycle.id, cycleStatus: detail.cycle.status }));
+    .map((detail) => ({
+      ...detail,
+      cycleId: detail.cycle.id,
+      cycleStatus: detail.cycle.status,
+      participants: profileVisibleUserIds
+        ? detail.participants.filter((participant) => profileVisibleUserIds.has(participant.userId))
+        : detail.participants,
+    }));
 
   const participantUserIds = [...new Set(details.flatMap((detail) => detail.participants.map((participant) => participant.userId)))].filter(Boolean);
   const now = new Date();
@@ -212,10 +244,11 @@ export default async function TalentPage() {
         recentPromotionNames,
         lowPromotionOpportunityCount,
         lowPromotionOpportunityNames,
-        currentQuarterRewards: currentQuarterRewardUserIds.length,
+        currentQuarterRewards: currentQuarterRewardRecords.length,
         currentQuarterRewardNames,
       }}
       profileExtrasByUserId={profileExtrasByUserId}
+      visibleSections={visibleSections}
     />
   );
 }
