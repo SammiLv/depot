@@ -55,6 +55,7 @@ export async function getTalentReviewCycles(viewer: Viewer) {
   // 范围/进度按查看权限收口：管理员/主管看部门全量，组长只看本组成员，组员只看本人。
   let participants = allParticipants;
   let scopeName: string | null = null;
+  let scopeTotalCount: number | null = null;
   if (selfOnly) {
     participants = allParticipants.filter((row) => row.userId === viewer.id && row.status === "CONFIRMED");
     scopeName = "本人";
@@ -69,6 +70,12 @@ export async function getTalentReviewCycles(viewer: Viewer) {
       ? await prisma.orgNode.findMany({ where: { id: { in: viewPermission.orgNodeIds } }, select: { name: true } })
       : [];
     scopeName = scopeNodes.map((node) => node.name).join("、") || (viewPermission.includesSelf ? "本人" : null);
+    // 范围口径 = 权限范围内（本组）组长+成员总人数，进度 = 已评价参与人 / 总人数
+    scopeTotalCount = viewPermission.orgNodeIds.length
+      ? await prisma.user.count({
+          where: { orgNodeId: { in: viewPermission.orgNodeIds }, roleType: { in: ["TEAM_LEADER", "MEMBER"] }, isActive: true, deletedAt: null },
+        })
+      : null;
   }
   const cycles = selfOnly ? allCycles.filter((row) => participants.some((participant) => participant.cycleId === row.id)) : allCycles;
   const templates = await prisma.talentReviewTemplateVersion.findMany({ where: { id: { in: cycles.map((row) => row.templateVersionId) } }, select: { id: true, name: true, version: true } });
@@ -84,7 +91,7 @@ export async function getTalentReviewCycles(viewer: Viewer) {
     orgNodeName: row.orgNodeId ? orgNameById.get(row.orgNodeId) ?? "未配置组织" : "未配置组织",
     departmentOrgNodeId: departmentScopes.find((item) => row.orgNodeId && item.orgNodeIds.includes(row.orgNodeId))?.department.id ?? "",
   }));
-  return { departments, cycles, participants, templates, candidates: selfOnly ? [] : candidates, canCreateCycle: calibratePermission.hasPermission, scopeName };
+  return { departments, cycles, participants, templates, candidates: selfOnly ? [] : candidates, canCreateCycle: calibratePermission.hasPermission, scopeName, scopeTotalCount };
 }
 
 export async function getTalentReviewCycleDetail(viewer: Viewer, cycleId: string) {
