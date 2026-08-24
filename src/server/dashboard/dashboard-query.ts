@@ -7,10 +7,9 @@ import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/pe
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 import { findUserPendingApprovalStep } from "@/server/kpi/approval-step-utils";
 import {
-  buildOrgScopeContext,
-  getAnnualGoalCapabilitiesForUser,
   getAnnualGoalPlanPermissions,
   getAnnualGoalPlanWhere,
+  resolveAnnualGoalPermissionContext,
 } from "@/server/organization/annual-goal-permissions";
 
 type CurrentUser = {
@@ -44,7 +43,7 @@ function sumValues<T>(items: T[], selector: (item: T) => number) {
 }
 
 export async function getDashboardData(currentUser: CurrentUser) {
-  const annualGoalCapabilities = await getAnnualGoalCapabilitiesForUser(currentUser);
+  const annualGoalPermissionContext = await resolveAnnualGoalPermissionContext(currentUser);
   const [
     viewKpiWhere,
     scoreSelfCoverage,
@@ -86,7 +85,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
       take: 5,
     }),
     prisma.annualGoalPlan.findMany({
-      where: await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities),
+      where: await getAnnualGoalPlanWhere(annualGoalPermissionContext),
       include: { metrics: { where: { deletedAt: null } } },
       orderBy: [{ year: "desc" }, { createdAt: "desc" }],
     }).then((plans) => plans.filter((plan) => Boolean(plan.departmentOrgNodeId))),
@@ -118,13 +117,12 @@ export async function getDashboardData(currentUser: CurrentUser) {
   const currentDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
   const currentDepartmentNode = currentDepartmentOrgNodeId ? orgNodeById.get(currentDepartmentOrgNodeId) ?? null : null;
 
-  const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
   const visibleAnnualPlans = activePlans.filter((plan) =>
-    getAnnualGoalPlanPermissions(currentUser, annualGoalCapabilities, {
+    getAnnualGoalPlanPermissions(annualGoalPermissionContext, {
       ownerType: "DEPARTMENT",
       ownerOrgNodeId: plan.departmentOrgNodeId,
       deletedAt: plan.deletedAt,
-    }, scopeContext).canViewPlan
+    }).canViewPlan
   );
 
   const visiblePlanMetricIds = Array.from(new Set(visibleAnnualPlans.flatMap((plan) => plan.metrics.map((metric) => metric.id))));

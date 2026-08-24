@@ -47,6 +47,16 @@ export const productManagementAbilityKeys = {
   manageProductTask: "MANAGE_PRODUCT_TASK",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
+export const annualGoalAbilityKeys = {
+  viewDepartmentPlans: "VIEW_ANNUAL_GOAL_DEPARTMENT_PLANS",
+  editDepartmentPlans: "EDIT_ANNUAL_GOAL_DEPARTMENT_PLANS",
+  viewTeamPlans: "VIEW_ANNUAL_GOAL_TEAM_PLANS",
+  editTeamPlans: "EDIT_ANNUAL_GOAL_TEAM_PLANS",
+  updateProgress: "UPDATE_ANNUAL_GOAL_PROGRESS",
+} satisfies Record<string, OrgPermissionAbilityKey>;
+
+export type AnnualGoalAbilityKey = (typeof annualGoalAbilityKeys)[keyof typeof annualGoalAbilityKeys];
+
 export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, number> = {
   SELF: 0,
   NODE: 1,
@@ -208,6 +218,51 @@ export const notificationOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[
   notificationAbilityKeys.manageNotificationScenario,
 ];
 
+// 组织与权限页的「指标管理权限」矩阵能力项：部门方案 → 小组指标 → 进度更新。
+export const annualGoalMatrixPermissionAbilityKeys = [
+  annualGoalAbilityKeys.viewDepartmentPlans,
+  annualGoalAbilityKeys.editDepartmentPlans,
+  annualGoalAbilityKeys.viewTeamPlans,
+  annualGoalAbilityKeys.editTeamPlans,
+  annualGoalAbilityKeys.updateProgress,
+] satisfies OrgPermissionAbilityKey[];
+
+// 指标管理按「能力 × 角色」分别定义作用域（组员可查看部门方案、可更新本组进度，
+// 无法套用 KPI/人才发展的统一角色映射）。矩阵保存/同步/读取共用本表；
+// 非默认开启的格子被管理员手动勾选时，也按本表锚定作用域。
+export const annualGoalPermissionScopeByAbilityRole: Record<AnnualGoalAbilityKey, Record<RoleType, OrgPermissionGrantScopeType>> = {
+  [annualGoalAbilityKeys.viewDepartmentPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "SUBTREE",
+    MEMBER: "SUBTREE",
+  },
+  [annualGoalAbilityKeys.editDepartmentPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "SUBTREE",
+    MEMBER: "SUBTREE",
+  },
+  [annualGoalAbilityKeys.viewTeamPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "NODE",
+  },
+  [annualGoalAbilityKeys.editTeamPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "NODE",
+  },
+  [annualGoalAbilityKeys.updateProgress]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "NODE",
+  },
+};
+
 export const productManagementOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
   productManagementAbilityKeys.manageProductGoal,
   productManagementAbilityKeys.manageProjectAndValueTracking,
@@ -315,3 +370,28 @@ export const notificationDefaultPermissionGrants: DefaultPermissionGrant[] = (
   roleType,
   orgNodeSeedKey: null,
 }));
+
+// 指标管理默认矩阵（对齐收归前实况）：ADMIN 全部(ALL)；查看部门方案 主管/组长/组员 SUBTREE@部门；
+// 编辑部门方案 主管 SUBTREE@部门；查看/编辑小组指标 主管 SUBTREE@部门 + 组长 NODE@本组；
+// 更新季度进度 主管 SUBTREE@部门 + 组长/组员 NODE@本组。
+const annualGoalDefaultEnabledRoles: Record<AnnualGoalAbilityKey, RoleType[]> = {
+  [annualGoalAbilityKeys.viewDepartmentPlans]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+  [annualGoalAbilityKeys.editDepartmentPlans]: ["ADMIN", "DEPARTMENT_MANAGER"],
+  [annualGoalAbilityKeys.viewTeamPlans]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"],
+  [annualGoalAbilityKeys.editTeamPlans]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"],
+  [annualGoalAbilityKeys.updateProgress]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+};
+
+export const annualGoalDefaultPermissionGrants: DefaultPermissionGrant[] = annualGoalMatrixPermissionAbilityKeys.flatMap((abilityKey) =>
+  annualGoalDefaultEnabledRoles[abilityKey].map((roleType) => {
+    const scopeType = annualGoalPermissionScopeByAbilityRole[abilityKey][roleType];
+    return {
+      moduleKey: orgPermissionModuleKeys.annualGoal,
+      abilityKey,
+      scopeType,
+      subjectType: "ROLE" as const,
+      roleType,
+      orgNodeSeedKey: scopeType === "ALL" ? null : scopeType === "SUBTREE" ? "DEPARTMENT" as const : "TEAM" as const,
+    };
+  })
+);

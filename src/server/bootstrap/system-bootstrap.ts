@@ -1,7 +1,7 @@
 import { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { ensureAnnualGoalPermissions, annualGoalPermissionDefinitions } from "@/server/organization/annual-goal-permissions";
 import {
+  annualGoalDefaultPermissionGrants,
   kpiAbilityKeys,
   notificationAbilityKeys,
   orgPermissionModuleKeys,
@@ -25,8 +25,7 @@ const systemMenus = [
 export async function ensureInitialSystemBootstrap() {
   await removePermissionMatrixIntegrationTestArtifacts();
   await ensureSystemMenus();
-  await ensureAnnualGoalPermissions();
-  await ensureSystemAnnualGoalRolePermissions();
+  await ensureAnnualGoalPermissionGrants();
   await ensureAdminKpiPermissions();
   await ensureDefaultTalentPermissions();
   await ensureInitialTalentSalaryConfig();
@@ -65,34 +64,60 @@ async function ensureSystemMenus() {
   }
 }
 
-async function ensureSystemAnnualGoalRolePermissions() {
-  const annualGoalPermissions = await prisma.annualGoalPermission.findMany({
-    select: { id: true, code: true },
+// 指标管理默认授权（幂等）：按 annualGoalDefaultPermissionGrants 发系统模板行（orgNodeId=null）
+// + 按部门/组物化行。服务启动与初始化引导都会调用，可重复执行。
+async function ensureAnnualGoalRoleGrant(
+  roleType: RoleType,
+  scopeType: "ALL" | "SUBTREE" | "NODE" | "SELF",
+  orgNodeId: string | null,
+  abilityKey: (typeof annualGoalDefaultPermissionGrants)[number]["abilityKey"],
+) {
+  const result = await prisma.orgPermissionGrant.updateMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.annualGoal,
+      abilityKey,
+      scopeType,
+      subjectType: "ROLE",
+      roleType,
+      userId: null,
+      orgNodeId,
+    },
+    data: { isActive: true },
   });
-  const permissionIdByCode = new Map(annualGoalPermissions.map((permission) => [permission.code, permission.id]));
 
-  for (const code of annualGoalPermissionDefinitions.map((permission) => permission.code)) {
-    const annualGoalPermissionId = permissionIdByCode.get(code);
-    if (!annualGoalPermissionId) continue;
-
-    await prisma.roleAnnualGoalPermission.upsert({
-      where: {
-        scopeType_departmentOrgNodeId_roleType_annualGoalPermissionId: {
-          scopeType: "SYSTEM",
-          departmentOrgNodeId: "",
-          roleType: RoleType.ADMIN,
-          annualGoalPermissionId,
-        },
-      },
-      update: { allowed: true },
-      create: {
-        scopeType: "SYSTEM",
-        departmentOrgNodeId: "",
-        roleType: RoleType.ADMIN,
-        annualGoalPermissionId,
-        allowed: true,
+  if (result.count === 0) {
+    await prisma.orgPermissionGrant.create({
+      data: {
+        moduleKey: orgPermissionModuleKeys.annualGoal,
+        abilityKey,
+        scopeType,
+        subjectType: "ROLE",
+        roleType,
+        userId: null,
+        orgNodeId,
+        isActive: true,
       },
     });
+  }
+}
+
+export async function ensureAnnualGoalPermissionGrants() {
+  const [departments, teams] = await Promise.all([
+    prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } }),
+    prisma.orgNode.findMany({ where: { nodeType: "TEAM" }, select: { id: true } }),
+  ]);
+
+  for (const grant of annualGoalDefaultPermissionGrants) {
+    // 系统模板行（权限矩阵「系统」视图读取的就是 null 节点行）
+    await ensureAnnualGoalRoleGrant(grant.roleType, grant.scopeType, null, grant.abilityKey);
+    const orgNodeIds = grant.orgNodeSeedKey === "DEPARTMENT"
+      ? departments.map((department) => department.id)
+      : grant.orgNodeSeedKey === "TEAM"
+        ? teams.map((team) => team.id)
+        : [];
+    for (const orgNodeId of orgNodeIds) {
+      await ensureAnnualGoalRoleGrant(grant.roleType, grant.scopeType, orgNodeId, grant.abilityKey);
+    }
   }
 }
 

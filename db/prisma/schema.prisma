@@ -66,6 +66,12 @@ enum OrgPermissionAbilityKey {
   MANAGE_PRODUCT_GOAL
   MANAGE_PROJECT_AND_VALUE_TRACKING
   MANAGE_PRODUCT_TASK
+  // 指标管理（年度目标）能力点，归属 ANNUAL_GOAL 模块
+  VIEW_ANNUAL_GOAL_DEPARTMENT_PLANS
+  EDIT_ANNUAL_GOAL_DEPARTMENT_PLANS
+  VIEW_ANNUAL_GOAL_TEAM_PLANS
+  EDIT_ANNUAL_GOAL_TEAM_PLANS
+  UPDATE_ANNUAL_GOAL_PROGRESS
 }
 
 enum NotificationTriggerType {
@@ -516,6 +522,8 @@ model RoleMenuPermission {
   @@index([menuPermissionId])
 }
 
+// 已废弃（2026-08-24 指标管理权限收归 OrgPermissionGrant 模型，moduleKey=ANNUAL_GOAL）：
+// 运行时与权限矩阵均不再读写，仅保留历史数据可读，待「角色可配置」里程碑评估删表。
 model AnnualGoalPermission {
   id                    String                     @id @default(cuid())
   code                  String                     @unique
@@ -527,6 +535,7 @@ model AnnualGoalPermission {
   roleAnnualPermissions RoleAnnualGoalPermission[]
 }
 
+// 已废弃：同 AnnualGoalPermission，仅保留历史数据可读。
 model RoleAnnualGoalPermission {
   id                     String              @id @default(cuid())
   scopeType              PermissionScopeType @default(SYSTEM)

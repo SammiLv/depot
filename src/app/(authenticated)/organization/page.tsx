@@ -2,10 +2,11 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import type { OrgPermissionAbilityKey } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { prisma } from "@/server/db/prisma";
-import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { getActivePermissionGrants } from "@/server/permissions/permission-query";
 import {
+  annualGoalMatrixPermissionAbilityKeys,
+  annualGoalPermissionScopeByAbilityRole,
   kpiAbilityKeys,
   kpiOrdinaryPermissionAbilityKeys,
   notificationAbilityKeys,
@@ -15,6 +16,7 @@ import {
   talentAbilityKeys,
   talentMatrixPermissionAbilityKeys,
   orgPermissionModuleKeys,
+  type AnnualGoalAbilityKey,
 } from "@/server/permissions/permission-constants";
 import { getUserWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
@@ -89,7 +91,7 @@ export default async function OrgPage({
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
 
-  const [users, orgNodes, menus, annualGoalPermissions, kpiPermissionGrants, kpiUserPermissionGrantRows, notificationPermissionGrants, productManagementPermissionGrants, talentPermissionGrants] = await Promise.all([
+  const [users, orgNodes, menus, annualGoalPermissionGrants, kpiPermissionGrants, kpiUserPermissionGrantRows, notificationPermissionGrants, productManagementPermissionGrants, talentPermissionGrants] = await Promise.all([
     prisma.user.findMany({
       where: { ...(await getUserWhereByScope(currentUser)), isActive: true },
       orderBy: [{ roleType: "asc" }, { name: "asc" }],
@@ -115,10 +117,11 @@ export default async function OrgPage({
       where: { isEnabled: true },
       orderBy: { sortOrder: "asc" },
     }),
-    (async () => {
-      await ensureAnnualGoalPermissions();
-      return prisma.annualGoalPermission.findMany({ orderBy: { sortOrder: "asc" } });
-    })(),
+    getActivePermissionGrants(
+      orgPermissionModuleKeys.annualGoal,
+      [...annualGoalMatrixPermissionAbilityKeys],
+      [...roleTypes],
+    ),
     getActivePermissionGrants(orgPermissionModuleKeys.kpi, Object.values(kpiAbilityKeys), [...roleTypes]),
     prisma.orgPermissionGrant.findMany({
       where: {
@@ -287,30 +290,59 @@ export default async function OrgPage({
     })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
   }));
 
-  const annualGoalMatrixRows = await prisma.roleAnnualGoalPermission.findMany({
-    where: { roleType: { in: [...roleTypes] } },
-  });
-  const annualGoalMatrixMap = new Map(annualGoalMatrixRows.map((row) => [`${row.scopeType}:${row.departmentOrgNodeId}:${row.roleType}:${row.annualGoalPermissionId}`, row]));
-  const buildAnnualGoalMatrix = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => annualGoalPermissions.map((permission) => ({
-    id: permission.id,
-    code: permission.code,
-    name: permission.name,
-    description: permission.description,
-    cells: Object.fromEntries(roleTypes.map((roleType) => {
-      const systemRow = annualGoalMatrixMap.get(`SYSTEM::${roleType}:${permission.id}`);
-      const scopedRow = scope.scopeType === "DEPARTMENT"
-        ? annualGoalMatrixMap.get(`DEPARTMENT:${scope.departmentOrgNodeId}:${roleType}:${permission.id}`)
-        : undefined;
-      const sourceRow = scopedRow ?? systemRow;
-      const allowed = sourceRow?.allowed ?? false;
-      return [roleType, {
-        allowed,
-        source: scopedRow ? "DEPARTMENT" : "SYSTEM",
-        explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
-        inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
-      }];
-    })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
-  }));
+  const annualGoalPermissionPresentation: Record<AnnualGoalAbilityKey, { name: string; description: string }> = {
+    VIEW_ANNUAL_GOAL_DEPARTMENT_PLANS: {
+      name: "查看部门方案",
+      description: "允许查看本部门的年度方案、年度指标、元指标与季度指标。",
+    },
+    EDIT_ANNUAL_GOAL_DEPARTMENT_PLANS: {
+      name: "编辑部门方案",
+      description: "允许维护本部门方案及其年度指标、元指标、季度指标与进度更新；生效前必须同时具备查看部门方案权限。",
+    },
+    VIEW_ANNUAL_GOAL_TEAM_PLANS: {
+      name: "查看小组指标",
+      description: "允许查看本小组的年度指标与季度指标数据。",
+    },
+    EDIT_ANNUAL_GOAL_TEAM_PLANS: {
+      name: "编辑小组指标",
+      description: "允许维护本小组年度指标、拆解季度指标；生效前必须同时具备查看小组指标权限，不包含季度/周进度更新。",
+    },
+    UPDATE_ANNUAL_GOAL_PROGRESS: {
+      name: "更新季度进度",
+      description: "允许仅更新本小组季度指标的当前进度与周进度。",
+    },
+  };
+
+  const annualGoalPermissionMap = new Map(annualGoalPermissionGrants
+    .filter((row) => row.subjectType === "ROLE")
+    .map((row) => [`${row.scopeType}:${row.orgNodeId ?? ""}:${row.roleType}:${row.abilityKey}`, row]));
+  const buildAnnualGoalPermissions = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => (
+    annualGoalMatrixPermissionAbilityKeys.map((abilityKey) => {
+      const presentation = annualGoalPermissionPresentation[abilityKey];
+      return {
+        id: abilityKey,
+        code: abilityKey,
+        name: presentation.name,
+        description: presentation.description,
+        cells: Object.fromEntries(roleTypes.map((roleType) => {
+          const scopeByAbilityRole = annualGoalPermissionScopeByAbilityRole[abilityKey][roleType];
+          const systemRow = annualGoalPermissionMap.get(`${scopeByAbilityRole}:${""}:${roleType}:${abilityKey}`);
+          const scopedOrgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : "";
+          const scopedRow = scopedOrgNodeId
+            ? annualGoalPermissionMap.get(`${scopeByAbilityRole}:${scopedOrgNodeId}:${roleType}:${abilityKey}`)
+            : undefined;
+          const sourceRow = scopedRow ?? systemRow;
+          const allowed = Boolean(sourceRow);
+          return [roleType, {
+            allowed,
+            source: scopedRow ? "DEPARTMENT" : "SYSTEM",
+            explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
+            inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
+          }];
+        })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
+      };
+    })
+  );
 
   const kpiPermissionPresentation: Partial<Record<OrgPermissionAbilityKey, { name: string; description: string }>> = {
     VIEW_KPI: {
@@ -807,7 +839,7 @@ export default async function OrgPage({
           ? buildDepartmentOrganizationHierarchyRoot(selectedDepartment)
           : null,
       menus: buildRoleMenuMatrix(scope),
-      annualGoalPermissions: buildAnnualGoalMatrix(scope),
+      annualGoalPermissions: buildAnnualGoalPermissions(scope),
       kpiPermissions: buildKpiPermissions(scope),
       notificationPermissions: buildNotificationPermissions(scope),
       productManagementPermissions: buildProductManagementPermissions(scope),

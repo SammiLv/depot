@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { prisma } from "@/server/db/prisma";
-import { annualGoalPermissionDefinitions } from "./annual-goal-permissions";
+import { annualGoalMatrixPermissionAbilityKeys, kpiOrdinaryPermissionAbilityKeys } from "@/server/permissions/permission-constants";
 import { permissionMatrixRoles, syncAnnualGoalPermissionMatrix, syncKpiPermissionMatrix, syncRoleMenuPermissionMatrix } from "./permission-matrix-sync";
 import { removePermissionMatrixIntegrationTestArtifacts } from "./integration-test-artifacts";
 
@@ -34,21 +34,25 @@ test("difference and full synchronization preserve unrelated permission data", a
   assert.equal((await prisma.roleMenuPermission.findUnique({ where: { scopeType_departmentOrgNodeId_roleType_menuPermissionId: { scopeType: "DEPARTMENT", departmentOrgNodeId: "dept-a", roleType: "MEMBER", menuPermissionId: "menu-dashboard" } } }))?.allowed, true);
   assert.equal((await prisma.roleMenuPermission.findUnique({ where: { scopeType_departmentOrgNodeId_roleType_menuPermissionId: { scopeType: "DEPARTMENT", departmentOrgNodeId: "dept-b", roleType: "MEMBER", menuPermissionId: "menu-project" } } }))?.allowed, true);
 
-  for (const definition of annualGoalPermissionDefinitions) await prisma.annualGoalPermission.create({ data: definition });
-  const annualIds = (await prisma.annualGoalPermission.findMany({ orderBy: { code: "asc" } })).map((row) => row.id);
+  // 指标管理矩阵：5 个能力点（OrgPermissionGrant，moduleKey=ANNUAL_GOAL），FULL 同步到 2 个部门。
+  // 允许 ADMIN/DEPARTMENT_MANAGER/TEAM_LEADER：系统行 3 角色 × 5 能力 = 15 行；
+  // 部门行跳过 ADMIN，2 部门 × 2 角色 × 5 能力 = 20 行。
+  const annualIds = [...annualGoalMatrixPermissionAbilityKeys];
   const annualSummary = await prisma.$transaction((tx) => syncAnnualGoalPermissionMatrix(tx, payload(annualIds, (role) => role !== "MEMBER"), "FULL"));
   assert.equal(annualSummary.syncedCellCount, 2 * 3 * annualIds.length);
+  const annualGoalRowCountAfterSync = await prisma.orgPermissionGrant.count({ where: { moduleKey: "ANNUAL_GOAL" } });
+  assert.equal(annualGoalRowCountAfterSync, 15 + 2 * 2 * annualIds.length);
 
   await prisma.orgPermissionGrant.createMany({ data: [
     { moduleKey: "KPI", abilityKey: "VIEW_KPI", scopeType: "SELF", subjectType: "USER", userId: "preserved-user", orgNodeId: "dept-a", isActive: true },
     { moduleKey: "ANNUAL_GOAL", abilityKey: "VIEW_KPI", scopeType: "ALL", subjectType: "ROLE", roleType: "ADMIN", isActive: true },
   ] });
-  const kpiIds = ["VIEW_KPI", "INITIALIZE_KPI", "VIEW_KPI_TEMPLATE", "MANAGE_KPI_TEMPLATE", "TOGGLE_KPI_TEMPLATE", "SCORE_SELF"];
+  const kpiIds = [...kpiOrdinaryPermissionAbilityKeys];
   const kpiPayload = payload(kpiIds, (role, id) => role === "ADMIN" || id === "VIEW_KPI");
   await prisma.$transaction((tx) => syncKpiPermissionMatrix(tx, kpiPayload, "FULL"));
   await prisma.$transaction((tx) => syncKpiPermissionMatrix(tx, kpiPayload, "FULL"));
   assert.equal(await prisma.orgPermissionGrant.count({ where: { subjectType: "USER", userId: "preserved-user" } }), 1);
-  assert.equal(await prisma.orgPermissionGrant.count({ where: { moduleKey: "ANNUAL_GOAL" } }), 1);
+  assert.equal(await prisma.orgPermissionGrant.count({ where: { moduleKey: "ANNUAL_GOAL" } }), annualGoalRowCountAfterSync + 1);
   const enabledKpiCells = permissionMatrixRoles.flatMap((role) => kpiIds.map((id) => ({ role, id }))).filter(({ role, id }) => role !== "ADMIN" && id === "VIEW_KPI");
   assert.equal(await prisma.orgPermissionGrant.count({ where: { moduleKey: "KPI", subjectType: "ROLE", orgNodeId: { in: ["dept-a", "dept-b"] } } }), 2 * enabledKpiCells.length);
 
