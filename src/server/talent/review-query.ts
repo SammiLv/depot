@@ -41,6 +41,15 @@ export async function getTalentReviewCycles(viewer: Viewer) {
   const departments = await authorizedDepartments(viewer, talentAbilityKeys.viewReview);
   const allCycles = await prisma.talentReviewCycle.findMany({ where: { departmentOrgNodeId: { in: departments.map((row) => row.id) }, deletedAt: null }, orderBy: [{ year: "desc" }, { halfYear: "desc" }, { createdAt: "desc" }] });
   const allParticipants = await prisma.talentReviewParticipant.findMany({ where: { cycleId: { in: allCycles.map((row) => row.id) } } });
+  // 历史导入的参与人可能缺少组织快照，回退到用户当前所属组织参与范围匹配
+  const participantOrgByUserId = new Map(
+    (await prisma.user.findMany({
+      where: { id: { in: [...new Set(allParticipants.map((row) => row.userId))] } },
+      select: { id: true, orgNodeId: true },
+    })).map((row) => [row.id, row.orgNodeId]),
+  );
+  const participantOrgNodeId = (row: (typeof allParticipants)[number]) =>
+    row.orgNodeIdSnapshot ?? participantOrgByUserId.get(row.userId) ?? null;
   // 本人视角只保留本人已确认的盘点记录；未确认的批次对本人不可见。
   const selfOnly = isSelfOnlyView(viewPermission);
   // 范围/进度按查看权限收口：管理员/主管看部门全量，组长只看本组成员，组员只看本人。
@@ -51,9 +60,11 @@ export async function getTalentReviewCycles(viewer: Viewer) {
     scopeName = "本人";
   } else if (!viewPermission.hasAllAccess && !viewPermission.hasSubtreeAccess) {
     const scopedNodeIds = new Set(viewPermission.orgNodeIds);
-    participants = allParticipants.filter((row) =>
-      (row.orgNodeIdSnapshot ? scopedNodeIds.has(row.orgNodeIdSnapshot) : false)
-      || (viewPermission.includesSelf && row.userId === viewer.id));
+    participants = allParticipants.filter((row) => {
+      const nodeId = participantOrgNodeId(row);
+      return (nodeId ? scopedNodeIds.has(nodeId) : false)
+        || (viewPermission.includesSelf && row.userId === viewer.id);
+    });
     const scopeNodes = viewPermission.orgNodeIds.length
       ? await prisma.orgNode.findMany({ where: { id: { in: viewPermission.orgNodeIds } }, select: { name: true } })
       : [];
@@ -86,21 +97,32 @@ export async function getTalentReviewCycleDetail(viewer: Viewer, cycleId: string
   const cycle = await prisma.talentReviewCycle.findFirst({ where: { id: cycleId, departmentOrgNodeId: { in: departments.map((row) => row.id) }, deletedAt: null } });
   if (!cycle) return null;
   const selfOnly = isSelfOnlyView(viewPermission);
-  const participantScope = viewPermission.hasAllAccess || viewPermission.hasSubtreeAccess
-    ? {}
-    : { AND: [
-        { OR: [...(viewPermission.includesSelf ? [{ userId: viewer.id }] : []), ...(viewPermission.orgNodeIds.length ? [{ orgNodeIdSnapshot: { in: viewPermission.orgNodeIds } }] : [])] },
-        // 本人视角追加确认状态闸：只返回已确认的盘点记录
-        ...(selfOnly ? [{ status: "CONFIRMED" as const }] : []),
-      ] };
-  const [template, dimensions, ratings, thresholds, nineBoxRules, participants] = await Promise.all([
+  const scoped = !(viewPermission.hasAllAccess || viewPermission.hasSubtreeAccess);
+  const [template, dimensions, ratings, thresholds, nineBoxRules, allCycleParticipants] = await Promise.all([
     prisma.talentReviewTemplateVersion.findUnique({ where: { id: cycle.templateVersionId } }),
     prisma.talentReviewDimension.findMany({ where: { templateVersionId: cycle.templateVersionId }, orderBy: { sortOrder: "asc" } }),
     prisma.talentRatingOption.findMany({ where: { templateVersionId: cycle.templateVersionId }, orderBy: { sortOrder: "asc" } }),
     prisma.talentGradeThreshold.findMany({ where: { templateVersionId: cycle.templateVersionId }, orderBy: { sortOrder: "asc" } }),
     prisma.talentNineBoxRule.findMany({ where: { templateVersionId: cycle.templateVersionId }, orderBy: { sortOrder: "asc" } }),
-    prisma.talentReviewParticipant.findMany({ where: { cycleId, ...participantScope }, orderBy: { createdAt: "asc" } }),
+    prisma.talentReviewParticipant.findMany({ where: { cycleId }, orderBy: { createdAt: "asc" } }),
   ]);
+  // 组织范围过滤放在内存中：历史导入数据可能没有 orgNodeIdSnapshot，需回退到用户当前所属组织
+  let participants = allCycleParticipants;
+  if (scoped) {
+    const orgByUserId = new Map(
+      (await prisma.user.findMany({
+        where: { id: { in: [...new Set(allCycleParticipants.map((row) => row.userId))] } },
+        select: { id: true, orgNodeId: true },
+      })).map((row) => [row.id, row.orgNodeId]),
+    );
+    participants = allCycleParticipants.filter((row) => {
+      const nodeId = row.orgNodeIdSnapshot ?? orgByUserId.get(row.userId) ?? null;
+      const inOrgScope = nodeId ? viewPermission.orgNodeIds.includes(nodeId) : false;
+      const isSelf = viewPermission.includesSelf && row.userId === viewer.id;
+      // 本人视角追加确认状态闸：只返回已确认的盘点记录
+      return (inOrgScope || isSelf) && (!selfOnly || row.status === "CONFIRMED");
+    });
+  }
   const participantIds = participants.map((row) => row.id);
   const [users, dimensionResults, results] = await Promise.all([
     prisma.user.findMany({ where: { id: { in: participants.map((row) => row.userId) } }, select: { id: true, name: true, title: true } }),

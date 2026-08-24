@@ -54,6 +54,7 @@ export default async function TalentPage() {
     getTalentDecisionRuleConfiguration(user),
   ]);
   // 总览收口：盘点参与人再按 VIEW_TALENT_PROFILE 的可见用户范围过滤，下游统计/列表共用同一份 details。
+  // 无画像权限时过滤为空集，不能放行全量；结果/维度结果同步收口，避免九宫格计数等聚合数据越权。
   const profileVisibleUserIds = profileCoverage.hasPermission
     ? new Set(
         (await prisma.user.findMany({
@@ -61,17 +62,21 @@ export default async function TalentPage() {
           select: { id: true },
         })).map((row) => row.id),
       )
-    : null;
+    : new Set<string>();
   const details = (await Promise.all(cycles.cycles.map((cycle) => getTalentReviewCycleDetail(user, cycle.id))))
     .filter((detail): detail is NonNullable<typeof detail> => Boolean(detail))
-    .map((detail) => ({
-      ...detail,
-      cycleId: detail.cycle.id,
-      cycleStatus: detail.cycle.status,
-      participants: profileVisibleUserIds
-        ? detail.participants.filter((participant) => profileVisibleUserIds.has(participant.userId))
-        : detail.participants,
-    }));
+    .map((detail) => {
+      const participants = detail.participants.filter((participant) => profileVisibleUserIds.has(participant.userId));
+      const participantIds = new Set(participants.map((participant) => participant.id));
+      return {
+        ...detail,
+        cycleId: detail.cycle.id,
+        cycleStatus: detail.cycle.status,
+        participants,
+        results: detail.results.filter((result) => participantIds.has(result.participantId)),
+        dimensionResults: detail.dimensionResults.filter((result) => participantIds.has(result.participantId)),
+      };
+    });
 
   const participantUserIds = [...new Set(details.flatMap((detail) => detail.participants.map((participant) => participant.userId)))].filter(Boolean);
   const now = new Date();

@@ -615,10 +615,13 @@ async function importTalentReviewHistory(
           userId,
           periodYear: group.year,
           periodHalfYear: group.halfYear,
+          // 快照写入盘点时所属组织，权限范围过滤（组长看本组）依赖该字段
+          orgNodeIdSnapshot: maps.userOrgNodeIdById.get(userId) ?? null,
           status: "CONFIRMED",
           confirmedAt: group.effectiveDate,
         },
         update: {
+          orgNodeIdSnapshot: maps.userOrgNodeIdById.get(userId) ?? null,
           status: "CONFIRMED",
           confirmedAt: group.effectiveDate,
         },
