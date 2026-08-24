@@ -152,17 +152,6 @@ type Person = {
   profileExtras?: ProfileExtras;
 };
 
-const people: Person[] = [
-  { id: 1, name: "周明轩", team: "B端组", title: "高级产品经理", level: "R3-2", years: 4, grid: "高潜高绩", tone: "success", score: 27, kpi: 103, hasKpi: true, kpiRating: "A", potential: 92, reviewLevel: "S", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-3", recommendation: "建议晋升", contract: "2027-06-30" },
-  { id: 2, name: "吴雨桐", team: "C端组", title: "产品经理", level: "R2", years: 2, grid: "潜力新星", tone: "primary", score: 23, kpi: 91, hasKpi: true, kpiRating: "B", potential: 94, reviewLevel: "A", assessment: 5, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-1", recommendation: "重点培养", contract: "2026-11-30" },
-  { id: 3, name: "郑雅琪", team: "设计组", title: "高级设计师", level: "R3-1", years: 5, grid: "高潜高绩", tone: "success", score: 26, kpi: 106, hasKpi: true, kpiRating: "S", potential: 90, reviewLevel: "S", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-2", recommendation: "建议加薪", contract: "2028-03-31" },
-  { id: 4, name: "孙宇航", team: "采购组", title: "采购经理", level: "R3-1", years: 6, grid: "中坚力量", tone: "info", score: 20, kpi: 88, hasKpi: true, kpiRating: "C", potential: 74, reviewLevel: "A", assessment: 4, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-2", recommendation: "保持观察", contract: "2026-10-15" },
-  { id: 5, name: "王梓涵", team: "B端组", title: "产品组长", level: "R4-1", years: 7, grid: "核心骨干", tone: "brand", score: 25, kpi: 101, hasKpi: true, kpiRating: "A", potential: 86, reviewLevel: "S", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R4-2", recommendation: "建议奖励", contract: "2027-12-31" },
-  { id: 6, name: "李隽贤", team: "C端组", title: "产品经理", level: "R2", years: 3, grid: "中坚力量", tone: "info", score: 19, kpi: 84, hasKpi: true, kpiRating: "C", potential: 78, reviewLevel: "A", assessment: 3, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-1", recommendation: "补足能力项", contract: "2027-04-30" },
-  { id: 7, name: "何晓斌", team: "B端组", title: "项目经理", level: "R2", years: 3, grid: "待发展", tone: "default", score: 14, kpi: 76, hasKpi: true, kpiRating: "C", potential: 68, reviewLevel: "B", assessment: 2, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-1", recommendation: "制定改进计划", contract: "2026-09-30" },
-  { id: 8, name: "孙圣宇", team: "设计组", title: "UI设计师", level: "R3-1", years: 3, grid: "明星员工", tone: "success", score: 24, kpi: 99, hasKpi: true, kpiRating: "B", potential: 82, reviewLevel: "A", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-2", recommendation: "建议奖励", contract: "2027-08-31" },
-];
-
 const overviewNineBoxLayout = [
   { code: "HIGH_LOW", defaultLabel: "熟练员工", tone: "primary" }, { code: "HIGH_MID", defaultLabel: "绩效之星", tone: "brand" }, { code: "HIGH_HIGH", defaultLabel: "超级明星", tone: "success" },
   { code: "MID_LOW", defaultLabel: "基本胜任", tone: "default" }, { code: "MID_MID", defaultLabel: "中坚力量", tone: "primary" }, { code: "MID_HIGH", defaultLabel: "潜力之星", tone: "brand" },
@@ -250,20 +239,19 @@ export default function TalentPageContent({
   const overviewLabelByCode = new Map<string, string>(overviewGrids.map((item) => [item.code, item.label]));
   const overviewTitle = overviewCycle?.name ?? `${new Date().getFullYear()}年${new Date().getMonth() < 6 ? "上半年" : "下半年"}人才盘点`;
   const overviewResultByParticipant = new Map(overviewDetail?.results.map((item) => [item.participantId, item]) ?? []);
-  const overviewUserById = new Map(overviewDetail?.users.map((item) => [item.id, item]) ?? []);
   const overviewCandidateById = new Map(reviewWorkspace.cycles.candidates.map((item) => [item.id, item]));
-  const employeeProfileByUserId = new Map(operationWorkspace.employeeProfiles.employees.map((item) => [item.id, item]));
   const jobLevelById = new Map(operationWorkspace.employeeProfiles.levels.map((item) => [item.id, item]));
-  const overviewPeople: Person[] = overviewDetail ? overviewDetail.participants.map((participant) => {
-    const user = overviewUserById.get(participant.userId);
-    const result = overviewResultByParticipant.get(participant.id);
-    const candidate = overviewCandidateById.get(participant.userId);
-    const fallback = people.find((item) => item.name === user?.name);
-    const employeeProfile = employeeProfileByUserId.get(participant.userId);
-    const jobLevel = employeeProfile?.jobLevelId ? jobLevelById.get(employeeProfile.jobLevelId) : null;
+  const overviewParticipantByUserId = new Map((overviewDetail?.participants ?? []).map((participant) => [participant.userId, participant]));
+  // 人才画像以"画像查看权限内的全部在职员工"为底表（与人才档案同一权限口径），叠加当前盘点批次的结果。
+  // 不再使用内置演示数据兜底：无盘点数据时应看到真实的空/待评价状态，而不是假数据。
+  const overviewPeople: Person[] = operationWorkspace.employeeProfiles.employees.map((employee) => {
+    const participant = overviewParticipantByUserId.get(employee.id);
+    const result = participant ? overviewResultByParticipant.get(participant.id) : undefined;
+    const candidate = overviewCandidateById.get(employee.id);
+    const jobLevel = employee.jobLevelId ? jobLevelById.get(employee.jobLevelId) : null;
     const gridCode = result?.nineBoxCode ?? undefined;
     const toneByGridCode: Record<string, Tone> = { HIGH_HIGH: "success", HIGH_MID: "brand", HIGH_LOW: "primary", MID_HIGH: "brand", MID_MID: "primary", MID_LOW: "warning", LOW_HIGH: "primary", LOW_MID: "warning", LOW_LOW: "danger" };
-    const latestKpi = latestKpiByUserId[participant.userId];
+    const latestKpi = latestKpiByUserId[employee.id];
     const activeKpiVersion = latestKpi
       ? operationWorkspace.decisionRules.kpiRuleVersions
           .filter((version) => version.departmentOrgNodeId === candidate?.departmentOrgNodeId && version.status === "ACTIVE")
@@ -274,32 +262,32 @@ export default function TalentPageContent({
           })[0]
       : null;
     const kpiBands = activeKpiVersion ? operationWorkspace.decisionRules.kpiBands.filter((band) => band.ruleVersionId === activeKpiVersion.id) : [];
-    const kpiRating = latestKpi?.finalScore != null ? resolveKpiRatingName(latestKpi.finalScore, kpiBands) : fallback?.kpiRating ?? null;
+    const kpiRating = latestKpi?.finalScore != null ? resolveKpiRatingName(latestKpi.finalScore, kpiBands) : null;
     return {
-      id: participant.userId,
-      name: user?.name ?? "未知员工",
-      team: candidate?.orgNodeName ?? fallback?.team ?? "未配置组织",
-      title: user?.title ?? fallback?.title ?? "未配置岗位",
-      level: jobLevel?.code ?? jobLevel?.name ?? fallback?.level ?? "未配置职级",
-      years: fallback?.years ?? 0,
-      grid: gridCode ? overviewLabelByCode.get(gridCode) ?? result?.talentType ?? "未落宫格" : "待评价",
+      id: employee.id,
+      name: employee.name,
+      team: employee.organization,
+      title: employee.originalTitle || "未配置岗位",
+      level: jobLevel?.code ?? jobLevel?.name ?? "未配置职级",
+      years: 0,
+      grid: gridCode ? overviewLabelByCode.get(gridCode) ?? result?.talentType ?? "未落宫格" : participant ? "待评价" : "未参与盘点",
       gridCode,
       tone: gridCode ? toneByGridCode[gridCode] ?? "default" : "default",
       score: result?.totalScore ?? 0,
-      kpi: latestKpi?.finalScore ?? fallback?.kpi ?? 0,
-      hasKpi: latestKpi != null || fallback?.hasKpi === true,
+      kpi: latestKpi?.finalScore ?? 0,
+      hasKpi: latestKpi != null,
       kpiRating,
-      potential: fallback?.potential ?? 0,
-      reviewLevel: result?.gradeCode ?? "待评价",
-      assessment: latestAssessmentByUserId[participant.userId]?.earnedScore ?? fallback?.assessment ?? 0,
-      assessmentMax: latestAssessmentByUserId[participant.userId]?.maxScore ?? fallback?.assessmentMax ?? 6,
-      hasAssessment: latestAssessmentByUserId[participant.userId] != null || fallback?.hasAssessment === true,
-      nextLevel: fallback?.nextLevel ?? "待配置",
-      recommendation: fallback?.recommendation ?? "待部门决策",
-      contract: fallback?.contract ?? "未配置",
-      profileExtras: profileExtrasByUserId[participant.userId],
+      potential: 0,
+      reviewLevel: result?.gradeCode ?? (participant ? "待评价" : "—"),
+      assessment: latestAssessmentByUserId[employee.id]?.earnedScore ?? 0,
+      assessmentMax: latestAssessmentByUserId[employee.id]?.maxScore ?? 6,
+      hasAssessment: latestAssessmentByUserId[employee.id] != null,
+      nextLevel: "待配置",
+      recommendation: "待部门决策",
+      contract: employee.currentContractEndAt || "",
+      profileExtras: profileExtrasByUserId[employee.id],
     };
-  }) : people;
+  });
   const overviewCompleted = overviewDetail?.results.length ?? 0;
   const overviewTotal = overviewDetail?.participants.length ?? 0;
   const overviewCompletionRate = overviewTotal > 0 ? Math.round((overviewCompleted / overviewTotal) * 100) : 0;
@@ -348,7 +336,7 @@ export default function TalentPageContent({
           <div className="p-5">
             <div className="grid grid-cols-3 gap-2 min-h-[310px]">
               {overviewGrids.map((item) => {
-                const count = overviewDetail ? overviewDetail.results.filter((result) => result.nineBoxCode === item.code).length : people.filter((person) => legacyGridCodeByLabel[person.grid] === item.code).length;
+                const count = overviewDetail ? overviewDetail.results.filter((result) => result.nineBoxCode === item.code).length : 0;
                 const active = gridFilter === item.code;
                 const map: Record<string, string> = {
                   light: "bg-slate-50/40 hover:bg-slate-50/70",

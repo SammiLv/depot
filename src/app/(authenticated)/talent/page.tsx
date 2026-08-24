@@ -78,7 +78,11 @@ export default async function TalentPage() {
       };
     });
 
-  const participantUserIds = [...new Set(details.flatMap((detail) => detail.participants.map((participant) => participant.userId)))].filter(Boolean);
+  // 人才画像以全部可见员工为底表，关联数据（KPI/业务考核/合同/晋升/奖励）需覆盖全部可见员工，而非仅盘点参与人
+  const participantUserIds = [...new Set([
+    ...details.flatMap((detail) => detail.participants.map((participant) => participant.userId)),
+    ...profileVisibleUserIds,
+  ])].filter(Boolean);
   const now = new Date();
   const ninetyDaysLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
   const yearStart = new Date(now.getFullYear(), 0, 1);
