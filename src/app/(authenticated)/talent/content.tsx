@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
+import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import {
   addTalentGradeThresholds,
@@ -24,8 +24,12 @@ import {
 import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-template-dialog";
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
-import type { TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
-import type { CareerWorkspaceData, CompetencyWorkspaceData } from "./operation-workspace-types";
+import type {
+  CareerWorkspaceData,
+  CompetencyWorkspaceData,
+  TalentDecisionRuleWorkspaceData,
+  TalentOperationWorkspaceData,
+} from "./operation-workspace-types";
 import {
   categoryLabels,
   conditionSummary,
@@ -67,10 +71,6 @@ import {
   type RestrictionRuleDraftActionState,
 } from "@/server/talent/restriction-rule-actions";
 import {
-  TalentDecisionWorkspace,
-  TalentHistoryWorkspace,
-} from "./operation-workspaces";
-import {
   AlertCircle,
   ArrowRight,
   Award,
@@ -103,6 +103,7 @@ import {
 import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { buildTalentHistoryHref } from "./talent-sections";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
@@ -192,14 +193,13 @@ function scoreTone(score: number) {
   return "text-amber-600 bg-amber-50";
 }
 
-export default function TalentPageContent({
+export function TalentOverviewContent({
   reviewWorkspace,
   operationWorkspace,
   latestKpiByUserId,
   latestAssessmentByUserId,
   statCards,
   profileExtrasByUserId,
-  visibleSections,
 }: {
   reviewWorkspace: ReviewWorkspaceData;
   operationWorkspace: TalentOperationWorkspaceData;
@@ -217,19 +217,14 @@ export default function TalentPageContent({
     currentQuarterRewardNames: string[];
   };
   profileExtrasByUserId: Record<string, ProfileExtras>;
-  visibleSections: Section[];
 }) {
+  const router = useRouter();
   const [gridFilter, setGridFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [team, setTeam] = useState("全部团队");
   const [selected, setSelected] = useState<Person | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [notice, setNotice] = useState("");
-  const [section, setSection] = useState<Section>(visibleSections[0] ?? "overview");
-  // 快捷入口可能跳到无权限的 tab，渲染时回退到第一个可见 tab。
-  const activeSection: Section | null = visibleSections.length === 0 ? null : (visibleSections.includes(section) ? section : visibleSections[0]);
-  const [historyInitialCategory, setHistoryInitialCategory] = useState<"profiles" | "promotion" | "contract" | "salary" | "reward">("profiles");
-  const [activeConfig, setActiveConfig] = useState<ConfigKey | null>(null);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
   const overviewDetail = reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
   const overviewTemplateId = overviewCycle?.templateVersionId ?? reviewWorkspace.config.templates.find((item) => item.status === "ACTIVE")?.id;
@@ -242,8 +237,6 @@ export default function TalentPageContent({
   const overviewCandidateById = new Map(reviewWorkspace.cycles.candidates.map((item) => [item.id, item]));
   const jobLevelById = new Map(operationWorkspace.employeeProfiles.levels.map((item) => [item.id, item]));
   const overviewParticipantByUserId = new Map((overviewDetail?.participants ?? []).map((participant) => [participant.userId, participant]));
-  // 人才画像以"画像查看权限内的全部在职员工"为底表（与人才档案同一权限口径），叠加当前盘点批次的结果。
-  // 不再使用内置演示数据兜底：无盘点数据时应看到真实的空/待评价状态，而不是假数据。
   const overviewPeople: Person[] = operationWorkspace.employeeProfiles.employees.map((employee) => {
     const participant = overviewParticipantByUserId.get(employee.id);
     const result = participant ? overviewResultByParticipant.get(participant.id) : undefined;
@@ -312,21 +305,7 @@ export default function TalentPageContent({
   }
 
   return (
-    <Card className="!p-6">
-      <PageHeader
-        title="人才发展"
-        description="人才画像 · 人才盘点 · 人才决策"
-      />
-
-      <div className="flex items-center gap-1 border-b border-border mb-5 overflow-x-auto">
-        {([
-          ["overview", "人才总览"], ["review", "人才盘点"], ["decision", "人才决策"], ["history", "人才履历"], ["config", "规则配置"],
-        ] as [Section, string][]).filter(([key]) => visibleSections.includes(key)).map(([key, label]) => <button key={key} onClick={() => { setSection(key); if (key === "config") setActiveConfig(null); }} className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${activeSection === key ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
-      </div>
-
-      {activeSection === null && <div className="py-16 text-center text-sm text-muted-foreground">暂无人才发展模块的访问权限，请联系管理员开通</div>}
-
-      {activeSection === "overview" && <>
+    <>
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(280px,0.9fr)] gap-4 mb-5">
         <Card className="!p-0 overflow-hidden">
           <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -356,11 +335,11 @@ export default function TalentPageContent({
         </Card>
 
         <div className="h-full flex flex-col justify-between gap-3">
-          <QuickCard icon={<CalendarClock className="w-5 h-5" />} tone="bg-orange-50 text-orange-500" hoverTone="hover:bg-orange-100/80" label="90 天内合同到期" value={`${statCards.contractsExpiringSoon} 人`} names={statCards.contractsExpiringSoonNames} action={() => { setSection("history"); showNotice("已切换到人才履历，请查看合同到期人员"); }} />
-          <QuickCard icon={<AlertCircle className="w-5 h-5" />} tone="bg-red-50 text-red-600" hoverTone="hover:bg-red-100/80" label="晋升机会紧张" value={`${statCards.lowPromotionOpportunityCount} 人`} names={statCards.lowPromotionOpportunityNames} action={() => { setSection("history"); showNotice("已切换到人才履历，请查看晋升机会紧张人员"); }} />
-          <QuickCard icon={<TrendingUp className="w-5 h-5" />} tone="bg-blue-50 text-blue-600" hoverTone="hover:bg-blue-100/80" label={statCards.recentPromotionHalfYear === "first" ? "上半年晋升" : "下半年晋升"} value={`${statCards.recentPromotions} 人`} names={statCards.recentPromotionNames} action={() => { setHistoryInitialCategory("promotion"); setSection("history"); showNotice("已切换到人才履历的晋升记录"); }} />
-          <QuickCard icon={<Award className="w-5 h-5" />} tone="bg-teal-50 text-teal-600" hoverTone="hover:bg-teal-100/80" label="本季奖励记录" value={`${statCards.currentQuarterRewards} 条`} names={statCards.currentQuarterRewardNames} action={() => { setHistoryInitialCategory("reward"); setSection("history"); showNotice("已切换到人才履历的奖励记录"); }} />
-          <Card className="!p-4 border-blue-100 bg-blue-50/80 text-slate-900 cursor-pointer hover:bg-blue-100/80 transition-colors" onClick={() => { setSection("review"); showNotice("已切换到人才盘点"); }}>
+          <QuickCard icon={<CalendarClock className="w-5 h-5" />} tone="bg-orange-50 text-orange-500" hoverTone="hover:bg-orange-100/80" label="90 天内合同到期" value={`${statCards.contractsExpiringSoon} 人`} names={statCards.contractsExpiringSoonNames} action={() => { router.push(buildTalentHistoryHref()); showNotice("已切换到人才履历，请查看合同到期人员"); }} />
+          <QuickCard icon={<AlertCircle className="w-5 h-5" />} tone="bg-red-50 text-red-600" hoverTone="hover:bg-red-100/80" label="晋升机会紧张" value={`${statCards.lowPromotionOpportunityCount} 人`} names={statCards.lowPromotionOpportunityNames} action={() => { router.push(buildTalentHistoryHref()); showNotice("已切换到人才履历，请查看晋升机会紧张人员"); }} />
+          <QuickCard icon={<TrendingUp className="w-5 h-5" />} tone="bg-blue-50 text-blue-600" hoverTone="hover:bg-blue-100/80" label={statCards.recentPromotionHalfYear === "first" ? "上半年晋升" : "下半年晋升"} value={`${statCards.recentPromotions} 人`} names={statCards.recentPromotionNames} action={() => { router.push(buildTalentHistoryHref("promotion")); showNotice("已切换到人才履历的晋升记录"); }} />
+          <QuickCard icon={<Award className="w-5 h-5" />} tone="bg-teal-50 text-teal-600" hoverTone="hover:bg-teal-100/80" label="本季奖励记录" value={`${statCards.currentQuarterRewards} 条`} names={statCards.currentQuarterRewardNames} action={() => { router.push(buildTalentHistoryHref("reward")); showNotice("已切换到人才履历的奖励记录"); }} />
+          <Card className="!p-4 border-blue-100 bg-blue-50/80 text-slate-900 cursor-pointer hover:bg-blue-100/80 transition-colors" onClick={() => { router.push("/talent/review"); showNotice("已切换到人才盘点"); }}>
             <div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-blue-100 text-blue-600"><UserRound className="w-5 h-5" /></div><div><div className="text-xs text-slate-500">本次盘点完成度</div><div className="mt-0.5 text-2xl font-semibold text-blue-700">{overviewCompletionRate}%</div></div></div><div className="text-[11px] text-slate-500 whitespace-nowrap self-end">{overviewCompleted} / {overviewTotal} 人已完成评价</div></div>
           </Card>
         </div>
@@ -391,16 +370,10 @@ export default function TalentPageContent({
           </table>
         </div>
       </Card>
-      </>}
-
-      {activeSection === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
-      {activeSection === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
-      {activeSection === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
-      {activeSection === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
 
       {selected && <PersonDrawer person={selected} tab={tab} setTab={setTab} onClose={() => setSelected(null)} onNotice={showNotice} />}
       {notice && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] rounded-lg bg-slate-900 text-white px-4 py-3 shadow-xl text-sm flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" />{notice}</div>}
-    </Card>
+    </>
   );
 }
 
@@ -408,7 +381,7 @@ function WorkbenchHeader({ title, description, action }: { title: string; descri
   return <div className="flex items-center justify-between gap-4 mb-4"><div><h3 className="text-lg font-semibold">{title}</h3><p className="text-xs text-muted-foreground mt-1">{description}</p></div>{action}</div>;
 }
 
-function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
+export function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createDepartmentId, setCreateDepartmentId] = useState(data.cycles.departments[0]?.id ?? "");
@@ -503,7 +476,7 @@ function TalentHistoryWorkbench() {
   return <div><WorkbenchHeader title="人才履历" description="管理员工已经正式发生的晋升、续签、加薪和奖励记录，并支持按员工查询完整历史" action={<Link href="/talent/history" className={primaryActionLinkClass}><Plus className="w-4 h-4" />进入履历管理</Link>} /><div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"><Metric label="晋升记录" value="12 条" hint="近三年" /><Metric label="续签记录" value="18 条" hint="近三年" /><Metric label="加薪记录" value="21 条" hint="近三年" /><Metric label="奖励记录" value="32 条" hint="近三年" /></div><Card className="!p-0 overflow-hidden"><div className="px-5 py-4 border-b border-border flex items-center justify-between"><div><h4 className="font-medium">员工履历记录</h4><p className="text-xs text-muted-foreground mt-1">正式记录可以关联人才决策，也可以来自公司其他管理系统</p></div><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><input placeholder="搜索员工历史" className="h-9 w-48 rounded-lg bg-muted/70 pl-8 pr-3 text-xs focus:outline-none focus:border-primary border border-transparent" /></div></div><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">记录编号</th><th className="text-left px-4 py-3 font-medium">员工</th><th className="text-left px-4 py-3 font-medium">类型</th><th className="text-left px-4 py-3 font-medium">正式结果</th><th className="text-left px-4 py-3 font-medium">生效日期</th><th className="text-left px-4 py-3 font-medium">来源</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{records.map((item) => <tr key={item.id}><td className="px-5 py-4 text-xs text-muted-foreground">{item.id}</td><td className="px-4 py-4 font-medium">{item.name}</td><td className="px-4 py-4"><Badge tone="primary">{item.type}</Badge></td><td className="px-4 py-4 text-xs font-medium">{item.content}</td><td className="px-4 py-4 text-xs">{item.effective}</td><td className="px-4 py-4 text-xs text-muted-foreground">{item.source}</td><td className="px-5 py-4 text-right"><button className="text-xs text-primary">查看员工履历</button></td></tr>)}</tbody></table></Card></div>;
 }
 
-function ConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
+export function TalentConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
   const configs: Array<{ key: ConfigKey; icon: typeof SlidersHorizontal; title: string; detail: string; version: string }> = [
     { key: "review", icon: SlidersHorizontal, title: "人才能力评估", detail: "配置人才能力测算权重与人才盘点评价模型", version: "V1.0 已启用" },
     { key: "career", icon: Route, title: "职业发展通道", detail: "岗位族、岗位、职级组和 R3-1 等职级档", version: "V1.0 已启用" },

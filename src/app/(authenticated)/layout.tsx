@@ -4,6 +4,7 @@ import { getRoleLabel } from "@/server/permissions/role-labels";
 import { prisma } from "@/server/db/prisma";
 import { AppShell } from "@/components/app-shell";
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
+import { getCachedDepartmentRoleMenus, getCachedEnabledMenus, getCachedSystemRoleMenus } from "@/server/organization/cached-menu-permissions";
 import type { ReactNode } from "react";
 
 export default async function AuthenticatedLayout({ children }: { children: ReactNode }) {
@@ -41,26 +42,11 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
     : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId);
 
   const [menuPermissions, systemRoleMenus, scopedRoleMenus] = await Promise.all([
-    prisma.menuPermission.findMany({
-      where: { isEnabled: true },
-      orderBy: { sortOrder: "asc" },
-    }),
-    prisma.roleMenuPermission.findMany({
-      where: {
-        scopeType: "SYSTEM",
-        departmentOrgNodeId: "",
-        roleType: currentUser.roleType,
-      },
-    }),
+    getCachedEnabledMenus(),
+    getCachedSystemRoleMenus(currentUser.roleType),
     currentUser.roleType === "ADMIN" || !scopedDepartmentOrgNodeId
       ? Promise.resolve([])
-      : prisma.roleMenuPermission.findMany({
-          where: {
-            scopeType: "DEPARTMENT",
-            departmentOrgNodeId: scopedDepartmentOrgNodeId,
-            roleType: currentUser.roleType,
-          },
-        }),
+      : getCachedDepartmentRoleMenus(currentUser.roleType, scopedDepartmentOrgNodeId),
   ]);
 
   const systemMenuMap = new Map(systemRoleMenus.map((row) => [row.menuPermissionId, row]));

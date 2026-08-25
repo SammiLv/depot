@@ -10,16 +10,18 @@ import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
 import { BusinessAssessmentQuarterlyWorkspace, WorkIncidentWorkspace } from "../talent/operation-workspaces";
 import type { AssessmentWorkspaceData, IncidentWorkspaceData } from "../talent/operation-workspace-types";
+import { buildKpiSectionHref, KPI_SECTION_TABS, type KpiSectionTab } from "./kpi-sections";
 
 
 type Props = {
   data: Awaited<ReturnType<typeof getKpiData>>;
-  assessmentData: AssessmentWorkspaceData;
-  incidentData: IncidentWorkspaceData;
   selectedYear: number;
   selectedQuarter: number;
+  activeSection: KpiSectionTab;
+  assessmentData?: AssessmentWorkspaceData | null;
+  incidentData?: IncidentWorkspaceData | null;
 };
-type SectionTab = "quarterly-kpi" | "business-assessment" | "work-incident" | "kpi-template";
+type SectionTab = KpiSectionTab;
 type TeamTab = "all" | Props["data"]["teamOptions"][number]["id"];
 type TemplateRow = Props["data"]["templateRows"][number];
 
@@ -1273,7 +1275,7 @@ function TemplateImportForm({
   );
 }
 
-export function KpiContent({ data, assessmentData, incidentData, selectedYear, selectedQuarter }: Props) {
+export function KpiContent({ data, selectedYear, selectedQuarter, activeSection, assessmentData = null, incidentData = null }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1285,10 +1287,7 @@ export function KpiContent({ data, assessmentData, incidentData, selectedYear, s
   const [templateImportResult, setTemplateImportResult] = useState<TemplateImportResult | null>(null);
   const [departmentTab, setDepartmentTab] = useState(data.defaultDepartmentOrgNodeId);
   const [teamTab, setTeamTab] = useState<TeamTab | null>(null);
-  const [sectionTab, setSectionTab] = useState<SectionTab>(() => {
-    const tab = searchParams.get("tab");
-    return tab === "business-assessment" || tab === "work-incident" || tab === "kpi-template" ? tab : "quarterly-kpi";
-  });
+  const sectionTab = activeSection;
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
   const [deleteQuarterlyKpiRow, setDeleteQuarterlyKpiRow] = useState<QuarterlyKpiRow | null>(null);
@@ -1315,6 +1314,7 @@ export function KpiContent({ data, assessmentData, incidentData, selectedYear, s
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
     }
   }, [dismissedErrorMessage, errorMessage, pathname, router, searchParams]);
+
   const filteredTeamOptions = useMemo(
     () => data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentTab),
     [data.teamOptions, departmentTab]
@@ -1474,22 +1474,16 @@ export function KpiContent({ data, assessmentData, incidentData, selectedYear, s
 
         <div className={`px-5 pb-4 flex flex-wrap items-center gap-4 ${teamTabs.length === 0 && !showDepartmentTabs ? "pt-3" : ""}`}>
           <div className="inline-flex rounded-lg bg-muted p-1">
-            {[
-              { key: "quarterly-kpi" as const, label: "季度KPI" },
-              { key: "business-assessment" as const, label: "业务考核" },
-              { key: "work-incident" as const, label: "工作事故" },
-              { key: "kpi-template" as const, label: "KPI模板" },
-            ].map((tab) => (
-              <button
+            {KPI_SECTION_TABS.map((tab) => (
+              <Link
                 key={tab.key}
-                type="button"
-                onClick={() => setSectionTab(tab.key)}
-                className={`h-9 rounded-lg px-4 text-sm transition ${
+                href={buildKpiSectionHref(tab.href, searchParams)}
+                className={`inline-flex h-9 items-center rounded-lg px-4 text-sm transition ${
                   sectionTab === tab.key ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {tab.label}
-              </button>
+              </Link>
             ))}
           </div>
 
@@ -1671,11 +1665,11 @@ export function KpiContent({ data, assessmentData, incidentData, selectedYear, s
           </div>
         ) : sectionTab === "business-assessment" ? (
           <div className="px-5 pb-5">
-            <BusinessAssessmentQuarterlyWorkspace data={assessmentData} />
+            {assessmentData ? <BusinessAssessmentQuarterlyWorkspace data={assessmentData} /> : null}
           </div>
         ) : sectionTab === "work-incident" ? (
           <div className="px-5 pb-5">
-            <WorkIncidentWorkspace data={incidentData} />
+            {incidentData ? <WorkIncidentWorkspace data={incidentData} /> : null}
           </div>
         ) : (
           <div className="px-5 pb-5">

@@ -1,37 +1,42 @@
+import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { getKpiData } from "@/server/kpi/kpi-query";
-import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query";
-import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { KpiContent } from "./content";
+import { resolveLegacyKpiTabRedirect } from "./kpi-sections";
+import { parsePeriodFromSearchParams, type PeriodSearchParams } from "./parse-period-params";
 
 type PageProps = {
-  searchParams?: Promise<{ year?: string | string[] | undefined; quarter?: string | string[] | undefined }>;
+  searchParams?: Promise<PeriodSearchParams>;
 };
 
-function parseIntParam(value: string | string[] | undefined) {
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (!raw) return undefined;
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : undefined;
+function toSearchParams(params: PeriodSearchParams | undefined) {
+  const searchParams = new URLSearchParams();
+  if (!params) return searchParams;
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) searchParams.append(key, item);
+    } else {
+      searchParams.set(key, value);
+    }
+  }
+  return searchParams;
 }
 
 export default async function KpiPage({ searchParams }: PageProps) {
-  const currentUser = await requireCurrentUser();
   const params = searchParams ? await searchParams : undefined;
-  const selectedYear = parseIntParam(params?.year);
-  const selectedQuarter = parseIntParam(params?.quarter);
-  const [data, assessmentData, incidentData] = await Promise.all([
-    getKpiData(currentUser, { selectedYear, selectedQuarter }),
-    getBusinessAssessmentPageData(currentUser, { selectedYear, selectedQuarter }),
-    getWorkIncidentPageData(currentUser, { selectedYear, selectedQuarter }),
-  ]);
+  const { selectedYear, selectedQuarter, tab } = parsePeriodFromSearchParams(params);
+  const legacyRedirect = resolveLegacyKpiTabRedirect(tab, toSearchParams(params));
+  if (legacyRedirect) redirect(legacyRedirect);
+
+  const currentUser = await requireCurrentUser();
+  const data = await getKpiData(currentUser, { selectedYear, selectedQuarter });
   return (
     <KpiContent
       data={data}
-      assessmentData={JSON.parse(JSON.stringify(assessmentData))}
-      incidentData={JSON.parse(JSON.stringify(incidentData))}
       selectedYear={selectedYear ?? data.year}
       selectedQuarter={selectedQuarter ?? data.quarter}
+      activeSection="quarterly-kpi"
     />
   );
 }

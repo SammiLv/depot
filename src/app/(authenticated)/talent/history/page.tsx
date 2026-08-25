@@ -1,22 +1,46 @@
-import Link from "next/link";
-import { Badge, Card, PageHeader, StatCard } from "@/components/ui-kit";
+import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { voidTalentHistoryRecord } from "@/server/talent/history-actions";
-import { confirmTalentHistoryImport, uploadTalentHistoryImport } from "@/server/talent/history-import-actions";
+import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
 import { getTalentHistoryData } from "@/server/talent/decision-history-query";
-import { HistoryRecordForm } from "./history-record-form";
+import { TalentHistoryPageContent } from "../history-content";
+import { requireTalentSection, resolveTalentVisibleSections } from "../resolve-visible-sections";
+import { resolveLegacyTalentSectionRedirect } from "../talent-sections";
+import { TalentSectionPage } from "../talent-section-page";
 
-const input = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
-const typeLabels: Record<string,string> = { PROMOTION: "晋升", CONTRACT_RENEWAL: "续签", SALARY_ADJUSTMENT: "加薪", REWARD: "奖励", QUARTERLY_REWARD: "奖励", ANNUAL_REWARD: "奖励" };
-const sourceLabels: Record<string,string> = { RECOMMENDATION: "决策建议", COMPANY_SYSTEM: "公司系统", MANUAL_IMPORT: "历史导入", MANUAL_ENTRY: "手工登记" };
-const importStatusLabels: Record<string,string> = { VALIDATED: "预检通过", FAILED: "预检失败", CONFIRMED: "已导入", CANCELLED: "已取消" };
+type PageProps = {
+  searchParams?: Promise<{ userId?: string; importBatchId?: string; category?: string; section?: string; tab?: string }>;
+};
 
-export default async function TalentHistoryPage({ searchParams }: { searchParams: Promise<{ userId?: string; importBatchId?: string }> }) {
-  const user = await requireCurrentUser(); const params = await searchParams; const data = await getTalentHistoryData(user, params.userId, params.importBatchId); const userName = new Map(data.users.map((row) => [row.id, row.name]));
-  return <Card className="!p-6"><PageHeader title="人才履历" description="独立管理已正式发生的晋升、续签、加薪和奖励；可选关联已采纳建议" action={<div className="flex gap-2"><Link href="/talent/recommendations" className="flex h-9 items-center rounded-full border border-border px-4 text-sm">人才决策</Link><Link href="/talent" className="flex h-9 items-center rounded-full border border-border px-4 text-sm">返回</Link></div>}/>
-    <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4"><StatCard label="晋升记录" value={`${data.counts.promotion} 条`}/><StatCard label="续签记录" value={`${data.counts.contract} 条`}/><StatCard label="加薪记录" value={`${data.counts.salary} 条`}/><StatCard label="奖励记录" value={`${data.counts.reward} 条`}/></div>
-    {data.canManage ? <Card className="mb-4"><div className="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">历史履历批量导入</h3><p className="mt-1 text-xs text-muted-foreground">用于批量补录过去已经发生的履历；先预检、确认后再整批入库，不覆盖员工当前岗位、职级或薪资。</p></div><a href="/templates/talent-history-import-template.csv" download className="rounded-full border border-border px-4 py-2 text-xs">下载 CSV 模板</a></div><form action={uploadTalentHistoryImport} className="mb-4 flex flex-wrap gap-2"><input name="file" type="file" accept=".xlsx,.xls,.csv" required className="min-w-72 rounded-lg border border-border bg-background px-3 py-2 text-sm"/><button className="rounded-full bg-primary px-5 text-sm text-primary-foreground">上传并预检</button></form>{data.importBatches.length > 0 ? <div className="mb-4 flex flex-wrap gap-2">{data.importBatches.map((batch) => <Link key={batch.id} href={`/talent/history?importBatchId=${batch.id}`} className={`rounded-full border px-3 py-1.5 text-xs ${data.selectedImportBatch?.id === batch.id ? "border-primary text-primary" : "border-border"}`}>{batch.fileName} · {importStatusLabels[batch.status] ?? batch.status}</Link>)}</div> : <p className="text-xs text-muted-foreground">暂无历史导入批次</p>}{data.selectedImportBatch ? <div className="rounded-xl border border-border"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-3 text-xs"><span>{data.selectedImportBatch.fileName} · 共 {String(data.selectedImportBatch.summary.total ?? 0)} 行，有效 {String(data.selectedImportBatch.summary.valid ?? 0)} 行，错误 {String(data.selectedImportBatch.summary.invalid ?? 0)} 行</span>{data.selectedImportBatch.status === "VALIDATED" ? <form action={confirmTalentHistoryImport}><input type="hidden" name="batchId" value={data.selectedImportBatch.id}/><button className="rounded-full bg-primary px-4 py-2 text-primary-foreground">确认整批导入</button></form> : <Badge tone={data.selectedImportBatch.status === "CONFIRMED" ? "success" : "default"}>{importStatusLabels[data.selectedImportBatch.status] ?? data.selectedImportBatch.status}</Badge>}</div><div className="max-h-72 overflow-auto"><table className="w-full text-xs"><thead className="bg-muted/40"><tr><th className="p-3 text-left">行号</th><th className="p-3 text-left">员工</th><th className="p-3 text-left">类型</th><th className="p-3 text-left">记录编号</th><th className="p-3 text-left">校验结果</th></tr></thead><tbody className="divide-y divide-border">{data.importRows.map((row) => <tr key={row.id}><td className="p-3">{row.rowNumber}</td><td className="p-3">{userName.get(String(row.normalized.userId ?? "")) ?? "—"}</td><td className="p-3">{typeLabels[String(row.normalized.decisionType ?? "")] ?? "—"}</td><td className="p-3">{String(row.normalized.recordNo ?? "—")}</td><td className={`p-3 ${row.errors.length ? "text-destructive" : "text-success"}`}>{row.errors.length ? row.errors.join("；") : row.status === "IMPORTED" ? "已导入" : "通过"}</td></tr>)}</tbody></table></div></div> : null}</Card> : null}
-    {data.canManage ? <Card className="mb-4"><h3 className="mb-1 font-semibold">批量登记正式履历</h3><p className="mb-4 text-xs text-muted-foreground">先选择履历类型，再多选员工；生效日期和数据来源整批共用，每位员工的类型明细逐行填写。晋升仅变更职级；岗位变更请在组织架构中按转岗处理。</p><HistoryRecordForm users={data.users} recommendations={data.recommendations} levels={data.levels}/></Card> : null}
-    <section><div className="mb-3 flex flex-wrap items-end justify-between gap-3"><div><h3 className="font-semibold">履历记录列表</h3><p className="mt-1 text-xs text-muted-foreground">集中查询通过历史批量导入或批量登记形成的正式履历。</p></div><form className="flex flex-wrap items-end gap-2"><label><span className="mb-1 block text-xs text-muted-foreground">筛选员工</span><select name="userId" defaultValue={data.selectedUserId} className={`${input} min-w-56`}><option value="">全部员工</option>{data.users.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="h-9 rounded-full border border-border px-4 text-sm">查询</button></form></div><Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40"><tr>{["生效日期","员工","类型","正式结果","记录编号","来源","状态/操作"].map((item) => <th key={item} className="p-4 text-left text-xs font-medium">{item}</th>)}</tr></thead><tbody className="divide-y divide-border">{data.timeline.map((row) => <tr key={`${row.type}-${row.id}`}><td className="p-4 text-xs">{row.effectiveDate.toLocaleDateString("zh-CN")}</td><td className="p-4 font-medium">{userName.get(row.userId) ?? row.userId}</td><td className="p-4"><Badge tone="primary">{typeLabels[row.type]}</Badge></td><td className="p-4 text-xs font-medium">{row.result}</td><td className="p-4 text-xs text-muted-foreground">{row.recordNo}</td><td className="p-4 text-xs">{sourceLabels[row.sourceType]}</td><td className="p-4"><Badge tone={row.status === "CONFIRMED" ? "success" : "default"}>{row.status === "CONFIRMED" ? "已确认" : "已作废"}</Badge>{data.canManage && row.status === "CONFIRMED" ? <form action={voidTalentHistoryRecord} className="mt-2 flex gap-1"><input type="hidden" name="id" value={row.id}/><input type="hidden" name="decisionType" value={row.type}/><input name="voidReason" required placeholder="作废原因" className="h-7 w-24 rounded border border-border px-2 text-xs"/><button className="text-xs text-destructive">作废</button></form> : null}</td></tr>)}</tbody></table>{data.timeline.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">暂无正式履历记录</div> : null}</Card></section>
-  </Card>;
+function parseHistoryCategory(value: string | undefined): "profiles" | "promotion" | "contract" | "salary" | "reward" {
+  if (value === "promotion" || value === "contract" || value === "salary" || value === "reward") return value;
+  return "profiles";
+}
+
+export default async function TalentHistoryPage({ searchParams }: PageProps) {
+  const params = searchParams ? await searchParams : undefined;
+  const legacySection = params?.section ?? params?.tab;
+  const legacyRedirect = resolveLegacyTalentSectionRedirect(legacySection, new URLSearchParams(Object.entries(params ?? {}).flatMap(([key, value]) => {
+    if (value === undefined || key === "section" || key === "tab") return [];
+    return [[key, String(value)]];
+  })));
+  if (legacyRedirect && legacySection !== "history") redirect(legacyRedirect);
+
+  const user = await requireCurrentUser();
+  const visibleSections = await resolveTalentVisibleSections(user);
+  if (!(await requireTalentSection(user, "history"))) redirect("/talent");
+
+  const [historyData, employeeProfiles] = await Promise.all([
+    getTalentHistoryData(user, params?.userId, params?.importBatchId),
+    getEmployeeProfileManagementData(user),
+  ]);
+
+  return (
+    <TalentSectionPage visibleSections={visibleSections} activeSection="history">
+      <TalentHistoryPageContent
+        historyData={JSON.parse(JSON.stringify(historyData))}
+        employeeProfiles={JSON.parse(JSON.stringify(employeeProfiles))}
+        initialCategory={parseHistoryCategory(params?.category)}
+      />
+    </TalentSectionPage>
+  );
 }

@@ -22,12 +22,12 @@ export type CompetencyWorkspaceData = JsonValue<Awaited<ReturnType<typeof getCom
 export type TalentDecisionRuleWorkspaceData = JsonValue<Awaited<ReturnType<typeof getTalentDecisionRuleConfiguration>>>;
 
 export type TalentOperationWorkspaceData = {
-  assessment: AssessmentWorkspaceData;
-  incident: IncidentWorkspaceData;
-  decision: DecisionWorkspaceData;
-  history: HistoryWorkspaceData;
+  assessment?: AssessmentWorkspaceData;
+  incident?: IncidentWorkspaceData;
+  decision?: DecisionWorkspaceData;
+  history?: HistoryWorkspaceData;
   employeeProfiles: EmployeeProfileWorkspaceData;
-  career: CareerWorkspaceData;
-  competency: CompetencyWorkspaceData;
+  career?: CareerWorkspaceData;
+  competency?: CompetencyWorkspaceData;
   decisionRules: TalentDecisionRuleWorkspaceData;
 };

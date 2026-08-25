@@ -1,19 +1,18 @@
+import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { buildUserWhereByPermission, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
 import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
-import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query";
-import { getTalentHistoryData, getTalentRecommendationData } from "@/server/talent/decision-history-query";
-import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
 import { getRemainingPromotionOpportunityCount } from "@/server/talent/employee-profile";
-import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
-import { getTalentReviewConfig, getTalentReviewCycleDetails, getTalentReviewCycles } from "@/server/talent/review-query";
 import { getTalentDecisionRuleConfiguration } from "@/server/talent/decision-rule-query";
-import { getProfileOverviewExtras, getProfileOverviewExtrasForUsers } from "@/server/talent/profile-overview-query";
-import TalentPageContent from "./content";
+import { getProfileOverviewExtrasForUsers } from "@/server/talent/profile-overview-query";
+import { TalentOverviewContent } from "./content";
+import { loadTalentOverviewReviewDetails } from "./load-review-workspace";
+import { resolveTalentVisibleSections } from "./resolve-visible-sections";
+import { resolveLegacyTalentSectionRedirect } from "./talent-sections";
+import { TalentSectionPage } from "./talent-section-page";
 import type { TalentOperationWorkspaceData } from "./operation-workspace-types";
-import type { ReviewWorkspaceData } from "./review-workspace-types";
 
 function startOfQuarter(date: Date) {
   const quarter = Math.floor(date.getMonth() / 3);
@@ -25,36 +24,33 @@ function endOfQuarter(date: Date) {
   return new Date(date.getFullYear(), quarter * 3 + 3, 0, 23, 59, 59, 999);
 }
 
-export default async function TalentPage() {
+type PageProps = {
+  searchParams?: Promise<{ section?: string; tab?: string }>;
+};
+
+export default async function TalentPage({ searchParams }: PageProps) {
+  const params = searchParams ? await searchParams : undefined;
+  const legacySection = params?.section ?? params?.tab;
+  const legacyRedirect = resolveLegacyTalentSectionRedirect(legacySection, new URLSearchParams());
+  if (legacyRedirect) redirect(legacyRedirect);
+
   const user = await requireCurrentUser();
-  const [profileCoverage, reviewCoverage, recommendationCoverage, historyCoverage, configCoverage] = await Promise.all([
-    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile),
-    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewReview),
-    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewRecommendation),
-    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewHistory),
-    resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig),
-  ]);
-  const visibleSections = ([
-    ["overview", profileCoverage],
-    ["review", reviewCoverage],
-    ["decision", recommendationCoverage],
-    ["history", historyCoverage],
-    ["config", configCoverage],
-  ] as const).filter(([, coverage]) => coverage.hasPermission).map(([key]) => key);
-  const [config, cycles, assessment, incident, decision, history, employeeProfiles, career, competency, decisionRules] = await Promise.all([
-    getTalentReviewConfig(user),
-    getTalentReviewCycles(user),
-    getBusinessAssessmentPageData(user),
-    getWorkIncidentPageData(user),
-    getTalentRecommendationData(user),
-    getTalentHistoryData(user),
+  const visibleSections = await resolveTalentVisibleSections(user);
+  if (!visibleSections.includes("overview")) {
+    redirect(visibleSections[0] === "review" ? "/talent/review"
+      : visibleSections[0] === "decision" ? "/talent/decision"
+      : visibleSections[0] === "history" ? "/talent/history"
+      : visibleSections[0] === "config" ? "/talent/config"
+      : "/");
+  }
+
+  const profileCoverage = await resolvePermissionCoverage(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile);
+  const [reviewWorkspace, employeeProfiles, decisionRules] = await Promise.all([
+    loadTalentOverviewReviewDetails(user),
     getEmployeeProfileManagementData(user),
-    getCareerConfiguration(user),
-    getCompetencyConfiguration(user),
     getTalentDecisionRuleConfiguration(user),
   ]);
-  // 总览收口：盘点参与人再按 VIEW_TALENT_PROFILE 的可见用户范围过滤，下游统计/列表共用同一份 details。
-  // 无画像权限时过滤为空集，不能放行全量；结果/维度结果同步收口，避免九宫格计数等聚合数据越权。
+
   const profileVisibleUserIds = profileCoverage.hasPermission
     ? new Set(
         (await prisma.user.findMany({
@@ -63,25 +59,12 @@ export default async function TalentPage() {
         })).map((row) => row.id),
       )
     : new Set<string>();
-  const details = (await getTalentReviewCycleDetails(user, cycles.cycles.map((cycle) => cycle.id)))
-    .map((detail) => {
-      const participants = detail.participants.filter((participant) => profileVisibleUserIds.has(participant.userId));
-      const participantIds = new Set(participants.map((participant) => participant.id));
-      return {
-        ...detail,
-        cycleId: detail.cycle.id,
-        cycleStatus: detail.cycle.status,
-        participants,
-        results: detail.results.filter((result) => participantIds.has(result.participantId)),
-        dimensionResults: detail.dimensionResults.filter((result) => participantIds.has(result.participantId)),
-      };
-    });
 
-  // 人才画像以全部可见员工为底表，关联数据（KPI/业务考核/合同/晋升/奖励）需覆盖全部可见员工，而非仅盘点参与人
   const participantUserIds = [...new Set([
-    ...details.flatMap((detail) => detail.participants.map((participant) => participant.userId)),
+    ...reviewWorkspace.details.flatMap((detail) => detail.participants.map((participant) => participant.userId)),
     ...profileVisibleUserIds,
   ])].filter(Boolean);
+
   const now = new Date();
   const ninetyDaysLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
   const yearStart = new Date(now.getFullYear(), 0, 1);
@@ -137,8 +120,7 @@ export default async function TalentPage() {
   ]);
 
   const cycleById = new Map(assessmentCycles.map((cycle) => [cycle.id, cycle]));
-
-  const overviewCycle = cycles.cycles[0];
+  const overviewCycle = reviewWorkspace.cycles.cycles[0];
   const overviewDepartmentOrgNodeId = overviewCycle?.departmentOrgNodeId;
   const overviewTemplateVersionId = overviewCycle?.templateVersionId;
 
@@ -160,8 +142,7 @@ export default async function TalentPage() {
   const kpiTotalScore = activeKpiRule?.quarterlyKpiTotalScore ?? 110;
   const reviewTotalScore = reviewDimensions.reduce((sum, dimension) => sum + (dimension.maxScore ?? 0), 0) || 30;
 
-  // 批量获取画像补充数据，避免按人循环产生 N+1 次 DB 往返；单用户失败不影响整体
-  const profileExtrasByUserId: Record<string, Awaited<ReturnType<typeof getProfileOverviewExtras>>> = {};
+  const profileExtrasByUserId: Record<string, Awaited<ReturnType<typeof import("@/server/talent/profile-overview-query").getProfileOverviewExtras>>> = {};
   if (participantUserIds.length > 0) {
     try {
       Object.assign(
@@ -169,7 +150,7 @@ export default async function TalentPage() {
         await getProfileOverviewExtrasForUsers(participantUserIds, { kpiTotalScore, reviewTotalScore }),
       );
     } catch {
-      // 批量查询失败时降级为空，页面其余部分仍可渲染
+      // 批量查询失败时降级为空
     }
   }
 
@@ -179,7 +160,6 @@ export default async function TalentPage() {
     const count = getRemainingPromotionOpportunityCount(profile.currentContractEndAt, now);
     return count !== null && count <= 2;
   });
-  const lowPromotionOpportunityCount = lowPromotionOpportunityProfiles.length;
 
   const latestPromotionRecord = recentPromotionRecords.length > 0
     ? recentPromotionRecords.reduce((latest, record) => (record.effectiveDate > latest.effectiveDate ? record : latest))
@@ -197,30 +177,20 @@ export default async function TalentPage() {
       .map((record) => record.userId),
   )];
 
-  const contractsExpiringSoonUserIds = contractsExpiringSoonProfiles.map((profile) => profile.userId);
-  const currentQuarterRewardUserIds = [...new Set(currentQuarterRewardRecords.map((record) => record.userId))];
-
   const statUserIds = [...new Set([
-    ...contractsExpiringSoonUserIds,
+    ...contractsExpiringSoonProfiles.map((profile) => profile.userId),
     ...lowPromotionOpportunityProfiles.map((profile) => profile.userId),
     ...recentPromotionUserIds,
-    ...currentQuarterRewardUserIds,
+    ...[...new Set(currentQuarterRewardRecords.map((record) => record.userId))],
   ])];
   const statUsers = statUserIds.length > 0
     ? await prisma.user.findMany({ where: { id: { in: statUserIds } }, select: { id: true, name: true } })
     : [];
   const userNameById = new Map(statUsers.map((row) => [row.id, row.name]));
 
-  const contractsExpiringSoonNames = contractsExpiringSoonUserIds.map((id) => userNameById.get(id) ?? id);
-  const lowPromotionOpportunityNames = lowPromotionOpportunityProfiles.map((profile) => userNameById.get(profile.userId) ?? profile.userId);
-  const recentPromotionNames = recentPromotionUserIds.map((id) => userNameById.get(id) ?? id);
-  const currentQuarterRewardNames = currentQuarterRewardUserIds.map((id) => userNameById.get(id) ?? id);
-
   const latestKpiByUserId: Record<string, (typeof latestKpis)[number]> = {};
   for (const kpi of latestKpis) {
-    if (!latestKpiByUserId[kpi.userId]) {
-      latestKpiByUserId[kpi.userId] = kpi;
-    }
+    if (!latestKpiByUserId[kpi.userId]) latestKpiByUserId[kpi.userId] = kpi;
   }
 
   const latestAssessmentByUserId: Record<string, (typeof latestAssessmentSummaries)[number] & { cycle: { year: number; quarter: number } | null }> = {};
@@ -233,32 +203,31 @@ export default async function TalentPage() {
       return (right.cycle?.quarter ?? 0) - (left.cycle?.quarter ?? 0);
     });
   for (const summary of sortedSummaries) {
-    if (!latestAssessmentByUserId[summary.userId]) {
-      latestAssessmentByUserId[summary.userId] = summary;
-    }
+    if (!latestAssessmentByUserId[summary.userId]) latestAssessmentByUserId[summary.userId] = summary;
   }
 
-  const reviewWorkspace = JSON.parse(JSON.stringify({ config, cycles, details })) as ReviewWorkspaceData;
-  const operationWorkspace = JSON.parse(JSON.stringify({ assessment, incident, decision, history, employeeProfiles, career, competency, decisionRules })) as TalentOperationWorkspaceData;
+  const operationWorkspace = JSON.parse(JSON.stringify({ employeeProfiles, decisionRules })) as TalentOperationWorkspaceData;
+
   return (
-    <TalentPageContent
-      reviewWorkspace={reviewWorkspace}
-      operationWorkspace={operationWorkspace}
-      latestKpiByUserId={latestKpiByUserId}
-      latestAssessmentByUserId={latestAssessmentByUserId}
-      statCards={{
-        contractsExpiringSoon: contractsExpiringSoonProfiles.length,
-        contractsExpiringSoonNames,
-        recentPromotions: recentPromotionUserIds.length,
-        recentPromotionHalfYear,
-        recentPromotionNames,
-        lowPromotionOpportunityCount,
-        lowPromotionOpportunityNames,
-        currentQuarterRewards: currentQuarterRewardRecords.length,
-        currentQuarterRewardNames,
-      }}
-      profileExtrasByUserId={profileExtrasByUserId}
-      visibleSections={visibleSections}
-    />
+    <TalentSectionPage visibleSections={visibleSections} activeSection="overview">
+      <TalentOverviewContent
+        reviewWorkspace={JSON.parse(JSON.stringify(reviewWorkspace))}
+        operationWorkspace={operationWorkspace}
+        latestKpiByUserId={latestKpiByUserId}
+        latestAssessmentByUserId={latestAssessmentByUserId}
+        statCards={{
+          contractsExpiringSoon: contractsExpiringSoonProfiles.length,
+          contractsExpiringSoonNames: contractsExpiringSoonProfiles.map((profile) => userNameById.get(profile.userId) ?? profile.userId),
+          recentPromotions: recentPromotionUserIds.length,
+          recentPromotionHalfYear,
+          recentPromotionNames: recentPromotionUserIds.map((id) => userNameById.get(id) ?? id),
+          lowPromotionOpportunityCount: lowPromotionOpportunityProfiles.length,
+          lowPromotionOpportunityNames: lowPromotionOpportunityProfiles.map((profile) => userNameById.get(profile.userId) ?? profile.userId),
+          currentQuarterRewards: currentQuarterRewardRecords.length,
+          currentQuarterRewardNames: [...new Set(currentQuarterRewardRecords.map((record) => record.userId))].map((id) => userNameById.get(id) ?? id),
+        }}
+        profileExtrasByUserId={profileExtrasByUserId}
+      />
+    </TalentSectionPage>
   );
 }
