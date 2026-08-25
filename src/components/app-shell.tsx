@@ -31,6 +31,8 @@ const menu = [
   { to: "/organization", label: "组织与权限", icon: Building2 },
 ];
 
+const heavyRoutes = new Set(["/kpi", "/talent", "/quarterly-work", "/organization"]);
+
 export interface AppShellUser {
   name: string;
   roleLabel: string;
@@ -42,12 +44,10 @@ export function AppShell({ children, user, allowedMenus }: { children: ReactNode
   const pathname = usePathname();
   const allowedPaths = allowedMenus ? new Set(allowedMenus.map((m) => m.path)) : null;
   const visibleMenu = allowedPaths ? menu.filter((m) => allowedPaths.has(m.to)) : menu;
-  const current = visibleMenu.find((m) => pathname.startsWith(m.to));
-  const title = current?.label ?? visibleMenu[0]?.label ?? "工作台";
+  const title = visibleMenu.find((m) => pathname.startsWith(m.to))?.label ?? visibleMenu[0]?.label ?? "工作台";
 
   return (
     <div className="h-screen overflow-hidden bg-background">
-      {/* Sidebar */}
       <aside className="hidden md:fixed md:inset-y-0 md:left-0 md:z-40 md:flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
         <div className="flex items-center gap-2 px-5 h-16 border-b border-sidebar-border">
           <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white bg-primary">
@@ -66,6 +66,7 @@ export function AppShell({ children, user, allowedMenus }: { children: ReactNode
               <Link
                 key={m.to}
                 href={m.to}
+                prefetch={heavyRoutes.has(m.to) ? false : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                   active
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -80,7 +81,6 @@ export function AppShell({ children, user, allowedMenus }: { children: ReactNode
         </nav>
       </aside>
 
-      {/* Main */}
       <div className="flex h-full min-w-0 flex-col md:pl-60">
         <header className="fixed left-0 right-0 top-0 z-30 h-16 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 flex items-center px-6 gap-4 md:left-60 shadow-sm">
           <h1 className="text-base font-semibold text-foreground">{title}</h1>

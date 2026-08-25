@@ -1,6 +1,5 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getKpiData } from "@/server/kpi/kpi-query";
-import { KpiContent } from "../content";
+import { KpiSectionPanel } from "../kpi-section-panel";
 import { parsePeriodFromSearchParams, type PeriodSearchParams } from "../parse-period-params";
 
 type PageProps = {
@@ -10,15 +9,13 @@ type PageProps = {
 export default async function KpiTemplatesPage({ searchParams }: PageProps) {
   const params = searchParams ? await searchParams : undefined;
   const { selectedYear, selectedQuarter } = parsePeriodFromSearchParams(params);
-  const currentUser = await requireCurrentUser();
-  const data = await getKpiData(currentUser, { selectedYear, selectedQuarter });
+  await requireCurrentUser();
 
   return (
-    <KpiContent
-      data={data}
-      selectedYear={selectedYear ?? data.year}
-      selectedQuarter={selectedQuarter ?? data.quarter}
+    <KpiSectionPanel
       activeSection="kpi-template"
+      selectedYear={selectedYear}
+      selectedQuarter={selectedQuarter}
     />
   );
 }

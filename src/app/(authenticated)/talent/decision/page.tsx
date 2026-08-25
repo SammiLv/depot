@@ -10,11 +10,11 @@ export default async function TalentDecisionPage() {
   const visibleSections = await resolveTalentVisibleSections(user);
   if (!(await requireTalentSection(user, "decision"))) redirect("/talent");
 
-  const decisionData = JSON.parse(JSON.stringify(await getTalentRecommendationData(user)));
+  const data = await getTalentRecommendationData(user);
 
   return (
     <TalentSectionPage visibleSections={visibleSections} activeSection="decision">
-      <TalentDecisionWorkspace data={decisionData} />
+      <TalentDecisionWorkspace data={JSON.parse(JSON.stringify(data))} />
     </TalentSectionPage>
   );
 }

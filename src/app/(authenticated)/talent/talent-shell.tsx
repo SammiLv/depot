@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Card, PageHeader } from "@/components/ui-kit";
 import type { Section } from "./content";
 import { TALENT_SECTION_TABS } from "./talent-sections";
@@ -15,13 +15,10 @@ export function TalentWorkspaceShell({
   activeSection: Section;
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  function isActiveTab(key: Section, href: string) {
-    if (key === activeSection) return true;
-    if (key === "overview" && pathname === "/talent") return true;
-    return pathname === href || pathname.startsWith(`${href}/`);
+  function isActiveTab(key: Section) {
+    return key === activeSection;
   }
 
   function buildHref(href: string) {
@@ -43,7 +40,7 @@ export function TalentWorkspaceShell({
             key={key}
             href={buildHref(href)}
             className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm transition-colors ${
-              isActiveTab(key, href)
+              isActiveTab(key)
                 ? "border-primary font-medium text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}

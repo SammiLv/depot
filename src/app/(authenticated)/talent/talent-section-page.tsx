@@ -1,7 +1,5 @@
 "use client";
 
-import { Suspense } from "react";
-import { TabPanelLoadingSkeleton } from "@/components/page-loading-skeleton";
 import { TalentWorkspaceShell } from "./talent-shell";
 import type { Section } from "./content";
 
@@ -15,10 +13,8 @@ export function TalentSectionPage({
   children: React.ReactNode;
 }) {
   return (
-    <Suspense fallback={<TabPanelLoadingSkeleton />}>
-      <TalentWorkspaceShell visibleSections={visibleSections} activeSection={activeSection}>
-        {children}
-      </TalentWorkspaceShell>
-    </Suspense>
+    <TalentWorkspaceShell visibleSections={visibleSections} activeSection={activeSection}>
+      {children}
+    </TalentWorkspaceShell>
   );
 }

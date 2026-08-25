@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getKpiData } from "@/server/kpi/kpi-query";
-import { KpiContent } from "./content";
+import { KpiSectionPanel } from "./kpi-section-panel";
 import { resolveLegacyKpiTabRedirect } from "./kpi-sections";
 import { parsePeriodFromSearchParams, type PeriodSearchParams } from "./parse-period-params";
 
@@ -29,14 +28,13 @@ export default async function KpiPage({ searchParams }: PageProps) {
   const legacyRedirect = resolveLegacyKpiTabRedirect(tab, toSearchParams(params));
   if (legacyRedirect) redirect(legacyRedirect);
 
-  const currentUser = await requireCurrentUser();
-  const data = await getKpiData(currentUser, { selectedYear, selectedQuarter });
+  await requireCurrentUser();
+
   return (
-    <KpiContent
-      data={data}
-      selectedYear={selectedYear ?? data.year}
-      selectedQuarter={selectedQuarter ?? data.quarter}
+    <KpiSectionPanel
       activeSection="quarterly-kpi"
+      selectedYear={selectedYear}
+      selectedQuarter={selectedQuarter}
     />
   );
 }

@@ -22,6 +22,7 @@ import {
   updateTalentAbilityCalculationWeights,
 } from "@/server/talent/review-actions";
 import { ConfirmDeleteButton } from "@/components/confirm-delete";
+import { loadTalentProfileExtras } from "@/server/talent/talent-page-actions";
 import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-template-dialog";
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
 import type {
@@ -199,10 +200,14 @@ export function TalentOverviewContent({
   latestKpiByUserId,
   latestAssessmentByUserId,
   statCards,
-  profileExtrasByUserId,
+  profileExtrasByUserId: initialProfileExtrasByUserId,
+  overviewKpiRuleVersions,
+  overviewKpiBands,
+  participantUserIds = [],
+  profileExtrasScoreOptions,
 }: {
   reviewWorkspace: ReviewWorkspaceData;
-  operationWorkspace: TalentOperationWorkspaceData;
+  operationWorkspace: { employeeProfiles: TalentOperationWorkspaceData["employeeProfiles"] };
   latestKpiByUserId: Record<string, { userId: string; year: number; quarter: number; finalScore: number | null; finalRatingName: string | null }>;
   latestAssessmentByUserId: Record<string, { userId: string; cycleId: string; earnedScore: number; maxScore: number; isOverallPassed: boolean; cycle: { year: number; quarter: number } | null }>;
   statCards: {
@@ -217,6 +222,10 @@ export function TalentOverviewContent({
     currentQuarterRewardNames: string[];
   };
   profileExtrasByUserId: Record<string, ProfileExtras>;
+  overviewKpiRuleVersions: Array<{ id: string; departmentOrgNodeId: string; publishedAt: Date | string | null; updatedAt: Date | string }>;
+  overviewKpiBands: Array<{ ruleVersionId: string; name: string; minScore: number; maxScore: number | null; isUnbounded: boolean; sortOrder: number }>;
+  participantUserIds?: string[];
+  profileExtrasScoreOptions: { kpiTotalScore: number; reviewTotalScore: number };
 }) {
   const router = useRouter();
   const [gridFilter, setGridFilter] = useState<string | null>(null);
@@ -225,6 +234,16 @@ export function TalentOverviewContent({
   const [selected, setSelected] = useState<Person | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [notice, setNotice] = useState("");
+  const [profileExtrasByUserId, setProfileExtrasByUserId] = useState(initialProfileExtrasByUserId);
+
+  useEffect(() => {
+    if (participantUserIds.length === 0) return;
+    let cancelled = false;
+    void loadTalentProfileExtras(participantUserIds, profileExtrasScoreOptions).then((extras) => {
+      if (!cancelled) setProfileExtrasByUserId(extras);
+    });
+    return () => { cancelled = true; };
+  }, [participantUserIds, profileExtrasScoreOptions]);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
   const overviewDetail = reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
   const overviewTemplateId = overviewCycle?.templateVersionId ?? reviewWorkspace.config.templates.find((item) => item.status === "ACTIVE")?.id;
@@ -245,16 +264,10 @@ export function TalentOverviewContent({
     const gridCode = result?.nineBoxCode ?? undefined;
     const toneByGridCode: Record<string, Tone> = { HIGH_HIGH: "success", HIGH_MID: "brand", HIGH_LOW: "primary", MID_HIGH: "brand", MID_MID: "primary", MID_LOW: "warning", LOW_HIGH: "primary", LOW_MID: "warning", LOW_LOW: "danger" };
     const latestKpi = latestKpiByUserId[employee.id];
-    const activeKpiVersion = latestKpi
-      ? operationWorkspace.decisionRules.kpiRuleVersions
-          .filter((version) => version.departmentOrgNodeId === candidate?.departmentOrgNodeId && version.status === "ACTIVE")
-          .sort((left, right) => {
-            const leftTime = left.publishedAt ? new Date(left.publishedAt).getTime() : 0;
-            const rightTime = right.publishedAt ? new Date(right.publishedAt).getTime() : 0;
-            return rightTime - leftTime;
-          })[0]
+    const activeKpiVersion = latestKpi && candidate?.departmentOrgNodeId
+      ? overviewKpiRuleVersions.find((version) => version.departmentOrgNodeId === candidate.departmentOrgNodeId)
       : null;
-    const kpiBands = activeKpiVersion ? operationWorkspace.decisionRules.kpiBands.filter((band) => band.ruleVersionId === activeKpiVersion.id) : [];
+    const kpiBands = activeKpiVersion ? overviewKpiBands.filter((band) => band.ruleVersionId === activeKpiVersion.id) : [];
     const kpiRating = latestKpi?.finalScore != null ? resolveKpiRatingName(latestKpi.finalScore, kpiBands) : null;
     return {
       id: employee.id,
