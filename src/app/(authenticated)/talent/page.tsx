@@ -8,9 +8,9 @@ import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
 import { getRemainingPromotionOpportunityCount } from "@/server/talent/employee-profile";
 import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
-import { getTalentReviewConfig, getTalentReviewCycleDetail, getTalentReviewCycles } from "@/server/talent/review-query";
+import { getTalentReviewConfig, getTalentReviewCycleDetails, getTalentReviewCycles } from "@/server/talent/review-query";
 import { getTalentDecisionRuleConfiguration } from "@/server/talent/decision-rule-query";
-import { getProfileOverviewExtras } from "@/server/talent/profile-overview-query";
+import { getProfileOverviewExtras, getProfileOverviewExtrasForUsers } from "@/server/talent/profile-overview-query";
 import TalentPageContent from "./content";
 import type { TalentOperationWorkspaceData } from "./operation-workspace-types";
 import type { ReviewWorkspaceData } from "./review-workspace-types";
@@ -63,8 +63,7 @@ export default async function TalentPage() {
         })).map((row) => row.id),
       )
     : new Set<string>();
-  const details = (await Promise.all(cycles.cycles.map((cycle) => getTalentReviewCycleDetail(user, cycle.id))))
-    .filter((detail): detail is NonNullable<typeof detail> => Boolean(detail))
+  const details = (await getTalentReviewCycleDetails(user, cycles.cycles.map((cycle) => cycle.id)))
     .map((detail) => {
       const participants = detail.participants.filter((participant) => profileVisibleUserIds.has(participant.userId));
       const participantIds = new Set(participants.map((participant) => participant.id));
@@ -161,15 +160,17 @@ export default async function TalentPage() {
   const kpiTotalScore = activeKpiRule?.quarterlyKpiTotalScore ?? 110;
   const reviewTotalScore = reviewDimensions.reduce((sum, dimension) => sum + (dimension.maxScore ?? 0), 0) || 30;
 
+  // 批量获取画像补充数据，避免按人循环产生 N+1 次 DB 往返；单用户失败不影响整体
   const profileExtrasByUserId: Record<string, Awaited<ReturnType<typeof getProfileOverviewExtras>>> = {};
   if (participantUserIds.length > 0) {
-    const extrasList = await Promise.all(
-      participantUserIds.map((userId) => getProfileOverviewExtras(userId, { kpiTotalScore, reviewTotalScore }).catch(() => null)),
-    );
-    participantUserIds.forEach((userId, index) => {
-      const extras = extrasList[index];
-      if (extras) profileExtrasByUserId[userId] = extras;
-    });
+    try {
+      Object.assign(
+        profileExtrasByUserId,
+        await getProfileOverviewExtrasForUsers(participantUserIds, { kpiTotalScore, reviewTotalScore }),
+      );
+    } catch {
+      // 批量查询失败时降级为空，页面其余部分仍可渲染
+    }
   }
 
   const lowPromotionOpportunityProfiles = employeeProfilesForPromotion.filter((profile) => {
