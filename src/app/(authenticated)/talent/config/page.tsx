@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
-import { getTalentDecisionRuleConfiguration } from "@/server/talent/decision-rule-query";
-import { loadTalentReviewWorkspace } from "@/server/talent/load-review-workspace";
+import {
+  getCachedCareerConfiguration,
+  getCachedCompetencyConfiguration,
+  getCachedTalentDecisionRuleConfiguration,
+  getCachedTalentReviewWorkspace,
+} from "@/server/talent/cached-talent-page-data";
 import { TalentConfigPageContent } from "../config-content";
 import { requireTalentSection, resolveTalentVisibleSections } from "../resolve-visible-sections";
 import { TalentSectionPage } from "../talent-section-page";
@@ -13,10 +16,10 @@ export default async function TalentConfigPage() {
   if (!(await requireTalentSection(user, "config"))) redirect("/talent");
 
   const [reviewWorkspace, career, competency, decisionRules] = await Promise.all([
-    loadTalentReviewWorkspace(user),
-    getCareerConfiguration(user),
-    getCompetencyConfiguration(user),
-    getTalentDecisionRuleConfiguration(user),
+    getCachedTalentReviewWorkspace(user),
+    getCachedCareerConfiguration(user),
+    getCachedCompetencyConfiguration(user),
+    getCachedTalentDecisionRuleConfiguration(user),
   ]);
   if (!reviewWorkspace) redirect("/talent");
 

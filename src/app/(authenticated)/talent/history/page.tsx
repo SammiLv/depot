@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
-import { getTalentHistoryData } from "@/server/talent/decision-history-query";
+import {
+  getCachedEmployeeProfileManagementData,
+  getCachedTalentHistoryData,
+} from "@/server/talent/cached-talent-page-data";
 import { TalentHistoryPageContent } from "../history-content";
 import { requireTalentSection, resolveTalentVisibleSections } from "../resolve-visible-sections";
 import { resolveLegacyTalentSectionRedirect } from "../talent-sections";
@@ -30,8 +32,8 @@ export default async function TalentHistoryPage({ searchParams }: PageProps) {
   if (!(await requireTalentSection(user, "history"))) redirect("/talent");
 
   const [historyData, employeeProfiles] = await Promise.all([
-    getTalentHistoryData(user, params?.userId, params?.importBatchId),
-    getEmployeeProfileManagementData(user),
+    getCachedTalentHistoryData(user, params?.userId, params?.importBatchId),
+    getCachedEmployeeProfileManagementData(user),
   ]);
 
   return (

@@ -1083,6 +1083,7 @@ model PersonalKpi {
   @@unique([year, quarter, userId])
   @@index([year, quarter])
   @@index([userId])
+  @@index([userId, status])
   @@index([orgNodeId])
   @@index([approvalPolicyId])
   @@index([ratingRuleVersionId])
@@ -1462,6 +1463,7 @@ model TalentReviewCycle {
 
   @@index([templateVersionId])
   @@index([status, deletedAt])
+  @@index([departmentOrgNodeId, deletedAt])
 }
 
 model TalentReviewParticipant {
@@ -2044,6 +2046,7 @@ model PromotionRecord {
   @@index([recommendationId])
   @@index([externalProcessNo])
   @@index([resultStatus, deletedAt])
+  @@index([outcome, resultStatus])
 }
 
 model SalaryAdjustmentRecord {
@@ -2106,6 +2109,7 @@ model RewardRecord {
   @@index([externalProcessNo])
   @@index([resultStatus, deletedAt])
   @@index([rewardCycle, rewardPeriodYear, rewardPeriodMonth, rewardPeriodQuarter])
+  @@index([effectiveDate])
 }
 
 model EmployeeTalentProfile {

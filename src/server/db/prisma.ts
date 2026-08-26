@@ -37,14 +37,37 @@ function resolvePrismaClientOptions() {
   };
 }
 
-function createPrismaClient() {
-  return new PrismaClient(resolvePrismaClientOptions());
+// Pragmas 只需在每个进程首次建立连接后跑一次:
+// - journal_mode=WAL:读写不互相阻塞,通知调度器写入不会卡住用户 SSR
+// - synchronous=NORMAL:配合 WAL 是官方推荐组合
+// - busy_timeout:并发下短暂锁等待自动重试
+// - cache_size / temp_store:让 SQLite 用更多内存降低磁盘 IO
+async function applyStartupPragmas(client: PrismaClient) {
+  try {
+    await client.$executeRawUnsafe("PRAGMA journal_mode=WAL");
+    await client.$executeRawUnsafe("PRAGMA synchronous=NORMAL");
+    await client.$executeRawUnsafe("PRAGMA busy_timeout=5000");
+    await client.$executeRawUnsafe("PRAGMA cache_size=-64000");
+    await client.$executeRawUnsafe("PRAGMA temp_store=MEMORY");
+  } catch (error) {
+    console.error("[prisma] apply startup pragmas failed", error);
+  }
 }
 
+function createPrismaClient() {
+  const client = new PrismaClient(resolvePrismaClientOptions());
+  void applyStartupPragmas(client);
+  return client;
+}
+
+// 生产模式:模块级单例,进程存活期间只建一次。
+// 开发模式:走 globalThis 缓存,并在 schema.prisma 变化时失效重建(支持 next dev 的 HMR)。
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
   prismaSchemaHash?: string;
 };
+
+let productionClient: PrismaClient | undefined;
 
 function hasCurrentDelegates(client: PrismaClient) {
   return typeof client.notificationScenario?.findMany === "function"
@@ -52,28 +75,26 @@ function hasCurrentDelegates(client: PrismaClient) {
     && typeof client.notificationGroupBot?.findMany === "function";
 }
 
-function isCachedClientValid(client: PrismaClient | undefined, schemaHash: string) {
-  if (!client) return false;
-  if (globalForPrisma.prismaSchemaHash !== schemaHash) return false;
-  return hasCurrentDelegates(client);
-}
-
-function resolvePrismaClient() {
-  const schemaHash = getSchemaHash();
-  const cached = globalForPrisma.prisma;
-  if (isCachedClientValid(cached, schemaHash)) {
-    return cached;
+function resolvePrismaClient(): PrismaClient {
+  if (process.env.NODE_ENV === "production") {
+    if (!productionClient) {
+      productionClient = createPrismaClient();
+    }
+    return productionClient;
   }
 
-  if (cached && typeof cached.$disconnect === "function") {
+  const cached = globalForPrisma.prisma;
+  if (cached && hasCurrentDelegates(cached)) {
+    const schemaHash = getSchemaHash();
+    if (globalForPrisma.prismaSchemaHash === schemaHash) {
+      return cached;
+    }
     void cached.$disconnect().catch(() => undefined);
   }
 
   const client = createPrismaClient();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
-    globalForPrisma.prismaSchemaHash = schemaHash;
-  }
+  globalForPrisma.prisma = client;
+  globalForPrisma.prismaSchemaHash = getSchemaHash();
   return client;
 }
 
