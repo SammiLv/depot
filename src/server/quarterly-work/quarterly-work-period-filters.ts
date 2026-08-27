@@ -10,19 +10,19 @@ export function getQuarterByDate(date: Date | null | undefined) {
   return Math.floor(date.getMonth() / 3) + 1;
 }
 
-export function isCompletedProjectVisibleInPeriod(
-  project: { status: string; completedAt: Date | null },
+export function isLaunchedProjectVisibleInPeriod(
+  project: { status: string; launchedAt: Date | null },
   period: ActivePeriod,
   isOverdue: boolean,
 ) {
-  if (project.status !== "COMPLETED" || isOverdue) {
+  if (project.status !== "LAUNCHED" || isOverdue) {
     return false;
   }
   if (period.quarter === "all") {
-    return (project.completedAt?.getFullYear() ?? period.year) === period.year;
+    return (project.launchedAt?.getFullYear() ?? period.year) === period.year;
   }
-  return getQuarterByDate(project.completedAt) === period.quarter
-    && (project.completedAt?.getFullYear() ?? period.year) === period.year;
+  return getQuarterByDate(project.launchedAt) === period.quarter
+    && (project.launchedAt?.getFullYear() ?? period.year) === period.year;
 }
 
 export function isValueTrackVisibleInPeriod(

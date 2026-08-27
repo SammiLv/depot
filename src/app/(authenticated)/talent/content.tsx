@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Button, Card, PageHeader, Progress } from "@/components/ui-kit";
+import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import {
   addTalentGradeThresholds,
@@ -19,9 +19,12 @@ import {
   saveDefaultTalentNineBoxRules,
   updateTalentReviewTemplate,
   updateTalentReviewDimension,
+  updateTalentAbilityCalculationWeights,
 } from "@/server/talent/review-actions";
+import { ConfirmDeleteButton } from "@/components/confirm-delete";
+import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-template-dialog";
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
-import type { AssessmentWorkspaceData, TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
+import type { TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
 import type { CareerWorkspaceData, CompetencyWorkspaceData } from "./operation-workspace-types";
 import {
   categoryLabels,
@@ -32,13 +35,6 @@ import {
   ruleStatusLabels,
   sourceLabels,
 } from "./config/decision-rules/presentation";
-import {
-  createBusinessAssessmentRuleVersion,
-  deleteBusinessAssessmentRuleVersion,
-  publishBusinessAssessmentRuleVersion,
-  saveBusinessAssessmentRuleVersion,
-  type BusinessAssessmentRuleActionState,
-} from "@/server/talent/assessment-actions";
 import {
   addCompetencyPackageItem,
   addCompetencyPackageToModel,
@@ -56,9 +52,10 @@ import {
   createDefaultKpiRatingRule,
   cloneWorkIncidentRuleVersion,
   createWorkIncidentRuleVersion,
+  deleteKpiRatingRuleDraft,
   publishKpiRatingRule,
   publishWorkIncidentRuleVersion,
-  saveKpiRatingBand,
+  saveKpiRatingDraft,
   type TalentRuleActionState,
 } from "@/server/talent/decision-rule-actions";
 import {
@@ -70,10 +67,8 @@ import {
   type RestrictionRuleDraftActionState,
 } from "@/server/talent/restriction-rule-actions";
 import {
-  BusinessAssessmentQuarterlyWorkspace,
   TalentDecisionWorkspace,
   TalentHistoryWorkspace,
-  WorkIncidentWorkspace,
 } from "./operation-workspaces";
 import {
   AlertCircle,
@@ -101,20 +96,95 @@ import {
   SlidersHorizontal,
   Trash2,
   TrendingUp,
-  Upload,
   UserRound,
   WalletCards,
   X,
 } from "lucide-react";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
-type Section = "overview" | "review" | "assessment" | "incident" | "decision" | "history" | "config";
-type ModalKind = "assessment-import" | "incident-create" | "decision-create" | "config-edit" | null;
-type ConfigKey = "review" | "career" | "competency" | "salary" | "assessment" | "incident" | "kpi-rating" | "decision-rules";
+type Section = "overview" | "review" | "decision" | "history" | "config";
+
+type ConfigKey = "review" | "career" | "competency" | "salary" | "incident" | "kpi-rating" | "decision-rules";
+
+const talentSectionTabs = [
+  { key: "overview", label: "人才总览" },
+  { key: "review", label: "人才盘点" },
+  { key: "decision", label: "人才决策" },
+  { key: "history", label: "人才履历" },
+  { key: "config", label: "规则配置" },
+] as const;
+
+function TalentSectionTabs({
+  value,
+  onChange,
+}: {
+  value: Section;
+  onChange: (section: Section) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [activeKey, setActiveKey] = useState(value);
+  const [slider, setSlider] = useState({ left: 0, width: 0 });
+  const [enableTransition, setEnableTransition] = useState(false);
+
+  useEffect(() => {
+    setActiveKey(value);
+  }, [value]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const updateSlider = () => {
+      const index = talentSectionTabs.findIndex((tab) => tab.key === activeKey);
+      const tab = list.querySelectorAll("button")[index];
+      if (!(tab instanceof HTMLElement)) return;
+      setSlider({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+
+    updateSlider();
+    const frame = window.requestAnimationFrame(() => setEnableTransition(true));
+    const observer = new ResizeObserver(updateSlider);
+    observer.observe(list);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [activeKey]);
+
+  return (
+    <div ref={listRef} className="relative flex h-full items-center gap-6">
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute bottom-0 h-0.5 bg-[#3069F9] ${
+          enableTransition ? "transition-[left,width] duration-200 ease-in-out" : ""
+        }`}
+        style={{ left: slider.left, width: slider.width }}
+      />
+      {talentSectionTabs.map((tabItem) => {
+        const active = activeKey === tabItem.key;
+        return (
+          <button
+            key={tabItem.key}
+            type="button"
+            onClick={() => {
+              setActiveKey(tabItem.key);
+              onChange(tabItem.key);
+            }}
+            className={`relative flex h-full items-center text-sm transition-colors duration-200 ${
+              active ? "font-medium text-[#3069F9]" : "text-[#181818]"
+            }`}
+          >
+            {tabItem.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 type ProfileExtras = {
   yearsOfService: number;
@@ -129,6 +199,8 @@ type ProfileExtras = {
   abilityMatchScore: number | null;
   kpiTotalScore: number;
   reviewTotalScore: number;
+  kpiWeight: number;
+  reviewWeight: number;
 };
 
 type Person = {
@@ -241,7 +313,6 @@ export default function TalentPageContent({
   const [section, setSection] = useState<Section>("overview");
   const [historyInitialCategory, setHistoryInitialCategory] = useState<"profiles" | "promotion" | "contract" | "salary" | "reward">("profiles");
   const [activeConfig, setActiveConfig] = useState<ConfigKey | null>(null);
-  const [modal, setModal] = useState<ModalKind>(null);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
   const overviewDetail = reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
   const overviewTemplateId = overviewCycle?.templateVersionId ?? reviewWorkspace.config.templates.find((item) => item.status === "ACTIVE")?.id;
@@ -325,19 +396,23 @@ export default function TalentPageContent({
   }
 
   return (
-    <Card className="!p-6">
-      <PageHeader
-        title="人才发展"
-        description="人才画像 · 人才盘点 · 业务考核与事故 · 人才决策"
-      />
+    <div className="flex h-full min-h-0 flex-col bg-[#F5F7F9]">
+      <header className="shrink-0 bg-white px-4 pt-4">
+        <h1 className="text-2xl font-semibold leading-[36px] tracking-tight text-[#181818]">人才发展</h1>
+        <p className="mt-2 text-sm leading-[22px] text-[#777777]">管理人才盘点、评估与发展。</p>
+        <div className="mt-2 flex h-12 items-center">
+          <TalentSectionTabs
+            value={section}
+            onChange={(next) => {
+              setSection(next);
+              if (next === "config") setActiveConfig(null);
+            }}
+          />
+        </div>
+      </header>
 
-      <div className="flex items-center gap-1 border-b border-border mb-5 overflow-x-auto">
-        {([
-          ["overview", "人才总览"], ["review", "人才盘点"], ["assessment", "业务考核"],
-          ["incident", "工作事故"], ["decision", "人才决策"], ["history", "人才履历"], ["config", "规则配置"],
-        ] as [Section, string][]).map(([key, label]) => <button key={key} onClick={() => { setSection(key); if (key === "config") setActiveConfig(null); }} className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${section === key ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>)}
-      </div>
-
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <Card className="!p-6">
       {section === "overview" && <>
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(280px,0.9fr)] gap-4 mb-5">
         <Card className="!p-0 overflow-hidden">
@@ -386,7 +461,7 @@ export default function TalentPageContent({
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left font-medium px-5 py-3">员工</th><th className="text-left font-medium px-4 py-3">当前职级</th><th className="text-left font-medium px-4 py-3">人才盘点</th><th className="text-left font-medium px-4 py-3">有效 KPI</th><th className="text-left font-medium px-4 py-3">业务考核</th><th className="text-left font-medium px-4 py-3">当前建议</th><th className="text-right font-medium px-5 py-3">操作</th></tr></thead>
+            <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left font-medium px-5 py-3">员工</th><th className="text-left font-medium px-4 py-3">当前职级</th><th className="text-left font-medium px-4 py-3">人才盘点</th><th className="text-left font-medium px-4 py-3">有效 KPI</th><th className="text-left font-medium px-4 py-3">业务考核</th><th className="text-left font-medium px-4 py-3">能力匹配度</th><th className="text-left font-medium px-4 py-3">当前建议</th><th className="text-right font-medium px-5 py-3">操作</th></tr></thead>
             <tbody className="divide-y divide-border">
               {filtered.map((person) => <tr key={person.id} className="hover:bg-muted/25 transition-colors cursor-pointer" onClick={() => openPerson(person)}>
                 <td className="px-5 py-3.5"><div><div className="font-medium">{person.name}</div><div className="mt-0.5 text-xs text-muted-foreground">{person.title} · {person.team}</div></div></td>
@@ -394,10 +469,11 @@ export default function TalentPageContent({
                 <td className="px-4 py-3.5"><div className="flex items-center gap-2"><Badge tone={person.tone}>{person.grid}</Badge><span className="text-xs text-muted-foreground">{person.reviewLevel === "待评价" ? "尚未完成评价" : `${person.score}分 / ${person.reviewLevel}`}</span></div></td>
                 <td className="px-4 py-3.5">{person.hasKpi ? <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${scoreTone(person.kpi)}`}>{person.kpi} 分{person.kpiRating ? ` / ${person.kpiRating}` : null}</span> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
                 <td className="px-4 py-3.5">{person.hasAssessment ? <><span className="font-medium">{person.assessment}</span><span className="text-xs text-muted-foreground"> / {person.assessmentMax}分</span></> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
+                <td className="px-4 py-3.5">{person.profileExtras?.abilityMatchScore != null ? <span className="text-sm font-medium text-primary">{person.profileExtras.abilityMatchScore}%</span> : <span className="text-xs text-muted-foreground">—</span>}</td>
                 <td className="px-4 py-3.5"><span className="text-xs">{person.recommendation}</span></td>
                 <td className="px-5 py-3.5 text-right"><button onClick={(event) => { event.stopPropagation(); openPerson(person); }} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">查看画像<ChevronRight className="w-3.5 h-3.5" /></button></td>
               </tr>)}
-              {filtered.length === 0 && <tr><td colSpan={7} className="px-5 py-14 text-center text-sm text-muted-foreground">没有匹配的员工，请调整筛选条件</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-muted-foreground">没有匹配的员工，请调整筛选条件</td></tr>}
             </tbody>
           </table>
         </div>
@@ -405,16 +481,15 @@ export default function TalentPageContent({
       </>}
 
       {section === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
-      {section === "assessment" && <BusinessAssessmentQuarterlyWorkspace data={operationWorkspace.assessment} />}
-      {section === "incident" && <WorkIncidentWorkspace data={operationWorkspace.incident} />}
       {section === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
       {section === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
-      {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} assessment={operationWorkspace.assessment} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
+      {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
+        </Card>
+      </div>
 
       {selected && <PersonDrawer person={selected} tab={tab} setTab={setTab} onClose={() => setSelected(null)} onNotice={showNotice} />}
-      {modal && <OperationModal kind={modal} onClose={() => setModal(null)} onSubmit={() => { setModal(null); showNotice("模拟数据已保存，本次不会写入数据库"); }} />}
       {notice && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] rounded-lg bg-slate-900 text-white px-4 py-3 shadow-xl text-sm flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" />{notice}</div>}
-    </Card>
+    </div>
   );
 }
 
@@ -453,7 +528,7 @@ function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
     </form>{activeTemplates.length === 0 && <p className="mt-2 text-xs text-amber-600">暂无已发布模型，请先到“规则配置 → 人才盘点模型”完成发布。</p>}</Card>}
     {!createPanelVisible && <>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"><Metric label="待评价" value={`${pending} 人`} hint="全部批次" /><Metric label="已评价" value={`${completed} 人`} hint="含待校准结果" /><Metric label="盘点批次" value={`${data.cycles.cycles.length} 个`} hint="历史版本独立保留" /></div>
-    <Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">盘点批次</th><th className="text-left px-4 py-3 font-medium">使用模型</th><th className="text-left px-4 py-3 font-medium">范围</th><th className="text-left px-4 py-3 font-medium">进度</th><th className="text-left px-4 py-3 font-medium">状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{data.cycles.cycles.map((cycle) => { const rows = participantRows.filter((item) => item.cycleId === cycle.id); const done = rows.filter((item) => item.status !== "PENDING").length; return <tr key={cycle.id}><td className="px-5 py-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground mt-1">{cycle.year}年{cycle.halfYear === 1 ? "上半年" : "下半年"}</div></td><td className="px-4 py-4 text-xs">{templateName.get(cycle.templateVersionId) ?? "模型已归档"}</td><td className="px-4 py-4 text-xs">{departmentName.get(cycle.departmentOrgNodeId)} · {rows.length}人</td><td className="px-4 py-4 font-medium">{done}/{rows.length}</td><td className="px-4 py-4"><Badge tone={cycle.status === "CONFIRMED" ? "success" : "primary"}>{reviewStatusLabel(cycle.status)}</Badge></td><td className="px-5 py-4"><div className="flex items-center justify-end gap-3"><button onClick={() => setSelectedCycleId(cycle.id)} className="text-xs text-primary">{cycle.status === "CONFIRMED" ? "查看结果" : "继续盘点"}</button>{cycle.status !== "CONFIRMED" && <form action={deleteTalentReviewCycle} onSubmit={(event) => { if (!window.confirm(`确认删除“${cycle.name}”吗？将删除 ${rows.length} 名员工的盘点数据，其中 ${done} 人已有评价结果。此操作不可恢复。`)) event.preventDefault(); }}><input type="hidden" name="cycleId" value={cycle.id}/><button type="submit" className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700"><Trash2 className="h-3.5 w-3.5"/>删除</button></form>}</div></td></tr>; })}</tbody></table>{data.cycles.cycles.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无盘点批次，请先发布模型并新建批次</div>}</Card>
+    <Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">盘点批次</th><th className="text-left px-4 py-3 font-medium">使用模型</th><th className="text-left px-4 py-3 font-medium">范围</th><th className="text-left px-4 py-3 font-medium">进度</th><th className="text-left px-4 py-3 font-medium">状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{data.cycles.cycles.map((cycle) => { const rows = participantRows.filter((item) => item.cycleId === cycle.id); const done = rows.filter((item) => item.status !== "PENDING").length; return <tr key={cycle.id}><td className="px-5 py-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground mt-1">{cycle.year}年{cycle.halfYear === 1 ? "上半年" : "下半年"}</div></td><td className="px-4 py-4 text-xs">{templateName.get(cycle.templateVersionId) ?? "模型已归档"}</td><td className="px-4 py-4 text-xs">{departmentName.get(cycle.departmentOrgNodeId)} · {rows.length}人</td><td className="px-4 py-4 font-medium">{done}/{rows.length}</td><td className="px-4 py-4"><Badge tone={cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "success" : "primary"}>{reviewStatusLabel(cycle.status)}</Badge></td><td className="px-5 py-4"><div className="flex items-center justify-end gap-3"><button onClick={() => setSelectedCycleId(cycle.id)} className="text-xs text-primary">{cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "查看结果" : "继续盘点"}</button>{(cycle.status !== "CONFIRMED" && cycle.status !== "ARCHIVED") && <ConfirmDeleteButton action={deleteReviewCycleWithState} initialState={initialTalentRuleState} hidden={{ cycleId: cycle.id }} title="删除盘点批次" description={`确认删除“${cycle.name}”吗？将删除 ${rows.length} 名员工的盘点数据，其中 ${done} 人已有评价结果。此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>}/>}</div></td></tr>; })}</tbody></table>{data.cycles.cycles.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无盘点批次，请先发布模型并新建批次</div>}</Card>
     </>}
     <ActionFeedback key={createState.requestId} state={createState}/>
   </div>;
@@ -492,24 +567,7 @@ function ReviewCycleDetailPanel({ detail, onBack }: { detail: ReviewCycleDetail;
   </div>;
 }
 
-function reviewStatusLabel(status: string) { return ({ IN_PROGRESS: "进行中", CALIBRATING: "校准中", CONFIRMED: "已完成" } as Record<string, string>)[status] ?? status; }
-
-function AssessmentWorkbench({ onNotice }: { onImport: () => void; onNotice: (message: string) => void }) {
-  const rows = [
-    { name: "周明轩", subjects: "PPT演讲、系统演示、产品知识", result: "全部及格", score: "6 / 6", sync: "KPI可查询" },
-    { name: "吴雨桐", subjects: "PPT演讲、系统演示、产品知识", result: "1科补考及格", score: "5 / 6", sync: "KPI可查询" },
-    { name: "李隽贤", subjects: "PPT演讲、系统演示、产品知识", result: "1科补考不及格", score: "3 / 6", sync: "KPI可查询" },
-  ];
-  return <div><WorkbenchHeader title="业务考核" description="只管理最终考试结果；支持等级评分、分数评分和补考结果导入" action={<Link href="/talent/assessments" className={primaryActionLinkClass}><Upload className="w-4 h-4" />新建业务考核</Link>} /><div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 mb-4 flex items-center gap-3"><Database className="w-5 h-5 text-blue-600" /><div className="text-xs"><span className="font-medium text-foreground">当前计分规则：</span><span className="text-muted-foreground">总分 6 分，按科目均摊；首次及格得满分，补考及格得一半，最终不及格得 0 分。</span></div></div><Card className="!p-0 overflow-hidden"><div className="px-5 py-4 border-b border-border flex items-center justify-between"><div><h4 className="font-medium">2026 年 Q2 考核结果</h4><p className="text-xs text-muted-foreground mt-1">3 个考试科目 · 每科 2 分</p></div><Badge tone="success">已导入 18 人</Badge></div><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">员工</th><th className="text-left px-4 py-3 font-medium">考试科目</th><th className="text-left px-4 py-3 font-medium">最终结果</th><th className="text-left px-4 py-3 font-medium">KPI得分</th><th className="text-left px-4 py-3 font-medium">查询状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{rows.map((item) => <tr key={item.name}><td className="px-5 py-4 font-medium">{item.name}</td><td className="px-4 py-4 text-xs text-muted-foreground">{item.subjects}</td><td className="px-4 py-4"><Badge tone={item.result === "全部及格" ? "success" : item.result.includes("不及格") ? "danger" : "warning"}>{item.result}</Badge></td><td className="px-4 py-4 font-medium">{item.score}</td><td className="px-4 py-4 text-xs">{item.sync}</td><td className="px-5 py-4 text-right"><button onClick={() => onNotice(`已查看 ${item.name} 的科目结果`)} className="text-xs text-primary">查看结果</button></td></tr>)}</tbody></table></Card></div>;
-}
-
-function IncidentWorkbench() {
-  const incidents = [
-    { date: "2026-07-12", name: "示例员工A", level: "D", title: "一般工作规范事故", penalty: "工作事故项扣 10 分", status: "KPI可查询" },
-    { date: "2026-05-08", name: "示例员工B", level: "C", title: "项目交付责任事故", penalty: "工作事故项扣 40 分", status: "KPI可查询" },
-  ];
-  return <div><WorkbenchHeader title="工作事故" description="保存事故事实、等级和限制期，并向 KPI 工作事故项提供扣分结果" action={<Link href="/talent/incidents" className={primaryActionLinkClass}><Plus className="w-4 h-4" />进入事故管理</Link>} /><div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"><Metric label="本季度事故" value="2 起" hint="C级 1起 · D级 1起" /><Metric label="KPI累计扣分" value="-50 分" hint="工作事故指标项" /><Metric label="限制期内员工" value="2 人" hint="影响晋升、加薪、奖励" /></div><Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">发生日期</th><th className="text-left px-4 py-3 font-medium">责任人</th><th className="text-left px-4 py-3 font-medium">等级</th><th className="text-left px-4 py-3 font-medium">事故摘要</th><th className="text-left px-4 py-3 font-medium">KPI结果</th><th className="text-left px-4 py-3 font-medium">状态</th></tr></thead><tbody className="divide-y divide-border">{incidents.map((item) => <tr key={item.date + item.name}><td className="px-5 py-4 text-xs">{item.date}</td><td className="px-4 py-4 font-medium">{item.name}</td><td className="px-4 py-4"><Badge tone={item.level === "C" ? "danger" : "warning"}>{item.level}级</Badge></td><td className="px-4 py-4 text-xs">{item.title}</td><td className="px-4 py-4 text-xs font-medium">{item.penalty}</td><td className="px-4 py-4"><Badge tone="success">{item.status}</Badge></td></tr>)}</tbody></table></Card></div>;
-}
+function reviewStatusLabel(status: string) { return ({ IN_PROGRESS: "进行中", CALIBRATING: "校准中", CONFIRMED: "已完成", ARCHIVED: "已归档" } as Record<string, string>)[status] ?? status; }
 
 function DecisionWorkbench() {
   const suggestions = [
@@ -534,43 +592,43 @@ function TalentHistoryWorkbench() {
   return <div><WorkbenchHeader title="人才履历" description="管理员工已经正式发生的晋升、续签、加薪和奖励记录，并支持按员工查询完整历史" action={<Link href="/talent/history" className={primaryActionLinkClass}><Plus className="w-4 h-4" />进入履历管理</Link>} /><div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"><Metric label="晋升记录" value="12 条" hint="近三年" /><Metric label="续签记录" value="18 条" hint="近三年" /><Metric label="加薪记录" value="21 条" hint="近三年" /><Metric label="奖励记录" value="32 条" hint="近三年" /></div><Card className="!p-0 overflow-hidden"><div className="px-5 py-4 border-b border-border flex items-center justify-between"><div><h4 className="font-medium">员工履历记录</h4><p className="text-xs text-muted-foreground mt-1">正式记录可以关联人才决策，也可以来自公司其他管理系统</p></div><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><input placeholder="搜索员工历史" className="h-9 w-48 rounded-lg bg-muted/70 pl-8 pr-3 text-xs focus:outline-none focus:border-primary border border-transparent" /></div></div><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">记录编号</th><th className="text-left px-4 py-3 font-medium">员工</th><th className="text-left px-4 py-3 font-medium">类型</th><th className="text-left px-4 py-3 font-medium">正式结果</th><th className="text-left px-4 py-3 font-medium">生效日期</th><th className="text-left px-4 py-3 font-medium">来源</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{records.map((item) => <tr key={item.id}><td className="px-5 py-4 text-xs text-muted-foreground">{item.id}</td><td className="px-4 py-4 font-medium">{item.name}</td><td className="px-4 py-4"><Badge tone="primary">{item.type}</Badge></td><td className="px-4 py-4 text-xs font-medium">{item.content}</td><td className="px-4 py-4 text-xs">{item.effective}</td><td className="px-4 py-4 text-xs text-muted-foreground">{item.source}</td><td className="px-5 py-4 text-right"><button className="text-xs text-primary">查看员工履历</button></td></tr>)}</tbody></table></Card></div>;
 }
 
-function ConfigWorkbench({ data, career, competency, assessment, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; assessment: AssessmentWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
+function ConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
   const configs: Array<{ key: ConfigKey; icon: typeof SlidersHorizontal; title: string; detail: string; version: string }> = [
-    { key: "review", icon: SlidersHorizontal, title: "人才盘点模型", detail: "六维模型 · S/A/B/C/D评分 · 九宫格规则", version: "V1.0 已启用" },
+    { key: "review", icon: SlidersHorizontal, title: "人才能力评估", detail: "配置人才能力测算权重与人才盘点评价模型", version: "V1.0 已启用" },
     { key: "career", icon: Route, title: "职业发展通道", detail: "岗位族、岗位、职级组和 R3-1 等职级档", version: "V1.0 已启用" },
     { key: "competency", icon: ClipboardList, title: "职业能力模型", detail: "按岗位与目标职级配置晋升能力要求", version: "支持草稿与发布" },
     { key: "salary", icon: WalletCards, title: "薪资与职级上限", detail: "R1 至 R6 薪资上限及细分职级继承规则", version: "V1.0 已启用" },
-    { key: "assessment", icon: FileText, title: "业务考核规则", detail: "等级/分数及格线、补考与 6 分摊分规则", version: "V1.0 已启用" },
     { key: "incident", icon: ShieldAlert, title: "工作事故等级配置", detail: "定义S/A/B/C/D工作事故等级，供事故记录和其他规则引用", version: decisionRules.incidentRuleVersions.some((row) => row.status === "ACTIVE") ? "已有发布版本" : "待配置" },
-    { key: "kpi-rating", icon: TrendingUp, title: "绩效等级规则", detail: "独立维护KPI等级名称、连续分数区间和评价说明", version: decisionRules.kpiRuleVersions.some((row) => row.status === "ACTIVE") ? "已有发布版本" : "待配置" },
+    { key: "kpi-rating", icon: TrendingUp, title: "绩效管理规则", detail: "维护KPI等级名称、分数区间、评价说明和业务考核计分规则", version: decisionRules.kpiRuleVersions.some((row) => row.status === "ACTIVE") ? "已有发布版本" : "待配置" },
     { key: "decision-rules", icon: Database, title: "人才决策规则配置", detail: "按业务字段配置触发条件和限制输出，不执行员工决策", version: `${decisionRules.restrictionRules.length} 条规则` },
   ];
-  if (activeConfig) return <InlineConfigPanel data={data} career={career} competency={competency} assessment={assessment} decisionRules={decisionRules} configKey={activeConfig} onBack={onBack} onNotice={onNotice} />;
+  if (activeConfig) return <InlineConfigPanel data={data} career={career} competency={competency} decisionRules={decisionRules} configKey={activeConfig} onBack={onBack} onNotice={onNotice} />;
   return <div><WorkbenchHeader title="规则配置" description="先选择规则类型，再在各自的版本列表中创建、编辑或查看规则" action={<span />} /><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{configs.map((item) => { const Icon = item.icon; return <button key={item.key} onClick={() => onSelect(item.key)} className="text-left"><Card className="h-full hover:border-primary/40 hover:shadow-md transition-all"><div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center"><Icon className="w-5 h-5" /></div><div className="flex-1"><h4 className="font-medium">{item.title}</h4><p className="text-xs text-muted-foreground leading-5 mt-1 min-h-10">{item.detail}</p><div className="mt-4 flex items-center justify-between"><Badge tone="default">{item.version}</Badge><span className="text-xs text-primary flex items-center">{item.key === "decision-rules" ? "进入规则列表" : "进入版本列表"}<ChevronRight className="w-3.5 h-3.5" /></span></div></div></div></Card></button>; })}</div></div>;
 }
 
-function InlineConfigPanel({ data, career, competency, assessment, decisionRules, configKey, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; assessment: AssessmentWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; configKey: ConfigKey; onBack: () => void; onNotice: (message: string) => void }) {
+function InlineConfigPanel({ data, career, competency, decisionRules, configKey, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; configKey: ConfigKey; onBack: () => void; onNotice: (message: string) => void }) {
   const meta: Record<ConfigKey, { title: string; description: string }> = {
-    review: { title: "人才盘点模型", description: "配置评价维度、评分档、等级区间和九宫格规则" },
+    review: { title: "人才能力评估", description: "配置人才能力测算权重与人才盘点评价模型" },
     career: { title: "职业发展通道", description: "配置职业通道、岗位序列、具体岗位和细分职级" },
     competency: { title: "职业能力模型", description: "按岗位与目标职级配置晋升能力要求" },
     salary: { title: "薪资与职级上限", description: "维护职级段薪资上限和细分职级覆盖规则" },
-    assessment: { title: "业务考核规则", description: "维护评分方式、及格线、补考和 6 分摊分规则" },
     incident: { title: "工作事故等级配置", description: "独立定义工作事故等级，不配置KPI扣分或人才决策处罚" },
-    "kpi-rating": { title: "绩效等级规则", description: "独立维护版本化 KPI 等级名称、分数区间和评价说明" },
+    "kpi-rating": { title: "绩效管理规则", description: "独立维护版本化 KPI 等级名称、分数区间和评价说明，并管理业务考核计分规则" },
     "decision-rules": { title: "人才决策规则配置", description: "这里只维护规则定义，不计算员工数据、不生成限制记录，也不直接作出人才决策" },
   };
   const current = meta[configKey];
-  return <div><WorkbenchHeader title={current.title} description={current.description} action={<Button className={actionButtonClass} variant="outline" onClick={onBack}><ArrowRight className="h-4 w-4 rotate-180" />返回</Button>} />
+  // 绩效管理规则进入版本详情页时隐藏外层配置标题，页面只保留版本名这一个标题。
+  const [kpiDetailOpen, setKpiDetailOpen] = useState(false);
+  const hideHeader = configKey === "kpi-rating" && kpiDetailOpen;
+  return <div>{!hideHeader && <WorkbenchHeader title={current.title} description={current.description} action={<Button className={actionButtonClass} variant="outline" onClick={onBack}><ArrowRight className="h-4 w-4 rotate-180" />返回</Button>} />}
     {configKey === "review" && <ReviewModelConfiguration data={data} />}
-    {configKey === "career" && <CareerConfiguration data={career}/>} 
-    {configKey === "competency" && <CompetencyConfiguration data={competency}/>} 
+    {configKey === "career" && <CareerConfiguration data={career}/>}
+    {configKey === "competency" && <CompetencyConfiguration data={competency}/>}
     {configKey === "salary" && <SalaryConfiguration/>}
-    {configKey === "assessment" && <BusinessAssessmentRuleConfiguration data={assessment}/>} 
-    {configKey === "incident" && <IncidentRuleConfiguration data={decisionRules}/>} 
-    {configKey === "kpi-rating" && <KpiRatingRuleConfiguration data={decisionRules}/>} 
-    {configKey === "decision-rules" && <TalentRestrictionRuleConfiguration data={decisionRules}/>} 
-    {configKey !== "incident" && configKey !== "review" && configKey !== "career" && configKey !== "competency" && configKey !== "salary" && configKey !== "assessment" && configKey !== "kpi-rating" && configKey !== "decision-rules" && <div className="mt-4 flex justify-end"><Button className={actionButtonClass} onClick={() => onNotice(`${current.title}草稿已保存`)}><Save className="h-4 w-4"/>保存配置草稿</Button></div>}
+    {configKey === "incident" && <IncidentRuleConfiguration data={decisionRules}/>}
+    {configKey === "kpi-rating" && <KpiRatingRuleConfiguration data={decisionRules} onDetailChange={setKpiDetailOpen}/>}
+    {configKey === "decision-rules" && <TalentRestrictionRuleConfiguration data={decisionRules}/>}
+    {configKey !== "incident" && configKey !== "review" && configKey !== "career" && configKey !== "competency" && configKey !== "salary" && configKey !== "kpi-rating" && configKey !== "decision-rules" && <div className="mt-4 flex justify-end"><Button className={actionButtonClass} onClick={() => onNotice(`${current.title}草稿已保存`)}><Save className="h-4 w-4"/>保存配置草稿</Button></div>}
   </div>;
 }
 
@@ -754,7 +812,7 @@ function restrictionComparisonOptions(
 
 const configuredTriggerSources: Partial<Record<keyof typeof categoryLabels, { configurationName: string; valueName: string }>> = {
   WORK_INCIDENT: { configurationName: "工作事故等级配置", valueName: "事故等级" },
-  QUARTERLY_KPI: { configurationName: "绩效等级规则", valueName: "KPI等级" },
+  QUARTERLY_KPI: { configurationName: "绩效管理规则", valueName: "KPI等级" },
   TALENT_REVIEW: { configurationName: "人才盘点模型等级区间", valueName: "人才盘点等级" },
 } as const;
 
@@ -935,8 +993,17 @@ function RestrictionWarning({ text }: { text: string }) { return <div className=
 function formatRestrictionDate(value: string | null | undefined) { return value ? new Date(value).toLocaleDateString("zh-CN") : "长期有效"; }
 function formatRestrictionDateTime(value: string | null | undefined) { return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—"; }
 
-const initialBusinessAssessmentRuleState: BusinessAssessmentRuleActionState = { status: "idle", message: "" };
 const initialTalentRuleState: TalentRuleActionState = { status: "idle", message: "" };
+
+// deleteTalentReviewCycle 是无状态 form action（失败抛错），包一层适配 useActionState 供删除确认弹窗使用。
+async function deleteReviewCycleWithState(_state: TalentRuleActionState, formData: FormData): Promise<TalentRuleActionState> {
+  try {
+    await deleteTalentReviewCycle(formData);
+    return { status: "success", message: "盘点批次已删除" };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : "盘点批次删除失败" };
+  }
+}
 
 type IncidentLevelDefinition = {
   level: string;
@@ -977,33 +1044,115 @@ function IncidentRuleCloneButton({ id }: { id: string }) {
   return <form action={action} className="flex items-center gap-2"><input type="hidden" name="sourceId" value={id}/><Button type="submit" disabled={pending} variant="outline" className={actionButtonClass}>{pending ? "复制中" : "复制为新草稿"}</Button><ActionFeedback state={state}/></form>;
 }
 
-function KpiRatingRuleConfiguration({ data }: { data: TalentDecisionRuleWorkspaceData }) {
+function KpiRatingRuleConfiguration({ data, onDetailChange }: { data: TalentDecisionRuleWorkspaceData; onDetailChange?: (open: boolean) => void }) {
   const [kpiState, createKpiAction, creatingKpi] = useActionState(createDefaultKpiRatingRule, initialTalentRuleState);
   const departmentNames = new Map(data.departments.map((row) => [row.id, row.name]));
   const versions = data.kpiRuleVersions;
   const [screen, setScreen] = useState<"list" | "create" | "detail">("list");
   const [selectedVersionId, setSelectedVersionId] = useState(versions[0]?.id ?? "");
+  useEffect(() => { onDetailChange?.(screen === "detail"); }, [screen, onDetailChange]);
+  useEffect(() => {
+    if (kpiState.status !== "success" || !kpiState.id) return;
+    // 创建成功后直接进入该草稿的编辑页，不再手动从列表点进。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedVersionId(kpiState.id);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setScreen("detail");
+  }, [kpiState]);
   if (screen === "list") return <div>
     <div className="mb-4 flex justify-end"><Button className={actionButtonClass} onClick={() => setScreen("create")}><Plus className="h-4 w-4"/>新建规则版本</Button></div>
-    <div className="space-y-2">{versions.map((rule) => <button key={rule.id} type="button" onClick={() => { setSelectedVersionId(rule.id); setScreen("detail"); }} className="flex w-full items-center justify-between rounded-xl border border-border p-4 text-left hover:border-primary/40"><div><div className="font-medium">{rule.name} · V{rule.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentNames.get(rule.departmentOrgNodeId)} · {data.kpiBands.filter((band) => band.ruleVersionId === rule.id).length}个等级区间</div></div><div className="flex items-center gap-3"><Badge tone={rule.status === "ACTIVE" ? "success" : rule.status === "DRAFT" ? "warning" : "default"}>{rule.status === "ACTIVE" ? "已发布" : rule.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><span className="text-xs text-primary">{rule.status === "DRAFT" ? "编辑" : "查看"} ›</span></div></button>)}{!versions.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无规则版本，请新建第一版</div>}</div>
+    <div className="space-y-2">{versions.map((rule) => { const openDetail = () => { setSelectedVersionId(rule.id); setScreen("detail"); }; return <div key={rule.id} className="flex w-full items-center justify-between rounded-xl border border-border p-4 hover:border-primary/40"><button type="button" onClick={openDetail} className="min-w-0 flex-1 text-left"><div className="font-medium">{rule.name} · V{rule.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentNames.get(rule.departmentOrgNodeId)} · {data.kpiBands.filter((band) => band.ruleVersionId === rule.id).length}个等级区间</div></button><div className="flex items-center gap-3"><Badge tone={rule.status === "ACTIVE" ? "success" : rule.status === "DRAFT" ? "warning" : "default"}>{rule.status === "ACTIVE" ? "已发布" : rule.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><button type="button" onClick={openDetail} className="shrink-0 text-xs text-primary">{rule.status === "DRAFT" ? "编辑 ›" : "查看 ›"}</button>{rule.status === "DRAFT" && <KpiRuleDraftDeleteButton id={rule.id} name={`${rule.name} V${rule.version}`}/>}</div></div>; })}{!versions.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无规则版本，请新建第一版</div>}</div>
   </div>;
-  if (screen === "create") return <div><WorkbenchHeader title="新建绩效等级规则" description="创建后进入独立草稿编辑页" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="规则基本信息"><form action={createKpiAction} className="space-y-3"><Field label="适用部门"><select name="departmentOrgNodeId" required className={inputClass}>{data.departments.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field><Field label="规则名称"><input name="name" required defaultValue="KPI 绩效等级规则" className={inputClass}/></Field><Field label="季度KPI总分"><input name="quarterlyKpiTotalScore" type="number" step="0.01" min="0" required defaultValue="110" className={inputClass}/></Field><Button type="submit" disabled={creatingKpi} className={actionButtonClass}>{creatingKpi ? "创建中" : "创建草稿"}</Button><ActionFeedback state={kpiState}/></form></ConfigBlock></div>;
-  const selectedVersions = versions.filter((rule) => rule.id === selectedVersionId);
-  return <div className="space-y-4">
-    <WorkbenchHeader title="规则版本详情" description="草稿可编辑，已发布版本只读" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/>
-    <ConfigBlock title="绩效等级规则版本"><div className="space-y-3">{selectedVersions.map((rule) => { const bands = data.kpiBands.filter((band) => band.ruleVersionId === rule.id); return <div key={rule.id} className="rounded-xl border border-border p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="font-medium">{rule.name} · V{rule.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentNames.get(rule.departmentOrgNodeId)} · 季度KPI总分 {rule.quarterlyKpiTotalScore ?? "—"}</div></div><div className="flex items-center gap-2"><Badge tone={rule.status === "ACTIVE" ? "success" : rule.status === "DRAFT" ? "warning" : "default"}>{rule.status === "ACTIVE" ? "已发布" : rule.status === "DRAFT" ? "草稿" : "已归档"}</Badge>{rule.status === "DRAFT" && <KpiRulePublishButton id={rule.id}/>}</div></div><KpiRuleOverview bands={bands}/>{rule.status === "DRAFT" ? <div className="mt-4 space-y-2"><div className="text-xs font-medium text-muted-foreground">编辑等级名称、分数区间和评价说明</div>{bands.map((band) => <KpiBandEditor key={band.id} band={band}/>)}</div> : null}</div>; })}</div></ConfigBlock>
+  if (screen === "create") return <div><WorkbenchHeader title="新建绩效管理规则" description="创建后直接进入草稿编辑页，等级区间与计分规则整页保存" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="规则基本信息"><form action={createKpiAction} className="space-y-3"><Field label="适用部门"><select name="departmentOrgNodeId" required className={inputClass}>{data.departments.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field><Field label="规则名称"><input name="name" required defaultValue="KPI 绩效管理规则" className={inputClass}/></Field><Field label="季度KPI总分"><input name="quarterlyKpiTotalScore" type="number" step="0.01" min="0" required defaultValue="110" className={inputClass}/></Field><Button type="submit" disabled={creatingKpi} className={actionButtonClass}>{creatingKpi ? "创建中" : "创建并进入编辑"}</Button><ActionFeedback state={kpiState}/></form></ConfigBlock></div>;
+  const selected = versions.find((rule) => rule.id === selectedVersionId);
+  const backButton = <Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>;
+  if (!selected) return <div className="space-y-4"><div className="flex justify-end">{backButton}</div><ConfigBlock title="规则版本"><p className="text-sm text-muted-foreground">规则版本加载中…</p></ConfigBlock></div>;
+  const bands = data.kpiBands.filter((band) => band.ruleVersionId === selected.id);
+  return <div className="space-y-6">
+    {selected.status === "DRAFT" ? <KpiRuleDraftEditor rule={selected} bands={bands} departmentName={departmentNames.get(selected.departmentOrgNodeId)} headerAction={backButton}/> : <>
+      <section><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="font-medium">{selected.name} · V{selected.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentNames.get(selected.departmentOrgNodeId)} · 季度KPI总分 {selected.quarterlyKpiTotalScore ?? "—"}</div></div><div className="flex items-center gap-2">{backButton}<Badge tone={selected.status === "ACTIVE" ? "success" : "default"}>{selected.status === "ACTIVE" ? "已发布" : "已归档"}</Badge></div></div><KpiRuleOverview bands={bands}/></section>
+      <section><h3 className="mb-2 font-semibold">业务考核计分规则</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">计分规则随版本冻结，发布后只读；新建业务考核（KPI管理 → 业务考核）时按部门已发布版本冻结快照。</p><BusinessAssessmentScoringReadonly rule={selected}/></section>
+    </>}
   </div>;
 }
 
-function KpiRulePublishButton({ id }: { id: string }) {
+function KpiRuleDraftEditor({ rule, bands, departmentName, headerAction }: { rule: TalentDecisionRuleWorkspaceData["kpiRuleVersions"][number]; bands: TalentDecisionRuleWorkspaceData["kpiBands"]; departmentName: string | undefined; headerAction?: React.ReactNode }) {
+  const [state, action, pending] = useActionState(saveKpiRatingDraft, initialTalentRuleState);
+  const formId = `kpi-draft-form-${rule.id}`;
+  // 保存后 rule.updatedAt 变化，整棵子树重挂载，让所有 uncontrolled 输入回到已保存的值。
+  return <div key={`${rule.id}-${String(rule.updatedAt)}`} className="space-y-6">
+    <section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><div className="font-medium">{rule.name} · V{rule.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentName} · 季度KPI总分 {rule.quarterlyKpiTotalScore ?? "—"}</div></div>
+        <div className="flex items-center gap-2">{headerAction}<Badge tone="warning">草稿</Badge><Button type="submit" form={formId} disabled={pending} className={actionButtonClass}>{pending ? "保存中" : "保存草稿"}</Button><KpiRulePublishButton id={rule.id} formId={`kpi-publish-form-${rule.id}`}/></div>
+      </div>
+      <KpiRuleOverview bands={bands}/>
+      <form id={formId} action={action} className="mt-4 space-y-2">
+        <input type="hidden" name="id" value={rule.id}/>
+        <div className="text-xs font-medium text-muted-foreground">编辑等级名称、分数区间和评价说明，改完后点击右上角「保存草稿」整页保存</div>
+        {bands.map((band) => <KpiBandDraftRow key={band.id} band={band}/>)}
+        <div className="flex items-center justify-end pt-1"><ActionFeedback state={state}/></div>
+      </form>
+    </section>
+    <section><h3 className="mb-2 font-semibold">业务考核计分规则</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">计分规则随版本冻结：与等级区间一起通过「保存草稿」整页保存，发布后只读；新建业务考核（KPI管理 → 业务考核）时按部门已发布版本冻结快照。</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <Field label="业务考核总分"><input form={formId} name="businessAssessmentTotalScore" type="number" min="0.01" step="0.01" required defaultValue={rule.businessAssessmentTotalScore} className={inputClass}/></Field>
+      <Field label="首次及格（%）"><input form={formId} name="baInitialPassPercent" type="number" min="0" max="100" step="0.01" required defaultValue={rule.baInitialPassPercent} className={inputClass}/></Field>
+      <Field label="补考及格（%）"><input form={formId} name="baRetestPassPercent" type="number" min="0" max="100" step="0.01" required defaultValue={rule.baRetestPassPercent} className={inputClass}/></Field>
+      <Field label="补考不及格（%）"><input form={formId} name="baFinalFailPercent" type="number" min="0" max="100" step="0.01" required defaultValue={rule.baFinalFailPercent} className={inputClass}/></Field>
+      <Field label="科目分配"><select disabled className={inputClass}><option>按科目平均摊分</option></select></Field>
+    </div></section>
+  </div>;
+}
+
+function KpiBandDraftRow({ band }: { band: TalentDecisionRuleWorkspaceData["kpiBands"][number] }) {
+  const [isUnbounded, setIsUnbounded] = useState(band.isUnbounded);
+  return <div className="grid gap-2 rounded-lg border border-border p-3 md:grid-cols-5">
+    <Field label="等级名称"><input name={`band.${band.id}.name`} required defaultValue={band.name} className={inputClass}/></Field>
+    <Field label="最低分"><input name={`band.${band.id}.minScore`} type="number" required defaultValue={band.minScore} className={inputClass}/></Field>
+    <Field label="最高分"><input name={`band.${band.id}.maxScore`} type="number" disabled={isUnbounded} defaultValue={band.maxScore ?? ""} className={inputClass}/></Field>
+    <Field label="评价说明"><input name={`band.${band.id}.description`} defaultValue={band.description ?? ""} className={inputClass}/></Field>
+    <label className="flex h-9 items-center gap-2 self-end text-xs"><input name={`band.${band.id}.isUnbounded`} type="checkbox" checked={isUnbounded} onChange={(event) => setIsUnbounded(event.target.checked)}/>不设上限</label>
+  </div>;
+}
+
+function BusinessAssessmentScoringReadonly({ rule }: { rule: TalentDecisionRuleWorkspaceData["kpiRuleVersions"][number] }) {
+  // 已发布/已归档版本只读展示：纯文本，不用输入框样式，避免误以为可改。
+  const readOnlyItems = [
+    { label: "业务考核总分", value: rule.businessAssessmentTotalScore },
+    { label: "首次及格（%）", value: rule.baInitialPassPercent },
+    { label: "补考及格（%）", value: rule.baRetestPassPercent },
+    { label: "补考不及格（%）", value: rule.baFinalFailPercent },
+    { label: "科目分配", value: "按科目平均摊分" },
+  ];
+  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    {readOnlyItems.map((item) => <div key={item.label} className="text-sm"><span className="text-muted-foreground">{item.label}：</span><span className="font-medium">{item.value}</span></div>)}
+  </div>;
+}
+
+
+function KpiRuleDraftDeleteButton({ id, name }: { id: string; name: string }) {
+  return <ConfirmDeleteButton
+    action={deleteKpiRatingRuleDraft}
+    initialState={initialTalentRuleState}
+    hidden={{ id }}
+    title="删除草稿"
+    description={`确定删除草稿「${name}」吗？删除后不可恢复。`}
+    trigger="删除"
+    triggerClassName="shrink-0 whitespace-nowrap text-xs font-medium text-red-600 hover:text-red-700"
+  />;
+}
+
+function KpiRulePublishButton({ id, formId }: { id: string; formId?: string }) {
   const [state, formAction, pending] = useActionState(publishKpiRatingRule, initialTalentRuleState);
-  return <form action={formAction} className="flex items-center gap-2"><input type="hidden" name="id" value={id}/><Button type="submit" disabled={pending} className={actionButtonClass}>{pending ? "发布中" : "发布"}</Button>{state.status === "error" && <span className="text-xs text-red-600">{state.message}</span>}</form>;
+  // 有 formId 时按钮与「保存草稿」同级渲染（隐藏表单单独提交），保证两个按钮高度、对齐完全一致。
+  if (formId) return <>
+    <form id={formId} action={formAction} className="hidden"><input type="hidden" name="id" value={id}/></form>
+    <Button type="submit" form={formId} variant="outline" disabled={pending} className={actionButtonClass}>{pending ? "发布中" : "发布"}</Button>
+    {state.status === "error" && <span className="text-xs text-red-600">{state.message}</span>}
+  </>;
+  return <form action={formAction} className="flex items-center gap-2"><input type="hidden" name="id" value={id}/><Button type="submit" variant="outline" disabled={pending} className={actionButtonClass}>{pending ? "发布中" : "发布"}</Button>{state.status === "error" && <span className="text-xs text-red-600">{state.message}</span>}</form>;
 }
 
-function RuleSaveFeedback({ state }: { state: TalentRuleActionState }) {
-  if (state.status === "idle") return null;
-  return <span className={`text-xs ${state.status === "error" ? "text-red-600" : "text-emerald-600"}`}>{state.message}</span>;
-}
 
 function KpiRuleOverview({ bands }: { bands: TalentDecisionRuleWorkspaceData["kpiBands"] }) {
   const ordered = [...bands].sort((left, right) => right.minScore - left.minScore);
@@ -1017,136 +1166,6 @@ function KpiRuleOverview({ bands }: { bands: TalentDecisionRuleWorkspaceData["kp
     <div className="flex items-center justify-between bg-muted/40 px-3 py-2"><span className="text-xs font-semibold">规则内容快速核验</span><Badge tone={isContinuous ? "success" : "danger"}>{isContinuous ? "区间连续完整" : "区间存在断档或重叠"}</Badge></div>
     <table className="w-full text-sm"><thead><tr className="border-t border-border text-xs text-muted-foreground"><th className="p-3 text-left">绩效等级</th><th className="p-3 text-left">适用分数</th><th className="p-3 text-left">评价说明</th></tr></thead><tbody className="divide-y divide-border">{ordered.map((band) => <tr key={band.id}><td className="p-3 font-semibold">{band.name}</td><td className="p-3">{band.isUnbounded ? `${band.minScore}分及以上` : `${band.minScore}–${band.maxScore}分`}</td><td className="p-3 text-muted-foreground">{band.description || "—"}</td></tr>)}</tbody></table>
   </div>;
-}
-
-function KpiBandEditor({ band }: { band: TalentDecisionRuleWorkspaceData["kpiBands"][number] }) {
-  const [state, action, pending] = useActionState(saveKpiRatingBand, initialTalentRuleState);
-  const [isUnbounded, setIsUnbounded] = useState(band.isUnbounded);
-  return <form action={action} className="grid gap-2 rounded-lg border border-border p-3 md:grid-cols-6">
-    <input type="hidden" name="id" value={band.id}/>
-    <Field label="等级名称"><input name="name" required defaultValue={band.name} className={inputClass}/></Field>
-    <Field label="最低分"><input name="minScore" type="number" required defaultValue={band.minScore} className={inputClass}/></Field>
-    <Field label="最高分"><input name="maxScore" type="number" disabled={isUnbounded} defaultValue={band.maxScore ?? ""} className={inputClass}/></Field>
-    <Field label="评价说明"><input name="description" defaultValue={band.description ?? ""} className={inputClass}/></Field>
-    <label className="flex h-9 items-center gap-2 self-end text-xs"><input name="isUnbounded" type="checkbox" checked={isUnbounded} onChange={(event) => setIsUnbounded(event.target.checked)}/>不设上限</label>
-    <Button type="submit" disabled={pending} className={`${actionButtonClass} self-end`}>{pending ? "保存中" : "保存等级"}</Button>
-    <div className="md:col-span-6"><RuleSaveFeedback state={state}/></div>
-  </form>;
-}
-
-type QuarterlyStandardRow = {
-  key: string;
-  scopeType: "ORG_NODE" | "USER";
-  scopeId: string;
-  passingNumericScore: number;
-  requiredGradeCode: string;
-};
-type QuarterlySubjectRow = { key: string; code: string; name: string; scoringType: "NUMERIC" | "GRADE"; standards: QuarterlyStandardRow[] };
-
-function departmentTeams(data: AssessmentWorkspaceData, departmentOrgNodeId: string | null) {
-  return data.teams.filter((team) => team.parentId === departmentOrgNodeId);
-}
-
-function departmentUsers(data: AssessmentWorkspaceData, departmentOrgNodeId: string | null) {
-  const teamIds = new Set(departmentTeams(data, departmentOrgNodeId).map((team) => team.id));
-  return data.users.filter((user) => user.orgNodeId && teamIds.has(user.orgNodeId));
-}
-
-function makeQuarterlyStandard(
-  data: AssessmentWorkspaceData,
-  departmentOrgNodeId: string | null,
-  scopeType: "ORG_NODE" | "USER" = "ORG_NODE",
-): QuarterlyStandardRow {
-  const targets = scopeType === "ORG_NODE"
-    ? departmentTeams(data, departmentOrgNodeId)
-    : departmentUsers(data, departmentOrgNodeId);
-  return {
-    key: `standard-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    scopeType,
-    scopeId: targets[0]?.id ?? "",
-    passingNumericScore: 80,
-    requiredGradeCode: "A",
-  };
-}
-
-function makeQuarterlySubject(data: AssessmentWorkspaceData, departmentOrgNodeId: string | null): QuarterlySubjectRow {
-  const teams = departmentTeams(data, departmentOrgNodeId);
-  return {
-    key: `subject-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    code: `SUBJECT_${Date.now().toString(36).toUpperCase()}_${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-    name: "",
-    scoringType: "NUMERIC",
-    standards: teams.length
-      ? teams.map((team) => ({ ...makeQuarterlyStandard(data, departmentOrgNodeId), key: `standard-${team.id}-${Date.now()}`, scopeId: team.id }))
-      : [makeQuarterlyStandard(data, departmentOrgNodeId)],
-  };
-}
-
-function BusinessAssessmentRuleConfiguration({ data }: { data: AssessmentWorkspaceData }) {
-  const [selectedRuleId, setSelectedRuleId] = useState(data.rules[0]?.id ?? "");
-  const [screen, setScreen] = useState<"list" | "create" | "detail">("list");
-  const selectedRule = data.rules.find((row) => row.id === selectedRuleId) ?? null;
-  const [subjectRows, setSubjectRows] = useState<QuarterlySubjectRow[]>([]);
-  const [createState, createAction, creating] = useActionState(createBusinessAssessmentRuleVersion, initialBusinessAssessmentRuleState);
-  const [saveState, saveAction, saving] = useActionState(saveBusinessAssessmentRuleVersion, initialBusinessAssessmentRuleState);
-  const [publishState, publishAction, publishing] = useActionState(publishBusinessAssessmentRuleVersion, initialBusinessAssessmentRuleState);
-  const [deleteState, deleteAction, deleting] = useActionState(deleteBusinessAssessmentRuleVersion, initialBusinessAssessmentRuleState);
-
-  useEffect(() => {
-    if (createState.status === "success" && createState.ruleId && selectedRuleId !== createState.ruleId) {
-      // The returned id is only available after the server action has created the rule.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedRuleId(createState.ruleId);
-      setScreen("detail");
-    }
-  }, [createState, selectedRuleId]);
-  useEffect(() => {
-    if (deleteState.status !== "success" || !deleteState.ruleId) return;
-    const nextRule = data.rules.find((rule) => rule.id !== deleteState.ruleId);
-    // Deletion changes which server-backed rule can be selected.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedRuleId(nextRule?.id ?? "");
-  }, [data.rules, deleteState]);
-  useEffect(() => {
-    if (!selectedRule) {
-      // Rule selection is the source of truth for this editable draft buffer.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSubjectRows([]);
-      return;
-    }
-    const subjects = data.ruleSubjects.filter((row) => row.ruleId === selectedRule.id);
-    // Rebuild the draft buffer when switching versions or after a server refresh.
-    setSubjectRows(subjects.map((subject) => ({ key: subject.id, code: subject.code, name: subject.name, scoringType: subject.scoringType, standards: data.standards.filter((standard) => standard.ruleSubjectId === subject.id).map((standard) => ({ key: standard.id, scopeType: standard.scopeType, scopeId: standard.scopeId, passingNumericScore: standard.passingNumericScore ?? 80, requiredGradeCode: standard.requiredGradeCode ?? "A" })) })));
-  }, [selectedRule, data.ruleSubjects, data.standards]);
-
-  const editable = Boolean(selectedRule && selectedRule.status === "DRAFT" && data.canManage);
-  const updateSubject = (key: string, patch: Partial<QuarterlySubjectRow>) => setSubjectRows((current) => current.map((row) => row.key === key ? { ...row, ...patch } : row));
-  const updateStandard = (subjectKey: string, standardKey: string, patch: Partial<QuarterlyStandardRow>) => setSubjectRows((current) => current.map((subject) => subject.key === subjectKey ? { ...subject, standards: subject.standards.map((standard) => standard.key === standardKey ? { ...standard, ...patch } : standard) } : subject));
-
-  if (screen === "list") return <div><div className="mb-4 flex justify-end">{data.canManage && <Button className={actionButtonClass} onClick={() => setScreen("create")}><Plus className="h-4 w-4"/>新建规则版本</Button>}</div><div className="space-y-2">{data.rules.map((rule) => <div key={rule.id} className="flex items-stretch rounded-xl border border-border hover:border-primary/40"><button type="button" onClick={() => { setSelectedRuleId(rule.id); setScreen("detail"); }} className="min-w-0 flex-1 p-4 text-left"><div className="flex items-center justify-between gap-3"><div><div className="font-medium">{rule.name} · V{rule.version}</div><div className="mt-1 text-xs text-muted-foreground">{data.departments.find((row) => row.id === rule.departmentOrgNodeId)?.name} · {rule.year}年 Q{rule.quarter}</div></div><div className="flex items-center gap-3"><Badge tone={rule.status === "CONFIRMED" ? "success" : rule.status === "DRAFT" ? "warning" : "default"}>{rule.status === "CONFIRMED" ? "已发布" : rule.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><span className="text-xs text-primary">{rule.status === "DRAFT" ? "编辑" : "查看"} ›</span></div></div></button>{data.canManage && <form action={deleteAction} onSubmit={(event) => { if (!window.confirm(`确认删除“${rule.name} V${rule.version}”吗？已用于考核批次的规则将不能删除。`)) event.preventDefault(); }} className="flex items-center border-l border-border px-3"><input type="hidden" name="ruleId" value={rule.id}/><button type="submit" disabled={deleting} className={`${rowIconButtonClass} text-red-600`} aria-label={`删除${rule.name} V${rule.version}`}><Trash2 className="h-4 w-4"/></button></form>}</div>)}{!data.rules.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无季度业务考核规则</div>}</div><ActionFeedback state={deleteState}/></div>;
-  if (screen === "create") return <div><WorkbenchHeader title="新建业务考核规则" description="为指定部门和季度创建独立草稿版本" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="规则基本信息"><form action={createAction} className="space-y-3"><select name="departmentOrgNodeId" required className={inputClass}>{data.departments.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select><div className="grid grid-cols-2 gap-2"><input name="year" type="number" min="2020" defaultValue={new Date().getFullYear()} required className={inputClass}/><select name="quarter" className={inputClass}>{[1,2,3,4].map((quarter) => <option key={quarter} value={quarter}>Q{quarter}</option>)}</select></div><Button type="submit" className={actionButtonClass} disabled={creating || !data.departments.length}><Plus className="h-4 w-4"/>{creating ? "创建中" : "创建规则草稿"}</Button><ActionFeedback state={createState}/></form></ConfigBlock></div>;
-
-  return <div className="space-y-4"><WorkbenchHeader title="业务考核规则详情" description="草稿可编辑，已发布版本只读" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/>
-    <div className="hidden">
-      <ConfigBlock title="规则版本">
-        <div className="space-y-2">{data.rules.map((rule) => <div key={rule.id} className={`flex items-stretch rounded-xl border transition ${selectedRuleId === rule.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}><button type="button" onClick={() => setSelectedRuleId(rule.id)} className="min-w-0 flex-1 p-3 text-left"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium">{rule.name} V{rule.version}</span><Badge tone={rule.status === "CONFIRMED" ? "success" : rule.status === "DRAFT" ? "warning" : "default"}>{rule.status === "CONFIRMED" ? "已发布" : rule.status === "DRAFT" ? "草稿" : "历史"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{rule.year}年 Q{rule.quarter}</p></button>{data.canManage && <form action={deleteAction} onSubmit={(event) => { if (!window.confirm(`确认删除“${rule.name} V${rule.version}”吗？已用于考核批次的规则将不能删除。`)) event.preventDefault(); }} className="flex items-center border-l border-border px-2"><input type="hidden" name="ruleId" value={rule.id}/><button type="submit" disabled={deleting} className={`${rowIconButtonClass} text-red-600`} aria-label={`删除${rule.name} V${rule.version}`} title="删除规则版本"><Trash2 className="h-4 w-4"/></button></form>}</div>)}{!data.rules.length && <p className="py-6 text-center text-sm text-muted-foreground">暂无季度业务考核规则</p>}</div>
-        <ActionFeedback state={deleteState}/>
-      </ConfigBlock>
-      {data.canManage && <ConfigBlock title="新建季度规则"><form action={createAction} className="space-y-2"><select name="departmentOrgNodeId" required className={inputClass}>{data.departments.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select><div className="grid grid-cols-2 gap-2"><input name="year" type="number" min="2020" defaultValue={new Date().getFullYear()} required className={inputClass}/><select name="quarter" className={inputClass}>{[1,2,3,4].map((quarter) => <option key={quarter} value={quarter}>Q{quarter}</option>)}</select></div><Button type="submit" className={`${actionButtonClass} w-full`} disabled={creating || !data.departments.length}><Plus className="h-4 w-4"/>{creating ? "创建中" : "新建业务考核规则"}</Button><ActionFeedback state={createState}/></form></ConfigBlock>}
-    </div>
-    {!selectedRule ? <Card className="flex min-h-72 items-center justify-center text-sm text-muted-foreground">请新建或选择一条季度业务考核规则</Card> : <div className="space-y-4">
-      <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-semibold">{selectedRule.name} V{selectedRule.version}</h3><Badge tone={selectedRule.status === "CONFIRMED" ? "success" : selectedRule.status === "DRAFT" ? "warning" : "default"}>{selectedRule.status === "CONFIRMED" ? "已发布" : selectedRule.status === "DRAFT" ? "草稿可编辑" : "历史版本"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{data.departments.find((row) => row.id === selectedRule.departmentOrgNodeId)?.name} · {selectedRule.year}年 Q{selectedRule.quarter}</p></div>{editable && <form action={publishAction}><input type="hidden" name="ruleId" value={selectedRule.id}/><Button type="submit" className={actionButtonClass} disabled={publishing}><Check className="h-4 w-4"/>{publishing ? "发布中" : "校验并发布"}</Button></form>}</div><ActionFeedback state={publishState}/></Card>
-      <form action={saveAction} className="space-y-4"><input type="hidden" name="ruleId" value={selectedRule.id}/><input type="hidden" name="ruleSubjectsJson" value={JSON.stringify(subjectRows.map((subject) => ({ code: subject.code, name: subject.name, scoringType: subject.scoringType, standards: subject.standards.map((standard) => ({ scopeType: standard.scopeType, scopeId: standard.scopeId, passingNumericScore: standard.passingNumericScore, requiredGradeCode: standard.requiredGradeCode })) })))}/>
-        <ConfigBlock title="计分规则"><p className="mb-4 text-xs leading-5 text-muted-foreground">本规则仅用于 {selectedRule.year} 年 Q{selectedRule.quarter}；每科满分按科目数平均分配。</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><Field label="业务考核总分"><input name="totalKpiScore" type="number" min="0.01" step="0.01" required defaultValue={selectedRule.totalKpiScore} disabled={!editable || saving} className={inputClass}/></Field><PercentageField name="initialPassPercent" label="首次及格" defaultValue={selectedRule.initialPassPercent} disabled={!editable || saving}/><PercentageField name="retestPassPercent" label="补考及格" defaultValue={selectedRule.retestPassPercent} disabled={!editable || saving}/><PercentageField name="finalFailPercent" label="补考不及格" defaultValue={selectedRule.finalFailPercent} disabled={!editable || saving}/><Field label="科目分配"><select disabled className={inputClass}><option>按科目平均摊分</option></select></Field></div></ConfigBlock>
-        <ConfigBlock title="考核科目与小组及格标准"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs leading-5 text-muted-foreground">每个科目先确定评分方式，再分别设置本部门各小组的及格线；个人规则仅作为同科目下的特殊覆盖。</p>{editable && <Button type="button" variant="outline" className={actionButtonClass} onClick={() => setSubjectRows((current) => [...current, makeQuarterlySubject(data, selectedRule.departmentOrgNodeId)])}><Plus className="h-4 w-4"/>添加科目</Button>}</div><div className="space-y-3">{subjectRows.map((subject, subjectIndex) => <div key={subject.key} className="rounded-xl border border-border p-3"><div className="grid gap-2 md:grid-cols-[140px_minmax(180px,1fr)_150px_76px] md:items-end"><Field label="科目编码"><input value={subject.code} disabled={!editable || saving} onChange={(event) => updateSubject(subject.key, { code: event.target.value })} placeholder="如 PPT" className={inputClass}/></Field><Field label="科目名称"><input value={subject.name} disabled={!editable || saving} onChange={(event) => updateSubject(subject.key, { name: event.target.value })} placeholder="如 PPT 演讲" className={inputClass}/></Field><Field label="评分方式"><select value={subject.scoringType} disabled={!editable || saving} onChange={(event) => updateSubject(subject.key, { scoringType: event.target.value as "NUMERIC" | "GRADE" })} className={inputClass}><option value="NUMERIC">分数评分</option><option value="GRADE">等级评分</option></select></Field><div className="flex justify-end gap-1 pb-0.5"><button type="button" disabled={!editable || saving || subjectRows.length === 1} onClick={() => setSubjectRows((current) => current.filter((row) => row.key !== subject.key))} className={`${rowIconButtonClass} text-red-600`} aria-label="删除科目"><Trash2 className="h-4 w-4"/></button><button type="button" disabled={!editable || saving} onClick={() => setSubjectRows((current) => [...current.slice(0, subjectIndex + 1), makeQuarterlySubject(data, selectedRule.departmentOrgNodeId), ...current.slice(subjectIndex + 1)])} className={rowIconButtonClass} aria-label="添加科目"><Plus className="h-4 w-4"/></button></div></div><div className="mt-3 space-y-2 border-t border-border pt-3"><p className="text-xs font-medium">小组及格标准</p>{subject.standards.map((standard, standardIndex) => { const targets = standard.scopeType === "ORG_NODE" ? departmentTeams(data, selectedRule.departmentOrgNodeId) : departmentUsers(data, selectedRule.departmentOrgNodeId); return <div key={standard.key} className="grid gap-2 rounded-lg bg-muted/30 p-2 md:grid-cols-[110px_minmax(180px,1fr)_minmax(150px,1fr)_76px] md:items-end"><Field label="适用范围"><select value={standard.scopeType} disabled={!editable || saving} onChange={(event) => { const scopeType = event.target.value as "ORG_NODE" | "USER"; const nextTargets = scopeType === "ORG_NODE" ? departmentTeams(data, selectedRule.departmentOrgNodeId) : departmentUsers(data, selectedRule.departmentOrgNodeId); updateStandard(subject.key, standard.key, { scopeType, scopeId: nextTargets[0]?.id ?? "" }); }} className={inputClass}><option value="ORG_NODE">小组</option><option value="USER">个人例外</option></select></Field><Field label={standard.scopeType === "ORG_NODE" ? "选择小组" : "选择员工"}><select value={standard.scopeId} disabled={!editable || saving} onChange={(event) => updateStandard(subject.key, standard.key, { scopeId: event.target.value })} className={inputClass}><option value="">请选择</option>{targets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}</select></Field>{subject.scoringType === "NUMERIC" ? <Field label="分数及格线"><div className="relative"><input type="number" min="0" max="100" step="0.01" value={standard.passingNumericScore} disabled={!editable || saving} onChange={(event) => updateStandard(subject.key, standard.key, { passingNumericScore: Number(event.target.value) })} className={`${inputClass} w-full pr-9`}/><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">分</span></div></Field> : <Field label="要求等级"><select value={standard.requiredGradeCode} disabled={!editable || saving} onChange={(event) => updateStandard(subject.key, standard.key, { requiredGradeCode: event.target.value })} className={inputClass}>{["S","A","B","C","D"].map((grade) => <option key={grade} value={grade}>达到 {grade} 级及以上</option>)}</select></Field>}<div className="flex justify-end gap-1 pb-0.5"><button type="button" disabled={!editable || saving || subject.standards.length === 1} onClick={() => updateSubject(subject.key, { standards: subject.standards.filter((row) => row.key !== standard.key) })} className={`${rowIconButtonClass} text-red-600`} aria-label="删除及格标准"><Trash2 className="h-4 w-4"/></button><button type="button" disabled={!editable || saving} onClick={() => updateSubject(subject.key, { standards: [...subject.standards.slice(0, standardIndex + 1), makeQuarterlyStandard(data, selectedRule.departmentOrgNodeId, standard.scopeType), ...subject.standards.slice(standardIndex + 1)] })} className={rowIconButtonClass} aria-label="添加及格标准"><Plus className="h-4 w-4"/></button></div></div>; })}</div></div>)}{!subjectRows.length && <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">暂无科目，请先添加考核科目</div>}</div></ConfigBlock>
-        <div className="flex flex-wrap items-center justify-between gap-3"><ActionFeedback state={saveState}/>{editable && <Button type="submit" className={actionButtonClass} disabled={saving}><Save className="h-4 w-4"/>{saving ? "保存中" : "保存规则草稿"}</Button>}</div>
-      </form>
-    </div>}
-  </div>;
-}
-
-function PercentageField({ name, label, defaultValue, disabled }: { name: string; label: string; defaultValue: number; disabled: boolean }) {
-  return <Field label={label}><div className="relative"><input name={name} type="number" min="0" max="100" step="0.01" inputMode="decimal" required defaultValue={defaultValue} disabled={disabled} className={`${inputClass} w-full pr-9`}/><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span></div></Field>;
 }
 
 type CareerLevelRow = { key: string; code: string; levelsText: string };
@@ -1349,9 +1368,11 @@ function CareerLevelRows({ data }: { data: CareerWorkspaceData }) {
 }
 
 function ReviewModelConfiguration({ data }: { data: ReviewWorkspaceData }) {
+  const [moduleTab, setModuleTab] = useState<"ability" | "review">("ability");
   const [selectedId, setSelectedId] = useState(data.config.templates[0]?.id ?? "");
   const [screen, setScreen] = useState<"list" | "create" | "detail">("list");
   const [ruleTab, setRuleTab] = useState<"dimension" | "rating" | "threshold" | "box">("dimension");
+  const [showCreate, setShowCreate] = useState(false);
   const selected = data.config.templates.find((item) => item.id === selectedId) ?? data.config.templates[0];
   const departmentName = new Map(data.config.departments.map((item) => [item.id, item.name]));
   const dimensions = data.config.dimensions.filter((item) => item.templateVersionId === selected?.id);
@@ -1360,9 +1381,70 @@ function ReviewModelConfiguration({ data }: { data: ReviewWorkspaceData }) {
   const thresholds = data.config.thresholds.filter((item) => item.templateVersionId === selected?.id);
   const boxes = data.config.nineBoxRules.filter((item) => item.templateVersionId === selected?.id);
   const isDraft = selected?.status === "DRAFT";
-  if (screen === "list") return <div><div className="mb-4 flex justify-end"><Button className={actionButtonClass} onClick={() => setScreen("create")}><Plus className="h-4 w-4"/>新建模型版本</Button></div><div className="space-y-2">{data.config.templates.map((item) => <button key={item.id} onClick={() => { setSelectedId(item.id); setScreen("detail"); }} className="flex w-full items-center justify-between rounded-xl border border-border p-4 text-left hover:border-primary/40"><div><div className="font-medium">{item.name} · V{item.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentName.get(item.departmentOrgNodeId)}</div></div><div className="flex items-center gap-3"><Badge tone={item.status === "ACTIVE" ? "success" : item.status === "DRAFT" ? "warning" : "default"}>{item.status === "ACTIVE" ? "已发布" : item.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><span className="text-xs text-primary">{item.status === "DRAFT" ? "编辑" : "查看"} ›</span></div></button>)}{!data.config.templates.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无模型版本</div>}</div></div>;
-  if (screen === "create") return <div><WorkbenchHeader title="新建人才盘点模型" description="新建后形成独立草稿版本" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="模型基本信息"><form action={createTalentReviewTemplate} className="space-y-3"><select name="departmentOrgNodeId" required className={inputClass}>{data.config.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input name="name" required placeholder="模型名称" className={inputClass}/><input name="description" placeholder="模型用途或本版本说明" className={inputClass}/><p className="text-xs leading-5 text-muted-foreground">模型编号和初始版本由系统自动生成；后续调整通过“复制为新草稿版本”进行。</p><Button type="submit" className={actionButtonClass} disabled={data.config.departments.length === 0}><Plus className="w-4 h-4"/>保存为草稿</Button></form></ConfigBlock></div>;
-  return <div className="space-y-4"><WorkbenchHeader title="人才盘点模型详情" description="草稿可编辑，已发布和历史版本只读" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/>
+  const moduleTabs = (
+    <div className="border-b border-border">
+      <div className="flex gap-6">
+        <button onClick={() => setModuleTab("ability")} className={`pb-2 text-sm border-b-2 transition-colors ${moduleTab === "ability" ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>人才能力测算模型</button>
+        <button onClick={() => setModuleTab("review")} className={`pb-2 text-sm border-b-2 transition-colors ${moduleTab === "review" ? "border-primary text-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>人才盘点模型</button>
+      </div>
+    </div>
+  );
+  if (moduleTab === "ability") {
+    return (
+      <div className="space-y-4">
+        {moduleTabs}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">人才能力测算模型版本</h3>
+            <p className="text-xs text-muted-foreground mt-1">每个版本独立维护 KPI 与人才盘点的权重配比；仅草稿版本可编辑权重。</p>
+          </div>
+          <Button className={actionButtonClass} onClick={() => setShowCreate((value) => !value)}><Plus className="h-4 w-4" />{showCreate ? "取消新建" : "新建模型版本"}</Button>
+        </div>
+        {showCreate && (
+          <ConfigBlock title="新建模型版本">
+            <form action={createTalentReviewTemplate} onSubmit={() => setShowCreate(false)} className="space-y-3">
+              <select name="departmentOrgNodeId" required className={inputClass}>{data.config.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+              <input name="name" required placeholder="模型名称" className={inputClass}/>
+              <input name="description" placeholder="模型用途或本版本说明" className={inputClass}/>
+              <p className="text-xs leading-5 text-muted-foreground">模型编号和初始版本由系统自动生成；新建后默认权重为 KPI 60% + 人才盘点 40%。</p>
+              <Button type="submit" className={actionButtonClass} disabled={data.config.departments.length === 0}><Plus className="w-4 h-4"/>保存为草稿</Button>
+            </form>
+          </ConfigBlock>
+        )}
+        <AbilityTemplateVersionList templates={data.config.templates} departments={data.config.departments} selectedId={selected?.id} onSelect={setSelectedId} />
+        {selected ? (
+          <Card className="space-y-4">
+            <div>
+              <h3 className="font-semibold">{selected.name} V{selected.version} · 人才能力测算权重</h3>
+              <p className="text-xs text-muted-foreground mt-1">配置该版本在人才画像中“能力匹配度”的 KPI 与人才盘点权重，两者之和须为 100%。</p>
+            </div>
+            <form action={updateTalentAbilityCalculationWeights} className="space-y-4">
+              <input type="hidden" name="id" value={selected.id} />
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">KPI 权重</span>
+                  <input name="kpiWeight" type="number" min="0" max="1" step="0.01" required defaultValue={selected.kpiWeight} disabled={!isDraft} className={inputClass} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">人才盘点权重</span>
+                  <input name="reviewWeight" type="number" min="0" max="1" step="0.01" required defaultValue={selected.reviewWeight} disabled={!isDraft} className={inputClass} />
+                </label>
+              </div>
+              <div className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground leading-5">
+                当前公式：能力匹配度 =（当前聘期内 KPI 均值 / 季度 KPI 总分）× {Math.round(selected.kpiWeight * 100)}% +（当前聘期内盘点均值 / 盘点模型总分 {modelFullScore}）× {Math.round(selected.reviewWeight * 100)}%
+              </div>
+              {isDraft ? <Button type="submit" className={actionButtonClass}><Save className="h-4 w-4" />保存权重</Button> : <div className="text-xs text-muted-foreground">仅草稿版本可编辑权重；如需调整请复制为新草稿版本。</div>}
+            </form>
+          </Card>
+        ) : (
+          <Card className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">暂无模型版本，请点击右上角“新建模型版本”创建。</Card>
+        )}
+      </div>
+    );
+  }
+  if (screen === "list") return <div className="space-y-4">{moduleTabs}<div><div className="mb-4 flex justify-end"><Button className={actionButtonClass} onClick={() => setScreen("create")}><Plus className="h-4 w-4"/>新建模型版本</Button></div><div className="space-y-2">{data.config.templates.map((item) => <div key={item.id} className="flex w-full items-center justify-between rounded-xl border border-border p-4 hover:border-primary/40"><button onClick={() => { setSelectedId(item.id); setScreen("detail"); }} className="min-w-0 flex-1 text-left"><div><div className="font-medium">{item.name} · V{item.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentName.get(item.departmentOrgNodeId)}</div></div></button><div className="flex items-center gap-3"><Badge tone={item.status === "ACTIVE" ? "success" : item.status === "DRAFT" ? "warning" : "default"}>{item.status === "ACTIVE" ? "已发布" : item.status === "DRAFT" ? "草稿" : "历史版本"}</Badge><span className="text-xs text-primary">{item.status === "DRAFT" ? "编辑" : "查看"} ›</span>{item.status === "DRAFT" && <DeleteDraftTemplateDialog id={item.id} name={`${item.name} V${item.version}`}/>}</div></div>)}{!data.config.templates.length && <div className="py-10 text-center text-sm text-muted-foreground">暂无模型版本</div>}</div></div></div>;
+  if (screen === "create") return <div className="space-y-4">{moduleTabs}<WorkbenchHeader title="新建人才盘点模型" description="新建后形成独立草稿版本" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/><ConfigBlock title="模型基本信息"><form action={createTalentReviewTemplate} className="space-y-3"><select name="departmentOrgNodeId" required className={inputClass}>{data.config.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input name="name" required placeholder="模型名称" className={inputClass}/><input name="description" placeholder="模型用途或本版本说明" className={inputClass}/><p className="text-xs leading-5 text-muted-foreground">模型编号和初始版本由系统自动生成；后续调整通过“复制为新草稿版本”进行。</p><Button type="submit" className={actionButtonClass} disabled={data.config.departments.length === 0}><Plus className="w-4 h-4"/>保存为草稿</Button></form></ConfigBlock></div>;
+  return <div className="space-y-4">{moduleTabs}<WorkbenchHeader title="人才盘点模型详情" description="草稿可编辑，已发布和历史版本只读" action={<Button variant="outline" className={actionButtonClass} onClick={() => setScreen("list")}><ArrowRight className="h-4 w-4 rotate-180"/>返回版本列表</Button>}/>
     {!selected ? <Card className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">规则版本不存在</Card> : <div className="space-y-4">
       <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-semibold">{selected.name} V{selected.version}</h3><Badge tone={selected.status === "ACTIVE" ? "success" : selected.status === "DRAFT" ? "warning" : "default"}>{selected.status === "ACTIVE" ? "已发布" : selected.status === "DRAFT" ? "草稿可编辑" : "历史版本"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{departmentName.get(selected.departmentOrgNodeId)} · 模型版本 V{selected.version}</p></div><div className="flex gap-2">{isDraft ? <><form action={initializeDefaultTalentReviewTemplate}><input type="hidden" name="templateVersionId" value={selected.id}/><Button type="submit" className={actionButtonClass} variant="outline" disabled={dimensions.length > 0}>初始化默认规则</Button></form><PublishTemplateForm templateId={selected.id}/></> : <form action={cloneTalentReviewTemplateVersion}><input type="hidden" name="sourceId" value={selected.id}/><Button type="submit" className={actionButtonClass}><Plus className="w-4 h-4"/>复制为新草稿版本</Button></form>}</div></div>
         {isDraft ? <form action={updateTalentReviewTemplate} className="mt-4 grid gap-2 md:grid-cols-[1fr_2fr_auto]"><input type="hidden" name="id" value={selected.id}/><input name="name" defaultValue={selected.name} required className={inputClass}/><input name="description" defaultValue={selected.description ?? ""} placeholder="本版本调整说明" className={inputClass}/><Button type="submit" className={actionButtonClass} variant="outline"><Save className="w-4 h-4"/>保存基础信息</Button></form> : <div className="mt-4 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">已发布版本不可直接修改；如需调整，请复制为新草稿版本。历史盘点继续使用原版本快照。</div>}
@@ -1377,11 +1459,40 @@ function ReviewModelConfiguration({ data }: { data: ReviewWorkspaceData }) {
   </div>;
 }
 
+function AbilityTemplateVersionList({ templates, departments, selectedId, onSelect }: { templates: ReviewWorkspaceData["config"]["templates"]; departments: ReviewWorkspaceData["config"]["departments"]; selectedId?: string; onSelect: (id: string) => void }) {
+  const departmentName = new Map(departments.map((item) => [item.id, item.name]));
+  if (templates.length === 0) return <Card className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">暂无模型版本</Card>;
+  return <div className="space-y-2">{templates.map((item) => {
+    const isSelected = item.id === selectedId;
+    const isDraft = item.status === "DRAFT";
+    return <div key={item.id} className={`rounded-xl border p-4 transition-colors ${isSelected ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <button onClick={() => onSelect(item.id)} className="min-w-0 flex-1 text-left">
+          <div className="font-medium">{item.name} · V{item.version}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{departmentName.get(item.departmentOrgNodeId)} · KPI {Math.round(item.kpiWeight * 100)}% / 盘点 {Math.round(item.reviewWeight * 100)}%</div>
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={item.status === "ACTIVE" ? "success" : item.status === "DRAFT" ? "warning" : "default"}>{item.status === "ACTIVE" ? "已发布" : item.status === "DRAFT" ? "草稿" : "历史版本"}</Badge>
+          {isDraft ? <>
+            <Button className={actionButtonClass} variant="outline" onClick={() => onSelect(item.id)}>编辑权重</Button>
+            <PublishTemplateForm templateId={item.id}/>
+            <DeleteDraftTemplateDialog id={item.id} name={`${item.name} V${item.version}`}/>
+          </> : <>
+            <form action={cloneTalentReviewTemplateVersion}><input type="hidden" name="sourceId" value={item.id}/><Button type="submit" className={actionButtonClass} variant="outline"><Plus className="h-4 w-4"/>复制为新草稿</Button></form>
+            <Button className={actionButtonClass} variant="outline" onClick={() => onSelect(item.id)}>查看</Button>
+          </>}
+        </div>
+      </div>
+    </div>;
+  })}</div>;
+}
+
 function HiddenTemplate({ id }: { id: string }) { return <input type="hidden" name="templateVersionId" value={id}/>; }
 function PublishTemplateForm({ templateId }: { templateId: string }) {
   const [state, formAction, pending] = useActionState(publishTalentReviewTemplateWithState, { status: "idle" as const, message: "", requestId: "" });
   return <><form action={formAction}><input type="hidden" name="id" value={templateId}/><Button type="submit" className={actionButtonClass} disabled={pending}>{pending ? "正在校验…" : "校验并发布"}</Button></form><ActionFeedback key={state.requestId} state={state}/></>;
 }
+
 function ActionFeedback({ state }: { state: { status: "idle" | "success" | "error"; message: string } }) {
   const [visible, setVisible] = useState(Boolean(state.message));
   useEffect(() => {
@@ -1456,30 +1567,12 @@ function ConfigBlock({ title, children }: { title: string; children: React.React
   return <Card><h3 className="mb-4 font-semibold">{title}</h3>{children}</Card>;
 }
 
-function OperationModal({ kind, onClose, onSubmit }: { kind: Exclude<ModalKind, null>; onClose: () => void; onSubmit: () => void }) {
-  const meta = {
-    "assessment-import": { title: "导入业务考核结果", description: "只导入最终结果，不记录考试过程" },
-    "incident-create": { title: "录入工作事故", description: "保存事故事实与等级，自动计算 KPI 工作事故项" },
-    "decision-create": { title: "登记正式决策结果", description: "记录公司其他管理系统产生的最终结果" },
-    "config-edit": { title: "配置规则版本", description: "此处仅演示规则配置交互，不保存到数据库" },
-  }[kind];
-  return <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"><button aria-label="关闭弹窗" onClick={onClose} className="absolute inset-0 bg-slate-950/35" /><div className="relative w-full max-w-xl rounded-2xl border border-border bg-card shadow-2xl"><div className="px-6 py-5 border-b border-border flex items-start"><div className="flex-1"><h3 className="text-lg font-semibold">{meta.title}</h3><p className="text-xs text-muted-foreground mt-1">{meta.description}</p></div><button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center"><X className="w-4 h-4" /></button></div><div className="p-6 space-y-4">{kind === "assessment-import" && <AssessmentImportForm />}{kind === "incident-create" && <IncidentForm />}{kind === "decision-create" && <DecisionForm />}{kind === "config-edit" && <ConfigForm />}</div><div className="px-6 py-4 border-t border-border flex justify-end gap-2"><Button className={actionButtonClass} variant="outline" onClick={onClose}>取消</Button><Button className={actionButtonClass} onClick={onSubmit}><Save className="w-4 h-4" />{kind === "assessment-import" ? "确认导入" : "保存"}</Button></div></div></div>;
-}
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   // Internal codes are maintained by the system and must never be exposed as user input.
   if (label.includes("编码")) return <div className="hidden" aria-hidden="true">{children}</div>;
   return <label className={`block ${label === "科目名称" ? "md:col-span-2" : ""}`}><span className="block text-xs font-medium mb-2">{label}</span>{children}</label>;
 }
 const inputClass = "w-full h-10 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:border-primary";
-
-function AssessmentImportForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="考核季度"><select className={inputClass}><option>2026年 Q3</option><option>2026年 Q2</option></select></Field><Field label="业务考核方案"><select className={inputClass}><option>产品部通用业务考核</option></select></Field></div><Field label="结果文件"><label className="h-28 rounded-xl border border-dashed border-primary/35 bg-primary/5 flex flex-col items-center justify-center cursor-pointer"><Upload className="w-6 h-6 text-primary" /><span className="text-sm mt-2">点击选择 Excel 文件</span><span className="text-[11px] text-muted-foreground mt-1">支持 .xlsx，导入前会预检员工和科目</span><input type="file" accept=".xlsx" className="hidden" /></label></Field><div className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">导入字段：员工编号、科目、评分方式、要求值、最终结果、是否补考、最终是否及格。</div></>; }
-
-function IncidentForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="责任人"><select className={inputClass}><option>请选择员工</option>{people.slice(0,5).map((person) => <option key={person.id}>{person.name}</option>)}</select></Field><Field label="事故等级"><select className={inputClass}><option>D级 · 扣10分</option><option>C级 · 扣40分</option><option>B级 · 扣满110分</option><option>A级 · 扣满110分</option><option>S级 · 扣满110分</option></select></Field><Field label="发生日期"><input type="date" defaultValue="2026-08-05" className={inputClass} /></Field><Field label="限制期至"><input type="date" className={inputClass} /></Field></div><Field label="事故摘要"><input placeholder="请输入事故名称或简要说明" className={inputClass} /></Field><Field label="事实与处理结果"><textarea placeholder="记录已确认的事故事实、责任认定及处理结果" className="w-full min-h-24 rounded-lg border border-border bg-background p-3 text-sm focus:outline-none focus:border-primary" /></Field></>; }
-
-function DecisionForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="员工"><select className={inputClass}><option>请选择员工</option>{people.slice(0,5).map((person) => <option key={person.id}>{person.name}</option>)}</select></Field><Field label="结果类型"><select className={inputClass}><option>晋升</option><option>续签</option><option>加薪</option><option>奖励</option></select></Field><Field label="关联部门建议"><select className={inputClass}><option>选择建议（可选）</option><option>2026Q2 建议晋升</option></select></Field><Field label="生效日期"><input type="date" className={inputClass} /></Field></div><Field label="公司最终结果"><input placeholder="例如：R3-2 晋升至 R3-3" className={inputClass} /></Field><Field label="结果说明"><textarea placeholder="记录公司流程编号、差异说明等" className="w-full min-h-20 rounded-lg border border-border bg-background p-3 text-sm focus:outline-none focus:border-primary" /></Field></>; }
-
-function ConfigForm() { return <><div className="grid grid-cols-2 gap-4"><Field label="配置类型"><select className={inputClass}><option>人才盘点模型</option><option>职业发展通道</option><option>职业能力模型</option><option>薪资与职级上限</option><option>业务考核规则</option><option>工作事故等级配置</option></select></Field><Field label="版本名称"><input defaultValue="V1.1" className={inputClass} /></Field></div><Field label="适用范围"><select className={inputClass}><option>产品部全员</option><option>B端产品岗位</option><option>C端产品岗位</option><option>设计岗位</option></select></Field><Field label="版本说明"><textarea placeholder="说明本版本调整内容" className="w-full min-h-20 rounded-lg border border-border bg-background p-3 text-sm focus:outline-none focus:border-primary" /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" className="rounded border-border" />保存后立即启用此版本</label></>; }
 
 function QuickCard({ icon, tone, hoverTone, label, value, names, action }: { icon: React.ReactNode; tone: string; hoverTone: string; label: string; value: string; names: string[]; action: () => void }) {
   const displayNames = names.join("、");
@@ -1593,6 +1686,15 @@ function Overview({ person }: { person: Person; setTab: (tab: Tab) => void }) {
 
     <section>
       <h3 className="text-sm font-semibold mb-3">能力表现</h3>
+      <Card className="!p-4 mb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium">能力匹配度</div>
+            <div className="text-xs text-muted-foreground mt-1">(当前聘期内 KPI 均值 / 季度 KPI 总分) × {Math.round((extras?.kpiWeight ?? 0.6) * 100)}% + (当前聘期内盘点均值 / 盘点模型总分) × {Math.round((extras?.reviewWeight ?? 0.4) * 100)}%</div>
+          </div>
+          <div className="text-2xl font-semibold text-primary">{extras?.abilityMatchScore != null ? `${extras.abilityMatchScore}%` : "—"}</div>
+        </div>
+      </Card>
       <div className="space-y-3">
         <Card className="!p-4">
           <div className="text-sm font-medium mb-3">聘期内 KPI 历史趋势</div>
@@ -1603,15 +1705,6 @@ function Overview({ person }: { person: Person; setTab: (tab: Tab) => void }) {
           {reviewHistory.length > 0 ? <LineChart data={[...reviewHistory].reverse().map((item) => ({ label: item.period, value: item.score, display: `${item.grade ?? "—"}/${item.score}` }))} color="#3b82f6" minValue={0} maxValue={extras?.reviewTotalScore ?? 30} /> : <div className="text-xs text-muted-foreground py-6 text-center">暂无聘期内盘点数据</div>}
         </Card>
       </div>
-      <Card className="!p-4 mt-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">能力模型匹配度</div>
-            <div className="text-xs text-muted-foreground mt-1">(当前聘期内 KPI 均值 / 季度 KPI 总分) × 60% + (当前聘期内盘点均值 / 盘点模型总分) × 40%</div>
-          </div>
-          <div className="text-2xl font-semibold text-primary">{extras?.abilityMatchScore != null ? `${extras.abilityMatchScore}%` : "—"}</div>
-        </div>
-      </Card>
     </section>
   </div>;
 }
@@ -1639,23 +1732,24 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
   const min = minValue ?? Math.min(0, dataMin);
   const max = maxValue ?? Math.max(dataMax, min + 1);
   const range = max - min || 1;
-  const leftPadding = 40;
-  const rightPadding = 16;
-  const topPadding = 28;
-  const bottomPadding = 28;
+  const leftPadding = 48;
+  const rightPadding = 48;
+  const topPadding = 36;
+  const bottomPadding = 36;
   const width = 600;
-  const height = 180;
+  const height = 200;
   const chartWidth = width - leftPadding - rightPadding;
   const chartHeight = height - topPadding - bottomPadding;
+  const singlePoint = data.length === 1;
   const points = data.map((item, index) => {
-    const x = leftPadding + (index / (data.length - 1)) * chartWidth;
+    const x = singlePoint ? leftPadding + chartWidth / 2 : leftPadding + (index / (data.length - 1)) * chartWidth;
     const y = height - bottomPadding - ((item.value - min) / range) * chartHeight;
     return { x, y, value: item.value, label: item.label, display: item.display };
   });
   const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   const yTicks = 5;
   return <div className="w-full overflow-x-auto">
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[500px]" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[520px]" preserveAspectRatio="xMidYMid meet">
       {/* grid lines and y-axis labels */}
       {Array.from({ length: yTicks + 1 }).map((_, index) => {
         const ratio = index / yTicks;
@@ -1663,17 +1757,26 @@ function LineChart({ data, color, minValue, maxValue }: { data: Array<{ label: s
         const value = Math.round(max - ratio * range);
         return <g key={index}>
           <line x1={leftPadding} y1={y} x2={width - rightPadding} y2={y} stroke="#e5e7eb" strokeWidth={1} />
-          <text x={leftPadding - 8} y={y + 3} textAnchor="end" className="text-[10px] fill-muted-foreground">{value}</text>
+          <text x={leftPadding - 10} y={y + 3} textAnchor="end" className="text-[10px] fill-muted-foreground">{value}</text>
         </g>;
       })}
       {/* line */}
       <path d={linePath} fill="none" stroke={color} strokeWidth={2} />
       {/* points and labels */}
-      {points.map((point, index) => <g key={index}>
-        <circle cx={point.x} cy={point.y} r={4} fill={color} stroke="white" strokeWidth={2} />
-        <text x={point.x} y={point.y - 10} textAnchor="middle" className="text-[10px] fill-foreground">{point.display ?? point.value}</text>
-        <text x={point.x} y={height - 8} textAnchor="middle" className="text-[10px] fill-muted-foreground">{point.label}</text>
-      </g>)}
+      {points.map((point, index) => {
+        const isFirst = index === 0;
+        const isLast = index === data.length - 1;
+        const valueAnchor = singlePoint ? "middle" : isFirst ? "start" : isLast ? "end" : "middle";
+        const valueDx = singlePoint ? 0 : isFirst ? 6 : isLast ? -6 : 0;
+        const labelAnchor = singlePoint ? "middle" : isFirst ? "start" : isLast ? "end" : "middle";
+        const labelDx = singlePoint ? 0 : isFirst ? 4 : isLast ? -4 : 0;
+        const valueY = point.y - 14 < topPadding ? point.y + 14 : point.y - 10;
+        return <g key={index}>
+          <circle cx={point.x} cy={point.y} r={4} fill={color} stroke="white" strokeWidth={2} />
+          <text x={point.x} y={valueY} dx={valueDx} textAnchor={valueAnchor} className="text-[10px] fill-foreground">{point.display ?? point.value}</text>
+          <text x={point.x} y={height - 10} dx={labelDx} textAnchor={labelAnchor} className="text-[10px] fill-muted-foreground">{point.label}</text>
+        </g>;
+      })}
     </svg>
   </div>;
 }

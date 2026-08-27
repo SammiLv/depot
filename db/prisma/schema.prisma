@@ -28,6 +28,8 @@ enum OrgPermissionModuleKey {
   ANNUAL_GOAL
   KPI
   TALENT
+  NOTIFICATION
+  PRODUCT_MANAGEMENT
 }
 
 enum OrgPermissionAbilityKey {
@@ -57,6 +59,34 @@ enum OrgPermissionAbilityKey {
   MANAGE_TALENT_HISTORY
   VIEW_TALENT_SENSITIVE
   MANAGE_TALENT_CONFIG
+  MANAGE_NOTIFICATION_SCENARIO
+  MANAGE_PRODUCT_GOAL
+  MANAGE_PROJECT_AND_VALUE_TRACKING
+  MANAGE_PRODUCT_TASK
+}
+
+enum NotificationTriggerType {
+  EVENT
+  SCHEDULE
+}
+
+enum NotificationDeliveryChannel {
+  IN_APP
+  DINGTALK
+  DINGTALK_PERSONAL
+  DINGTALK_GROUP
+}
+
+enum DingTalkGroupBotSecurityType {
+  KEYWORD
+  SIGN
+  IP
+}
+
+enum NotificationDeliveryStatus {
+  SENT
+  FAILED
+  SKIPPED
 }
 
 enum OrgPermissionGrantScopeType {
@@ -97,6 +127,7 @@ enum WorkStatus {
 enum ProjectStatus {
   NOT_STARTED
   IN_PROGRESS
+  LAUNCHED
   COMPLETED
   CLOSED
 }
@@ -718,7 +749,6 @@ model AnnualGoalProgress {
 model Project {
   id                String        @id @default(cuid())
   title             String
-  productGoalId     String?
   description       String?
   expectedOutcome   String?
   startQuarter      String?
@@ -726,22 +756,39 @@ model Project {
   ownerId           String
   orgNodeId         String?
   status            ProjectStatus @default(NOT_STARTED)
+  launchedAt        DateTime?
   completedAt       DateTime?
   workloadPersonDay Float?
   otherCost         String?
   actualValue       String?
   valueJudgement    String?
+  valueTrackStatus  String?
   createdById       String
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   deletedAt         DateTime?
 
   quarterlyWorks QuarterlyWork[]
+  productGoalLinks ProjectProductGoal[]
 
-  @@index([productGoalId])
   @@index([ownerId])
   @@index([orgNodeId])
   @@index([status])
+}
+
+model ProjectProductGoal {
+  id            String   @id @default(cuid())
+  projectId     String
+  productGoalId String
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productGoal ProductGoal @relation(fields: [productGoalId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, productGoalId])
+  @@index([projectId])
+  @@index([productGoalId])
 }
 
 model ProductGoal {
@@ -758,6 +805,8 @@ model ProductGoal {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
+
+  projectLinks ProjectProductGoal[]
 
   @@index([year])
   @@index([ownerId])
@@ -784,6 +833,10 @@ model QuarterlyWork {
   endDate         DateTime?
   createdById     String
   completedAt     DateTime?
+  taskResult      String?
+  executionSummary String?
+  taskDescription String?
+  workloadPersonDay Float?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
@@ -841,6 +894,20 @@ model RequirementValueTrack {
 
   @@index([projectId])
   @@index([trackedAt])
+}
+
+model OperationLog {
+  id          String   @id @default(cuid())
+  targetType  String
+  targetId    String
+  targetTitle String
+  action      String
+  operatorId  String
+  remark      String?
+  createdAt   DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
 }
 
 model KpiTemplate {
@@ -1287,6 +1354,8 @@ model TalentReviewTemplateVersion {
   departmentOrgNodeId String
   version             Int                 @default(1)
   status              TalentVersionStatus @default(DRAFT)
+  kpiWeight           Float               @default(0.6)
+  reviewWeight        Float               @default(0.4)
   description         String?
   createdById         String
   publishedAt         DateTime?
@@ -1791,6 +1860,11 @@ model KpiRatingRuleVersion {
   effectiveFrom        DateTime?
   effectiveTo          DateTime?
   quarterlyKpiTotalScore Float?
+  /// 业务考核计分规则，随版本冻结；草稿可编辑，发布后只读。新建业务考核时按部门已发布版本冻结快照。
+  businessAssessmentTotalScore    Float              @default(6)
+  baInitialPassPercent            Float              @default(100)
+  baRetestPassPercent             Float              @default(50)
+  baFinalFailPercent              Float              @default(0)
   createdById          String
   publishedById        String?
   publishedAt          DateTime?
@@ -2180,6 +2254,62 @@ model Notification {
 
   @@index([userId])
   @@index([targetType, targetId])
+}
+
+model NotificationScenario {
+  id              String                  @id @default(cuid())
+  name            String
+  description     String?
+  module          String                  @default("KPI管理")
+  triggerType     NotificationTriggerType
+  triggerEvent    String
+  scheduleConfig  Json?
+  nextRunAt       DateTime?
+  recipientConfig Json
+  channelConfig   Json
+  conditionConfig Json?
+  isActive        Boolean                 @default(true)
+  sortOrder       Int                     @default(0)
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  deliveryLogs NotificationDeliveryLog[]
+
+  @@index([triggerType, isActive])
+  @@index([triggerEvent, isActive])
+  @@index([module, isActive])
+  @@index([nextRunAt])
+}
+
+model NotificationDeliveryLog {
+  id         String                     @id @default(cuid())
+  scenarioId String
+  eventKey   String
+  userId     String
+  channel    NotificationDeliveryChannel
+  status     NotificationDeliveryStatus
+  error      String?
+  createdAt  DateTime                   @default(now())
+
+  scenario NotificationScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([scenarioId, eventKey, channel])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model NotificationGroupBot {
+  id            String                       @id @default(cuid())
+  name          String                       @unique
+  webhookUrl    String
+  securityType  DingTalkGroupBotSecurityType
+  securityValue String
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
 }
 
 model TodoItem {

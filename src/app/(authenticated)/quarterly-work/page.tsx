@@ -3,7 +3,7 @@ import { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-que
 import { QuarterlyWorkContent } from "./content";
 
 type PageProps = {
-  searchParams?: Promise<{ year?: string | string[] | undefined; quarter?: string | string[] | undefined }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 function readParam(value: string | string[] | undefined) {
@@ -23,6 +23,18 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
   const selectedYear = parseIntParam(params?.year);
   const selectedQuarterRaw = readParam(params?.quarter);
   const selectedQuarter = selectedQuarterRaw === "all" ? "all" : parseIntParam(params?.quarter);
-  const data = await getQuarterlyWorkData(currentUser, { selectedYear, selectedQuarter });
+  const data = await getQuarterlyWorkData(currentUser, {
+    selectedYear,
+    selectedQuarter,
+    goalId: readParam(params?.goalId),
+    view: readParam(params?.view) === "list" ? "list" : "card",
+    projectPanel: readParam(params?.projectPanel) === "value" ? "value" : "task",
+    status: readParam(params?.status) as NonNullable<Parameters<typeof getQuarterlyWorkData>[1]>["status"],
+    orgNodeId: readParam(params?.orgNodeId),
+    teamId: readParam(params?.teamId),
+    ownerId: readParam(params?.ownerId),
+    projectId: readParam(params?.projectId),
+    query: readParam(params?.q),
+  });
   return <QuarterlyWorkContent data={data} />;
 }

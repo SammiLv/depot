@@ -1,0 +1,2 @@
+-- SQLite stores enum values as TEXT; no schema change required.
+-- NotificationDeliveryChannel adds DINGTALK_PERSONAL for personal chat notifications (notifyEventType=6).

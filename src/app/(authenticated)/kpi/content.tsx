@@ -5,12 +5,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deleteKpiTemplate, deletePersonalKpi } from "@/server/kpi/actions";
+import { runServerAction } from "@/lib/run-server-action";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
+import { BusinessAssessmentQuarterlyWorkspace, WorkIncidentWorkspace } from "../talent/operation-workspaces";
+import type { AssessmentWorkspaceData, IncidentWorkspaceData } from "../talent/operation-workspace-types";
 
 
-type Props = { data: Awaited<ReturnType<typeof getKpiData>> };
-type SectionTab = "quarterly-kpi" | "kpi-template";
+type Props = {
+  data: Awaited<ReturnType<typeof getKpiData>>;
+  assessmentData: AssessmentWorkspaceData;
+  incidentData: IncidentWorkspaceData;
+  selectedYear: number;
+  selectedQuarter: number;
+};
+type SectionTab = "quarterly-kpi" | "business-assessment" | "work-incident" | "kpi-template";
 type TeamTab = "all" | Props["data"]["teamOptions"][number]["id"];
 type TemplateRow = Props["data"]["templateRows"][number];
 
@@ -144,19 +153,21 @@ function TemplateList({
 }
 
 function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: QuarterlyKpiRow; onClose: () => void; onComplete: () => void }) {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   async function handleDelete() {
     try {
-      await deletePersonalKpi(row.id);
+      await runServerAction(() => deletePersonalKpi(row.id));
       onComplete();
       onClose();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "删除季度 KPI 失败");
+      setErrorMessage(error instanceof Error ? error.message : "删除季度 KPI 失败");
     }
   }
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">确认删除成员「{row.userName}」的季度 KPI？删除后该成员本季度的 KPI 数据将被移除，且无法恢复。</p>
+      {errorMessage ? <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorMessage}</div> : null}
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={onClose}>取消</Button>
         <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
@@ -166,13 +177,14 @@ function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: Quarterl
 }
 
 function TemplateDeleteConfirm({ row, onClose, onComplete }: { row: TemplateRow; onClose: () => void; onComplete: () => void }) {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   async function handleDelete() {
     try {
-      await deleteKpiTemplate(row.id);
+      await runServerAction(() => deleteKpiTemplate(row.id));
       onComplete();
       onClose();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "删除 KPI 模板失败");
+      setErrorMessage(error instanceof Error ? error.message : "删除 KPI 模板失败");
     }
   }
 
@@ -181,6 +193,7 @@ function TemplateDeleteConfirm({ row, onClose, onComplete }: { row: TemplateRow;
       <p className="text-sm text-muted-foreground">
         确认删除模板「{row.name}」？删除后引用该模板的指标可能会受影响，且列表中将不再显示该模板。
       </p>
+      {errorMessage ? <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorMessage}</div> : null}
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={onClose}>取消</Button>
         <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
@@ -434,7 +447,7 @@ function CreateTemplateDrawer({
       action={async (formData) => {
         try {
           setErrorMessage(null);
-          const result = await createKpiTemplate(formData);
+          const result = await runServerAction(() => createKpiTemplate(formData));
           onComplete(result);
           onClose();
         } catch (error) {
@@ -811,7 +824,7 @@ function TemplateEditDrawer({
         action={async (formData) => {
           try {
             setErrorMessage(null);
-            const result = await updateKpiTemplate(formData);
+            const result = await runServerAction(() => updateKpiTemplate(formData));
             onComplete(result);
             onClose();
           } catch (error) {
@@ -1135,7 +1148,7 @@ function InitializeForm({
       action={async (formData) => {
         try {
           setErrorMessage(null);
-          const result = await initializeQuarterlyKpis(formData);
+          const result = await runServerAction(() => initializeQuarterlyKpis(formData));
           onComplete(result);
           onClose();
         } catch (error) {
@@ -1209,7 +1222,7 @@ function TemplateImportForm({
       action={async (formData) => {
         try {
           setErrorMessage(null);
-          const result = await importKpiTemplates(formData);
+          const result = await runServerAction(() => importKpiTemplates(formData));
           onComplete(result);
           onClose();
         } catch (error) {
@@ -1260,31 +1273,41 @@ function TemplateImportForm({
   );
 }
 
-export function KpiContent({ data }: Props) {
+export function KpiContent({ data, assessmentData, incidentData, selectedYear, selectedQuarter }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const errorMessage = searchParams.get("error");
   const [dismissedErrorMessage, setDismissedErrorMessage] = useState<string | null>(null);
+  const [inlineErrorMessage, setInlineErrorMessage] = useState<string | null>(null);
   const [showInitDialog, setShowInitDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [templateImportResult, setTemplateImportResult] = useState<TemplateImportResult | null>(null);
   const [departmentTab, setDepartmentTab] = useState(data.defaultDepartmentOrgNodeId);
   const [teamTab, setTeamTab] = useState<TeamTab | null>(null);
-  const [sectionTab, setSectionTab] = useState<SectionTab>("quarterly-kpi");
+  const [sectionTab, setSectionTab] = useState<SectionTab>(() => {
+    const tab = searchParams.get("tab");
+    return tab === "business-assessment" || tab === "work-incident" || tab === "kpi-template" ? tab : "quarterly-kpi";
+  });
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
   const [deleteQuarterlyKpiRow, setDeleteQuarterlyKpiRow] = useState<QuarterlyKpiRow | null>(null);
   const [deleteTemplateRow, setDeleteTemplateRow] = useState<TemplateRow | null>(null);
+  const [templateActionError, setTemplateActionError] = useState<string | null>(null);
   const [templateDrawerMode, setTemplateDrawerMode] = useState<"view" | "edit" | null>(null);
   const quarterOptions = useMemo<QuarterOption[]>(
     () => [1, 2, 3, 4].map((quarter) => ({ value: quarter, label: `Q${quarter}` })),
     []
   );
+  const filterQuarterOptions = useMemo<QuarterOption[]>(
+    () => [{ value: 0, label: "全部" }, ...quarterOptions],
+    [quarterOptions]
+  );
 
   useEffect(() => {
     if (errorMessage && errorMessage !== dismissedErrorMessage) {
-      window.alert(errorMessage);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setInlineErrorMessage(errorMessage);
       setDismissedErrorMessage(errorMessage);
       const nextParams = new URLSearchParams(searchParams.toString());
       nextParams.delete("error");
@@ -1379,7 +1402,7 @@ export function KpiContent({ data }: Props) {
   async function handleDownloadTemplate() {
     const formData = new FormData();
     formData.set("departmentOrgNodeId", departmentTab);
-    const { fileName, content } = await downloadKpiTemplateCsv(formData);
+    const { fileName, content } = await runServerAction(() => downloadKpiTemplateCsv(formData));
     const blob = base64ToBlob(
       content,
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1398,6 +1421,12 @@ export function KpiContent({ data }: Props) {
 
   return (
     <>
+      {inlineErrorMessage ? (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <span>{inlineErrorMessage}</span>
+          <button type="button" aria-label="关闭错误提示" onClick={() => setInlineErrorMessage(null)} className="shrink-0 text-destructive/70 hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      ) : null}
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
           <h1 className="text-3xl font-semibold tracking-tight">KPI管理</h1>
@@ -1447,6 +1476,8 @@ export function KpiContent({ data }: Props) {
           <div className="inline-flex rounded-lg bg-muted p-1">
             {[
               { key: "quarterly-kpi" as const, label: "季度KPI" },
+              { key: "business-assessment" as const, label: "业务考核" },
+              { key: "work-incident" as const, label: "工作事故" },
               { key: "kpi-template" as const, label: "KPI模板" },
             ].map((tab) => (
               <button
@@ -1474,12 +1505,12 @@ export function KpiContent({ data }: Props) {
             ) : null}
           </div>
 
-          {sectionTab === "quarterly-kpi" ? (
+          {sectionTab !== "kpi-template" ? (
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
                 <select
-                  value={String(data.year)}
-                  onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), data.quarter)}
+                  value={String(selectedYear)}
+                  onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), selectedQuarter)}
                   className="h-full bg-transparent outline-none"
                 >
                   {data.availableYears.map((year) => (
@@ -1489,12 +1520,12 @@ export function KpiContent({ data }: Props) {
               </label>
               <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
                 <select
-                  value={String(data.quarter)}
-                  onChange={(event) => updatePeriodFilters(data.year, Number.parseInt(event.target.value, 10))}
+                  value={String(selectedQuarter)}
+                  onChange={(event) => updatePeriodFilters(selectedYear, Number.parseInt(event.target.value, 10))}
                   className="h-full bg-transparent outline-none"
                 >
-                  {data.availableQuarters.map((quarter) => (
-                    <option key={quarter} value={quarter}>Q{quarter}季度</option>
+                  {filterQuarterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}{option.value === 0 ? "" : "季度"}</option>
                   ))}
                 </select>
               </label>
@@ -1503,8 +1534,14 @@ export function KpiContent({ data }: Props) {
 
           <div className="ml-auto text-xs text-muted-foreground">
             {sectionTab === "quarterly-kpi"
-              ? `当前看板：${data.year} Q${data.quarter}`
-              : `当前模板部门：${data.departmentOptions.find((department) => department.id === departmentTab)?.name ?? "—"}`}
+              ? `当前看板：${selectedYear} ${selectedQuarter === 0 ? "全年" : `Q${selectedQuarter}`}`
+              : sectionTab === "business-assessment"
+                ? `当前看板：${selectedYear} ${selectedQuarter === 0 ? "全年业务考核" : `Q${selectedQuarter} 业务考核`}`
+                : sectionTab === "work-incident"
+                  ? `当前看板：${selectedYear} ${selectedQuarter === 0 ? "全年工作事故" : `Q${selectedQuarter} 工作事故`}`
+                  : sectionTab === "kpi-template"
+                    ? `当前模板部门：${data.departmentOptions.find((department) => department.id === departmentTab)?.name ?? "—"}`
+                    : null}
           </div>
         </div>
 
@@ -1584,7 +1621,6 @@ export function KpiContent({ data }: Props) {
                   <tr className="text-left text-sm text-muted-foreground">
                     <th className="px-5 py-3 font-medium">成员</th>
                     <th className="px-5 py-3 font-medium">小组</th>
-                    <th className="px-5 py-3 font-medium">KPI 数</th>
                     <th className="px-5 py-3 font-medium">阶段</th>
                     <th className="w-48 px-5 py-3 font-medium">完成度</th>
                     <th className="px-5 py-3 font-medium">得分</th>
@@ -1600,7 +1636,6 @@ export function KpiContent({ data }: Props) {
                           <span className="text-sm font-medium">{r.userName}</span>
                         </td>
                         <td className="px-5 py-3 text-sm text-muted-foreground">{r.teamName}</td>
-                        <td className="px-5 py-3 text-sm tabular-nums">{r.itemCount}</td>
                         <td className="px-5 py-3"><Badge tone={r.tone}>{r.status}</Badge></td>
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
                         <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
@@ -1627,15 +1662,29 @@ export function KpiContent({ data }: Props) {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
+                      <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </Card>
           </div>
+        ) : sectionTab === "business-assessment" ? (
+          <div className="px-5 pb-5">
+            <BusinessAssessmentQuarterlyWorkspace data={assessmentData} />
+          </div>
+        ) : sectionTab === "work-incident" ? (
+          <div className="px-5 pb-5">
+            <WorkIncidentWorkspace data={incidentData} />
+          </div>
         ) : (
           <div className="px-5 pb-5">
+            {templateActionError ? (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                <span>{templateActionError}</span>
+                <button type="button" aria-label="关闭错误提示" onClick={() => setTemplateActionError(null)} className="shrink-0 text-destructive/70 hover:text-destructive"><X className="h-4 w-4" /></button>
+              </div>
+            ) : null}
             <TemplateList
               rows={templateRows}
               canManageKpiTemplate={canManageKpiTemplate}
@@ -1650,10 +1699,11 @@ export function KpiContent({ data }: Props) {
               }}
               onToggleActive={async (row) => {
                 try {
-                  await toggleKpiTemplateActive(row.id);
+                  await runServerAction(() => toggleKpiTemplateActive(row.id));
+                  setTemplateActionError(null);
                   router.refresh();
                 } catch (error) {
-                  window.alert(error instanceof Error ? error.message : "切换模板状态失败");
+                  setTemplateActionError(error instanceof Error ? error.message : "切换模板状态失败");
                 }
               }}
               onDelete={(row) => setDeleteTemplateRow(row)}

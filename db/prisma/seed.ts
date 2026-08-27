@@ -1,10 +1,19 @@
 import "dotenv/config";
-import { randomUUID } from "node:crypto";
+import { randomUUID, scryptSync } from "node:crypto";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualMetricCalculationType, PrismaClient, RoleType } from "@prisma/client";
 import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
-import { kpiDefaultPermissionGrants, talentDefaultPermissionGrants } from "../../src/server/permissions/permission-constants";
+import {
+  kpiDefaultPermissionGrants,
+  notificationDefaultPermissionGrants,
+  productManagementDefaultPermissionGrants,
+  talentDefaultPermissionGrants,
+} from "../../src/server/permissions/permission-constants";
+import { computeNextRunAt } from "../../src/server/notifications/schedule-utils";
+import { removePermissionMatrixIntegrationTestArtifacts } from "../../src/server/organization/integration-test-artifacts";
+import { ensureAnnualGoalDemoData } from "./seed-annual-goals-demo";
+import { ensurePresetNotificationScenarios } from "../../src/server/notifications/preset-scenarios";
 
 function resolveDatabaseUrl() {
   if (!process.env.DATABASE_URL || process.env.DATABASE_URL === "file:./dev.db") {
@@ -24,6 +33,324 @@ function resolveDatabaseUrl() {
 
 const adapter = new PrismaBetterSqlite3({ url: resolveDatabaseUrl() });
 const prisma = new PrismaClient({ adapter });
+
+/** 本地 seed 账号默认密码；与 scripts/set-admin-password.ts、login 校验算法一致 */
+const SEED_DEFAULT_PASSWORD = "admin1234";
+
+function hashSeedPassword(password: string) {
+  return scryptSync(password, "department-management", 64).toString("hex");
+}
+
+const seedPasswordHash = hashSeedPassword(SEED_DEFAULT_PASSWORD);
+
+/** 本地密码登录测试所需角色：主管 / 组长 / 组员（不含 admin） */
+const SEED_PASSWORD_TEST_ROLES = [
+  RoleType.DEPARTMENT_MANAGER,
+  RoleType.TEAM_LEADER,
+  RoleType.MEMBER,
+] as const;
+
+const defaultSeedTestAccountByRole = {
+  [RoleType.DEPARTMENT_MANAGER]: {
+    loginName: "test-dept-manager",
+    name: "测试部门主管",
+    title: "部门主管",
+  },
+  [RoleType.TEAM_LEADER]: {
+    loginName: "test-team-leader",
+    name: "测试组长",
+    title: "组长",
+  },
+  [RoleType.MEMBER]: {
+    loginName: "test-member",
+    name: "测试组员",
+    title: "产品经理",
+  },
+} satisfies Record<(typeof SEED_PASSWORD_TEST_ROLES)[number], { loginName: string; name: string; title: string }>;
+
+function getPasswordLoginUserWhere(roleType: RoleType) {
+  return {
+    deletedAt: null,
+    isActive: true,
+    passwordLoginEnabled: true,
+    passwordHash: { not: null },
+    loginName: { not: null },
+    roleType,
+  };
+}
+
+/** 已配置密码登录的账号不参与 sample 用户清理 */
+function getSampleUserDeletionWhere(sampleUserNames: string[]) {
+  return {
+    name: { in: sampleUserNames },
+    NOT: {
+      passwordLoginEnabled: true,
+      passwordHash: { not: null },
+      loginName: { not: null },
+    },
+  };
+}
+
+/** 补建密码测试账号时优先挂载的部门；生产环境默认平台部，可通过环境变量覆盖 */
+const SEED_TEST_DEPARTMENT_NAME = process.env.SEED_TEST_DEPARTMENT_NAME?.trim() || "平台部";
+
+async function resolvePreferredTestDepartment() {
+  const preferred = await prisma.orgNode.findFirst({
+    where: { nodeType: "DEPARTMENT", name: SEED_TEST_DEPARTMENT_NAME },
+    select: { id: true, name: true },
+  });
+  if (preferred) {
+    return preferred;
+  }
+
+  const fallback = await prisma.orgNode.findFirst({
+    where: { nodeType: "DEPARTMENT" },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+  if (fallback && SEED_TEST_DEPARTMENT_NAME) {
+    console.warn(
+      `[seed] 未找到部门「${SEED_TEST_DEPARTMENT_NAME}」，测试账号将挂到「${fallback.name}」`,
+    );
+  }
+  return fallback ?? null;
+}
+
+async function resolveSeedOrgNodeIdForRole(roleType: RoleType) {
+  const department = await resolvePreferredTestDepartment();
+  if (!department) {
+    return null;
+  }
+
+  if (roleType === RoleType.DEPARTMENT_MANAGER) {
+    return department.id;
+  }
+
+  const team = await prisma.orgNode.findFirst({
+    where: { nodeType: "TEAM", parentId: department.id },
+    orderBy: { name: "asc" },
+    select: { id: true },
+  });
+  if (team) {
+    return team.id;
+  }
+
+  const fallbackTeam = await prisma.orgNode.findFirst({
+    where: { nodeType: "TEAM" },
+    orderBy: { name: "asc" },
+    select: { id: true },
+  });
+  if (fallbackTeam) {
+    console.warn(
+      `[seed] 部门「${department.name}」下无小组，${roleType} 测试账号将挂到其他小组`,
+    );
+  }
+  return fallbackTeam?.id ?? null;
+}
+
+async function ensureSeedPasswordTestAccountsIfMissing() {
+  const missingRoles: RoleType[] = [];
+  for (const roleType of SEED_PASSWORD_TEST_ROLES) {
+    const count = await prisma.user.count({ where: getPasswordLoginUserWhere(roleType) });
+    if (count === 0) {
+      missingRoles.push(roleType);
+    }
+  }
+
+  if (missingRoles.length === 0) {
+    return;
+  }
+
+  let created = 0;
+  for (const roleType of missingRoles) {
+    const orgNodeId = await resolveSeedOrgNodeIdForRole(roleType);
+    if (!orgNodeId) {
+      console.warn(`[seed] 跳过 ${roleType} 测试账号：未找到可用组织节点`);
+      continue;
+    }
+
+    const template = defaultSeedTestAccountByRole[roleType];
+    const loginTaken = await prisma.user.findFirst({
+      where: { loginName: template.loginName },
+      select: { id: true },
+    });
+    if (loginTaken) {
+      console.warn(`[seed] 跳过 ${template.loginName}：登录名已占用`);
+      continue;
+    }
+
+    await prisma.user.create({
+      data: {
+        name: template.name,
+        loginName: template.loginName,
+        roleType,
+        orgNodeId,
+        title: template.title,
+        passwordHash: seedPasswordHash,
+        passwordLoginEnabled: true,
+      },
+    });
+    created += 1;
+  }
+
+  if (created > 0) {
+    console.info(
+      `[seed] 已补建 ${created} 个密码登录测试账号（${missingRoles.join(" / ")}，挂载部门：${SEED_TEST_DEPARTMENT_NAME}，密码：${SEED_DEFAULT_PASSWORD}）`,
+    );
+  }
+}
+
+const PRODUCT_TEAM_PASSWORD_ACCOUNTS = [
+  {
+    loginName: "b-leader",
+    name: "采购组组长",
+    title: "组长",
+    roleType: RoleType.TEAM_LEADER,
+  },
+  {
+    loginName: "b-member",
+    name: "采购组组员",
+    title: "组员",
+    roleType: RoleType.MEMBER,
+  },
+] as const;
+
+async function ensureProductProcurementPasswordAccounts() {
+  const department = await prisma.orgNode.findFirst({
+    where: { nodeType: "DEPARTMENT", name: "产品部" },
+    select: { id: true, name: true },
+  });
+  if (!department) {
+    console.warn("[seed] 未找到部门「产品部」，跳过 b-leader / b-member");
+    return;
+  }
+
+  const team = await prisma.orgNode.findFirst({
+    where: { nodeType: "TEAM", name: "采购组", parentId: department.id },
+    select: { id: true, name: true },
+  });
+  if (!team) {
+    console.warn("[seed] 未找到产品部下的「采购组」，跳过 b-leader / b-member");
+    return;
+  }
+
+  let created = 0;
+  let updated = 0;
+  for (const account of PRODUCT_TEAM_PASSWORD_ACCOUNTS) {
+    const existing = await prisma.user.findFirst({
+      where: { loginName: account.loginName },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          name: account.name,
+          title: account.title,
+          roleType: account.roleType,
+          orgNodeId: team.id,
+          passwordHash: seedPasswordHash,
+          passwordLoginEnabled: true,
+          isActive: true,
+          deletedAt: null,
+        },
+      });
+      updated += 1;
+      continue;
+    }
+
+    await prisma.user.create({
+      data: {
+        name: account.name,
+        loginName: account.loginName,
+        title: account.title,
+        roleType: account.roleType,
+        orgNodeId: team.id,
+        passwordHash: seedPasswordHash,
+        passwordLoginEnabled: true,
+      },
+    });
+    created += 1;
+  }
+
+  if (created > 0 || updated > 0) {
+    console.info(
+      `[seed] 产品部/采购组密码账号：新建 ${created}、更新 ${updated}（b-leader / b-member，密码：${SEED_DEFAULT_PASSWORD}）`,
+    );
+  }
+}
+
+async function ensureOrgPermissionGrants() {
+  const root = await prisma.orgNode.findFirst({ where: { nodeType: "ROOT" }, select: { id: true } });
+  const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+  const teams = await prisma.orgNode.findMany({ where: { nodeType: "TEAM" }, select: { id: true } });
+
+  if (!root || departments.length === 0) {
+    console.warn("[seed] 缺少组织根节点或部门，跳过默认权限补全");
+    return;
+  }
+
+  const allGrants = [
+    ...kpiDefaultPermissionGrants,
+    ...talentDefaultPermissionGrants,
+    ...notificationDefaultPermissionGrants,
+    ...productManagementDefaultPermissionGrants,
+  ];
+
+  let created = 0;
+  let updated = 0;
+  for (const grant of allGrants) {
+    const orgNodeIds = grant.orgNodeSeedKey === null
+      ? [null]
+      : grant.orgNodeSeedKey === "ROOT"
+        ? [root.id]
+        : grant.orgNodeSeedKey === "DEPARTMENT"
+          ? departments.map((d) => d.id)
+          : teams.map((t) => t.id);
+
+    for (const orgNodeId of orgNodeIds) {
+      const existing = await prisma.orgPermissionGrant.findFirst({
+        where: {
+          moduleKey: grant.moduleKey,
+          abilityKey: grant.abilityKey,
+          scopeType: grant.scopeType,
+          subjectType: grant.subjectType,
+          roleType: grant.roleType,
+          userId: null,
+          orgNodeId,
+        },
+      });
+      if (existing) {
+        if (!existing.isActive) {
+          await prisma.orgPermissionGrant.update({
+            where: { id: existing.id },
+            data: { isActive: true },
+          });
+          updated++;
+        }
+        continue;
+      }
+      await prisma.orgPermissionGrant.create({
+        data: {
+          moduleKey: grant.moduleKey,
+          abilityKey: grant.abilityKey,
+          scopeType: grant.scopeType,
+          subjectType: grant.subjectType,
+          roleType: grant.roleType,
+          userId: null,
+          orgNodeId,
+          isActive: true,
+        },
+      });
+      created++;
+    }
+  }
+
+  if (created > 0 || updated > 0) {
+    console.info(`[seed] 已补全默认组织权限：新建 ${created} 条，更新 ${updated} 条`);
+  }
+}
 
 function createOrgNodeId() {
   return randomUUID();
@@ -133,6 +460,19 @@ async function syncLegacyOrgReferences(rootNodeId: string) {
 }
 
 async function main() {
+  await removePermissionMatrixIntegrationTestArtifacts(prisma);
+
+  const fullReset = process.env.SEED_FULL_RESET === "true";
+  if (!fullReset) {
+    console.info("[seed] 增量模式：不清理通知/指标/组织；按角色检测密码测试账号，三者齐全则不补建。全量重建请使用 npm run seed:full");
+    await ensureOrgPermissionGrants();
+    await ensureSeedPasswordTestAccountsIfMissing();
+    await ensureProductProcurementPasswordAccounts();
+    await ensurePresetNotificationScenarios();
+    await ensureAnnualGoalDemoData(prisma);
+    return;
+  }
+
   const department = {
     id: "seed_dept_product",
     name: "产品部",
@@ -172,7 +512,7 @@ async function main() {
   ];
 
   await prisma.todoItem.deleteMany();
-  await prisma.notification.deleteMany();
+  // 不清理 Notification：seed 可能中途失败或仅需补预设数据，清空会导致「全部通知」历史丢失
   await prisma.annualGoalProgress.deleteMany();
   await prisma.annualGoalQuarterTarget.deleteMany();
   await prisma.annualGoalMetricAssignment.deleteMany();
@@ -182,13 +522,22 @@ async function main() {
   await prisma.kpiTemplateAssignment.deleteMany();
   await prisma.kpiTemplateItem.deleteMany();
   await prisma.kpiTemplate.deleteMany({ where: { templateKey: { startsWith: "kpi-template-" } } });
-  await prisma.user.deleteMany({ where: { name: { in: sampleUserNames } } });
+  await prisma.user.deleteMany({ where: getSampleUserDeletionWhere(sampleUserNames) });
 
-  const admin = await prisma.user.create({
-    data: {
+  const admin = await prisma.user.upsert({
+    where: { loginName: "admin" },
+    update: {
+      name: "系统管理员",
+      passwordHash: seedPasswordHash,
+      passwordLoginEnabled: true,
+      roleType: RoleType.ADMIN,
+      orgNodeId: rootOrgNodeId,
+      title: "管理员",
+    },
+    create: {
       name: "系统管理员",
       loginName: "admin",
-      passwordHash: "d6ad2d7161306be4e93af1276e8dafb7f945d9a25df0b193ad1f9817031e1f7025a1c8b5afb9692d8772387a8ad2fd39553f31bf5349bce78630358f2dbc58a3",
+      passwordHash: seedPasswordHash,
       passwordLoginEnabled: true,
       roleType: RoleType.ADMIN,
       orgNodeId: rootOrgNodeId,
@@ -196,17 +545,31 @@ async function main() {
     },
   });
 
-  const manager = await prisma.user.create({
-    data: {
-      name: "产品部主管",
-      loginName: "product-manager",
-      passwordHash: "d6ad2d7161306be4e93af1276e8dafb7f945d9a25df0b193ad1f9817031e1f7025a1c8b5afb9692d8772387a8ad2fd39553f31bf5349bce78630358f2dbc58a3",
-      passwordLoginEnabled: true,
-      roleType: RoleType.DEPARTMENT_MANAGER,
-      orgNodeId: departmentOrgNodeId,
-      title: "部门主管",
-    },
+  const existingProductManager = await prisma.user.findFirst({
+    where: { loginName: "product-manager", deletedAt: null },
+    select: { id: true },
   });
+  const manager = existingProductManager
+    ? await prisma.user.update({
+        where: { id: existingProductManager.id },
+        data: {
+          passwordHash: seedPasswordHash,
+          passwordLoginEnabled: true,
+          orgNodeId: departmentOrgNodeId,
+          roleType: RoleType.DEPARTMENT_MANAGER,
+        },
+      })
+    : await prisma.user.create({
+        data: {
+          name: "产品部主管",
+          loginName: "product-manager",
+          passwordHash: seedPasswordHash,
+          passwordLoginEnabled: true,
+          roleType: RoleType.DEPARTMENT_MANAGER,
+          orgNodeId: departmentOrgNodeId,
+          title: "部门主管",
+        },
+      });
 
   const secondDepartmentManager = await prisma.user.create({
     data: {
@@ -390,7 +753,7 @@ async function main() {
     }
   }
 
-  for (const grant of [...kpiDefaultPermissionGrants, ...talentDefaultPermissionGrants]) {
+  for (const grant of [...kpiDefaultPermissionGrants, ...talentDefaultPermissionGrants, ...notificationDefaultPermissionGrants, ...productManagementDefaultPermissionGrants]) {
     const orgNodeIds = grant.orgNodeSeedKey === null
       ? [null]
       : grant.orgNodeSeedKey === "ROOT"
@@ -478,6 +841,153 @@ async function main() {
         type: "SYSTEM",
         title: "欢迎试用产品部管理工作台",
         content: "普通成员视角默认只展示本人相关数据。",
+      },
+    ],
+  });
+
+  const initializationReminderSchedule = {
+    frequency: "weekly" as const,
+    timeOfDay: "09:00",
+    weekdays: [1],
+    scanType: "kpi_initialization_pending" as const,
+    daysBefore: 0,
+    timezone: "Asia/Shanghai",
+  };
+
+  const selfReviewSchedule = {
+    frequency: "daily" as const,
+    timeOfDay: "09:00",
+    weekdays: [1, 2, 3, 4, 5],
+    scanType: "kpi_self_review_pending" as const,
+    daysBefore: 0,
+    timezone: "Asia/Shanghai",
+  };
+
+  await prisma.notificationScenario.createMany({
+    data: [
+      {
+        name: "季度 KPI 初始化提醒",
+        description: "每季度到达指定时间后，提醒负责人为尚未生成 KPI 的成员执行初始化",
+        module: "KPI管理",
+        triggerType: "SCHEDULE",
+        triggerEvent: "kpi.initialization.pending",
+        scheduleConfig: initializationReminderSchedule,
+        nextRunAt: computeNextRunAt(initializationReminderSchedule),
+        recipientConfig: { rules: [{ type: "DEPARTMENT_MANAGER" }], dedupeWindowHours: 24 },
+        channelConfig: {
+          channels: ["IN_APP", "DINGTALK"],
+          notificationType: "KPI_TODO",
+          dingtalkNotifyType: 5,
+          titleTemplate: "{{year}}年Q{{quarter}} KPI 待初始化（{{pendingCount}}人）",
+          contentTemplate: "{{departmentName}} 仍有 {{pendingCount}} 名成员未生成本季度 KPI，请尽快完成初始化。",
+          messageUrlTemplate: "{{appUrl}}/kpi",
+        },
+        isActive: true,
+        sortOrder: 5,
+        createdById: manager.id,
+        updatedById: manager.id,
+      },
+      {
+        name: "KPI 初始化提醒自评",
+        description: "季度 KPI 初始化后，通知被考核人开始自评",
+        module: "KPI管理",
+        triggerType: "EVENT",
+        triggerEvent: "kpi.initialized",
+        recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 24 },
+        channelConfig: {
+          channels: ["IN_APP", "DINGTALK"],
+          notificationType: "KPI_TODO",
+          dingtalkNotifyType: 5,
+          titleTemplate: "{{year}}年Q{{quarter}} KPI 已开启，请开始自评",
+          contentTemplate: "{{userName}}，您的季度 KPI 已初始化，请及时完成自评。",
+          messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+        },
+        isActive: true,
+        sortOrder: 10,
+        createdById: manager.id,
+        updatedById: manager.id,
+      },
+      {
+        name: "KPI 提交后通知审批人",
+        description: "自评提交后通知当前审批人处理",
+        module: "KPI管理",
+        triggerType: "EVENT",
+        triggerEvent: "kpi.approval.pending",
+        recipientConfig: { rules: [{ type: "CURRENT_APPROVER" }], dedupeWindowHours: 24 },
+        channelConfig: {
+          channels: ["IN_APP", "DINGTALK"],
+          notificationType: "APPROVAL_TODO",
+          dingtalkNotifyType: 5,
+          titleTemplate: "{{userName}} 的 {{year}}年Q{{quarter}} KPI 待您处理",
+          contentTemplate: "请及时完成评分或审批。",
+          messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+        },
+        isActive: true,
+        sortOrder: 20,
+        createdById: manager.id,
+        updatedById: manager.id,
+      },
+      {
+        name: "KPI 审批驳回通知",
+        description: "审批驳回后通知被考核人修改",
+        module: "KPI管理",
+        triggerType: "EVENT",
+        triggerEvent: "kpi.approval.rejected",
+        recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 24 },
+        channelConfig: {
+          channels: ["IN_APP", "DINGTALK"],
+          notificationType: "KPI_TODO",
+          dingtalkNotifyType: 5,
+          titleTemplate: "{{year}}年Q{{quarter}} KPI 已驳回，请修改后重提",
+          contentTemplate: "{{userName}}，驳回原因：{{comment}}",
+          messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+        },
+        isActive: true,
+        sortOrder: 30,
+        createdById: manager.id,
+        updatedById: manager.id,
+      },
+      {
+        name: "KPI 终评完成通知",
+        description: "KPI 完成后通知被考核人",
+        module: "KPI管理",
+        triggerType: "EVENT",
+        triggerEvent: "kpi.completed",
+        recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 24 },
+        channelConfig: {
+          channels: ["IN_APP", "DINGTALK"],
+          notificationType: "KPI_TODO",
+          dingtalkNotifyType: 5,
+          titleTemplate: "{{year}}年Q{{quarter}} KPI 已完成终评",
+          contentTemplate: "{{userName}}，您的季度 KPI 已完成，可前往查看结果。",
+          messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+        },
+        isActive: true,
+        sortOrder: 40,
+        createdById: manager.id,
+        updatedById: manager.id,
+      },
+      {
+        name: "每日提醒未完成自评",
+        description: "每天 09:00 扫描仍处于自评阶段的 KPI",
+        module: "KPI管理",
+        triggerType: "SCHEDULE",
+        triggerEvent: "kpi.self_review.pending",
+        scheduleConfig: selfReviewSchedule,
+        nextRunAt: computeNextRunAt(selfReviewSchedule),
+        recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 20 },
+        channelConfig: {
+          channels: ["IN_APP", "DINGTALK"],
+          notificationType: "KPI_TODO",
+          dingtalkNotifyType: 5,
+          titleTemplate: "提醒：{{year}}年Q{{quarter}} KPI 自评尚未完成",
+          contentTemplate: "{{userName}}，请尽快完成自评提交。",
+          messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
+        },
+        isActive: true,
+        sortOrder: 50,
+        createdById: manager.id,
+        updatedById: manager.id,
       },
     ],
   });
@@ -797,6 +1307,8 @@ async function main() {
     },
   });
 
+  await ensureSeedPasswordTestAccountsIfMissing();
+  await ensureProductProcurementPasswordAccounts();
   await syncLegacyOrgReferences(rootOrgNodeId);
 }
 

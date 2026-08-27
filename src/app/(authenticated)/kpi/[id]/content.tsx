@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
+import { runServerAction } from "@/lib/run-server-action";
 import { Badge, Button, Card } from "@/components/ui-kit";
 
 type EditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL" | null;
@@ -277,15 +278,8 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
     };
   }, [attendanceScore, data.editableStage, data.totals.attendanceScore, data.totals.leaderTotal, data.totals.managerTotal, data.totals.scoreTotal, data.totals.selfTotal, scorePenaltyTotal]);
 
-  const upperSummary = useMemo(() => {
-    if (data.editableStage === "LEADER" || data.editableStage === "MANAGER") {
-      return { praise, opportunity };
-    }
-    return {
-      praise: data.summary.manager.praise || data.summary.leader.praise,
-      opportunity: data.summary.manager.opportunity || data.summary.leader.opportunity,
-    };
-  }, [data.editableStage, data.summary.leader.opportunity, data.summary.leader.praise, data.summary.manager.opportunity, data.summary.manager.praise, opportunity, praise]);
+  const hasLeaderSummary = Boolean(data.summary.leader.praise.trim() || data.summary.leader.opportunity.trim());
+  const hasManagerSummary = Boolean(data.summary.manager.praise.trim() || data.summary.manager.opportunity.trim());
 
   const canEditSelf = !viewOnly && data.editableStage === "SELF";
   const canEditLeader = !viewOnly && data.editableStage === "LEADER";
@@ -305,13 +299,13 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
         formData.set("rejectRemark", rejectRemark);
       }
       if (action === "save") {
-        await savePersonalKpiScoring(formData);
+        await runServerAction(() => savePersonalKpiScoring(formData));
       } else if (action === "submit") {
-        await submitPersonalKpiScoring(formData);
+        await runServerAction(() => submitPersonalKpiScoring(formData));
       } else if (action === "approve") {
-        await approvePersonalKpiScoring(formData);
+        await runServerAction(() => approvePersonalKpiScoring(formData));
       } else {
-        await rejectPersonalKpiScoring(formData);
+        await runServerAction(() => rejectPersonalKpiScoring(formData));
       }
       setPendingAction(null);
       setRejectRemark("");
@@ -529,15 +523,97 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
                 <div>
                   <div className="mb-3 text-sm font-semibold">上级点评</div>
-                  <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
-                    <div>
-                      <div className="mb-2 text-sm font-medium">表扬</div>
-                      <SummaryTextarea name="praise" value={upperSummary.praise} onChange={setPraise} required={canEditLeader} readOnly={!canEditLeader && !canEditManager} placeholder="请输入上级表扬" />
-                    </div>
-                    <div>
-                      <div className="mb-2 text-sm font-medium">机会</div>
-                      <SummaryTextarea name="opportunity" value={upperSummary.opportunity} onChange={setOpportunity} required={canEditLeader} readOnly={!canEditLeader && !canEditManager} placeholder="请输入上级建议与机会" />
-                    </div>
+                  <div className="space-y-6">
+                    {canEditLeader ? (
+                      <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                        <div>
+                          <div className="mb-2 text-sm font-medium">表扬</div>
+                          <SummaryTextarea name="praise" value={praise} onChange={setPraise} required placeholder="请输入上级表扬" />
+                        </div>
+                        <div>
+                          <div className="mb-2 text-sm font-medium">机会</div>
+                          <SummaryTextarea name="opportunity" value={opportunity} onChange={setOpportunity} required placeholder="请输入上级建议与机会" />
+                        </div>
+                      </div>
+                    ) : null}
+                    {canEditManager ? (
+                      <>
+                        {hasLeaderSummary ? (
+                          <div>
+                            <div className="mb-3 text-sm font-medium text-muted-foreground">组长点评</div>
+                            <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                              <div>
+                                <div className="mb-2 text-sm font-medium">表扬</div>
+                                <SummaryTextarea value={data.summary.leader.praise} readOnly placeholder="暂无组长表扬" />
+                              </div>
+                              <div>
+                                <div className="mb-2 text-sm font-medium">机会</div>
+                                <SummaryTextarea value={data.summary.leader.opportunity} readOnly placeholder="暂无组长建议与机会" />
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                        <div>
+                          <div className="mb-3 text-sm font-medium text-muted-foreground">主管点评</div>
+                          <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                            <div>
+                              <div className="mb-2 text-sm font-medium">表扬</div>
+                              <SummaryTextarea name="praise" value={praise} onChange={setPraise} required placeholder="请输入主管表扬" />
+                            </div>
+                            <div>
+                              <div className="mb-2 text-sm font-medium">机会</div>
+                              <SummaryTextarea name="opportunity" value={opportunity} onChange={setOpportunity} required placeholder="请输入主管建议与机会" />
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+                    {!canEditLeader && !canEditManager ? (
+                      <>
+                        {hasLeaderSummary ? (
+                          <div>
+                            <div className="mb-3 text-sm font-medium text-muted-foreground">组长点评</div>
+                            <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                              <div>
+                                <div className="mb-2 text-sm font-medium">表扬</div>
+                                <SummaryTextarea value={data.summary.leader.praise} readOnly placeholder="暂无组长表扬" />
+                              </div>
+                              <div>
+                                <div className="mb-2 text-sm font-medium">机会</div>
+                                <SummaryTextarea value={data.summary.leader.opportunity} readOnly placeholder="暂无组长建议与机会" />
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                        {hasManagerSummary ? (
+                          <div>
+                            <div className="mb-3 text-sm font-medium text-muted-foreground">主管点评</div>
+                            <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                              <div>
+                                <div className="mb-2 text-sm font-medium">表扬</div>
+                                <SummaryTextarea value={data.summary.manager.praise} readOnly placeholder="暂无主管表扬" />
+                              </div>
+                              <div>
+                                <div className="mb-2 text-sm font-medium">机会</div>
+                                <SummaryTextarea value={data.summary.manager.opportunity} readOnly placeholder="暂无主管建议与机会" />
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                        {!hasLeaderSummary && !hasManagerSummary ? (
+                          <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                            <div>
+                              <div className="mb-2 text-sm font-medium">表扬</div>
+                              <SummaryTextarea value="" readOnly placeholder="暂无上级表扬" />
+                            </div>
+                            <div>
+                              <div className="mb-2 text-sm font-medium">机会</div>
+                              <SummaryTextarea value="" readOnly placeholder="暂无上级建议与机会" />
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
                   </div>
                 </div>
 

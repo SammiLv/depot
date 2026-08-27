@@ -90,7 +90,7 @@ async function replaceDefaultNineBoxRules(templateVersionId: string, labels: Rec
 export async function createTalentReviewTemplate(formData: FormData) {
   const user = await requireAbility(talentAbilityKeys.manageConfig); const departmentOrgNodeId = value(formData, "departmentOrgNodeId"); await assertDepartment(user, departmentOrgNodeId, talentAbilityKeys.manageConfig);
   const code = `TRM_${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
-  const row = await prisma.talentReviewTemplateVersion.create({ data: { departmentOrgNodeId, code, name: value(formData, "name"), version: 1, description: optionalValue(formData, "description"), createdById: user.id } });
+  const row = await prisma.talentReviewTemplateVersion.create({ data: { departmentOrgNodeId, code, name: value(formData, "name"), version: 1, kpiWeight: 0.6, reviewWeight: 0.4, description: optionalValue(formData, "description"), createdById: user.id } });
   await audit("TalentReviewTemplateVersion", row.id, "CREATE", user.id, row); revalidateTalentReview();
 }
 
@@ -100,11 +100,23 @@ export async function updateTalentReviewTemplate(formData: FormData) {
   await audit("TalentReviewTemplateVersion", id, "UPDATE_DRAFT", user.id, { before, after: row }); revalidateTalentReview();
 }
 
+export async function updateTalentAbilityCalculationWeights(formData: FormData) {
+  const user = await requireAbility(talentAbilityKeys.manageConfig); const id = value(formData, "id"); const before = await editableTemplate(user, id);
+  const kpiWeight = numberValue(formData, "kpiWeight");
+  const reviewWeight = numberValue(formData, "reviewWeight");
+  if (kpiWeight < 0 || kpiWeight > 1) throw new Error("KPI 权重必须在 0 到 1 之间");
+  if (reviewWeight < 0 || reviewWeight > 1) throw new Error("人才盘点权重必须在 0 到 1 之间");
+  const sum = Number((kpiWeight + reviewWeight).toFixed(4));
+  if (sum !== 1) throw new Error(`KPI 权重与人才盘点权重之和必须等于 1，当前为 ${sum}`);
+  const row = await prisma.talentReviewTemplateVersion.update({ where: { id }, data: { kpiWeight, reviewWeight } });
+  await audit("TalentReviewTemplateVersion", id, "UPDATE_WEIGHTS", user.id, { before, after: row }); revalidateTalentReview();
+}
+
 export async function cloneTalentReviewTemplateVersion(formData: FormData) {
   const user = await requireAbility(talentAbilityKeys.manageConfig); const sourceId = value(formData, "sourceId"); const source = await prisma.talentReviewTemplateVersion.findFirst({ where: { id: sourceId, deletedAt: null } }); if (!source) throw new Error("源模型不存在"); await assertDepartment(user, source.departmentOrgNodeId, talentAbilityKeys.manageConfig);
   const latest = await prisma.talentReviewTemplateVersion.aggregate({ where: { departmentOrgNodeId: source.departmentOrgNodeId, code: source.code }, _max: { version: true } }); const version = (latest._max.version ?? source.version) + 1;
   const [dimensions, ratings, thresholds, boxes] = await Promise.all([prisma.talentReviewDimension.findMany({ where: { templateVersionId: sourceId } }), prisma.talentRatingOption.findMany({ where: { templateVersionId: sourceId } }), prisma.talentGradeThreshold.findMany({ where: { templateVersionId: sourceId } }), prisma.talentNineBoxRule.findMany({ where: { templateVersionId: sourceId } })]);
-  const row = await prisma.$transaction(async (tx) => { const target = await tx.talentReviewTemplateVersion.create({ data: { departmentOrgNodeId: source.departmentOrgNodeId, code: source.code, name: source.name, version, description: optionalValue(formData, "description") ?? `基于 V${source.version} 复制`, createdById: user.id } }); await tx.talentReviewDimension.createMany({ data: dimensions.map(({ code, name, category, weight, maxScore, sortOrder, isRequired }) => ({ templateVersionId: target.id, code, name, category, weight, maxScore, sortOrder, isRequired })) }); await tx.talentRatingOption.createMany({ data: ratings.map(({ code, label, numericScore, sortOrder }) => ({ templateVersionId: target.id, code, label, numericScore, sortOrder })) }); await tx.talentGradeThreshold.createMany({ data: thresholds.map(({ gradeCode, label, minScore, maxScore, sortOrder }) => ({ templateVersionId: target.id, gradeCode, label, minScore, maxScore, sortOrder })) }); await tx.talentNineBoxRule.createMany({ data: boxes.map(({ code, label, potentialMin, potentialMax, performanceMin, performanceMax, colorToken, sortOrder }) => ({ templateVersionId: target.id, code, label, potentialMin, potentialMax, performanceMin, performanceMax, colorToken, sortOrder })) }); return target; });
+  const row = await prisma.$transaction(async (tx) => { const target = await tx.talentReviewTemplateVersion.create({ data: { departmentOrgNodeId: source.departmentOrgNodeId, code: source.code, name: source.name, version, kpiWeight: source.kpiWeight, reviewWeight: source.reviewWeight, description: optionalValue(formData, "description") ?? `基于 V${source.version} 复制`, createdById: user.id } }); await tx.talentReviewDimension.createMany({ data: dimensions.map(({ code, name, category, weight, maxScore, sortOrder, isRequired }) => ({ templateVersionId: target.id, code, name, category, weight, maxScore, sortOrder, isRequired })) }); await tx.talentRatingOption.createMany({ data: ratings.map(({ code, label, numericScore, sortOrder }) => ({ templateVersionId: target.id, code, label, numericScore, sortOrder })) }); await tx.talentGradeThreshold.createMany({ data: thresholds.map(({ gradeCode, label, minScore, maxScore, sortOrder }) => ({ templateVersionId: target.id, gradeCode, label, minScore, maxScore, sortOrder })) }); await tx.talentNineBoxRule.createMany({ data: boxes.map(({ code, label, potentialMin, potentialMax, performanceMin, performanceMax, colorToken, sortOrder }) => ({ templateVersionId: target.id, code, label, potentialMin, potentialMax, performanceMin, performanceMax, colorToken, sortOrder })) }); return target; });
   await audit("TalentReviewTemplateVersion", row.id, "CLONE_VERSION", user.id, { sourceId, version }); revalidateTalentReview();
 }
 
@@ -297,6 +309,8 @@ export async function publishTalentReviewTemplate(formData: FormData) {
   const [dimensions, ratings, thresholds, existingBoxes] = await Promise.all([prisma.talentReviewDimension.findMany({ where: { templateVersionId: id } }), prisma.talentRatingOption.findMany({ where: { templateVersionId: id } }), prisma.talentGradeThreshold.findMany({ where: { templateVersionId: id } }), prisma.talentNineBoxRule.findMany({ where: { templateVersionId: id } })]);
   const missingRules = [dimensions.length === 0 ? "评价维度" : null, ratings.length === 0 ? "评分档" : null, thresholds.length === 0 ? "等级区间" : null].filter(Boolean);
   if (missingRules.length > 0) throw new Error(`发布前请先完成：${missingRules.join("、")}`);
+  const weightSum = Number((template.kpiWeight + template.reviewWeight).toFixed(4));
+  if (weightSum !== 1) throw new Error(`发布前请确认人才能力测算权重：KPI 权重与人才盘点权重之和必须等于 1，当前为 ${weightSum}`);
   const boxes = await replaceDefaultNineBoxRules(id, Object.fromEntries(existingBoxes.map((item) => [item.code, item.label])));
   const modelMaxScore = dimensions.reduce((sum, item) => sum + item.maxScore * item.weight, 0); validateGradeThresholds(thresholds, modelMaxScore);
   if (boxes.length !== 9) throw new Error("九宫格生成失败，请重新保存后再发布");
@@ -310,6 +324,34 @@ export async function publishTalentReviewTemplateWithState(_previousState: Talen
     return { status: "success", message: "人才盘点模型已发布", requestId: randomUUID() };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "发布失败，请稍后重试", requestId: randomUUID() };
+  }
+}
+
+export async function deleteTalentReviewTemplate(formData: FormData) {
+  const user = await requireAbility(talentAbilityKeys.manageConfig);
+  const id = value(formData, "id");
+  const template = await prisma.talentReviewTemplateVersion.findUnique({ where: { id } });
+  if (!template) throw new Error("模板不存在");
+  if (template.status !== "DRAFT") throw new Error("只能删除草稿模板");
+  await assertDepartment(user, template.departmentOrgNodeId, talentAbilityKeys.manageConfig);
+  await prisma.$transaction(async (tx) => {
+    await tx.talentReviewDimension.deleteMany({ where: { templateVersionId: id } });
+    await tx.talentRatingOption.deleteMany({ where: { templateVersionId: id } });
+    await tx.talentGradeThreshold.deleteMany({ where: { templateVersionId: id } });
+    await tx.talentNineBoxRule.deleteMany({ where: { templateVersionId: id } });
+    await tx.talentReviewTemplateVersion.delete({ where: { id } });
+  });
+  await audit("TalentReviewTemplateVersion", id, "DELETE_DRAFT", user.id, { template });
+  revalidateTalentReview();
+}
+
+export type TalentDeleteTemplateState = { status: "idle" | "success" | "error"; message: string; requestId: string };
+export async function deleteTalentReviewTemplateWithState(_previousState: TalentDeleteTemplateState, formData: FormData): Promise<TalentDeleteTemplateState> {
+  try {
+    await deleteTalentReviewTemplate(formData);
+    return { status: "success", message: "草稿模型已删除", requestId: randomUUID() };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : "删除失败，请稍后重试", requestId: randomUUID() };
   }
 }
 

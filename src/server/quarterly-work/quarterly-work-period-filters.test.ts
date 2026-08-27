@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getQuarterByDate,
-  isCompletedProjectVisibleInPeriod,
+  isLaunchedProjectVisibleInPeriod,
   isValueTrackVisibleInPeriod,
   matchesDepartmentAndTeamScope,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
@@ -12,18 +12,19 @@ test("getQuarterByDate returns calendar quarter", () => {
   assert.equal(getQuarterByDate(null), null);
 });
 
-test("isCompletedProjectVisibleInPeriod filters by completedAt year and quarter", () => {
+test("isLaunchedProjectVisibleInPeriod filters by launchedAt year and quarter", () => {
   const period = { year: 2026, quarter: 3 as const };
-  const completedProject = {
-    status: "COMPLETED",
-    completedAt: new Date(2026, 7, 15),
+  const launchedProject = {
+    status: "LAUNCHED",
+    launchedAt: new Date(2026, 7, 15),
   };
 
-  assert.equal(isCompletedProjectVisibleInPeriod(completedProject, period, false), true);
-  assert.equal(isCompletedProjectVisibleInPeriod(completedProject, { year: 2026, quarter: 2 }, false), false);
-  assert.equal(isCompletedProjectVisibleInPeriod(completedProject, { year: 2026, quarter: "all" }, false), true);
-  assert.equal(isCompletedProjectVisibleInPeriod({ ...completedProject, status: "IN_PROGRESS" }, period, false), false);
-  assert.equal(isCompletedProjectVisibleInPeriod(completedProject, period, true), false);
+  assert.equal(isLaunchedProjectVisibleInPeriod(launchedProject, period, false), true);
+  assert.equal(isLaunchedProjectVisibleInPeriod(launchedProject, { year: 2026, quarter: 2 }, false), false);
+  assert.equal(isLaunchedProjectVisibleInPeriod(launchedProject, { year: 2026, quarter: "all" }, false), true);
+  assert.equal(isLaunchedProjectVisibleInPeriod({ ...launchedProject, status: "COMPLETED" }, period, false), false);
+  assert.equal(isLaunchedProjectVisibleInPeriod({ ...launchedProject, status: "IN_PROGRESS" }, period, false), false);
+  assert.equal(isLaunchedProjectVisibleInPeriod(launchedProject, period, true), false);
 });
 
 test("isValueTrackVisibleInPeriod filters by trackedAt year and quarter", () => {

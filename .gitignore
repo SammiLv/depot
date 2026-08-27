@@ -43,6 +43,9 @@ scripts/log/
 # claude code
 .claude/
 
+# cursor (local rules/settings, not for git)
+.cursor/
+
 # vercel
 .vercel
 

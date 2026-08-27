@@ -1,0 +1,1523 @@
+{
+  "exportedAt": "2026-08-19T04:33:39.427Z",
+  "summary": {
+    "talentReviewTemplates": 1,
+    "careerTracks": 1,
+    "jobFamilies": 2,
+    "jobRoles": 4,
+    "jobLevelGroups": 6,
+    "jobLevels": 10,
+    "competencyItems": 0,
+    "competencyPackages": 0,
+    "competencyModelVersions": 0,
+    "salaryCapConfigs": 12,
+    "businessAssessmentRules": 1,
+    "workIncidentRuleVersions": 1,
+    "kpiRatingRuleVersions": 1,
+    "talentRestrictionRules": 14,
+    "talentRuleFieldDefinitions": 8
+  },
+  "modules": {
+    "talentReviewModel": [
+      {
+        "code": "TRM_ABF663F34413",
+        "name": "公司级人才盘点模型",
+        "departmentName": "产品部",
+        "version": 1,
+        "status": "ACTIVE",
+        "description": "公司级人才盘点模型1.0",
+        "dimensions": [
+          {
+            "code": "DIM_02C159CB",
+            "name": "忠诚度",
+            "category": "POTENTIAL",
+            "weight": 1,
+            "maxScore": 5,
+            "sortOrder": 10,
+            "isRequired": true
+          },
+          {
+            "code": "DIM_A7512E57",
+            "name": "工作态度",
+            "category": "PERFORMANCE",
+            "weight": 1,
+            "maxScore": 5,
+            "sortOrder": 20,
+            "isRequired": true
+          },
+          {
+            "code": "DIM_14455587",
+            "name": "匹配度",
+            "category": "POTENTIAL",
+            "weight": 1,
+            "maxScore": 5,
+            "sortOrder": 30,
+            "isRequired": true
+          },
+          {
+            "code": "DIM_E1F385D2",
+            "name": "成长度",
+            "category": "POTENTIAL",
+            "weight": 1,
+            "maxScore": 5,
+            "sortOrder": 40,
+            "isRequired": true
+          },
+          {
+            "code": "DIM_13E315BE",
+            "name": "能力度",
+            "category": "PERFORMANCE",
+            "weight": 1,
+            "maxScore": 5,
+            "sortOrder": 50,
+            "isRequired": true
+          },
+          {
+            "code": "DIM_D80F2F77",
+            "name": "产出度",
+            "category": "PERFORMANCE",
+            "weight": 1,
+            "maxScore": 5,
+            "sortOrder": 60,
+            "isRequired": true
+          }
+        ],
+        "gradeThresholds": [
+          {
+            "gradeCode": "S",
+            "label": "杰出",
+            "minScore": 25,
+            "maxScore": 30,
+            "sortOrder": 10
+          },
+          {
+            "gradeCode": "A",
+            "label": "优秀",
+            "minScore": 19,
+            "maxScore": 24,
+            "sortOrder": 20
+          },
+          {
+            "gradeCode": "B",
+            "label": "普通",
+            "minScore": 13,
+            "maxScore": 18,
+            "sortOrder": 30
+          },
+          {
+            "gradeCode": "C",
+            "label": "略差",
+            "minScore": 7,
+            "maxScore": 12,
+            "sortOrder": 40
+          },
+          {
+            "gradeCode": "D",
+            "label": "淘汰",
+            "minScore": 0,
+            "maxScore": 6,
+            "sortOrder": 50
+          }
+        ],
+        "nineBoxRules": [
+          {
+            "code": "LOW_LOW",
+            "label": "问题员工",
+            "potentialMin": 3,
+            "potentialMax": 7,
+            "performanceMin": 3,
+            "performanceMax": 7,
+            "colorToken": "danger",
+            "sortOrder": 10
+          },
+          {
+            "code": "MID_LOW",
+            "label": "基本胜任",
+            "potentialMin": 3,
+            "potentialMax": 7,
+            "performanceMin": 8,
+            "performanceMax": 11,
+            "colorToken": "warning",
+            "sortOrder": 20
+          },
+          {
+            "code": "HIGH_LOW",
+            "label": "熟练员工",
+            "potentialMin": 3,
+            "potentialMax": 7,
+            "performanceMin": 12,
+            "performanceMax": 15,
+            "colorToken": "warning",
+            "sortOrder": 30
+          },
+          {
+            "code": "LOW_MID",
+            "label": "差距员工",
+            "potentialMin": 8,
+            "potentialMax": 11,
+            "performanceMin": 3,
+            "performanceMax": 7,
+            "colorToken": "default",
+            "sortOrder": 40
+          },
+          {
+            "code": "MID_MID",
+            "label": "中坚力量",
+            "potentialMin": 8,
+            "potentialMax": 11,
+            "performanceMin": 8,
+            "performanceMax": 11,
+            "colorToken": "primary",
+            "sortOrder": 50
+          },
+          {
+            "code": "HIGH_MID",
+            "label": "绩效之星",
+            "potentialMin": 8,
+            "potentialMax": 11,
+            "performanceMin": 12,
+            "performanceMax": 15,
+            "colorToken": "warning",
+            "sortOrder": 60
+          },
+          {
+            "code": "LOW_HIGH",
+            "label": "待发展者",
+            "potentialMin": 12,
+            "potentialMax": 15,
+            "performanceMin": 3,
+            "performanceMax": 7,
+            "colorToken": "warning",
+            "sortOrder": 70
+          },
+          {
+            "code": "MID_HIGH",
+            "label": "潜力之星",
+            "potentialMin": 12,
+            "potentialMax": 15,
+            "performanceMin": 8,
+            "performanceMax": 11,
+            "colorToken": "warning",
+            "sortOrder": 80
+          },
+          {
+            "code": "HIGH_HIGH",
+            "label": "超级明星",
+            "potentialMin": 12,
+            "potentialMax": 15,
+            "performanceMin": 12,
+            "performanceMax": 15,
+            "colorToken": "danger",
+            "sortOrder": 90
+          }
+        ],
+        "ratingOptions": [
+          {
+            "code": "S",
+            "label": "杰出",
+            "numericScore": 5,
+            "sortOrder": 10
+          },
+          {
+            "code": "A",
+            "label": "优秀",
+            "numericScore": 4,
+            "sortOrder": 20
+          },
+          {
+            "code": "B",
+            "label": "普通",
+            "numericScore": 3,
+            "sortOrder": 30
+          },
+          {
+            "code": "C",
+            "label": "略差",
+            "numericScore": 2,
+            "sortOrder": 40
+          },
+          {
+            "code": "D",
+            "label": "淘汰",
+            "numericScore": 1,
+            "sortOrder": 50
+          }
+        ]
+      }
+    ],
+    "careerTrack": {
+      "careerTracks": [
+        {
+          "code": "TRACK_7E0B43E7B3",
+          "name": "技术岗",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 1
+        }
+      ],
+      "jobFamilies": [
+        {
+          "code": "FAMILY_08411FD97C",
+          "name": "产品序列",
+          "careerTrackCode": "TRACK_7E0B43E7B3",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 1
+        },
+        {
+          "code": "FAMILY_0FF34C38BF",
+          "name": "设计序列",
+          "careerTrackCode": "TRACK_7E0B43E7B3",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 3
+        }
+      ],
+      "jobRoles": [
+        {
+          "code": "ROLE_08EC71C531",
+          "name": "B端产品",
+          "jobFamilyCode": "FAMILY_08411FD97C",
+          "careerTrackCode": "TRACK_7E0B43E7B3",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 1
+        },
+        {
+          "code": "ROLE_E05D1A4B10",
+          "name": "C端产品",
+          "jobFamilyCode": "FAMILY_08411FD97C",
+          "careerTrackCode": "TRACK_7E0B43E7B3",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 2
+        },
+        {
+          "code": "ROLE_055AE5362D",
+          "name": "UI设计",
+          "jobFamilyCode": "FAMILY_0FF34C38BF",
+          "careerTrackCode": "TRACK_7E0B43E7B3",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 3
+        },
+        {
+          "code": "ROLE_05BE664F1C",
+          "name": "平面设计",
+          "jobFamilyCode": "FAMILY_0FF34C38BF",
+          "careerTrackCode": "TRACK_7E0B43E7B3",
+          "departmentName": "产品部",
+          "description": null,
+          "sortOrder": 4
+        }
+      ],
+      "jobLevelGroups": [
+        {
+          "code": "R1",
+          "name": "R1职级",
+          "rankOrder": 1,
+          "description": "系统基础职级段；具体职级档由部门按实际情况配置。"
+        },
+        {
+          "code": "R2",
+          "name": "R2职级",
+          "rankOrder": 2,
+          "description": "系统基础职级段；具体职级档由部门按实际情况配置。"
+        },
+        {
+          "code": "R3",
+          "name": "R3职级",
+          "rankOrder": 3,
+          "description": "系统基础职级段；具体职级档由部门按实际情况配置。"
+        },
+        {
+          "code": "R4",
+          "name": "R4职级",
+          "rankOrder": 4,
+          "description": "系统基础职级段；具体职级档由部门按实际情况配置。"
+        },
+        {
+          "code": "R5",
+          "name": "R5职级",
+          "rankOrder": 5,
+          "description": "系统基础职级段；具体职级档由部门按实际情况配置。"
+        },
+        {
+          "code": "R6",
+          "name": "R6职级",
+          "rankOrder": 6,
+          "description": "系统基础职级段；具体职级档由部门按实际情况配置。"
+        }
+      ],
+      "jobLevels": [
+        {
+          "code": "R1",
+          "name": "R1",
+          "jobLevelGroupCode": "R1",
+          "stepOrder": 1,
+          "displayOrder": 101
+        },
+        {
+          "code": "R2",
+          "name": "R2",
+          "jobLevelGroupCode": "R2",
+          "stepOrder": 1,
+          "displayOrder": 201
+        },
+        {
+          "code": "R3-1",
+          "name": "R3-1",
+          "jobLevelGroupCode": "R3",
+          "stepOrder": 1,
+          "displayOrder": 301
+        },
+        {
+          "code": "R3-2",
+          "name": "R3-2",
+          "jobLevelGroupCode": "R3",
+          "stepOrder": 2,
+          "displayOrder": 302
+        },
+        {
+          "code": "R3-3",
+          "name": "R3-3",
+          "jobLevelGroupCode": "R3",
+          "stepOrder": 3,
+          "displayOrder": 303
+        },
+        {
+          "code": "R4-1",
+          "name": "R4-1",
+          "jobLevelGroupCode": "R4",
+          "stepOrder": 1,
+          "displayOrder": 401
+        },
+        {
+          "code": "R4-2",
+          "name": "R4-2",
+          "jobLevelGroupCode": "R4",
+          "stepOrder": 2,
+          "displayOrder": 402
+        },
+        {
+          "code": "R4-3",
+          "name": "R4-3",
+          "jobLevelGroupCode": "R4",
+          "stepOrder": 3,
+          "displayOrder": 403
+        },
+        {
+          "code": "R5",
+          "name": "R5",
+          "jobLevelGroupCode": "R5",
+          "stepOrder": 1,
+          "displayOrder": 501
+        },
+        {
+          "code": "R6",
+          "name": "R6",
+          "jobLevelGroupCode": "R6",
+          "stepOrder": 1,
+          "displayOrder": 601
+        }
+      ]
+    },
+    "competencyModel": {
+      "competencyItems": [],
+      "competencyPackages": [],
+      "competencyModelVersions": []
+    },
+    "salaryCap": [
+      {
+        "departmentName": "产品部",
+        "jobLevelGroupCode": "R1",
+        "jobLevelCode": null,
+        "maxSalary": 10000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "产品部",
+        "jobLevelGroupCode": "R2",
+        "jobLevelCode": null,
+        "maxSalary": 15000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "产品部",
+        "jobLevelGroupCode": "R3",
+        "jobLevelCode": null,
+        "maxSalary": 20000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "产品部",
+        "jobLevelGroupCode": "R4",
+        "jobLevelCode": null,
+        "maxSalary": 30000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "产品部",
+        "jobLevelGroupCode": "R5",
+        "jobLevelCode": null,
+        "maxSalary": 40000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "产品部",
+        "jobLevelGroupCode": "R6",
+        "jobLevelCode": null,
+        "maxSalary": 50000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "平台部",
+        "jobLevelGroupCode": "R1",
+        "jobLevelCode": null,
+        "maxSalary": 10000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "平台部",
+        "jobLevelGroupCode": "R2",
+        "jobLevelCode": null,
+        "maxSalary": 15000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "平台部",
+        "jobLevelGroupCode": "R3",
+        "jobLevelCode": null,
+        "maxSalary": 20000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "平台部",
+        "jobLevelGroupCode": "R4",
+        "jobLevelCode": null,
+        "maxSalary": 30000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "平台部",
+        "jobLevelGroupCode": "R5",
+        "jobLevelCode": null,
+        "maxSalary": 40000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      },
+      {
+        "departmentName": "平台部",
+        "jobLevelGroupCode": "R6",
+        "jobLevelCode": null,
+        "maxSalary": 50000,
+        "currency": "CNY",
+        "effectiveFrom": "2026-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "version": 1,
+        "versionStatus": "ACTIVE"
+      }
+    ],
+    "businessAssessment": [
+      {
+        "scopeKey": "QUARTERLY_5c2a80c3-9a63-4e10-b027-bf2c33beb015",
+        "name": "2026年Q3业务考核规则",
+        "departmentName": "产品部",
+        "year": 2026,
+        "quarter": 3,
+        "version": 2,
+        "status": "CONFIRMED",
+        "totalKpiScore": 6,
+        "allocationMode": "EQUAL",
+        "initialPassPercent": 100,
+        "retestPassPercent": 50,
+        "finalFailPercent": 0,
+        "defaultScoringType": "NUMERIC",
+        "passingNumericScore": 80,
+        "requiredGradeCode": "A",
+        "subjects": [
+          {
+            "code": "SUBJECT_MSODYACV_CB1C",
+            "name": "考试系统考试",
+            "scoringType": "NUMERIC",
+            "sortOrder": 10,
+            "passingStandards": [
+              {
+                "scopeType": "ORG_NODE",
+                "scopeName": "B端组",
+                "scoringType": "NUMERIC",
+                "passingNumericScore": 80,
+                "requiredGradeCode": null
+              },
+              {
+                "scopeType": "ORG_NODE",
+                "scopeName": "C端组",
+                "scoringType": "NUMERIC",
+                "passingNumericScore": 80,
+                "requiredGradeCode": null
+              },
+              {
+                "scopeType": "ORG_NODE",
+                "scopeName": "采购组",
+                "scoringType": "NUMERIC",
+                "passingNumericScore": 80,
+                "requiredGradeCode": null
+              },
+              {
+                "scopeType": "ORG_NODE",
+                "scopeName": "设计组",
+                "scoringType": "NUMERIC",
+                "passingNumericScore": 80,
+                "requiredGradeCode": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "workIncident": [
+      {
+        "departmentName": "产品部",
+        "name": "工作事故规则",
+        "version": 1,
+        "status": "ACTIVE",
+        "policyVersion": "V3.0",
+        "matrixJson": "[{\"level\":\"S\",\"name\":\"S级事故\"},{\"level\":\"A\",\"name\":\"A级事故\"},{\"level\":\"B\",\"name\":\"B级事故\"},{\"level\":\"C\",\"name\":\"C级事故\"},{\"level\":\"D\",\"name\":\"D级事故\"}]",
+        "description": "依据部门绩效管理机制 V3.0"
+      }
+    ],
+    "kpiRating": [
+      {
+        "departmentName": "产品部",
+        "name": "KPI 绩效等级规则",
+        "version": 2,
+        "status": "ACTIVE",
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "quarterlyKpiTotalScore": 110,
+        "bands": [
+          {
+            "name": "S",
+            "minScore": 110,
+            "maxScore": null,
+            "isUnbounded": true,
+            "description": "绩效优秀",
+            "sortOrder": 10
+          },
+          {
+            "name": "A",
+            "minScore": 100,
+            "maxScore": 109,
+            "isUnbounded": false,
+            "description": "绩效良好",
+            "sortOrder": 20
+          },
+          {
+            "name": "B",
+            "minScore": 90,
+            "maxScore": 99,
+            "isUnbounded": false,
+            "description": "基本满意",
+            "sortOrder": 30
+          },
+          {
+            "name": "C",
+            "minScore": 70,
+            "maxScore": 89,
+            "isUnbounded": false,
+            "description": "尚需改进",
+            "sortOrder": 40
+          },
+          {
+            "name": "D",
+            "minScore": 0,
+            "maxScore": 69,
+            "isUnbounded": false,
+            "description": "不达预期",
+            "sortOrder": 50
+          }
+        ]
+      }
+    ],
+    "talentRestriction": {
+      "rules": [
+        {
+          "code": "FORMAL_ASSESSMENT_FAILED",
+          "name": "业务考核不及格",
+          "category": "BUSINESS_ASSESSMENT",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": "部门绩效管理机制 V3.0",
+            "description": "用于第3轮规则列表和只读详情验收；不触发员工处理",
+            "effectiveFrom": "2025-12-31T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": "依据正式制度建立首版只读规则",
+            "conditions": [
+              {
+                "fieldDefinitionCode": "BUSINESS_ASSESSMENT_RESULT",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"FAILED\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "SALARY_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              },
+              {
+                "outputType": "PROMOTION_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 30
+              }
+            ]
+          }
+        },
+        {
+          "code": "FORMAL_INCIDENT_A",
+          "name": "A级工作事故",
+          "category": "WORK_INCIDENT",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": "部门绩效管理机制 V3.0",
+            "description": "用于第3轮规则列表和只读详情验收；不触发员工处理",
+            "effectiveFrom": "2025-12-31T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": "依据正式制度建立首版只读规则",
+            "conditions": [
+              {
+                "fieldDefinitionCode": "WORK_INCIDENT_LEVEL",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"A\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "KPI_PROCESSING",
+                "handlingCode": "DEDUCT_POINTS",
+                "numericValue": 110,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              },
+              {
+                "outputType": "SALARY_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 30
+              },
+              {
+                "outputType": "PROMOTION_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 40
+              },
+              {
+                "outputType": "ANNUAL_BONUS_PROCESSING",
+                "handlingCode": "CANCEL",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_YEAR",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 50
+              }
+            ]
+          }
+        },
+        {
+          "code": "FORMAL_KPI_C",
+          "name": "季度KPI为C级",
+          "category": "QUARTERLY_KPI",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 2,
+            "status": "ACTIVE",
+            "policyBasis": "部门绩效管理机制 V3.0",
+            "description": "用于第3轮规则列表和只读详情验收；不触发员工处理",
+            "effectiveFrom": "2025-12-30T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": "依据正式制度建立首版只读规则",
+            "conditions": [
+              {
+                "fieldDefinitionCode": "QUARTERLY_KPI_RATING",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"C\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "SALARY_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              },
+              {
+                "outputType": "TRAINING_OR_TRANSFER",
+                "handlingCode": "TRAINING",
+                "numericValue": null,
+                "durationValue": 3,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 30
+              },
+              {
+                "outputType": "PROMOTION_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 40
+              }
+            ]
+          }
+        },
+        {
+          "code": "FORMAL_PROFILE_TWO_C_REVIEWS",
+          "name": "聘期内人才盘点2次C级",
+          "category": "EMPLOYEE_PROFILE",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": "部门绩效管理机制 V3.0",
+            "description": "用于第3轮规则列表和只读详情验收；不触发员工处理",
+            "effectiveFrom": "2025-12-31T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": "依据正式制度建立首版只读规则",
+            "conditions": [
+              {
+                "fieldDefinitionCode": "PROFILE_TWO_C_REVIEWS_IN_CONTRACT",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"YES\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "DO_NOT_RENEW",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "FORMAL_REVIEW_C",
+          "name": "人才盘点为C级",
+          "category": "TALENT_REVIEW",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 2,
+            "status": "ACTIVE",
+            "policyBasis": "部门绩效管理机制 V3.0",
+            "description": "用于第3轮规则列表和只读详情验收；不触发员工处理",
+            "effectiveFrom": "2025-12-30T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": "依据正式制度建立首版只读规则",
+            "conditions": [
+              {
+                "fieldDefinitionCode": "TALENT_REVIEW_GRADE",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"C\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "SALARY_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              },
+              {
+                "outputType": "PROMOTION_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 30
+              },
+              {
+                "outputType": "TRAINING_OR_TRANSFER",
+                "handlingCode": "TRAINING",
+                "numericValue": null,
+                "durationValue": 3,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 40
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_2041B51396F6418B",
+          "name": "聘期内无晋升",
+          "category": "EMPLOYEE_PROFILE",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-12T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "PROFILE_FORMAL_PROMOTION_IN_CONTRACT",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"NO\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "DO_NOT_RENEW",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_3F86D4E43D66444D",
+          "name": "C级工作事故",
+          "category": "WORK_INCIDENT",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-12T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "WORK_INCIDENT_LEVEL",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"C\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "KPI_PROCESSING",
+                "handlingCode": "DEDUCT_POINTS",
+                "numericValue": 40,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              },
+              {
+                "outputType": "SALARY_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 30
+              },
+              {
+                "outputType": "PROMOTION_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 6,
+                "durationUnit": "MONTH",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 40
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_44215379DCF94CD0",
+          "name": "季度KPI为D级",
+          "category": "QUARTERLY_KPI",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-11T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "QUARTERLY_KPI_RATING",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"D\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "IMMEDIATE_TERMINATION_RECOMMENDATION",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_48F20A23F9F04B60",
+          "name": "人才盘点为D级",
+          "category": "TALENT_REVIEW",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-11T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "TALENT_REVIEW_GRADE",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"D\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "IMMEDIATE_TERMINATION_RECOMMENDATION",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_55AEF24B980041C0",
+          "name": "续聘前1次人才盘点为C级",
+          "category": "EMPLOYEE_PROFILE",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-12T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "PROFILE_LATEST_PRE_RENEWAL_REVIEW_C",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"YES\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "DO_NOT_RENEW",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_77F2D6262A144075",
+          "name": "S级工作事故",
+          "category": "WORK_INCIDENT",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-10T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "WORK_INCIDENT_LEVEL",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"S\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "IMMEDIATE_TERMINATION_RECOMMENDATION",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_95B91F76D9BB49D3",
+          "name": "聘期内人才盘点连续2次C级",
+          "category": "EMPLOYEE_PROFILE",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-12T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "PROFILE_CONSECUTIVE_TWO_C_REVIEWS_IN_CONTRACT",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"YES\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "CONTRACT_PROCESSING",
+                "handlingCode": "IMMEDIATE_TERMINATION_RECOMMENDATION",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_A201FD53892F4871",
+          "name": "B级工作事故",
+          "category": "WORK_INCIDENT",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-12T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "WORK_INCIDENT_LEVEL",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"B\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "KPI_PROCESSING",
+                "handlingCode": "DEDUCT_POINTS",
+                "numericValue": 110,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              },
+              {
+                "outputType": "SALARY_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 30
+              },
+              {
+                "outputType": "PROMOTION_RESTRICTION",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": 1,
+                "durationUnit": "YEAR",
+                "effectPeriodCode": null,
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 40
+              }
+            ]
+          }
+        },
+        {
+          "code": "TRR_E7CB2DCD73384297",
+          "name": "D级工作事故",
+          "category": "WORK_INCIDENT",
+          "departmentName": "产品部",
+          "status": "ACTIVE",
+          "activeRevision": {
+            "revisionNo": 1,
+            "status": "ACTIVE",
+            "policyBasis": null,
+            "description": null,
+            "effectiveFrom": "2026-08-12T16:00:00.000Z",
+            "effectiveTo": null,
+            "priority": 100,
+            "revisionNote": null,
+            "conditions": [
+              {
+                "fieldDefinitionCode": "WORK_INCIDENT_LEVEL",
+                "operator": "EQUALS",
+                "comparisonValueJson": "\"D\""
+              }
+            ],
+            "outputs": [
+              {
+                "outputType": "KPI_PROCESSING",
+                "handlingCode": "DEDUCT_POINTS",
+                "numericValue": 10,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 10
+              },
+              {
+                "outputType": "REWARD_PROCESSING",
+                "handlingCode": "PROHIBIT",
+                "numericValue": null,
+                "durationValue": null,
+                "durationUnit": null,
+                "effectPeriodCode": "CURRENT_QUARTER",
+                "parametersJson": "{}",
+                "description": null,
+                "sortOrder": 20
+              }
+            ]
+          }
+        }
+      ],
+      "fieldDefinitions": [
+        {
+          "code": "BUSINESS_ASSESSMENT_RESULT",
+          "displayName": "业务考核等级",
+          "source": "BUSINESS_ASSESSMENT",
+          "sourceFieldPath": "BusinessAssessmentSummary.isOverallPassed",
+          "dataType": "ENUM",
+          "enumValuesJson": "[{\"value\":\"PASSED\",\"label\":\"合格\"},{\"value\":\"FAILED\",\"label\":\"不及格\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "业务考核",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "业务考核汇总后的整体是否合格"
+        },
+        {
+          "code": "PROFILE_CONSECUTIVE_TWO_C_REVIEWS_IN_CONTRACT",
+          "displayName": "聘期内人才盘点连续2次C",
+          "source": "EMPLOYEE_PROFILE",
+          "sourceFieldPath": "EmployeeTalentProfile.hasConsecutiveTwoCReviewsInCurrentContract",
+          "dataType": "TRISTATE_BOOLEAN",
+          "enumValuesJson": "[{\"value\":\"PENDING\",\"label\":\"待更新\"},{\"value\":\"YES\",\"label\":\"是\"},{\"value\":\"NO\",\"label\":\"否\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "员工档案",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "只读取员工档案最终事实，不在配置中心判断连续次数"
+        },
+        {
+          "code": "PROFILE_FORMAL_PROMOTION_IN_CONTRACT",
+          "displayName": "当前聘期内是否有正式晋升",
+          "source": "EMPLOYEE_PROFILE",
+          "sourceFieldPath": "EmployeeTalentProfile.hasFormalPromotionInCurrentContract",
+          "dataType": "TRISTATE_BOOLEAN",
+          "enumValuesJson": "[{\"value\":\"PENDING\",\"label\":\"待更新\"},{\"value\":\"YES\",\"label\":\"是\"},{\"value\":\"NO\",\"label\":\"否\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "员工档案",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "只读取员工档案最终事实，不在配置中心聚合晋升记录"
+        },
+        {
+          "code": "PROFILE_LATEST_PRE_RENEWAL_REVIEW_C",
+          "displayName": "续聘前最近一次人才盘点为C级",
+          "source": "EMPLOYEE_PROFILE",
+          "sourceFieldPath": "EmployeeTalentProfile.isLatestPreRenewalReviewC",
+          "dataType": "TRISTATE_BOOLEAN",
+          "enumValuesJson": "[{\"value\":\"PENDING\",\"label\":\"待更新\"},{\"value\":\"YES\",\"label\":\"是\"},{\"value\":\"NO\",\"label\":\"否\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "员工档案",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "只读取员工档案最终事实，不在配置中心查找最近一次盘点"
+        },
+        {
+          "code": "PROFILE_TWO_C_REVIEWS_IN_CONTRACT",
+          "displayName": "聘期内人才盘点2次C",
+          "source": "EMPLOYEE_PROFILE",
+          "sourceFieldPath": "EmployeeTalentProfile.hasTwoCReviewsInCurrentContract",
+          "dataType": "TRISTATE_BOOLEAN",
+          "enumValuesJson": "[{\"value\":\"PENDING\",\"label\":\"待更新\"},{\"value\":\"YES\",\"label\":\"是\"},{\"value\":\"NO\",\"label\":\"否\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "员工档案",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "只读取员工档案最终事实，不在配置中心统计次数"
+        },
+        {
+          "code": "QUARTERLY_KPI_RATING",
+          "displayName": "KPI等级",
+          "source": "QUARTERLY_KPI",
+          "sourceFieldPath": "PersonalKpi.finalRatingName",
+          "dataType": "ENUM",
+          "enumValuesJson": "[{\"value\":\"S\",\"label\":\"S\"},{\"value\":\"A\",\"label\":\"A\"},{\"value\":\"B\",\"label\":\"B\"},{\"value\":\"C\",\"label\":\"C\"},{\"value\":\"D\",\"label\":\"D\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "KPI",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "季度KPI完成审批后的最终等级"
+        },
+        {
+          "code": "TALENT_REVIEW_GRADE",
+          "displayName": "人才盘点等级",
+          "source": "TALENT_REVIEW",
+          "sourceFieldPath": "TalentReviewResult.gradeCode",
+          "dataType": "ENUM",
+          "enumValuesJson": "[{\"value\":\"S\",\"label\":\"S\"},{\"value\":\"A\",\"label\":\"A\"},{\"value\":\"B\",\"label\":\"B\"},{\"value\":\"C\",\"label\":\"C\"},{\"value\":\"D\",\"label\":\"D\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "人才盘点",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "已确认人才盘点结果的最终等级"
+        },
+        {
+          "code": "WORK_INCIDENT_LEVEL",
+          "displayName": "事故等级",
+          "source": "WORK_INCIDENT",
+          "sourceFieldPath": "WorkIncident.level",
+          "dataType": "ENUM",
+          "enumValuesJson": "[{\"value\":\"S\",\"label\":\"S\"},{\"value\":\"A\",\"label\":\"A\"},{\"value\":\"B\",\"label\":\"B\"},{\"value\":\"C\",\"label\":\"C\"},{\"value\":\"D\",\"label\":\"D\"}]",
+          "operatorsJson": "[\"EQUALS\"]",
+          "ownerModule": "工作事故",
+          "isEnabled": true,
+          "isSystem": true,
+          "description": "已确认工作事故的正式事故等级"
+        }
+      ]
+    }
+  }
+}

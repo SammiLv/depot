@@ -4,6 +4,8 @@ export const orgPermissionModuleKeys = {
   annualGoal: "ANNUAL_GOAL",
   kpi: "KPI",
   talent: "TALENT",
+  notification: "NOTIFICATION",
+  productManagement: "PRODUCT_MANAGEMENT",
 } satisfies Record<string, OrgPermissionModuleKey>;
 
 export const kpiAbilityKeys = {
@@ -16,6 +18,8 @@ export const kpiAbilityKeys = {
   scoreLeader: "SCORE_LEADER",
   scoreManager: "SCORE_MANAGER",
   scoreFinal: "SCORE_FINAL",
+  manageBusinessAssessment: "MANAGE_BUSINESS_ASSESSMENT",
+  manageWorkIncident: "MANAGE_WORK_INCIDENT",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
 export const talentAbilityKeys = {
@@ -38,6 +42,16 @@ export const talentAbilityKeys = {
   manageConfig: "MANAGE_TALENT_CONFIG",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
+export const notificationAbilityKeys = {
+  manageNotificationScenario: "MANAGE_NOTIFICATION_SCENARIO",
+} satisfies Record<string, OrgPermissionAbilityKey>;
+
+export const productManagementAbilityKeys = {
+  manageProductGoal: "MANAGE_PRODUCT_GOAL",
+  manageProjectAndValueTracking: "MANAGE_PROJECT_AND_VALUE_TRACKING",
+  manageProductTask: "MANAGE_PRODUCT_TASK",
+} satisfies Record<string, OrgPermissionAbilityKey>;
+
 export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, number> = {
   SELF: 0,
   NODE: 1,
@@ -54,6 +68,8 @@ export const kpiOrdinaryPermissionAbilityKeys = [
   kpiAbilityKeys.manageKpiTemplate,
   kpiAbilityKeys.toggleKpiTemplate,
   kpiAbilityKeys.scoreSelf,
+  kpiAbilityKeys.manageBusinessAssessment,
+  kpiAbilityKeys.manageWorkIncident,
 ] satisfies OrgPermissionAbilityKey[];
 
 export const kpiDefaultPermissionGrants: Array<{
@@ -179,6 +195,16 @@ export const talentOrdinaryPermissionAbilityKeys = [
   talentAbilityKeys.viewHistory,
 ] satisfies OrgPermissionAbilityKey[];
 
+export const notificationOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
+  notificationAbilityKeys.manageNotificationScenario,
+];
+
+export const productManagementOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
+  productManagementAbilityKeys.manageProductGoal,
+  productManagementAbilityKeys.manageProjectAndValueTracking,
+  productManagementAbilityKeys.manageProductTask,
+];
+
 type DefaultPermissionGrant = {
   moduleKey: OrgPermissionModuleKey;
   abilityKey: OrgPermissionAbilityKey;
@@ -188,23 +214,32 @@ type DefaultPermissionGrant = {
   orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
 };
 
+const migratedToKpiTalentAbilityKeys = new Set<OrgPermissionAbilityKey>([
+  talentAbilityKeys.manageBusinessAssessment,
+  talentAbilityKeys.manageWorkIncident,
+]);
+
 export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
-  ...Object.values(talentAbilityKeys).map((abilityKey) => ({
-    moduleKey: orgPermissionModuleKeys.talent,
-    abilityKey,
-    scopeType: "ALL" as const,
-    subjectType: "ROLE" as const,
-    roleType: "ADMIN" as const,
-    orgNodeSeedKey: null,
-  })),
-  ...Object.values(talentAbilityKeys).map((abilityKey) => ({
-    moduleKey: orgPermissionModuleKeys.talent,
-    abilityKey,
-    scopeType: "SUBTREE" as const,
-    subjectType: "ROLE" as const,
-    roleType: "DEPARTMENT_MANAGER" as const,
-    orgNodeSeedKey: "DEPARTMENT" as const,
-  })),
+  ...Object.values(talentAbilityKeys)
+    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
+    .map((abilityKey) => ({
+      moduleKey: orgPermissionModuleKeys.talent,
+      abilityKey,
+      scopeType: "ALL" as const,
+      subjectType: "ROLE" as const,
+      roleType: "ADMIN" as const,
+      orgNodeSeedKey: null,
+    })),
+  ...Object.values(talentAbilityKeys)
+    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
+    .map((abilityKey) => ({
+      moduleKey: orgPermissionModuleKeys.talent,
+      abilityKey,
+      scopeType: "SUBTREE" as const,
+      subjectType: "ROLE" as const,
+      roleType: "DEPARTMENT_MANAGER" as const,
+      orgNodeSeedKey: "DEPARTMENT" as const,
+    })),
   ...[
     talentAbilityKeys.viewProfile,
     talentAbilityKeys.viewReview,
@@ -232,3 +267,50 @@ export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
     orgNodeSeedKey: "TEAM" as const,
   })),
 ];
+
+export const productManagementDefaultPermissionGrants: DefaultPermissionGrant[] = productManagementOrdinaryPermissionAbilityKeys.flatMap((abilityKey) => ([
+  {
+    moduleKey: orgPermissionModuleKeys.productManagement,
+    abilityKey,
+    scopeType: "ALL" as const,
+    subjectType: "ROLE" as const,
+    roleType: "ADMIN" as const,
+    orgNodeSeedKey: null,
+  },
+  {
+    moduleKey: orgPermissionModuleKeys.productManagement,
+    abilityKey,
+    scopeType: "SUBTREE" as const,
+    subjectType: "ROLE" as const,
+    roleType: "DEPARTMENT_MANAGER" as const,
+    orgNodeSeedKey: "DEPARTMENT" as const,
+  },
+  {
+    moduleKey: orgPermissionModuleKeys.productManagement,
+    abilityKey,
+    scopeType: "NODE" as const,
+    subjectType: "ROLE" as const,
+    roleType: "TEAM_LEADER" as const,
+    orgNodeSeedKey: "TEAM" as const,
+  },
+  {
+    moduleKey: orgPermissionModuleKeys.productManagement,
+    abilityKey,
+    scopeType: "SELF" as const,
+    subjectType: "ROLE" as const,
+    roleType: "MEMBER" as const,
+    orgNodeSeedKey: "TEAM" as const,
+  },
+]));
+
+/** 场景全系统共享：有能力即可配置，默认给管理角色 ALL 作用域。 */
+export const notificationDefaultPermissionGrants: DefaultPermissionGrant[] = (
+  ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"] as const
+).map((roleType) => ({
+  moduleKey: orgPermissionModuleKeys.notification,
+  abilityKey: notificationAbilityKeys.manageNotificationScenario,
+  scopeType: "ALL" as const,
+  subjectType: "ROLE" as const,
+  roleType,
+  orgNodeSeedKey: null,
+}));

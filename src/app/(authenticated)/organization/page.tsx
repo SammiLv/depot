@@ -5,7 +5,15 @@ import { prisma } from "@/server/db/prisma";
 import { ensureAnnualGoalPermissions } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { getActivePermissionGrants } from "@/server/permissions/permission-query";
-import { kpiAbilityKeys, kpiOrdinaryPermissionAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
+import {
+  kpiAbilityKeys,
+  kpiOrdinaryPermissionAbilityKeys,
+  notificationAbilityKeys,
+  notificationOrdinaryPermissionAbilityKeys,
+  productManagementAbilityKeys,
+  productManagementOrdinaryPermissionAbilityKeys,
+  orgPermissionModuleKeys,
+} from "@/server/permissions/permission-constants";
 import { getUserWhereByScope } from "@/server/permissions/data-scope";
 import { OrgContent } from "./content";
 
@@ -79,7 +87,7 @@ export default async function OrgPage({
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
 
-  const [users, orgNodes, menus, annualGoalPermissions, kpiPermissionGrants, kpiUserPermissionGrantRows] = await Promise.all([
+  const [users, orgNodes, menus, annualGoalPermissions, kpiPermissionGrants, kpiUserPermissionGrantRows, notificationPermissionGrants, productManagementPermissionGrants] = await Promise.all([
     prisma.user.findMany({
       where: { ...(await getUserWhereByScope(currentUser)), isActive: true },
       orderBy: [{ roleType: "asc" }, { name: "asc" }],
@@ -126,6 +134,16 @@ export default async function OrgPage({
         orgNodeId: true,
       },
     }),
+    getActivePermissionGrants(
+      orgPermissionModuleKeys.notification,
+      Object.values(notificationAbilityKeys),
+      [...roleTypes],
+    ),
+    getActivePermissionGrants(
+      orgPermissionModuleKeys.productManagement,
+      Object.values(productManagementAbilityKeys),
+      [...roleTypes],
+    ),
   ]);
 
   const orgNodeById = new Map(orgNodes.map((node) => [node.id, node]));
@@ -324,7 +342,108 @@ export default async function OrgPage({
       name: "终审",
       description: "允许执行 KPI 终审。",
     },
+    MANAGE_BUSINESS_ASSESSMENT: {
+      name: "维护业务考核",
+      description: "允许在 KPI 管理中创建、编辑、导入和删除业务考核批次及结果。",
+    },
+    MANAGE_WORK_INCIDENT: {
+      name: "维护工作事故",
+      description: "允许在 KPI 管理中录入、作废工作事故记录。",
+    },
   };
+
+  const notificationPermissionPresentation = {
+    MANAGE_NOTIFICATION_SCENARIO: {
+      name: "管理通知场景",
+      description: "允许在通知中心配置、启停与测试通知场景（全系统共享）。",
+    },
+  } as const;
+
+  const productManagementPermissionPresentation = {
+    MANAGE_PRODUCT_GOAL: {
+      name: "管理产品目标",
+      description: "允许创建、编辑与删除产品目标。",
+    },
+    MANAGE_PROJECT_AND_VALUE_TRACKING: {
+      name: "管理项目与需求价值跟踪",
+      description: "允许维护项目、项目价值判定及需求价值跟踪记录。",
+    },
+    MANAGE_PRODUCT_TASK: {
+      name: "管理任务",
+      description: "允许创建、编辑与删除季度任务及任务看板内容。",
+    },
+  } as const;
+
+  const productManagementPermissionMap = new Map(productManagementPermissionGrants
+    .filter((row) => row.subjectType === "ROLE")
+    .map((row) => [`${row.scopeType}:${row.orgNodeId ?? ""}:${row.roleType}:${row.abilityKey}`, row]));
+  const buildProductManagementPermissions = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => (
+    productManagementOrdinaryPermissionAbilityKeys.map((abilityKey) => {
+      const presentation = productManagementPermissionPresentation[
+        abilityKey as keyof typeof productManagementPermissionPresentation
+      ];
+      return {
+        id: abilityKey,
+        code: abilityKey,
+        name: presentation.name,
+        description: presentation.description,
+        cells: Object.fromEntries(roleTypes.map((roleType) => {
+          const scopeByRole = roleType === "ADMIN" ? "ALL" : roleType === "DEPARTMENT_MANAGER" ? "SUBTREE" : roleType === "TEAM_LEADER" ? "NODE" : "SELF";
+          const systemRow = productManagementPermissionMap.get(`${scopeByRole}:${""}:${roleType}:${abilityKey}`);
+          const scopedOrgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : "";
+          const scopedRow = scopedOrgNodeId
+            ? productManagementPermissionMap.get(`${scopeByRole}:${scopedOrgNodeId}:${roleType}:${abilityKey}`)
+            : undefined;
+          const sourceRow = scopedRow ?? systemRow;
+          const allowed = Boolean(sourceRow);
+          return [roleType, {
+            allowed,
+            source: scopedRow ? "DEPARTMENT" : "SYSTEM",
+            explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
+            inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
+          }];
+        })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
+      };
+    })
+  );
+
+  const notificationPermissionMap = new Map(notificationPermissionGrants
+    .filter((row) => row.subjectType === "ROLE")
+    .map((row) => [`${row.scopeType}:${row.orgNodeId ?? ""}:${row.roleType}:${row.abilityKey}`, row]));
+  const notificationScopeByRole = {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "SELF",
+  } as const;
+  const buildNotificationPermissions = (scope: { scopeType: "SYSTEM" | "DEPARTMENT"; departmentOrgNodeId: string }) => (
+    notificationOrdinaryPermissionAbilityKeys.map((abilityKey) => {
+      const presentation = notificationPermissionPresentation[
+        abilityKey as keyof typeof notificationPermissionPresentation
+      ];
+      return {
+        id: abilityKey,
+        code: abilityKey,
+        name: presentation.name,
+        description: presentation.description,
+        cells: Object.fromEntries(roleTypes.map((roleType) => {
+          const systemRow = notificationPermissionMap.get(`ALL::${roleType}:${abilityKey}`);
+          const scopedOrgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : "";
+          const scopedRow = scopedOrgNodeId
+            ? notificationPermissionMap.get(`${notificationScopeByRole[roleType]}:${scopedOrgNodeId}:${roleType}:${abilityKey}`)
+            : undefined;
+          const sourceRow = scopedRow ?? systemRow;
+          const allowed = Boolean(sourceRow);
+          return [roleType, {
+            allowed,
+            source: scopedRow ? "DEPARTMENT" : "SYSTEM",
+            explicit: Boolean(scopedRow || (scope.scopeType === "SYSTEM" && systemRow)),
+            inherited: scope.scopeType === "DEPARTMENT" && !scopedRow,
+          }];
+        })) as Record<(typeof roleTypes)[number], { allowed: boolean; source: "SYSTEM" | "DEPARTMENT"; explicit: boolean; inherited: boolean }>,
+      };
+    })
+  );
 
   const kpiPermissionMap = new Map(kpiPermissionGrants
     .filter((row) => row.subjectType === "ROLE")
@@ -369,7 +488,7 @@ export default async function OrgPage({
         userId: row.userId,
         userName: user.name,
         abilityKey: row.abilityKey,
-        abilityName: kpiPermissionPresentation[row.abilityKey]?.name ?? row.abilityKey,
+        abilityName: kpiPermissionPresentation[row.abilityKey as keyof typeof kpiPermissionPresentation]?.name ?? row.abilityKey,
         scopeType: row.scopeType,
         orgNodeId: row.orgNodeId,
         orgNodeName: orgNode?.name ?? null,
@@ -599,6 +718,8 @@ export default async function OrgPage({
       menus: buildRoleMenuMatrix(scope),
       annualGoalPermissions: buildAnnualGoalMatrix(scope),
       kpiPermissions: buildKpiPermissions(scope),
+      notificationPermissions: buildNotificationPermissions(scope),
+      productManagementPermissions: buildProductManagementPermissions(scope),
       kpiUserPermissionGrants: scopedUserPermissionGrants,
       kpiApprovalPolicies: scopedApprovalPolicies,
     }];

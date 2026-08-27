@@ -1,5 +1,7 @@
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { getKpiData } from "@/server/kpi/kpi-query";
+import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query";
+import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { KpiContent } from "./content";
 
 type PageProps = {
@@ -18,6 +20,18 @@ export default async function KpiPage({ searchParams }: PageProps) {
   const params = searchParams ? await searchParams : undefined;
   const selectedYear = parseIntParam(params?.year);
   const selectedQuarter = parseIntParam(params?.quarter);
-  const data = await getKpiData(currentUser, { selectedYear, selectedQuarter });
-  return <KpiContent data={data} />;
+  const [data, assessmentData, incidentData] = await Promise.all([
+    getKpiData(currentUser, { selectedYear, selectedQuarter }),
+    getBusinessAssessmentPageData(currentUser, { selectedYear, selectedQuarter }),
+    getWorkIncidentPageData(currentUser, { selectedYear, selectedQuarter }),
+  ]);
+  return (
+    <KpiContent
+      data={data}
+      assessmentData={JSON.parse(JSON.stringify(assessmentData))}
+      incidentData={JSON.parse(JSON.stringify(incidentData))}
+      selectedYear={selectedYear ?? data.year}
+      selectedQuarter={selectedQuarter ?? data.quarter}
+    />
+  );
 }

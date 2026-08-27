@@ -5,6 +5,7 @@ import { getDataScopeLabel, getRoleLabel } from "@/server/permissions/role-label
 import { buildKpiWhereByPermission, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
+import { findUserPendingApprovalStep } from "@/server/kpi/approval-step-utils";
 import {
   buildOrgScopeContext,
   getAnnualGoalCapabilitiesForUser,
@@ -223,16 +224,23 @@ export async function getDashboardData(currentUser: CurrentUser) {
           personalKpiId: true,
           approverId: true,
           stageKey: true,
+          stepOrder: true,
+          status: true,
         },
       })
     : [];
 
   const activeApprovalStepByKpiId = new Map<string, typeof activeApprovalSteps[number]>();
   const hasApprovalChainByKpiId = new Map<string, boolean>();
+  const approvalStepsByKpiId = new Map<string, typeof activeApprovalSteps>();
   for (const step of activeApprovalSteps) {
     hasApprovalChainByKpiId.set(step.personalKpiId, true);
-    if (!activeApprovalStepByKpiId.has(step.personalKpiId)) {
-      activeApprovalStepByKpiId.set(step.personalKpiId, step);
+    const steps = approvalStepsByKpiId.get(step.personalKpiId) ?? [];
+    steps.push(step);
+    approvalStepsByKpiId.set(step.personalKpiId, steps);
+    const userStep = findUserPendingApprovalStep(steps, currentUser.id);
+    if (userStep) {
+      activeApprovalStepByKpiId.set(step.personalKpiId, userStep);
     }
   }
 
@@ -250,7 +258,7 @@ export async function getDashboardData(currentUser: CurrentUser) {
     const hasApprovalChain = hasApprovalChainByKpiId.get(kpi.id) ?? false;
 
     if (hasApprovalChain) {
-      return activeStep?.approverId === currentUser.id;
+      return Boolean(findUserPendingApprovalStep(approvalStepsByKpiId.get(kpi.id) ?? [], currentUser.id));
     }
 
     if (canScoreLeader && kpi.status === "PENDING_LEADER_SCORE") {

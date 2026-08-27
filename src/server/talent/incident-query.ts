@@ -1,24 +1,55 @@
 import type { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { resolveAuthorizedOrgNodeIds, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
-import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
+import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
+import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 
 type Viewer = { id: string; roleType: RoleType; orgNodeId: string | null };
 
-export async function getWorkIncidentPageData(viewer: Viewer) {
-  const [viewCoverage, manageCoverage] = await Promise.all([
-    resolvePermissionCoverage(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.viewWorkIncident),
-    resolvePermissionCoverage(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.manageWorkIncident),
-  ]);
-  const orgNodeIds = await resolveAuthorizedOrgNodeIds(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.viewWorkIncident);
-  const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT", ...(orgNodeIds === null ? {} : { id: { in: orgNodeIds } }) }, select: { id: true, name: true }, orderBy: { name: "asc" } });
-  if (!viewCoverage.hasPermission) return { departments: [], incidents: [], responsiblePeople: [], users: [], summaries: [], restrictions: [], canManage: manageCoverage.hasPermission };
-  const incidents = await prisma.workIncident.findMany({ where: { departmentOrgNodeId: { in: departments.map((row) => row.id) } }, orderBy: { occurredAt: "desc" } });
-  const responsiblePeople = await prisma.workIncidentResponsiblePerson.findMany({ where: { incidentId: { in: incidents.map((row) => row.id) } } });
-  const users = await prisma.user.findMany({ where: { OR: [{ id: { in: responsiblePeople.map((row) => row.userId) } }, { orgNodeId: { in: orgNodeIds === null ? departments.map((row) => row.id) : orgNodeIds } }], isActive: true, deletedAt: null }, select: { id: true, name: true, orgNodeId: true }, orderBy: { name: "asc" } });
+function getQuarterFromDate(date: Date) {
+  return Math.floor(date.getMonth() / 3) + 1;
+}
+
+export async function getWorkIncidentPageData(
+  viewer: Viewer,
+  options?: { selectedYear?: number; selectedQuarter?: number },
+) {
+  const manageCoverage = await resolvePermissionCoverage(viewer, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageWorkIncident);
+  const viewerDepartmentOrgNodeId = await findNearestDepartmentOrgNodeId(viewer.orgNodeId);
+  const now = new Date();
+  const filterYear = options?.selectedYear ?? now.getFullYear();
+  const filterAllQuarters = options?.selectedQuarter === 0;
+  const filterQuarter = filterAllQuarters ? null : (options?.selectedQuarter ?? getQuarterFromDate(now));
+  const departments = await (viewer.roleType === "ADMIN" || viewerDepartmentOrgNodeId === null
+    ? prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+    : prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT", id: viewerDepartmentOrgNodeId }, select: { id: true, name: true }, orderBy: { name: "asc" } }));
+  if (departments.length === 0) return { departments: [], incidents: [], responsiblePeople: [], users: [], summaries: [], restrictions: [], canManage: manageCoverage.hasPermission };
+  const visibleOrgNodeIds = [...new Set((await Promise.all(departments.map((row) => getDescendantOrgNodeIds(row.id)))).flat())];
+  const incidents = await prisma.workIncident.findMany({
+    where: {
+      departmentOrgNodeId: { in: departments.map((row) => row.id) },
+      occurredAt: {
+        gte: new Date(filterYear, 0, 1),
+        lt: new Date(filterYear + 1, 0, 1),
+      },
+    },
+    orderBy: { occurredAt: "desc" },
+  });
+  const filteredIncidents = filterAllQuarters
+    ? incidents
+    : incidents.filter((incident) => getQuarterFromDate(incident.occurredAt) === filterQuarter);
+  const incidentIds = filteredIncidents.map((row) => row.id);
+  const responsiblePeople = await prisma.workIncidentResponsiblePerson.findMany({ where: { incidentId: { in: incidentIds } } });
+  const users = await prisma.user.findMany({ where: { OR: [{ id: { in: responsiblePeople.map((row) => row.userId) } }, { orgNodeId: { in: visibleOrgNodeIds } }], isActive: true, deletedAt: null }, select: { id: true, name: true, orgNodeId: true }, orderBy: { name: "asc" } });
+  const summaryWhere = filterAllQuarters
+    ? { userId: { in: responsiblePeople.map((row) => row.userId) }, year: filterYear }
+    : { userId: { in: responsiblePeople.map((row) => row.userId) }, year: filterYear, quarter: filterQuarter! };
   const [summaries, restrictions] = await Promise.all([
-    prisma.workIncidentQuarterSummary.findMany({ where: { userId: { in: responsiblePeople.map((row) => row.userId) } }, orderBy: [{ year: "desc" }, { quarter: "desc" }] }),
-    prisma.incidentRestriction.findMany({ where: { incidentId: { in: incidents.map((row) => row.id) } }, orderBy: [{ effectiveFrom: "desc" }, { controlledType: "asc" }] }),
+    prisma.workIncidentQuarterSummary.findMany({
+      where: summaryWhere,
+      orderBy: [{ year: "desc" }, { quarter: "desc" }],
+    }),
+    prisma.incidentRestriction.findMany({ where: { incidentId: { in: incidentIds } }, orderBy: [{ effectiveFrom: "desc" }, { controlledType: "asc" }] }),
   ]);
-  return { departments, incidents, responsiblePeople, users, summaries, restrictions, canManage: manageCoverage.hasPermission };
+  return { departments, incidents: filteredIncidents, responsiblePeople, users, summaries, restrictions, canManage: manageCoverage.hasPermission };
 }

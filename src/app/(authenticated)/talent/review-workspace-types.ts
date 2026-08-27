@@ -2,6 +2,7 @@ export type ReviewDepartment = { id: string; name: string };
 export type ReviewTemplate = {
   id: string; departmentOrgNodeId: string; code: string; name: string; version: number;
   description: string | null; status: string; publishedAt: string | null;
+  kpiWeight: number; reviewWeight: number;
 };
 export type ReviewDimension = { id: string; templateVersionId: string; code: string; name: string; category: string; weight: number; maxScore: number; sortOrder: number; isRequired: boolean };
 export type ReviewRating = { id: string; templateVersionId: string; code: string; label: string; numericScore: number; sortOrder: number };
