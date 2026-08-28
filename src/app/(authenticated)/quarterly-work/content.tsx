@@ -667,6 +667,18 @@ function QuarterlyWorkForm({
             </select>
           </div>
         </FormRow>
+        <FormRow label="是否需要开发 *" align="center">
+          <select
+            name="needsDevelopment"
+            required
+            defaultValue={item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择是否需要开发</option>
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </FormRow>
         <FormRow label="任务描述">
           <textarea
             name="taskDescription"
@@ -1852,6 +1864,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<BoardTab>("board");
   const [viewMode, setViewMode] = useState<ViewMode>("card");
+  const [needsDevOnly, setNeedsDevOnly] = useState(false);
   const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentOrgNodeId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
@@ -1971,9 +1984,11 @@ export function QuarterlyWorkContent({ data }: Props) {
   const filteredTaskColumns = useMemo(
     () => visibleColumns.map((column) => ({
       ...column,
-      items: column.items.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
+      items: column.items.filter((item) =>
+        matchesFuzzySearch(item.title, tabSearchQuery) && (!needsDevOnly || item.needsDevelopment === true)
+      ),
     })),
-    [visibleColumns, tabSearchQuery],
+    [visibleColumns, tabSearchQuery, needsDevOnly],
   );
   const filteredValueOverviewItems = useMemo(
     () => visibleValueOverviewItems.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
@@ -2512,6 +2527,17 @@ export function QuarterlyWorkContent({ data }: Props) {
               placeholder="搜索任务名称"
               {...tabSearchBarProps}
             />
+            <div className="-mt-1 mb-3 flex items-center px-1">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={needsDevOnly}
+                  onChange={(event) => setNeedsDevOnly(event.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                仅看需开发
+              </label>
+            </div>
             {viewMode === "card" ? (
             <>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -2538,7 +2564,10 @@ export function QuarterlyWorkContent({ data }: Props) {
                           <div key={it.id} className="rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <div className="text-sm font-medium leading-snug">{it.title}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium leading-snug">{it.title}</div>
+                                  {it.needsDevelopment ? <Badge tone="info">需开发</Badge> : null}
+                                </div>
                                 <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
                               </div>
                               <div className="flex items-center gap-1">
@@ -2599,7 +2628,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             </>
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
+                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
                   <div>任务名称</div>
                   <div>所属项目</div>
                   <div>负责人</div>
@@ -2609,6 +2638,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <div>工作量(人天)</div>
                   <div>任务状态</div>
                   <div>任务结果</div>
+                  <div>是否需开发</div>
                   <div>创建时间</div>
                   <div>完成时间</div>
                   <div className="text-right">操作</div>
@@ -2616,7 +2646,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                 <div className="divide-y divide-border">
                   {filteredTaskColumns.flatMap((column) => column.items).length ? (
                     filteredTaskColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -2628,6 +2658,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
                         <div className="text-muted-foreground">{columnTitleByStatus[item.status]}</div>
                         <div className="text-muted-foreground">{item.taskResult || "—"}</div>
+                        <div className="text-muted-foreground">{item.needsDevelopment === null ? "—" : item.needsDevelopment ? "是" : "否"}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="text-right">

@@ -45,6 +45,7 @@ type BoardItem = {
   taskResult: string | null;
   executionSummary: string | null;
   workloadPersonDay: number | null;
+  needsDevelopment: boolean | null;
   remainingWeeksLabel: string | null;
   createdAt: Date;
   completedAt: Date | null;
@@ -565,6 +566,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       taskResult: work.taskResult,
       executionSummary: work.executionSummary,
       workloadPersonDay: work.workloadPersonDay,
+      needsDevelopment: work.needsDevelopment,
       remainingWeeksLabel: formatRemainingWeeksLabel(work.year, work.endMonth),
       createdAt: work.createdAt,
       completedAt: work.completedAt,
