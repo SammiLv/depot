@@ -2189,6 +2189,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
 
         <div className="px-5 pb-5 pt-0">
+          <div key={`${tab}-${viewMode}`}>
           {tab === "goal" ? (
             <>
             <BoardSearchBar
@@ -2298,8 +2299,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                 </div>
                 <div className="divide-y divide-border">
                   {filteredProductGoalColumns.flatMap((column) => column.items).length ? (
-                    filteredProductGoalColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_90px_1.3fr_1.3fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                    filteredProductGoalColumns.flatMap((column) => column.items.map((item) => (
+                      <div key={`${column.key}-${item.id}`} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_90px_1.3fr_1.3fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
                         <div className="text-muted-foreground">{item.year}</div>
@@ -2341,7 +2342,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )))
                   ) : (
                     <div className="px-5 py-12 text-center text-sm text-muted-foreground">
                       {tabSearchQuery ? "暂无匹配的产品目标数据" : "暂无产品目标数据"}
@@ -2466,8 +2467,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                 </div>
                 <div className="divide-y divide-border">
                   {filteredProjectColumns.flatMap((column) => column.items).length ? (
-                    filteredProjectColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className={`px-4 py-4 grid ${projectListGridClass} gap-x-2 gap-y-3 items-start text-sm hover:bg-muted/20 transition`}>
+                    filteredProjectColumns.flatMap((column) => column.items.map((item) => (
+                      <div key={`${column.key}-${item.id}`} className={`px-4 py-4 grid ${projectListGridClass} gap-x-2 gap-y-3 items-start text-sm hover:bg-muted/20 transition`}>
                         <div className="min-w-0 font-medium text-foreground break-words">{item.title}</div>
                         <div className="min-w-0 text-muted-foreground break-words">{item.productGoalTitle || "—"}</div>
                         <div className="min-w-0 text-muted-foreground break-words">{item.owner}</div>
@@ -2510,7 +2511,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )))
                   ) : (
                     <div className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {tabSearchQuery ? "暂无匹配的项目数据" : "暂无项目数据"}
@@ -2645,8 +2646,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                 </div>
                 <div className="divide-y divide-border">
                   {filteredTaskColumns.flatMap((column) => column.items).length ? (
-                    filteredTaskColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                    filteredTaskColumns.flatMap((column) => column.items.map((item) => (
+                      <div key={`${column.key}-${item.id}`} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
@@ -2694,7 +2695,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )))
                   ) : (
                     <div className="px-5 py-12 text-center text-sm text-muted-foreground">
                       {tabSearchQuery ? "暂无匹配的任务数据" : "暂无任务数据"}
@@ -2967,6 +2968,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             </div>
             </>
           )}
+          </div>
         </div>
       </Card>
 
