@@ -268,16 +268,27 @@ function formatRemainingWeeksLabel(year: number, endMonth: number | null | undef
   }
 
   const now = new Date();
+  // 只按日期比较，忽略当天的具体时间：任务周期最后一天当天结束前都算“剩余”
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const planEndDate = new Date(year, endMonth, 0);
-  const diffDays = (planEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-  const diffWeeks = Math.abs(diffDays) / 7;
-  const roundedWeeks = Math.round(diffWeeks * 10) / 10;
+  const daysRemaining = Math.round((planEndDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays >= 0) {
-    return `还剩${roundedWeeks}周`;
+  if (daysRemaining < 0) {
+    const overdueDays = -daysRemaining;
+    if (overdueDays <= 3) {
+      return `超期${overdueDays}天`;
+    }
+    const overdueWeeks = Math.round((overdueDays / 7) * 10) / 10;
+    return `超期${overdueWeeks}周`;
   }
 
-  return `超期${roundedWeeks}周`;
+  // 距最后一天 3 天及以内按天展示（含最后一天当天=剩余0天）
+  if (daysRemaining <= 3) {
+    return `剩余${daysRemaining}天`;
+  }
+
+  const remainingWeeks = Math.round((daysRemaining / 7) * 10) / 10;
+  return `还剩${remainingWeeks}周`;
 }
 
 function compareNames(left: { name: string }, right: { name: string }) {

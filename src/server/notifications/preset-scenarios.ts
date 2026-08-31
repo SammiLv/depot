@@ -1,7 +1,6 @@
 import { prisma } from "@/server/db/prisma";
-import { computeNextRunAt, parseScheduleConfig } from "@/server/notifications/schedule-utils";
+import { computeNextRunAt } from "@/server/notifications/schedule-utils";
 import { resolveEventModule } from "@/server/notifications/event-registry";
-import type { ScheduleConfig } from "@/server/notifications/types";
 
 const initializationReminderSchedule = {
   frequency: "weekly" as const,
@@ -491,37 +490,12 @@ export async function ensurePresetNotificationScenarios() {
   for (const preset of PRESET_SCENARIOS) {
     const existing = await prisma.notificationScenario.findFirst({
       where: { name: preset.name },
-      select: { id: true, scheduleConfig: true },
+      select: { id: true },
     });
 
     if (!existing) {
       await prisma.notificationScenario.create({ data: { ...preset } });
-      continue;
     }
-
-    const updateData: {
-      description: string;
-      module: string;
-      scheduleConfig?: ScheduleConfig;
-      nextRunAt?: Date | null;
-    } = {
-      description: preset.description,
-      module: preset.module,
-    };
-
-    if ("scheduleConfig" in preset && preset.scheduleConfig) {
-      const currentSchedule = parseScheduleConfig(existing.scheduleConfig) ?? preset.scheduleConfig;
-      updateData.scheduleConfig = {
-        ...currentSchedule,
-        ...preset.scheduleConfig,
-        daysBefore: preset.scheduleConfig.daysBefore,
-      };
-      updateData.nextRunAt = computeNextRunAt(updateData.scheduleConfig);
-    }
-
-    await prisma.notificationScenario.update({
-      where: { id: existing.id },
-      data: updateData,
-    });
+    // 已存在的场景不再回写，用户的修改为准
   }
 }
