@@ -540,10 +540,23 @@ cmd_pull() {
   fi
   echo ""
 
-  # 4. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
-  log "=== 4/6 应用数据库迁移（migrate deploy）==="
+  # 4. 停服务释放 SQLite 锁（migrate deploy 需要独占写库；服务在跑会 database is locked）
+  log "=== 4/6 停止当前服务（释放数据库锁）==="
+  local was_running=0
+  if [ -n "$(pid_listening_on_port)" ]; then
+    was_running=1
+  fi
+  cmd_stop || true
+  echo ""
+
+  # 5. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
+  log "=== 5/6 应用数据库迁移（migrate deploy）==="
   if ! (cd "$PROJECT_DIR" && npx prisma migrate deploy --config db/prisma.config.ts); then
     err "migrate deploy 失败"
+    if [ "$was_running" = "1" ]; then
+      warn "正在恢复旧版本服务..."
+      cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+    fi
     return 1
   fi
   # 兼容旧版误生成的嵌套库目录
@@ -553,20 +566,14 @@ cmd_pull() {
   fi
   echo ""
 
-  # 5. 重新构建（短暂停机；build 失败则回滚 .next 并恢复旧服务）
-  log "=== 5/6 重新构建（短暂停机）==="
-  local was_running=0
-  if [ -n "$(pid_listening_on_port)" ]; then
-    was_running=1
-  fi
-  log "  步骤 5a: 停止当前服务"
-  cmd_stop || true
-  log "  步骤 5b: 备份旧构建产物 .next/ → .next.backup/"
+  # 6. 重新构建（build 失败则回滚 .next 并恢复旧服务）
+  log "=== 6/6 重新构建并启动新版本 ==="
+  log "  步骤 6a: 备份旧构建产物 .next/ → .next.backup/"
   rm -rf "$PROJECT_DIR/.next.backup"
   if [ -d "$PROJECT_DIR/.next" ]; then
     mv "$PROJECT_DIR/.next" "$PROJECT_DIR/.next.backup"
   fi
-  log "  步骤 5c: 执行 next build"
+  log "  步骤 6b: 执行 next build"
   if ! (cd "$PROJECT_DIR" && npm run build); then
     err "build 失败"
     rm -rf "$PROJECT_DIR/.next"
@@ -589,8 +596,7 @@ cmd_pull() {
   rm -rf "$PROJECT_DIR/.next.backup"
   echo ""
 
-  # 6. 启动新版本
-  log "=== 6/6 启动新版本 ==="
+  log "  步骤 6c: 启动新版本"
   cmd_start
 }
 
