@@ -19,6 +19,24 @@ type DataScopeInput = {
   orgNodeId?: string | null;
 };
 
+type WorkspaceStatusFilter = ProjectStatus | "DELAYED" | "all";
+type WorkspaceViewMode = "card" | "list";
+type ProjectPanelMode = "task" | "value";
+
+type QuarterlyWorkQueryOptions = {
+  selectedYear?: number;
+  selectedQuarter?: number | "all";
+  goalId?: string | "all";
+  view?: WorkspaceViewMode;
+  projectPanel?: ProjectPanelMode;
+  status?: WorkspaceStatusFilter;
+  orgNodeId?: string | null;
+  teamId?: string | "all" | null;
+  ownerId?: string | null;
+  projectId?: string | null;
+  query?: string | null;
+};
+
 type OrgNodeSummary = {
   id: string;
   name: string;
@@ -38,6 +56,7 @@ type BoardItem = {
   teamName: string | null;
   startMonth: number | null;
   endMonth: number | null;
+  endDate: Date | null;
   status: WorkStatus;
   description: string | null;
   taskDescription: string | null;
@@ -83,6 +102,7 @@ type ProjectBoardItem = {
   status: ProjectStatus;
   startQuarter: string | null;
   endQuarter: string | null;
+  remainingWeeksLabel: string | null;
   description: string | null;
   expectedOutcome: string | null;
   workloadPersonDay: number | null;
@@ -153,6 +173,53 @@ type ValueTrackItem = {
   actualValue: string | null;
   valueJudgement: string | null;
   valueTrackStatus: string;
+};
+
+type GoalNavigationItem = {
+  id: string;
+  title: string;
+  year: number | null;
+  ownerId: string | null;
+  owner: string | null;
+  departmentOrgNodeId: string | null;
+  teamOrgNodeId: string | null;
+  teamName: string | null;
+  status: ProjectStatus | "all";
+  description: string | null;
+  expectedOutcome: string | null;
+  projectCount: number;
+  taskCount: number;
+  isAll: boolean;
+};
+
+type ProjectWorkspaceTaskItem = BoardItem & {
+  year: number;
+  quarter: number;
+  periodLabel: string;
+  isOverdue: boolean;
+};
+
+type ProjectWorkspaceValueTrackItem = ValueTrackItem & {
+  periodLabel: string;
+};
+
+type ProjectWorkspaceItem = ProjectBoardItem & {
+  productGoals: Array<{
+    id: string;
+    title: string;
+    year: number;
+  }>;
+  statusFilterKey: WorkspaceStatusFilter;
+  isOverdue: boolean;
+  tasks: ProjectWorkspaceTaskItem[];
+  valueTracks: ProjectWorkspaceValueTrackItem[];
+  valueTrackSummary: {
+    status: string;
+    judgement: string | null;
+    actualValue: string | null;
+    latestTrackedAt: Date | null;
+    trackCount: number;
+  };
 };
 
 const asciiLetterPattern = /^[A-Za-z]$/;
@@ -226,7 +293,8 @@ function getQuarterEndDate(value: string | null | undefined) {
   if (!parsed) {
     return null;
   }
-  return new Date(parsed.year, parsed.quarter * 3, 0);
+  // 季度末取当季最后一天的 23:59:59（月末结束），而非当天零点
+  return new Date(parsed.year, parsed.quarter * 3, 0, 23, 59, 59, 999);
 }
 
 function projectRangeHasQuarter(project: { startQuarter: string | null; endQuarter: string | null }, year: number, quarter: number) {
@@ -262,33 +330,113 @@ function getQuarterByDate(date: Date | null | undefined) {
   return Math.floor(date.getMonth() / 3) + 1;
 }
 
-function formatRemainingWeeksLabel(year: number, endMonth: number | null | undefined) {
-  if (!endMonth) {
+function formatTaskRemainLabel(work: { year: number; endMonth: number | null; endDate?: Date | null; completedAt: Date | null; status: WorkStatus }) {
+  // 关闭的任务已中止，不再统计剩余/逾期
+  if (work.status === "CLOSED") {
     return null;
   }
-
-  const now = new Date();
-  // 只按日期比较，忽略当天的具体时间：任务周期最后一天当天结束前都算“剩余”
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const planEndDate = new Date(year, endMonth, 0);
-  const daysRemaining = Math.round((planEndDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-
-  if (daysRemaining < 0) {
-    const overdueDays = -daysRemaining;
-    if (overdueDays <= 3) {
-      return `超期${overdueDays}天`;
-    }
-    const overdueWeeks = Math.round((overdueDays / 7) * 10) / 10;
-    return `超期${overdueWeeks}周`;
+  // 按月推算时，截止点取当月最后一天的 23:59:59（月末结束），而非当天零点
+  const planEndDate = work.endDate ?? (work.endMonth ? new Date(work.year, work.endMonth, 0, 23, 59, 59, 999) : null);
+  if (!planEndDate) {
+    return null;
   }
-
-  // 距最后一天 3 天及以内按天展示（含最后一天当天=剩余0天）
-  if (daysRemaining <= 3) {
-    return `剩余${daysRemaining}天`;
+  // 已完成任务以完成时间衡量是否逾期，未完成任务以当前时间衡量剩余/逾期
+  const referenceDate = work.completedAt ?? new Date();
+  const diffDays = (planEndDate.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24);
+  const roundedWeeks = Math.round((Math.abs(diffDays) / 7) * 10) / 10;
+  if (diffDays < 0) {
+    return `逾期${roundedWeeks}周`;
   }
+  // 已完成且未逾期（在周期内完成）：不打任何标签
+  if (work.completedAt) {
+    return null;
+  }
+  // 未完成：仅剩余 2 周内才提示，超过 2 周不打标签
+  if (diffDays / 7 <= 2) {
+    return `剩余${roundedWeeks}周`;
+  }
+  return null;
+}
 
-  const remainingWeeks = Math.round((daysRemaining / 7) * 10) / 10;
-  return `还剩${remainingWeeks}周`;
+function formatProjectRemainLabel(project: {
+  startQuarter: string | null;
+  endQuarter: string | null;
+  status: ProjectStatus;
+  completedAt: Date | null;
+}) {
+  // 关闭的项目已中止，不再统计剩余/逾期
+  if (project.status === "CLOSED") {
+    return null;
+  }
+  const planEndDate = getQuarterEndDate(project.endQuarter ?? project.startQuarter);
+  if (!planEndDate) {
+    return null;
+  }
+  // 仅「已完成」算项目完成状态，以完成时间衡量是否逾期；其余（含已上线）均以当前时间衡量
+  const referenceDate = project.status === "COMPLETED" ? (project.completedAt ?? new Date()) : new Date();
+  const diffDays = (planEndDate.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24);
+  const roundedWeeks = Math.round((Math.abs(diffDays) / 7) * 10) / 10;
+  if (diffDays < 0) {
+    return `逾期${roundedWeeks}周`;
+  }
+  // 已完成且未逾期（在周期内完成）：不打任何标签
+  if (project.status === "COMPLETED") {
+    return null;
+  }
+  // 未完成项目：距季度截止 ≤1 个月才提示剩余，超过 1 个月不打标签
+  const oneMonthAhead = new Date(referenceDate);
+  oneMonthAhead.setMonth(oneMonthAhead.getMonth() + 1);
+  if (planEndDate.getTime() <= oneMonthAhead.getTime()) {
+    return `剩余${roundedWeeks}周`;
+  }
+  return null;
+}
+
+function formatTaskPeriodLabel(startMonth: number | null | undefined, endMonth: number | null | undefined) {
+  if (startMonth && endMonth) {
+    return startMonth === endMonth ? `${startMonth}月` : `${startMonth}月 - ${endMonth}月`;
+  }
+  if (startMonth) {
+    return `${startMonth}月起`;
+  }
+  if (endMonth) {
+    return `${endMonth}月前`;
+  }
+  return "—";
+}
+
+function normalizeSearchQuery(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function textMatchesSearchQuery(query: string, ...values: Array<string | number | null | undefined>) {
+  if (!query) {
+    return true;
+  }
+  return values.some((value) => String(value ?? "").toLowerCase().includes(query));
+}
+
+function normalizeWorkspaceStatusFilter(value: WorkspaceStatusFilter | null | undefined): WorkspaceStatusFilter {
+  if (
+    value === "all"
+    || value === "DELAYED"
+    || value === "NOT_STARTED"
+    || value === "IN_PROGRESS"
+    || value === "LAUNCHED"
+    || value === "COMPLETED"
+    || value === "CLOSED"
+  ) {
+    return value;
+  }
+  return "all";
+}
+
+function normalizeWorkspaceViewMode(value: WorkspaceViewMode | null | undefined): WorkspaceViewMode {
+  return value === "list" ? "list" : "card";
+}
+
+function normalizeProjectPanelMode(value: ProjectPanelMode | null | undefined): ProjectPanelMode {
+  return value === "value" ? "value" : "task";
 }
 
 function compareNames(left: { name: string }, right: { name: string }) {
@@ -395,7 +543,7 @@ function getProjectManagementUserWhere(currentUser: DataScopeInput, departmentOr
   return { id: currentUser.id, isActive: true, deletedAt: null };
 }
 
-export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?: { selectedYear?: number; selectedQuarter?: number | "all" }) {
+export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?: QuarterlyWorkQueryOptions) {
   const departmentOrgNodeId = currentUser.roleType === "ADMIN"
     ? null
     : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
@@ -486,7 +634,6 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   const availableYears = Array.from(new Set(works.map((work) => work.year))).sort((a, b) => b - a);
   if (!availableYears.includes(fallbackYear)) availableYears.unshift(fallbackYear);
   const activeYear = availableYears.includes(options?.selectedYear ?? Number.NaN) ? options!.selectedYear! : fallbackYear;
-  const quarterSource = works.filter((work) => work.year === activeYear).map((work) => work.quarter);
   const availableQuarters = [1, 2, 3, 4];
   const allQuarterSelected = options?.selectedQuarter === "all";
   const selectedQuarter = typeof options?.selectedQuarter === "number" ? options.selectedQuarter : undefined;
@@ -495,7 +642,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     : availableQuarters.includes(selectedQuarter ?? Number.NaN)
       ? selectedQuarter!
       : (availableQuarters.includes(fallbackQuarter) ? fallbackQuarter : availableQuarters[0]);
-  const isWorkOverdue = (work: (typeof works)[number]) => formatRemainingWeeksLabel(work.year, work.endMonth)?.startsWith("超期") ?? false;
+  const isWorkOverdue = (work: (typeof works)[number]) => formatTaskRemainLabel(work)?.startsWith("逾期") ?? false;
   const getWorkQuarterForFilter = (work: (typeof works)[number]) => getQuarterByMonth(work.startMonth ?? work.endMonth) ?? work.quarter;
   const getCompletedOverdueQuarter = (work: (typeof works)[number]) => getQuarterByDate(work.completedAt) ?? getWorkQuarterForFilter(work);
 
@@ -570,6 +717,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
       startMonth: work.startMonth,
       endMonth: work.endMonth,
+      endDate: work.endDate,
       status: work.status,
       description: work.description,
       taskDescription: work.taskDescription,
@@ -578,7 +726,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       executionSummary: work.executionSummary,
       workloadPersonDay: work.workloadPersonDay,
       needsDevelopment: work.needsDevelopment,
-      remainingWeeksLabel: formatRemainingWeeksLabel(work.year, work.endMonth),
+      remainingWeeksLabel: formatTaskRemainLabel(work),
       createdAt: work.createdAt,
       completedAt: work.completedAt,
       progress,
@@ -609,6 +757,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       status: project.status,
       startQuarter: project.startQuarter,
       endQuarter: project.endQuarter,
+      remainingWeeksLabel: formatProjectRemainLabel(project),
       description: project.description,
       expectedOutcome: project.expectedOutcome,
       workloadPersonDay: project.workloadPersonDay,
@@ -694,21 +843,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     { key: "completed", title: "已完成", tone: "success", status: "COMPLETED", items: completed.map(toBoardItem) },
   ];
 
-  const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
-
-  const isProjectOverdue = (project: (typeof projects)[number]) => {
-    const endDate = getQuarterEndDate(project.endQuarter ?? project.startQuarter);
-    if (!endDate) {
-      return false;
-    }
-    if (project.status === "COMPLETED") {
-      return project.completedAt ? project.completedAt.getTime() > endDate.getTime() : false;
-    }
-    if (project.status === "LAUNCHED") {
-      return project.launchedAt ? project.launchedAt.getTime() > endDate.getTime() : false;
-    }
-    return now.getTime() > endDate.getTime();
-  };
+  // 以「已完成」为状态分割点判断是否延期，与项目逾期标签口径一致（已上线不算完成，按当前时间衡量）
+  const isProjectOverdue = (project: (typeof projects)[number]) => formatProjectRemainLabel(project)?.startsWith("逾期") ?? false;
   const getProjectDoneOverdueQuarter = (project: (typeof projects)[number]) => getQuarterByDate(project.launchedAt ?? project.completedAt) ?? parseQuarterCode(project.endQuarter ?? project.startQuarter)?.quarter ?? null;
   const activePeriod: ActivePeriod = { year: activeYear, quarter: activeQuarter };
   const isLaunchedProjectInActivePeriod = (project: (typeof projects)[number]) =>
@@ -797,6 +933,274 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     departmentOrgNodeId: logAffiliationByTargetId.get(log.targetId)?.departmentOrgNodeId ?? null,
   }));
 
+  const productGoalById = new Map(productGoals.map((goal) => [goal.id, goal]));
+  const activeWorksByProject = new Map<string, typeof activeWorks>();
+  for (const work of activeWorks) {
+    const list = activeWorksByProject.get(work.projectId) ?? [];
+    list.push(work);
+    activeWorksByProject.set(work.projectId, list);
+  }
+
+  const valueTrackItems = valueTracks
+    .filter((track) => isValueTrackVisibleInPeriod(track, activePeriod))
+    .map((track): ValueTrackItem => {
+      const project = projects.find((item) => item.id === track.projectId) ?? null;
+      const { teamOrgNodeId, departmentOrgNodeId } = project
+        ? getProjectOrgAffiliation(project)
+        : { teamOrgNodeId: null, departmentOrgNodeId: null };
+
+      return {
+        id: track.id,
+        projectId: track.projectId,
+        projectTitle: project?.title ?? "—",
+        ownerId: project?.ownerId ?? "",
+        owner: project ? ownerMap.get(project.ownerId) ?? "—" : "—",
+        departmentOrgNodeId,
+        teamOrgNodeId,
+        trackedAt: track.trackedAt,
+        trackingResult: track.trackingResult,
+        followUpOptimization: track.followUpOptimization,
+        actualValue: project?.actualValue ?? null,
+        valueJudgement: project?.valueJudgement ?? null,
+        valueTrackStatus: normalizeValueTrackStatus(project?.valueTrackStatus),
+      };
+    });
+  const valueTracksByProject = new Map<string, ValueTrackItem[]>();
+  for (const track of valueTrackItems) {
+    const list = valueTracksByProject.get(track.projectId) ?? [];
+    list.push(track);
+    valueTracksByProject.set(track.projectId, list);
+  }
+
+  const workspaceStatus = normalizeWorkspaceStatusFilter(options?.status);
+  const workspaceView = normalizeWorkspaceViewMode(options?.view);
+  const workspaceProjectPanel = normalizeProjectPanelMode(options?.projectPanel);
+  const workspaceSearchQuery = normalizeSearchQuery(options?.query);
+  const selectedGoalId = options?.goalId && options.goalId !== "all" ? options.goalId : null;
+  const currentUserTeamOrgNodeId = getTeamOrgNodeIdForRecord(currentUser.orgNodeId, orgNodeById);
+  const roleDefaultTeamId = (currentUser.roleType === "TEAM_LEADER" || currentUser.roleType === "MEMBER")
+    ? currentUserTeamOrgNodeId
+    : null;
+  const roleDefaultOwnerId = currentUser.roleType === "MEMBER" ? currentUser.id : null;
+  const rawTeamId = options?.teamId;
+  const selectedTeamId = rawTeamId == null
+    ? roleDefaultTeamId
+    : rawTeamId === "all"
+      ? null
+      : rawTeamId;
+  const selectedOrgNodeId = options?.orgNodeId?.trim() || null;
+  const rawOwnerId = options?.ownerId;
+  const selectedOwnerId = rawOwnerId == null
+    ? roleDefaultOwnerId
+    : rawOwnerId === "all"
+      ? null
+      : rawOwnerId.trim() || null;
+  const selectedProjectId = options?.projectId?.trim() || null;
+
+  const toProjectWorkspaceTaskItem = (work: (typeof activeWorks)[number]): ProjectWorkspaceTaskItem => ({
+    ...toBoardItem(work),
+    year: work.year,
+    quarter: work.quarter,
+    periodLabel: formatTaskPeriodLabel(work.startMonth, work.endMonth),
+    isOverdue: isWorkOverdue(work),
+  });
+
+  const buildProjectWorkspaceItem = (project: (typeof projects)[number]): ProjectWorkspaceItem => {
+    const base = toProjectBoardItem(project);
+    const projectGoals = base.productGoalIds
+      .map((goalId) => productGoalById.get(goalId) ?? null)
+      .filter((goal): goal is NonNullable<typeof goal> => Boolean(goal))
+      .map((goal) => ({
+        id: goal.id,
+        title: goal.title,
+        year: goal.year,
+      }));
+    const tasks = (activeWorksByProject.get(project.id) ?? [])
+      .map(toProjectWorkspaceTaskItem)
+      .sort((left, right) => {
+        const leftEnd = left.endMonth ?? left.startMonth ?? 13;
+        const rightEnd = right.endMonth ?? right.startMonth ?? 13;
+        return leftEnd - rightEnd || right.createdAt.getTime() - left.createdAt.getTime();
+      });
+    const projectValueTracks = valueTracksByProject.get(project.id) ?? [];
+    const latestValueTrack = projectValueTracks[0] ?? null;
+    const isOverdue = isProjectOverdue(project);
+
+    return {
+      ...base,
+      productGoals: projectGoals,
+      statusFilterKey: isOverdue ? "DELAYED" : project.status,
+      isOverdue,
+      tasks,
+      valueTracks: projectValueTracks.map((track) => ({
+        ...track,
+        periodLabel: `${track.trackedAt.getFullYear()}年Q${getQuarterByDate(track.trackedAt) ?? ""}`,
+      })),
+      valueTrackSummary: {
+        status: normalizeValueTrackStatus(project.valueTrackStatus),
+        judgement: project.valueJudgement,
+        actualValue: project.actualValue,
+        latestTrackedAt: latestValueTrack?.trackedAt ?? null,
+        trackCount: projectValueTracks.length,
+      },
+    };
+  };
+
+  const projectMatchesActivePeriod = (project: (typeof projects)[number]) => {
+    const hasActiveTasks = Boolean(activeWorksByProject.get(project.id)?.length);
+    const hasActiveValueTracks = Boolean(valueTracksByProject.get(project.id)?.length);
+    const projectPeriodMatched = allQuarterSelected
+      ? projectRangeOverlapsYear(project, activeYear)
+      : projectRangeHasQuarter(project, activeYear, activeQuarter as number);
+    return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks;
+  };
+
+  const projectWorkspaceSourceItems = projects
+    .filter(projectMatchesActivePeriod)
+    .map(buildProjectWorkspaceItem);
+
+  const matchesProjectWorkspaceFilters = (
+    item: ReturnType<typeof buildProjectWorkspaceItem>,
+    options?: { ignoreStatus?: boolean; ignoreOwner?: boolean },
+  ) => {
+    const ignoreStatus = options?.ignoreStatus ?? false;
+    const ignoreOwner = options?.ignoreOwner ?? false;
+    if (selectedProjectId && item.id !== selectedProjectId) {
+      return false;
+    }
+    if (selectedGoalId && !item.productGoalIds.includes(selectedGoalId)) {
+      return false;
+    }
+    if (!ignoreStatus && workspaceStatus !== "all" && item.statusFilterKey !== workspaceStatus) {
+      return false;
+    }
+    if (selectedTeamId && item.teamOrgNodeId !== selectedTeamId) {
+      return false;
+    }
+    if (selectedOrgNodeId) {
+      const belongsToSelectedOrg = item.departmentOrgNodeId === selectedOrgNodeId || item.teamOrgNodeId === selectedOrgNodeId;
+      if (!belongsToSelectedOrg) {
+        return false;
+      }
+    }
+    if (!ignoreOwner && selectedOwnerId && item.ownerId !== selectedOwnerId) {
+      return false;
+    }
+    if (!workspaceSearchQuery) {
+      return true;
+    }
+
+    return textMatchesSearchQuery(
+      workspaceSearchQuery,
+      item.title,
+      item.description,
+      item.expectedOutcome,
+      item.actualValue,
+      item.valueJudgement,
+      ...item.productGoals.flatMap((goal) => [goal.title, goal.year]),
+      ...item.tasks.flatMap((task) => [task.title, task.description, task.taskDescription, task.expectedOutcome, task.taskResult, task.executionSummary]),
+      ...item.valueTracks.flatMap((track) => [track.trackingResult, track.followUpOptimization, track.actualValue, track.valueJudgement]),
+    );
+  };
+
+  const projectWorkspaceItems = projectWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item));
+  const projectStatusScopeItems = projectWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item, { ignoreStatus: true }));
+  const taskWorkspaceItems = projectWorkspaceSourceItems
+    .filter((item) => matchesProjectWorkspaceFilters(item, { ignoreStatus: true, ignoreOwner: true }))
+    .flatMap((project) => project.tasks.filter((task) => !selectedOwnerId || task.ownerId === selectedOwnerId));
+  const countByStatusFilterKey = (key: Exclude<WorkspaceStatusFilter, "all">) =>
+    projectStatusScopeItems.filter((item) => item.statusFilterKey === key).length;
+  const projectStatusCounts = {
+    all: projectStatusScopeItems.length,
+    IN_PROGRESS: countByStatusFilterKey("IN_PROGRESS"),
+    DELAYED: countByStatusFilterKey("DELAYED"),
+    LAUNCHED: countByStatusFilterKey("LAUNCHED"),
+    NOT_STARTED: countByStatusFilterKey("NOT_STARTED"),
+    COMPLETED: countByStatusFilterKey("COMPLETED"),
+    CLOSED: countByStatusFilterKey("CLOSED"),
+  };
+
+  const goalNavigationScopeItems = projectWorkspaceSourceItems.filter((item) => {
+    if (workspaceStatus !== "all" && item.statusFilterKey !== workspaceStatus) {
+      return false;
+    }
+    if (selectedTeamId && item.teamOrgNodeId !== selectedTeamId) {
+      return false;
+    }
+    if (selectedOrgNodeId) {
+      const belongsToSelectedOrg = item.departmentOrgNodeId === selectedOrgNodeId || item.teamOrgNodeId === selectedOrgNodeId;
+      if (!belongsToSelectedOrg) {
+        return false;
+      }
+    }
+    if (selectedOwnerId && item.ownerId !== selectedOwnerId) {
+      return false;
+    }
+    if (!workspaceSearchQuery) {
+      return true;
+    }
+    return projectWorkspaceItems.some((itemInSearchResult) => itemInSearchResult.id === item.id);
+  });
+
+  const countGoalProjects = (goalId: string) => goalNavigationScopeItems.filter((item) => item.productGoalIds.includes(goalId));
+  const sumTaskCount = (items: ProjectWorkspaceItem[]) => items.reduce((sum, item) => sum + item.tasks.length, 0);
+  const toGoalNavigationItem = (goal: (typeof productGoals)[number]): GoalNavigationItem => {
+    const goalProjects = countGoalProjects(goal.id);
+    const teamOrgNodeId = getTeamOrgNodeIdForRecord(goal.orgNodeId, orgNodeById);
+    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(goal.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
+
+    return {
+      id: goal.id,
+      title: goal.title,
+      year: goal.year,
+      ownerId: goal.ownerId,
+      owner: ownerMap.get(goal.ownerId) ?? "—",
+      departmentOrgNodeId,
+      teamOrgNodeId,
+      teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
+      status: goal.status,
+      description: goal.description,
+      expectedOutcome: goal.expectedOutcome,
+      projectCount: goalProjects.length,
+      taskCount: sumTaskCount(goalProjects),
+      isAll: false,
+    };
+  };
+  const visibleGoalIds = new Set(goalNavigationScopeItems.flatMap((item) => item.productGoalIds));
+  const goalNavigationItems: GoalNavigationItem[] = [
+    {
+      id: "all",
+      title: "全部",
+      year: null,
+      ownerId: null,
+      owner: null,
+      departmentOrgNodeId: null,
+      teamOrgNodeId: null,
+      teamName: null,
+      status: "all",
+      description: null,
+      expectedOutcome: null,
+      projectCount: goalNavigationScopeItems.length,
+      taskCount: sumTaskCount(goalNavigationScopeItems),
+      isAll: true,
+    },
+    ...productGoals
+      .filter((goal) => goal.year === activeYear || visibleGoalIds.has(goal.id))
+      .map(toGoalNavigationItem),
+  ];
+
+  const workspaceSummary = {
+    totalProjectCount: projectWorkspaceSourceItems.length,
+    filteredProjectCount: projectWorkspaceItems.length,
+    totalTaskCount: sumTaskCount(projectWorkspaceSourceItems),
+    filteredTaskCount: sumTaskCount(projectWorkspaceItems),
+    totalValueTrackCount: projectWorkspaceSourceItems.reduce((sum, item) => sum + item.valueTracks.length, 0),
+    filteredValueTrackCount: projectWorkspaceItems.reduce((sum, item) => sum + item.valueTracks.length, 0),
+    overdueProjectCount: projectWorkspaceSourceItems.filter((item) => item.isOverdue).length,
+    overdueTaskCount: projectWorkspaceSourceItems.reduce((sum, item) => sum + item.tasks.filter((task) => task.isOverdue).length, 0),
+    projectStatusCounts,
+  };
+
   const [
     canManageProductGoalPermission,
     canManageProjectAndValueTrackingPermission,
@@ -851,30 +1255,22 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       .filter(isLaunchedProjectInActivePeriod)
       .sort((left, right) => (right.launchedAt?.getTime() ?? 0) - (left.launchedAt?.getTime() ?? 0))
       .map(toValueOverviewItem),
-    valueTrackItems: valueTracks
-      .filter((track) => isValueTrackVisibleInPeriod(track, activePeriod))
-      .map((track): ValueTrackItem => {
-      const project = projects.find((item) => item.id === track.projectId) ?? null;
-      const { teamOrgNodeId, departmentOrgNodeId } = project
-        ? getProjectOrgAffiliation(project)
-        : { teamOrgNodeId: null, departmentOrgNodeId: null };
-
-      return {
-        id: track.id,
-        projectId: track.projectId,
-        projectTitle: project?.title ?? "—",
-        ownerId: project?.ownerId ?? "",
-        owner: project ? ownerMap.get(project.ownerId) ?? "—" : "—",
-        departmentOrgNodeId,
-        teamOrgNodeId,
-        trackedAt: track.trackedAt,
-        trackingResult: track.trackingResult,
-        followUpOptimization: track.followUpOptimization,
-        actualValue: project?.actualValue ?? null,
-        valueJudgement: project?.valueJudgement ?? null,
-        valueTrackStatus: normalizeValueTrackStatus(project?.valueTrackStatus),
-      };
-    }),
+    valueTrackItems,
+    goalNavigationItems,
+    projectWorkspaceItems,
+    taskWorkspaceItems,
+    workspaceSummary,
+    workspaceFilters: {
+      goalId: selectedGoalId ?? "all",
+      view: workspaceView,
+      projectPanel: workspaceProjectPanel,
+      status: workspaceStatus,
+      orgNodeId: selectedOrgNodeId,
+      teamId: selectedTeamId ?? "all",
+      ownerId: selectedOwnerId,
+      projectId: selectedProjectId,
+      query: workspaceSearchQuery,
+    },
     productGoalOptions: productGoals.map((goal) => ({
       id: goal.id,
       title: goal.title,
