@@ -67,6 +67,14 @@ function parseOptionalFloat(value: FormDataEntryValue | null) {
   return Math.round(parsed * 10) / 10;
 }
 
+function parseLaunchedAtInput(value: FormDataEntryValue | null): Date | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function parseOptionalId(value: FormDataEntryValue | null) {
   const text = (value as string | null)?.trim();
   return text || null;
@@ -686,6 +694,9 @@ export async function createProject(formData: FormData) {
   if ((status === "LAUNCHED" || status === "COMPLETED") && workloadPersonDay === null) {
     throw new Error("项目状态为已上线或已完成时，工作量(人天)为必填项");
   }
+  if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
+    throw new Error("项目状态为已上线时，上线时间为必填项");
+  }
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
@@ -704,7 +715,7 @@ export async function createProject(formData: FormData) {
         status,
         workloadPersonDay,
         createdById: currentUser.id,
-        launchedAt: status === "LAUNCHED" ? new Date() : null,
+        launchedAt: status === "LAUNCHED" ? parseLaunchedAtInput(formData.get("launchedAt")) ?? new Date() : null,
         completedAt: getProjectCompletedAtByStatus(status),
         ...(status === "LAUNCHED"
           ? { valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED, valueJudgement: null }
@@ -1221,6 +1232,9 @@ export async function updateProject(formData: FormData) {
   if ((status === "LAUNCHED" || status === "COMPLETED") && workloadPersonDay === null) {
     throw new Error("项目状态为已上线或已完成时，工作量(人天)为必填项");
   }
+  if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
+    throw new Error("项目状态为已上线时，上线时间为必填项");
+  }
 
   const project = await prisma.project.findFirst({
     where: { id: projectId, ...scopeWhere },
@@ -1246,6 +1260,9 @@ export async function updateProject(formData: FormData) {
   const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
   const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
+  const nextLaunchedAt = status === "LAUNCHED"
+    ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt ?? new Date())
+    : getProjectLaunchedAtByStatus(status, project.launchedAt);
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
@@ -1261,7 +1278,7 @@ export async function updateProject(formData: FormData) {
         status,
         ownerId: owner.id,
         orgNodeId: owner.orgNodeId,
-        launchedAt: getProjectLaunchedAtByStatus(status, project.launchedAt),
+        launchedAt: nextLaunchedAt,
         completedAt: getProjectCompletedAtByStatus(status),
         ...(valueTrackInit ?? {}),
       },

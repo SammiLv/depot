@@ -1019,6 +1019,21 @@ function ProjectEditForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
+  // 状态切换为已上线/已完成时，把新出现的必填时间字段滚动到可视区域，
+  // 避免字段出现在滚动区折叠线以下导致用户看不到
+  const launchedAtRowRef = useRef<HTMLDivElement>(null);
+  const completedAtRowRef = useRef<HTMLDivElement>(null);
+  const prevProjectStatusRef = useRef(projectStatus);
+  useEffect(() => {
+    if (prevProjectStatusRef.current === projectStatus) return;
+    prevProjectStatusRef.current = projectStatus;
+    const target = projectStatus === "LAUNCHED"
+      ? launchedAtRowRef.current
+      : projectStatus === "COMPLETED"
+        ? completedAtRowRef.current
+        : null;
+    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [projectStatus]);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
   const taskWorkloadSum = useMemo(
     () => data.columns.flatMap((column) => column.items).reduce((sum, work) => {
@@ -1168,15 +1183,30 @@ function ProjectEditForm({
           </select>
         </FormRow>
         {projectStatus === "COMPLETED" ? (
-          <FormRow label="完成时间 *" align="center">
-            <input
-              name="completedAt"
-              type="datetime-local"
-              required
-              defaultValue={toDateTimeLocalValue(item.completedAt)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            />
-          </FormRow>
+          <div ref={completedAtRowRef}>
+            <FormRow label="完成时间 *" align="center">
+              <input
+                name="completedAt"
+                type="datetime-local"
+                required
+                defaultValue={toDateTimeLocalValue(item.completedAt)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
+        ) : null}
+        {projectStatus === "LAUNCHED" ? (
+          <div ref={launchedAtRowRef}>
+            <FormRow label="上线时间 *" align="center">
+              <input
+                name="launchedAt"
+                type="datetime-local"
+                required
+                defaultValue={toDateTimeLocalValue(item.launchedAt ?? new Date())}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
         ) : null}
       </StickyFormScroll>
       <StickyFormFooter>
@@ -1219,6 +1249,20 @@ function ProjectCreateForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [createProjectStatus, setCreateProjectStatus] = useState<ProjectStatus>(defaultStatus ?? "NOT_STARTED");
+  // 状态切换为已上线/已完成时，把新出现的必填时间字段滚动到可视区域
+  const launchedAtRowRef = useRef<HTMLDivElement>(null);
+  const completedAtRowRef = useRef<HTMLDivElement>(null);
+  const prevCreateProjectStatusRef = useRef(createProjectStatus);
+  useEffect(() => {
+    if (prevCreateProjectStatusRef.current === createProjectStatus) return;
+    prevCreateProjectStatusRef.current = createProjectStatus;
+    const target = createProjectStatus === "LAUNCHED"
+      ? launchedAtRowRef.current
+      : createProjectStatus === "COMPLETED"
+        ? completedAtRowRef.current
+        : null;
+    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [createProjectStatus]);
   const createWorkloadRequired = createProjectStatus === "LAUNCHED" || createProjectStatus === "COMPLETED";
 
   const quarterOptions = useMemo(() => {
@@ -1359,15 +1403,30 @@ function ProjectCreateForm({
           </select>
         </FormRow>
         {createProjectStatus === "COMPLETED" ? (
-          <FormRow label="完成时间 *" align="center">
-            <input
-              name="completedAt"
-              type="datetime-local"
-              required
-              defaultValue={toDateTimeLocalValue(null)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            />
-          </FormRow>
+          <div ref={completedAtRowRef}>
+            <FormRow label="完成时间 *" align="center">
+              <input
+                name="completedAt"
+                type="datetime-local"
+                required
+                defaultValue={toDateTimeLocalValue(null)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
+        ) : null}
+        {createProjectStatus === "LAUNCHED" ? (
+          <div ref={launchedAtRowRef}>
+            <FormRow label="上线时间 *" align="center">
+              <input
+                name="launchedAt"
+                type="datetime-local"
+                required
+                defaultValue={toDateTimeLocalValue(null)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
         ) : null}
       </StickyFormScroll>
       <StickyFormFooter>
@@ -2092,12 +2151,14 @@ function CountdownTag({ label, overdue }: { label: string | null; overdue: boole
   );
 }
 
-function getTaskStatusFilterKey(task: ProjectWorkspaceTaskItem): Exclude<TaskStatusFilter, "all"> {
-  if (task.status === "CLOSED") return "CLOSED";
-  if (task.status === "COMPLETED") return "COMPLETED";
-  if (task.status === "DELAYED_COMPLETED" || task.isOverdue) return "DELAYED";
-  if (task.status === "IN_PROGRESS") return "IN_PROGRESS";
-  return "NOT_STARTED";
+function taskMatchesStatusFilter(task: ProjectWorkspaceTaskItem, filter: TaskStatusFilter): boolean {
+  if (filter === "all") return true;
+  if (task.status === "CLOSED") return filter === "CLOSED";
+  if (task.status === "COMPLETED") return filter === "COMPLETED";
+  // 延期与执行状态并存：逾期未完成任务同时归入「延期」和其状态（未启动/进行中）筛选
+  if (filter === "DELAYED") return task.status === "DELAYED_COMPLETED" || task.isOverdue;
+  if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS";
+  return task.status === "NOT_STARTED";
 }
 
 function getRemainingWeeks(task: ProjectWorkspaceTaskItem) {
@@ -4182,6 +4243,7 @@ function QuarterlyWorkShell({
   const isValueHome = entityTab === "value";
   const bleedCardList = (isGoalHome || isTaskHome) && activeView === "card";
   const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusFilter>("all");
+  const [needsDevOnly, setNeedsDevOnly] = useState(false);
   const [valueStatusFilter, setValueStatusFilter] = useState<ValueStatusFilter>("all");
   const [valueJudgementFilter, setValueJudgementFilter] = useState("");
   const projectStatusCounts = data.workspaceSummary.projectStatusCounts;
@@ -4194,24 +4256,58 @@ function QuarterlyWorkShell({
   const secondLevelTeamValue = data.workspaceFilters.teamId && data.workspaceFilters.teamId !== "all"
     ? data.workspaceFilters.teamId
     : "";
+  // 部门/业务组/负责人联动：负责人选项随部门与业务组收缩
+  const scopedMemberOptions = useMemo(
+    () => data.memberOptions.filter((member) =>
+      (!selectedDepartmentId || member.departmentOrgNodeId === selectedDepartmentId)
+      && (!secondLevelTeamValue || member.teamOrgNodeId === secondLevelTeamValue),
+    ),
+    [data.memberOptions, selectedDepartmentId, secondLevelTeamValue],
+  );
+  // 失效的筛选值（如不存在的 ID、跨部门的业务组/负责人）自动回收，避免叠加后查无数据
+  const lastFilterResetRef = useRef("");
+  useEffect(() => {
+    let reset: Record<string, string | null> | null = null;
+    if (selectedDepartmentId && !data.departments.some((department) => department.id === selectedDepartmentId)) {
+      reset = { orgNodeId: null, teamId: "all", ownerId: "all" };
+    } else if (secondLevelTeamValue && !secondLevelTeamOptions.some((team) => team.id === secondLevelTeamValue)) {
+      reset = { teamId: "all", ownerId: "all" };
+    } else if (data.workspaceFilters.ownerId && !scopedMemberOptions.some((member) => member.id === data.workspaceFilters.ownerId)) {
+      reset = { ownerId: "all" };
+    }
+    if (!reset) {
+      lastFilterResetRef.current = "";
+      return;
+    }
+    const resetKey = JSON.stringify(reset);
+    if (lastFilterResetRef.current === resetKey) return;
+    lastFilterResetRef.current = resetKey;
+    onUpdateFilters(reset);
+  }, [selectedDepartmentId, secondLevelTeamValue, secondLevelTeamOptions, scopedMemberOptions, data.departments, data.workspaceFilters.ownerId, onUpdateFilters]);
   const taskItems = data.taskWorkspaceItems;
+  const scopedTaskItems = useMemo(
+    () => (needsDevOnly ? taskItems.filter((task) => task.needsDevelopment === true) : taskItems),
+    [taskItems, needsDevOnly],
+  );
   const taskCounts = useMemo(() => {
     const counts: Record<TaskStatusFilter, number> = {
-      all: taskItems.length,
+      all: scopedTaskItems.length,
       IN_PROGRESS: 0,
       DELAYED: 0,
       NOT_STARTED: 0,
       COMPLETED: 0,
       CLOSED: 0,
     };
-    for (const task of taskItems) {
-      counts[getTaskStatusFilterKey(task)] += 1;
+    for (const task of scopedTaskItems) {
+      for (const { key } of taskStatusFilters) {
+        if (key !== "all" && taskMatchesStatusFilter(task, key)) counts[key] += 1;
+      }
     }
     return counts;
-  }, [taskItems]);
+  }, [scopedTaskItems]);
   const visibleTasks = useMemo(
-    () => taskItems.filter((task) => taskStatusFilter === "all" || getTaskStatusFilterKey(task) === taskStatusFilter),
-    [taskItems, taskStatusFilter],
+    () => scopedTaskItems.filter((task) => taskMatchesStatusFilter(task, taskStatusFilter)),
+    [scopedTaskItems, taskStatusFilter],
   );
   const projectFilterOptions = useMemo(() => {
     const titles = new Map<string, string>();
@@ -4385,7 +4481,7 @@ function QuarterlyWorkShell({
             onChange={(value) => onUpdateFilters({ ownerId: value || "all" })}
             options={[
               { value: "", label: "负责人" },
-              ...data.memberOptions.map((member) => ({
+              ...scopedMemberOptions.map((member) => ({
                 value: member.id,
                 label: member.name,
               })),
@@ -4402,6 +4498,7 @@ function QuarterlyWorkShell({
               setEntityTab(nextTab);
               if (nextTab === "task") {
                 setTaskStatusFilter("all");
+                setNeedsDevOnly(false);
                 if (activeStatus !== "all") onUpdateFilters({ status: null });
               }
               if (nextTab === "value") {
@@ -4486,7 +4583,7 @@ function QuarterlyWorkShell({
                 />
               </div>
             ) : isTaskHome ? (
-              <div className="mt-2">
+              <div className="mt-2 flex items-center gap-2">
                 <WorkspaceFilterSelect
                   width={96}
                   plain
@@ -4496,6 +4593,15 @@ function QuarterlyWorkShell({
                   onChange={(value) => onUpdateFilters({ projectId: value || null })}
                   options={projectFilterOptions}
                 />
+                <label className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-[#4B4B4B]">
+                  <input
+                    type="checkbox"
+                    checked={needsDevOnly}
+                    onChange={(event) => setNeedsDevOnly(event.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-[#D9D9D9]"
+                  />
+                  仅看需开发
+                </label>
               </div>
             ) : isValueHome ? (
               <div className="mt-2 flex gap-2">

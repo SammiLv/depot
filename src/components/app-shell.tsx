@@ -20,7 +20,7 @@ const menu: Array<{
   { to: "/quarterly-work", label: "产品管理", iconSrc: "/icons/nav-product.png", iconActiveSrc: "/icons/nav-product-active.png", description: "以产品目标为核心管理关联项目、项目任务与上线后价值跟踪。" },
   { to: "/kpi", label: "KPI 管理", iconSrc: "/icons/nav-kpi.png", iconActiveSrc: "/icons/nav-kpi-active.png", description: "管理季度 KPI 评分与进度。" },
   { to: "/talent", label: "人才发展", iconSrc: "/icons/nav-talent.png", iconActiveSrc: "/icons/nav-talent-active.png", description: "管理人才盘点、评估与发展。" },
-  { to: "/statistics", label: "数据统计", iconSrc: "/icons/nav-todos.png", iconActiveSrc: "/icons/nav-todos-active.png", description: "数据统计模块，建设中。" },
+  { to: "/statistics", label: "数据统计", iconSrc: "/icons/nav-statistics.png", iconActiveSrc: "/icons/nav-statistics-active.png", description: "数据统计模块，建设中。" },
   { to: "/notifications", label: "通知中心", iconSrc: "/icons/nav-notifications.png", iconActiveSrc: "/icons/nav-notifications-active.png", description: "查看系统通知与消息。" },
   { to: "/organization", label: "组织架构", iconSrc: "/icons/nav-org.png", iconActiveSrc: "/icons/nav-org-active.png", description: "管理组织架构、人员与权限。" },
 ];
