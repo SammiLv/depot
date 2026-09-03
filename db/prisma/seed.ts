@@ -3,7 +3,6 @@ import { randomUUID, scryptSync } from "node:crypto";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualMetricCalculationType, PrismaClient, RoleType } from "@prisma/client";
-import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
 import {
   kpiDefaultPermissionGrants,
   notificationDefaultPermissionGrants,
@@ -632,44 +631,7 @@ async function main() {
     }
   }
 
-  for (const permission of annualGoalPermissionDefinitions) {
-    await prisma.annualGoalPermission.upsert({
-      where: { code: permission.code },
-      update: {
-        name: permission.name,
-        description: permission.description,
-        sortOrder: permission.sortOrder,
-      },
-      create: permission,
-    });
-  }
-
-  const annualGoalPermissions = await prisma.annualGoalPermission.findMany();
-  const annualGoalPermissionIdByCode = new Map(annualGoalPermissions.map((permission) => [permission.code, permission.id]));
-  const annualGoalRoleDefaults: Array<[RoleType, string[]]> = [
-    [RoleType.ADMIN, annualGoalPermissionDefinitions.map((permission) => permission.code)],
-    [RoleType.DEPARTMENT_MANAGER, annualGoalPermissionDefinitions.map((permission) => permission.code)],
-    [RoleType.TEAM_LEADER, ["annualGoal.viewDepartmentPlans", "annualGoal.editTeamPlans", "annualGoal.updateProgress"]],
-    [RoleType.MEMBER, ["annualGoal.viewDepartmentPlans", "annualGoal.updateProgress"]],
-  ];
-
-  await prisma.roleAnnualGoalPermission.deleteMany();
   await prisma.orgPermissionGrant.deleteMany();
-  for (const [roleType, codes] of annualGoalRoleDefaults) {
-    for (const code of codes) {
-      const annualGoalPermissionId = annualGoalPermissionIdByCode.get(code);
-      if (!annualGoalPermissionId) continue;
-      await prisma.roleAnnualGoalPermission.create({
-        data: {
-          scopeType: "SYSTEM",
-          departmentOrgNodeId: "",
-          roleType,
-          annualGoalPermissionId,
-          allowed: true,
-        },
-      });
-    }
-  }
 
   for (const grant of [...kpiDefaultPermissionGrants, ...talentDefaultPermissionGrants, ...notificationDefaultPermissionGrants, ...productManagementDefaultPermissionGrants]) {
     const orgNodeIds = grant.orgNodeSeedKey === null
