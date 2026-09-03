@@ -191,6 +191,7 @@ ensure_node_path() {
   fi
   # 2. 常见候选位置
   local candidates=(
+    "/c/Users/rj/.workbuddy/binaries/node/versions/24.20.0"
     "/c/Users/rj/.workbuddy/binaries/node/versions/22.22.2"
     "/c/Program Files/nodejs"
     "/c/Program Files (x86)/nodejs"
@@ -377,7 +378,7 @@ cmd_start() {
   # 探测 node 路径(直接调 next 的 JS 入口,绕开 npx/npm/cmd 链)
   local node_dir
   node_dir=$(ensure_node_path) || {
-    err "找不到 node.exe。请安装 Node.js 18+ 或把现有 node 加到 PATH"
+    err "找不到 node.exe。请安装 Node.js 20.9+ 或把现有 node 加到 PATH"
     return 1
   }
   log "node 路径: $node_dir/node"
