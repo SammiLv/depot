@@ -1202,7 +1202,7 @@ function ProjectEditForm({
                 name="launchedAt"
                 type="datetime-local"
                 required
-                defaultValue={toDateTimeLocalValue(item.launchedAt ?? new Date())}
+                defaultValue={toDateTimeLocalValue(item.launchedAt)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
               />
             </FormRow>
@@ -1473,7 +1473,8 @@ function formatDateTimeLabel(value: Date | string | null | undefined) {
 }
 
 function toDateTimeLocalValue(value: Date | string | null | undefined) {
-  const date = value ? (value instanceof Date ? value : new Date(value)) : new Date();
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -2153,12 +2154,13 @@ function CountdownTag({ label, overdue }: { label: string | null; overdue: boole
 
 function taskMatchesStatusFilter(task: ProjectWorkspaceTaskItem, filter: TaskStatusFilter): boolean {
   if (filter === "all") return true;
-  if (task.status === "CLOSED") return filter === "CLOSED";
-  if (task.status === "COMPLETED") return filter === "COMPLETED";
-  // 延期与执行状态并存：逾期未完成任务同时归入「延期」和其状态（未启动/进行中）筛选
-  if (filter === "DELAYED") return task.status === "DELAYED_COMPLETED" || task.isOverdue;
+  // 延期：仅「进行中 + 已逾期」
+  if (filter === "DELAYED") return task.status === "IN_PROGRESS" && task.isOverdue;
+  if (filter === "COMPLETED") return task.status === "COMPLETED";
+  if (filter === "CLOSED") return task.status === "CLOSED";
   if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS";
-  return task.status === "NOT_STARTED";
+  if (filter === "NOT_STARTED") return task.status === "NOT_STARTED";
+  return false;
 }
 
 function getRemainingWeeks(task: ProjectWorkspaceTaskItem) {

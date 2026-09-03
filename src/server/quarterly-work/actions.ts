@@ -67,12 +67,30 @@ function parseOptionalFloat(value: FormDataEntryValue | null) {
   return Math.round(parsed * 10) / 10;
 }
 
-function parseLaunchedAtInput(value: FormDataEntryValue | null): Date | null {
+function parseDateTimeInput(value: FormDataEntryValue | null): Date | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
+  const localMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (localMatch) {
+    const [, year, month, day, hour, minute, second] = localMatch;
+    const date = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      second ? Number(second) : 0,
+      0,
+    );
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
   const date = new Date(trimmed);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseLaunchedAtInput(value: FormDataEntryValue | null): Date | null {
+  return parseDateTimeInput(value);
 }
 
 function parseOptionalId(value: FormDataEntryValue | null) {
@@ -193,7 +211,31 @@ function assertEditableStatus(status: WorkStatus) {
   }
 }
 
-function getCompletedAtByStatus(status: WorkStatus) {
+function resolveCompletedAtByStatus(
+  status: WorkStatus,
+  formValue: FormDataEntryValue | null,
+  existingCompletedAt: Date | null = null,
+) {
+  if (status !== "COMPLETED") return null;
+  const parsed = parseDateTimeInput(formValue);
+  if (parsed) return parsed;
+  if (existingCompletedAt) return existingCompletedAt;
+  throw new Error("任务状态为已完成时，完成时间为必填项");
+}
+
+function resolveProjectCompletedAtByStatus(
+  status: ProjectStatus,
+  formValue: FormDataEntryValue | null,
+  existingCompletedAt: Date | null = null,
+) {
+  if (status !== "COMPLETED") return null;
+  const parsed = parseDateTimeInput(formValue);
+  if (parsed) return parsed;
+  if (existingCompletedAt) return existingCompletedAt;
+  throw new Error("项目状态为已完成时，完成时间为必填项");
+}
+
+function getProjectCompletedAtByStatus(status: ProjectStatus) {
   return status === "COMPLETED" ? new Date() : null;
 }
 
@@ -211,10 +253,6 @@ function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkSta
     throw new Error("任务状态为已完成时，任务执行概况为必填项");
   }
   return text;
-}
-
-function getProjectCompletedAtByStatus(status: ProjectStatus) {
-  return status === "COMPLETED" ? new Date() : null;
 }
 
 function getProjectLaunchedAtByStatus(status: ProjectStatus, existingLaunchedAt: Date | null) {
@@ -406,6 +444,9 @@ export async function createQuarterlyWork(formData: FormData) {
   if (status === "COMPLETED" && workloadPersonDay === null) {
     throw new Error("任务状态为已完成时，工作量(人天)为必填项");
   }
+  if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
+    throw new Error("任务状态为已完成时，完成时间为必填项");
+  }
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
@@ -449,7 +490,7 @@ export async function createQuarterlyWork(formData: FormData) {
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       createdById: currentUser.id,
-      completedAt: getCompletedAtByStatus(status),
+      completedAt: resolveCompletedAtByStatus(status, formData.get("completedAt")),
     },
     select: { id: true },
   });
@@ -484,6 +525,9 @@ export async function updateQuarterlyWork(formData: FormData) {
   if (status === "COMPLETED" && workloadPersonDay === null) {
     throw new Error("任务状态为已完成时，工作量(人天)为必填项");
   }
+  if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
+    throw new Error("任务状态为已完成时，完成时间为必填项");
+  }
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
@@ -503,6 +547,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       startMonth: true,
       endMonth: true,
       ownerId: true,
+      completedAt: true,
       title: true,
       description: true,
       taskDescription: true,
@@ -554,7 +599,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       needsDevelopment,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
-      completedAt: getCompletedAtByStatus(status),
+      completedAt: resolveCompletedAtByStatus(status, formData.get("completedAt"), existingWork.completedAt),
     },
   });
 
@@ -697,6 +742,9 @@ export async function createProject(formData: FormData) {
   if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
   }
+  if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
+    throw new Error("项目状态为已完成时，完成时间为必填项");
+  }
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
@@ -715,8 +763,8 @@ export async function createProject(formData: FormData) {
         status,
         workloadPersonDay,
         createdById: currentUser.id,
-        launchedAt: status === "LAUNCHED" ? parseLaunchedAtInput(formData.get("launchedAt")) ?? new Date() : null,
-        completedAt: getProjectCompletedAtByStatus(status),
+        launchedAt: status === "LAUNCHED" ? parseLaunchedAtInput(formData.get("launchedAt")) : null,
+        completedAt: resolveProjectCompletedAtByStatus(status, formData.get("completedAt")),
         ...(status === "LAUNCHED"
           ? { valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED, valueJudgement: null }
           : {}),
@@ -1235,6 +1283,9 @@ export async function updateProject(formData: FormData) {
   if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
   }
+  if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
+    throw new Error("项目状态为已完成时，完成时间为必填项");
+  }
 
   const project = await prisma.project.findFirst({
     where: { id: projectId, ...scopeWhere },
@@ -1243,6 +1294,7 @@ export async function updateProject(formData: FormData) {
       status: true,
       ownerId: true,
       launchedAt: true,
+      completedAt: true,
       title: true,
       description: true,
       expectedOutcome: true,
@@ -1261,8 +1313,11 @@ export async function updateProject(formData: FormData) {
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
   const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
   const nextLaunchedAt = status === "LAUNCHED"
-    ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt ?? new Date())
+    ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt)
     : getProjectLaunchedAtByStatus(status, project.launchedAt);
+  if (status === "LAUNCHED" && !nextLaunchedAt) {
+    throw new Error("项目状态为已上线时，上线时间为必填项");
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
@@ -1279,7 +1334,7 @@ export async function updateProject(formData: FormData) {
         ownerId: owner.id,
         orgNodeId: owner.orgNodeId,
         launchedAt: nextLaunchedAt,
-        completedAt: getProjectCompletedAtByStatus(status),
+        completedAt: resolveProjectCompletedAtByStatus(status, formData.get("completedAt"), project.completedAt),
         ...(valueTrackInit ?? {}),
       },
     });

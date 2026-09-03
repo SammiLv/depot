@@ -406,6 +406,21 @@ async function listDepartments(tree: boolean) {
   return (data ?? []).map(normalizeDepartment).filter((dept): dept is DepartmentRecord => Boolean(dept));
 }
 
+async function listDepartmentsByIds(deptIds: string[]) {
+  if (deptIds.length === 0) return [];
+  const data = await requestDingTalk<DingTalkDepartmentNode[]>("listDepartments", { deptIds, tree: false });
+  return (data ?? []).map(normalizeDepartment).filter((dept): dept is DepartmentRecord => Boolean(dept));
+}
+
+function collectUserIdsFromDepartments(departments: DepartmentRecord[]) {
+  const userIds = new Set<string>();
+  for (const department of departments) {
+    extractUserIds(department.userInDept).forEach((userId) => userIds.add(userId));
+    extractUserIds(department.deptAdmin).forEach((userId) => userIds.add(userId));
+  }
+  return userIds;
+}
+
 async function listUserDepartments(userId: string) {
   const data = await requestDingTalk<DingTalkDepartmentNode[]>("listUserDepartments", { userId, tree: true });
   return (data ?? []).map(normalizeDepartment).filter((dept): dept is DepartmentRecord => Boolean(dept));
@@ -430,12 +445,11 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
   const childDepartments = productDepartment.children;
   const syncDepartmentIds = new Set([productDepartment.deptId, ...childDepartments.map((dept) => dept.deptId)]);
   const seedByUserId = new Map(PRODUCT_MEMBER_SEEDS.map((seed) => [seed.userId, seed]));
-  const userIds = new Set(PRODUCT_MEMBER_SEEDS.map((seed) => seed.userId));
+  const syncDeptIdList = [...syncDepartmentIds];
+  const userIds = collectUserIdsFromDepartments(allDepartments.filter((dept) => syncDepartmentIds.has(dept.deptId)));
 
-  for (const department of allDepartments) {
-    if (!syncDepartmentIds.has(department.deptId)) continue;
-    extractUserIds(department.userInDept).forEach((userId) => userIds.add(userId));
-  }
+  const flatDepartments = await listDepartmentsByIds(syncDeptIdList);
+  collectUserIdsFromDepartments(flatDepartments).forEach((userId) => userIds.add(userId));
 
   const allSyncDepartments = [productDepartment, ...childDepartments];
   const deptAdminUserIds = new Set<string>();
@@ -482,6 +496,11 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
 
     await backfillOrgAssignments(tx, assignmentMaps);
 
+    const existingMemberCount = await tx.user.count({
+      where: { deletedAt: null, roleType: { not: "ADMIN" } },
+    });
+    const isInitialSync = existingMemberCount === 0;
+
     const syncedUserIds: string[] = [];
     for (const user of validUsers) {
       const seed = user.userId ? seedByUserId.get(user.userId) : undefined;
@@ -495,7 +514,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         where: { dingtalkUserId: user.userId },
       });
 
-      if (!existing) {
+      if (!existing && isInitialSync) {
         existing = await tx.user.findFirst({
           where: {
             deletedAt: null,
@@ -507,7 +526,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         });
       }
 
-      if (!existing) {
+      if (!existing && isInitialSync) {
         const nameMatchedUsers = await tx.user.findMany({
           where: {
             deletedAt: null,
@@ -518,6 +537,40 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         if (nameMatchedUsers.length === 1) {
           existing = nameMatchedUsers[0];
         }
+      }
+
+      if (!isInitialSync) {
+        if (existing && existing.dingtalkUserId === user.userId && existing.name === name) {
+          syncedUserIds.push(existing.id);
+          continue;
+        }
+
+        if (!existing) {
+          const savedUser = await tx.user.create({
+            data: {
+              dingtalkUserId: user.userId!,
+              name,
+              mobile: user.mobile ?? null,
+              email: user.email ?? null,
+              orgNodeId,
+              title,
+              roleType: inferredRoleType,
+              isActive: true,
+              deletedAt: null,
+            },
+          });
+          syncedUserIds.push(savedUser.id);
+          continue;
+        }
+
+        if (existing.name !== name) {
+          await tx.user.update({
+            where: { id: existing.id },
+            data: { name },
+          });
+        }
+        syncedUserIds.push(existing.id);
+        continue;
       }
 
       const data = {

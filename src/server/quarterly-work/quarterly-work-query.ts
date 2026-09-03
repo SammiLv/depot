@@ -681,6 +681,15 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   }
 
   const ownerMap = new Map(users.map((user) => [user.id, user.name]));
+  const ownerAffiliationByUserId = new Map(
+    users.map((user) => [
+      user.id,
+      {
+        teamOrgNodeId: getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById),
+        departmentOrgNodeId: getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId),
+      },
+    ]),
+  );
   const teamNameMap = new Map(teams.map((team) => [team.orgNodeId, team.name]));
   const scopedDepartments = currentUser.roleType === "ADMIN"
     ? departments
@@ -702,8 +711,10 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     const completedPlans = plans.filter((plan) => plan.status === "COMPLETED").length;
     const delayedPlans = plans.filter((plan) => plan.status === "DELAYED_COMPLETED").length;
     const progress = totalPlans > 0 ? Math.round((completedPlans / totalPlans) * 100) : undefined;
-    const teamOrgNodeId = getTeamOrgNodeIdForRecord(work.orgNodeId, orgNodeById);
-    const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(work.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
+    const ownerAffiliation = ownerAffiliationByUserId.get(work.ownerId);
+    const teamOrgNodeId = ownerAffiliation?.teamOrgNodeId ?? getTeamOrgNodeIdForRecord(work.orgNodeId, orgNodeById);
+    const departmentOrgNodeId = ownerAffiliation?.departmentOrgNodeId
+      ?? getDepartmentOrgNodeIdForRecord(work.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
 
     return {
       id: work.id,
@@ -934,6 +945,10 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   }));
 
   const productGoalById = new Map(productGoals.map((goal) => [goal.id, goal]));
+  const productGoalIdsByProjectId = new Map(
+    projects.map((project) => [project.id, project.productGoalLinks.map((link) => link.productGoalId)]),
+  );
+  const projectById = new Map(projects.map((project) => [project.id, project]));
   const activeWorksByProject = new Map<string, typeof activeWorks>();
   for (const work of activeWorks) {
     const list = activeWorksByProject.get(work.projectId) ?? [];
@@ -1105,9 +1120,50 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
 
   const projectWorkspaceItems = projectWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item));
   const projectStatusScopeItems = projectWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item, { ignoreStatus: true }));
-  const taskWorkspaceItems = projectWorkspaceSourceItems
-    .filter((item) => matchesProjectWorkspaceFilters(item, { ignoreStatus: true, ignoreOwner: true }))
-    .flatMap((project) => project.tasks.filter((task) => !selectedOwnerId || task.ownerId === selectedOwnerId));
+  const matchesTaskWorkspaceFilters = (task: ProjectWorkspaceTaskItem) => {
+    const project = projectById.get(task.projectId);
+    const projectGoalIds = productGoalIdsByProjectId.get(task.projectId) ?? [];
+    if (selectedProjectId && task.projectId !== selectedProjectId) {
+      return false;
+    }
+    if (selectedGoalId && !projectGoalIds.includes(selectedGoalId)) {
+      return false;
+    }
+    if (selectedOwnerId && task.ownerId !== selectedOwnerId) {
+      return false;
+    }
+    if (selectedTeamId && task.teamOrgNodeId !== selectedTeamId) {
+      return false;
+    }
+    if (selectedOrgNodeId) {
+      const belongsToSelectedOrg = task.departmentOrgNodeId === selectedOrgNodeId || task.teamOrgNodeId === selectedOrgNodeId;
+      if (!belongsToSelectedOrg) {
+        return false;
+      }
+    }
+    if (!workspaceSearchQuery) {
+      return true;
+    }
+    return textMatchesSearchQuery(
+      workspaceSearchQuery,
+      task.title,
+      task.description,
+      task.taskDescription,
+      task.expectedOutcome,
+      task.taskResult,
+      task.executionSummary,
+      project?.title,
+      project?.description,
+      project?.expectedOutcome,
+      ...projectGoalIds.flatMap((goalId) => {
+        const goal = productGoalById.get(goalId);
+        return goal ? [goal.title, goal.year] : [];
+      }),
+    );
+  };
+  const taskWorkspaceItems = activeWorks
+    .map(toProjectWorkspaceTaskItem)
+    .filter(matchesTaskWorkspaceFilters);
   const countByStatusFilterKey = (key: Exclude<WorkspaceStatusFilter, "all">) =>
     projectStatusScopeItems.filter((item) => item.statusFilterKey === key).length;
   const projectStatusCounts = {
