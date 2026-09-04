@@ -1,5 +1,6 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient, type Prisma } from "@prisma/client";
+import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -18,6 +19,15 @@ function resolveDatabaseUrl() {
   }
 
   return process.env.DATABASE_URL;
+}
+
+function resolveDatabaseFilePath() {
+  const databaseUrl = resolveDatabaseUrl();
+  if (!databaseUrl.startsWith("file:")) {
+    throw new Error(`Unsupported database URL for pragma setup: ${databaseUrl}`);
+  }
+  const rawPath = databaseUrl.slice("file:".length);
+  return path.isAbsolute(rawPath) ? rawPath : path.resolve(process.cwd(), rawPath);
 }
 
 const schemaPath = path.resolve(process.cwd(), "db/prisma/schema.prisma");
@@ -42,22 +52,23 @@ function resolvePrismaClientOptions() {
 // - synchronous=NORMAL:配合 WAL 是官方推荐组合
 // - busy_timeout:并发下短暂锁等待自动重试
 // - cache_size / temp_store:让 SQLite 用更多内存降低磁盘 IO
-async function applyStartupPragmas(client: PrismaClient) {
+function applyStartupPragmasOnFile() {
   try {
-    await client.$executeRawUnsafe("PRAGMA journal_mode=WAL");
-    await client.$executeRawUnsafe("PRAGMA synchronous=NORMAL");
-    await client.$executeRawUnsafe("PRAGMA busy_timeout=5000");
-    await client.$executeRawUnsafe("PRAGMA cache_size=-64000");
-    await client.$executeRawUnsafe("PRAGMA temp_store=MEMORY");
+    const db = new Database(resolveDatabaseFilePath());
+    db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("busy_timeout = 5000");
+    db.pragma("cache_size = -64000");
+    db.pragma("temp_store = MEMORY");
+    db.close();
   } catch (error) {
     console.error("[prisma] apply startup pragmas failed", error);
   }
 }
 
 function createPrismaClient() {
-  const client = new PrismaClient(resolvePrismaClientOptions());
-  void applyStartupPragmas(client);
-  return client;
+  applyStartupPragmasOnFile();
+  return new PrismaClient(resolvePrismaClientOptions());
 }
 
 // 生产模式:模块级单例,进程存活期间只建一次。

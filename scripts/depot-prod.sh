@@ -184,12 +184,7 @@ is_app_key_field() {
 # 探测 node.exe 路径,返回其所在目录(标准输出);找不到则 stderr 报错
 # 解决 nohup 子进程不继承完整 PATH + 不想依赖 npx/npm 链式调用的问题
 ensure_node_path() {
-  # 1. 先看 PATH 里有没有 node
-  if command -v node >/dev/null 2>&1; then
-    command -v node | xargs dirname
-    return 0
-  fi
-  # 2. 常见候选位置
+  # 1. 优先用脚本配置的候选路径
   local candidates=(
     "/c/Users/rj/.workbuddy/binaries/node/versions/24.20.0"
     "/c/Users/rj/.workbuddy/binaries/node/versions/22.22.2"
@@ -203,6 +198,11 @@ ensure_node_path() {
       return 0
     fi
   done
+  # 2. 兜底：PATH 里的 node
+  if command -v node >/dev/null 2>&1; then
+    command -v node | xargs dirname
+    return 0
+  fi
   return 1
 }
 
@@ -524,8 +524,8 @@ cmd_pull() {
     else
       log "package.json / package-lock.json 有变更，执行 npm install"
     fi
-    if ! (cd "$PROJECT_DIR" && npm install --registry=https://registry.npmmirror.com); then
-      err "npm install 失败"
+    if ! (cd "$PROJECT_DIR" && npm ci --ignore-scripts --registry=https://registry.npmmirror.com); then
+      err "npm ci 失败"
       return 1
     fi
   else
