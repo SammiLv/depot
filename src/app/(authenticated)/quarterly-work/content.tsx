@@ -4595,15 +4595,23 @@ function QuarterlyWorkShell({
                   onChange={(value) => onUpdateFilters({ projectId: value || null })}
                   options={projectFilterOptions}
                 />
-                <label className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-[#4B4B4B]">
-                  <input
-                    type="checkbox"
-                    checked={needsDevOnly}
-                    onChange={(event) => setNeedsDevOnly(event.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-[#D9D9D9]"
-                  />
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={needsDevOnly}
+                  onClick={() => setNeedsDevOnly((current) => !current)}
+                  className="group inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-[#4B4B4B]"
+                >
+                  {needsDevOnly ? (
+                    <img src="/icons/radio-checked.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
+                  ) : (
+                    <>
+                      <img src="/icons/radio-default.png" alt="" width={14} height={14} className="h-3.5 w-3.5 group-hover:hidden" />
+                      <img src="/icons/radio-hover.png" alt="" width={14} height={14} className="hidden h-3.5 w-3.5 group-hover:block" />
+                    </>
+                  )}
                   仅看需开发
-                </label>
+                </button>
               </div>
             ) : isValueHome ? (
               <div className="mt-2 flex gap-2">
