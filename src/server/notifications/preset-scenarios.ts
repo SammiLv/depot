@@ -75,6 +75,14 @@ const projectValueTrackPendingSchedule = {
   daysBefore: 7,
 };
 
+const quarterlyWorkMessageUrls = {
+  task: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}&panel=task&workId={{targetId}}",
+  project: "{{appUrl}}/quarterly-work?panel=project&projectId={{targetId}}",
+  projectWithPeriod: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}&panel=project&projectId={{targetId}}",
+  value: "{{appUrl}}/quarterly-work?panel=value&projectId={{targetId}}",
+  valueWithPeriod: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}&panel=value&projectId={{targetId}}",
+} as const;
+
 const PRESET_SCENARIOS = [
   {
     name: "季度 KPI 初始化提醒",
@@ -298,7 +306,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "您被指派为任务负责人：{{title}}",
       contentTemplate: "{{ownerName}}，请及时跟进「{{title}}」。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.task,
     },
     isActive: true,
     sortOrder: 110,
@@ -319,7 +327,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "项目已上线，请开始价值跟踪：{{title}}",
       contentTemplate: "{{ownerName}}，「{{title}}」已上线，请及时维护跟踪状态与价值判断。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.valueWithPeriod,
     },
     isActive: true,
     sortOrder: 115,
@@ -340,7 +348,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "项目已完成：{{title}}",
       contentTemplate: "{{ownerName}}，「{{title}}」已完成，项目后续事项全部结束。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.projectWithPeriod,
     },
     isActive: true,
     sortOrder: 120,
@@ -364,7 +372,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "价值判断未达预期：{{title}}",
       contentTemplate: "「{{title}}」的价值判断已变更为未达预期，请关注后续优化。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+      messageUrlTemplate: quarterlyWorkMessageUrls.value,
     },
     isActive: true,
     sortOrder: 130,
@@ -387,7 +395,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "任务已延期：{{title}}",
       contentTemplate: "「{{title}}」已超过结束月份 {{overdueDays}} 天，请尽快更新进展。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.task,
     },
     isActive: true,
     sortOrder: 140,
@@ -410,7 +418,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "任务即将延期：{{title}}",
       contentTemplate: "「{{title}}」距结束月份还剩 {{daysUntilDue}} 天，请及时推进。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.task,
     },
     isActive: true,
     sortOrder: 150,
@@ -433,7 +441,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "项目已延期：{{title}}",
       contentTemplate: "「{{title}}」已超过结束季度 {{overdueDays}} 天，请尽快处理。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+      messageUrlTemplate: quarterlyWorkMessageUrls.project,
     },
     isActive: true,
     sortOrder: 160,
@@ -456,7 +464,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "项目即将延期：{{title}}",
       contentTemplate: "「{{title}}」距结束季度还剩 {{daysUntilDue}} 天，请及时推进。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work",
+      messageUrlTemplate: quarterlyWorkMessageUrls.project,
     },
     isActive: true,
     sortOrder: 170,
@@ -479,7 +487,7 @@ const PRESET_SCENARIOS = [
       dingtalkNotifyType: 5,
       titleTemplate: "请完成价值跟踪：{{title}}",
       contentTemplate: "距本季度结束还剩 {{daysUntilQuarterEnd}} 天，「{{title}}」跟踪状态仍为{{valueTrackStatus}}，请尽快完成。",
-      messageUrlTemplate: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.valueWithPeriod,
     },
     isActive: true,
     sortOrder: 180,
@@ -490,12 +498,28 @@ export async function ensurePresetNotificationScenarios() {
   for (const preset of PRESET_SCENARIOS) {
     const existing = await prisma.notificationScenario.findFirst({
       where: { name: preset.name },
-      select: { id: true },
+      select: { id: true, channelConfig: true },
     });
 
     if (!existing) {
       await prisma.notificationScenario.create({ data: { ...preset } });
+      continue;
     }
-    // 已存在的场景不再回写，用户的修改为准
+
+    const presetMessageUrl = preset.channelConfig.messageUrlTemplate;
+    if (!presetMessageUrl) continue;
+
+    const channelConfig = (existing.channelConfig ?? {}) as Record<string, unknown>;
+    if (channelConfig.messageUrlTemplate === presetMessageUrl) continue;
+
+    await prisma.notificationScenario.update({
+      where: { id: existing.id },
+      data: {
+        channelConfig: {
+          ...channelConfig,
+          messageUrlTemplate: presetMessageUrl,
+        },
+      },
+    });
   }
 }

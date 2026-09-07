@@ -22,6 +22,7 @@ type DataScopeInput = {
 type WorkspaceStatusFilter = ProjectStatus | "DELAYED" | "all";
 type WorkspaceViewMode = "card" | "list";
 type ProjectPanelMode = "task" | "value";
+type WorkspacePanel = "goal" | "project" | "task" | "value";
 
 type QuarterlyWorkQueryOptions = {
   selectedYear?: number;
@@ -29,11 +30,13 @@ type QuarterlyWorkQueryOptions = {
   goalId?: string | "all";
   view?: WorkspaceViewMode;
   projectPanel?: ProjectPanelMode;
+  panel?: WorkspacePanel;
   status?: WorkspaceStatusFilter;
   orgNodeId?: string | null;
   teamId?: string | "all" | null;
   ownerId?: string | null;
   projectId?: string | null;
+  workId?: string | null;
   query?: string | null;
 };
 
@@ -330,6 +333,12 @@ function getQuarterByDate(date: Date | null | undefined) {
   return Math.floor(date.getMonth() / 3) + 1;
 }
 
+function computeTaskWorkloadPersonDay(tasks: Array<{ workloadPersonDay: number | null }>): number | null {
+  if (tasks.length === 0) return null;
+  const sum = tasks.reduce((total, task) => total + (task.workloadPersonDay ?? 0), 0);
+  return sum > 0 ? Math.round(sum * 10) / 10 : null;
+}
+
 function formatTaskRemainLabel(work: { year: number; endMonth: number | null; endDate?: Date | null; completedAt: Date | null; status: WorkStatus }) {
   // 关闭的任务已中止，不再统计剩余/逾期
   if (work.status === "CLOSED") {
@@ -543,7 +552,54 @@ function getProjectManagementUserWhere(currentUser: DataScopeInput, departmentOr
   return { id: currentUser.id, isActive: true, deletedAt: null };
 }
 
+function normalizeWorkspacePanel(value: string | undefined): WorkspacePanel | null {
+  if (value === "goal" || value === "project" || value === "task" || value === "value") {
+    return value;
+  }
+  return null;
+}
+
+async function resolveQuarterlyWorkDeepLinkOptions(options?: QuarterlyWorkQueryOptions): Promise<QuarterlyWorkQueryOptions | undefined> {
+  if (!options) return options;
+
+  let resolved = { ...options };
+  const workId = options.workId?.trim() || null;
+  const projectId = options.projectId?.trim() || null;
+
+  if (workId) {
+    const work = await prisma.quarterlyWork.findFirst({
+      where: { id: workId, deletedAt: null },
+      select: { year: true, quarter: true, projectId: true },
+    });
+    if (work) {
+      resolved = {
+        ...resolved,
+        selectedYear: work.year,
+        selectedQuarter: work.quarter,
+        projectId: projectId ?? work.projectId,
+        panel: resolved.panel ?? "task",
+      };
+    }
+  } else if (projectId && !options.selectedYear) {
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: { endQuarter: true, startQuarter: true },
+    });
+    const parsed = parseQuarterCode(project?.endQuarter ?? project?.startQuarter ?? null);
+    if (parsed) {
+      resolved = {
+        ...resolved,
+        selectedYear: parsed.year,
+        selectedQuarter: parsed.quarter,
+      };
+    }
+  }
+
+  return resolved;
+}
+
 export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?: QuarterlyWorkQueryOptions) {
+  options = await resolveQuarterlyWorkDeepLinkOptions(options);
   const departmentOrgNodeId = currentUser.roleType === "ADMIN"
     ? null
     : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
@@ -748,6 +804,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   const toProjectBoardItem = (project: (typeof projects)[number]): ProjectBoardItem => {
     const projectWorks = worksByProject.get(project.id) ?? [];
     const activeProjectWorks = projectWorks.filter((work) => work.status !== "COMPLETED" && work.status !== "CLOSED");
+    const taskWorkloadPersonDay = computeTaskWorkloadPersonDay(projectWorks);
     const teamOrgNodeId = getTeamOrgNodeIdForRecord(project.orgNodeId, orgNodeById);
     const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(project.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
     const productGoalIds = project.productGoalLinks.map((link) => link.productGoalId);
@@ -771,7 +828,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       remainingWeeksLabel: formatProjectRemainLabel(project),
       description: project.description,
       expectedOutcome: project.expectedOutcome,
-      workloadPersonDay: project.workloadPersonDay,
+      workloadPersonDay: projectWorks.length > 0 ? taskWorkloadPersonDay : project.workloadPersonDay,
       otherCost: project.otherCost,
       actualValue: project.actualValue,
       valueJudgement: project.valueJudgement,
@@ -834,7 +891,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     };
   };
 
-  const notStarted = activeWorks.filter((work) => work.status === "NOT_STARTED");
+  const notStarted = activeWorks.filter((work) => work.status === "NOT_STARTED" && !isWorkOverdue(work));
   const inProgress = activeWorks.filter((work) => work.status === "IN_PROGRESS" && !isWorkOverdue(work));
   const delayed = activeWorks.filter((work) => {
     if (!isWorkOverdue(work)) {
@@ -1011,6 +1068,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       ? null
       : rawOwnerId.trim() || null;
   const selectedProjectId = options?.projectId?.trim() || null;
+  const selectedWorkId = options?.workId?.trim() || null;
+  const workspacePanel = normalizeWorkspacePanel(options?.panel ?? undefined);
 
   const toProjectWorkspaceTaskItem = (work: (typeof activeWorks)[number]): ProjectWorkspaceTaskItem => ({
     ...toBoardItem(work),
@@ -1320,11 +1379,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       goalId: selectedGoalId ?? "all",
       view: workspaceView,
       projectPanel: workspaceProjectPanel,
+      panel: workspacePanel,
       status: workspaceStatus,
       orgNodeId: selectedOrgNodeId,
       teamId: selectedTeamId ?? "all",
       ownerId: selectedOwnerId,
       projectId: selectedProjectId,
+      workId: selectedWorkId,
       query: workspaceSearchQuery,
     },
     productGoalOptions: productGoals.map((goal) => ({

@@ -67,22 +67,25 @@ function parseOptionalFloat(value: FormDataEntryValue | null) {
   return Math.round(parsed * 10) / 10;
 }
 
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+}
+
 function parseDateTimeInput(value: FormDataEntryValue | null): Date | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
+  const dateOnlyMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
   const localMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (localMatch) {
-    const [, year, month, day, hour, minute, second] = localMatch;
-    const date = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      second ? Number(second) : 0,
-      0,
-    );
+    const [, year, month, day] = localMatch;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0);
     return Number.isNaN(date.getTime()) ? null : date;
   }
   const date = new Date(trimmed);
@@ -144,6 +147,40 @@ async function replaceProjectProductGoals(
       sortOrder: (index + 1) * 10,
     })),
   });
+}
+
+type ProjectWorkloadDb = Pick<typeof prisma, "quarterlyWork" | "project">;
+
+function computeTaskWorkloadPersonDay(tasks: Array<{ workloadPersonDay: number | null }>): number | null {
+  if (tasks.length === 0) return null;
+  const sum = tasks.reduce((total, task) => total + (task.workloadPersonDay ?? 0), 0);
+  return sum > 0 ? Math.round(sum * 10) / 10 : null;
+}
+
+async function countProjectTasks(projectId: string, tx: ProjectWorkloadDb = prisma) {
+  return tx.quarterlyWork.count({ where: { projectId, deletedAt: null } });
+}
+
+async function getProjectTaskWorkloadSum(projectId: string, tx: ProjectWorkloadDb = prisma) {
+  const tasks = await tx.quarterlyWork.findMany({
+    where: { projectId, deletedAt: null },
+    select: { workloadPersonDay: true },
+  });
+  return computeTaskWorkloadPersonDay(tasks);
+}
+
+async function syncProjectWorkloadFromTasks(projectId: string, tx: ProjectWorkloadDb = prisma) {
+  const tasks = await tx.quarterlyWork.findMany({
+    where: { projectId, deletedAt: null },
+    select: { workloadPersonDay: true },
+  });
+  if (tasks.length === 0) return null;
+  const workloadPersonDay = computeTaskWorkloadPersonDay(tasks);
+  await tx.project.update({
+    where: { id: projectId },
+    data: { workloadPersonDay },
+  });
+  return workloadPersonDay;
 }
 
 function parseRequiredYear(value: FormDataEntryValue | null, fieldName: string) {
@@ -236,7 +273,7 @@ function resolveProjectCompletedAtByStatus(
 }
 
 function getProjectCompletedAtByStatus(status: ProjectStatus) {
-  return status === "COMPLETED" ? new Date() : null;
+  return status === "COMPLETED" ? startOfToday() : null;
 }
 
 function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
@@ -256,7 +293,7 @@ function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkSta
 }
 
 function getProjectLaunchedAtByStatus(status: ProjectStatus, existingLaunchedAt: Date | null) {
-  if (status === "LAUNCHED") return existingLaunchedAt ?? new Date();
+  if (status === "LAUNCHED") return existingLaunchedAt ?? startOfToday();
   // 已完成/已关闭属于已上线之后的终态，保留上线时间作为历史
   if (status === "COMPLETED" || status === "CLOSED") return existingLaunchedAt;
   // 回退到未开始/进行中时清空上线时间
@@ -496,6 +533,7 @@ export async function createQuarterlyWork(formData: FormData) {
   });
 
   await syncProjectStatusFromWork(project.id, status);
+  await syncProjectWorkloadFromTasks(project.id);
   await emitQuarterlyWorkAssigned(work.id);
 
   await writeOperationLog(prisma, {
@@ -607,6 +645,10 @@ export async function updateQuarterlyWork(formData: FormData) {
   if (previousProjectId !== project.id) {
     await syncProjectStatusFromWork(previousProjectId, status);
   }
+  await syncProjectWorkloadFromTasks(project.id);
+  if (previousProjectId !== project.id) {
+    await syncProjectWorkloadFromTasks(previousProjectId);
+  }
 
   const userNameById = await resolveUserNames([existingWork.ownerId, owner.id]);
   const projectTitles = await prisma.project.findMany({
@@ -676,7 +718,11 @@ export async function updateProjectStatus(formData: FormData) {
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
   const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
 
-  if (becameLaunched && project.workloadPersonDay === null) {
+  const taskCount = await countProjectTasks(project.id);
+  const effectiveWorkloadPersonDay = taskCount > 0
+    ? await syncProjectWorkloadFromTasks(project.id)
+    : project.workloadPersonDay;
+  if (becameLaunched && effectiveWorkloadPersonDay === null) {
     throw new Error("项目变更为已上线前，请先编辑项目填写工作量(人天)");
   }
 
@@ -696,7 +742,7 @@ export async function updateProjectStatus(formData: FormData) {
         where: { projectId: project.id, deletedAt: null },
         data: {
           status,
-          completedAt: status === "COMPLETED" ? new Date() : null,
+          completedAt: status === "COMPLETED" ? startOfToday() : null,
         },
       });
     }
@@ -1157,7 +1203,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
       id: workId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, title: true },
+    select: { id: true, title: true, projectId: true },
   });
 
   if (!work) throw new Error("任务不存在或无权限删除");
@@ -1166,6 +1212,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
     where: { id: work.id },
     data: { deletedAt: new Date() },
   });
+  await syncProjectWorkloadFromTasks(work.projectId);
 
   await writeOperationLog(prisma, {
     targetType: "QUARTERLY_WORK",
@@ -1277,16 +1324,6 @@ export async function updateProject(formData: FormData) {
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
 
-  if ((status === "LAUNCHED" || status === "COMPLETED") && workloadPersonDay === null) {
-    throw new Error("项目状态为已上线或已完成时，工作量(人天)为必填项");
-  }
-  if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
-    throw new Error("项目状态为已上线时，上线时间为必填项");
-  }
-  if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
-    throw new Error("项目状态为已完成时，完成时间为必填项");
-  }
-
   const project = await prisma.project.findFirst({
     where: { id: projectId, ...scopeWhere },
     select: {
@@ -1305,6 +1342,21 @@ export async function updateProject(formData: FormData) {
     },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
+
+  const taskCount = await countProjectTasks(project.id);
+  const resolvedWorkloadPersonDay = taskCount > 0
+    ? await getProjectTaskWorkloadSum(project.id)
+    : workloadPersonDay;
+
+  if ((status === "LAUNCHED" || status === "COMPLETED") && resolvedWorkloadPersonDay === null) {
+    throw new Error("项目状态为已上线或已完成时，工作量(人天)为必填项");
+  }
+  if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
+    throw new Error("项目状态为已上线时，上线时间为必填项");
+  }
+  if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
+    throw new Error("项目状态为已完成时，完成时间为必填项");
+  }
 
   await validateProductGoalIds(productGoalIds, scopeWhere);
 
@@ -1326,7 +1378,7 @@ export async function updateProject(formData: FormData) {
         title,
         description,
         expectedOutcome,
-        workloadPersonDay,
+        workloadPersonDay: resolvedWorkloadPersonDay,
         otherCost,
         startQuarter,
         endQuarter,
@@ -1339,13 +1391,16 @@ export async function updateProject(formData: FormData) {
       },
     });
     await replaceProjectProductGoals(tx, project.id, productGoalIds);
+    if (taskCount > 0) {
+      await syncProjectWorkloadFromTasks(project.id, tx);
+    }
 
     if (status === "COMPLETED" || status === "CLOSED") {
       await tx.quarterlyWork.updateMany({
         where: { projectId: project.id, deletedAt: null },
         data: {
           status,
-          completedAt: status === "COMPLETED" ? new Date() : null,
+          completedAt: status === "COMPLETED" ? startOfToday() : null,
         },
       });
     }
@@ -1373,7 +1428,7 @@ export async function updateProject(formData: FormData) {
     },
     { label: "项目描述", previous: project.description, next: description },
     { label: "预期收益", previous: project.expectedOutcome, next: expectedOutcome },
-    { label: "工作量(人天)", previous: project.workloadPersonDay, next: workloadPersonDay },
+    { label: "工作量(人天)", previous: project.workloadPersonDay, next: resolvedWorkloadPersonDay },
     { label: "其他成本", previous: project.otherCost, next: otherCost },
   ]);
   if (projectUpdateRemark) {

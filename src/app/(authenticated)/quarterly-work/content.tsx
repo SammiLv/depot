@@ -902,9 +902,9 @@ function QuarterlyWorkForm({
           <FormRow label="完成时间 *" align="center">
             <input
               name="completedAt"
-              type="datetime-local"
+              type="date"
               required
-              defaultValue={toDateTimeLocalValue(item?.completedAt)}
+              defaultValue={toDateInputValue(item?.completedAt)}
               className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
             />
           </FormRow>
@@ -1035,19 +1035,32 @@ function ProjectEditForm({
     target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [projectStatus]);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
-  const taskWorkloadSum = useMemo(
-    () => data.columns.flatMap((column) => column.items).reduce((sum, work) => {
-      if (work.projectId === item.id && work.workloadPersonDay !== null && work.workloadPersonDay !== undefined) {
-        return sum + work.workloadPersonDay;
+  const hasTasks = item.workCount > 0;
+  const taskWorkloadSum = useMemo(() => {
+    if (!hasTasks) return null;
+    const taskIds = new Set<string>();
+    let sum = 0;
+    for (const task of data.taskWorkspaceItems) {
+      if (task.projectId !== item.id || taskIds.has(task.id)) continue;
+      taskIds.add(task.id);
+      if (task.workloadPersonDay != null) sum += task.workloadPersonDay;
+    }
+    for (const column of data.columns) {
+      for (const work of column.items) {
+        if (work.projectId !== item.id || taskIds.has(work.id)) continue;
+        taskIds.add(work.id);
+        if (work.workloadPersonDay != null) sum += work.workloadPersonDay;
       }
-      return sum;
-    }, 0),
-    [data.columns, item.id],
-  );
+    }
+    return Math.round(sum * 10) / 10;
+  }, [data.columns, data.taskWorkspaceItems, hasTasks, item.id]);
   const [workloadPersonDay, setWorkloadPersonDay] = useState<string>(() => {
+    if (hasTasks) {
+      const computed = taskWorkloadSum ?? item.workloadPersonDay;
+      return computed != null ? String(computed) : "";
+    }
     if (item.workloadPersonDay !== null && item.workloadPersonDay !== undefined) return String(item.workloadPersonDay);
-    const rounded = Math.round(taskWorkloadSum * 10) / 10;
-    return rounded > 0 ? String(rounded) : "";
+    return "";
   });
 
   const quarterOptions = useMemo(() => {
@@ -1147,18 +1160,26 @@ function ProjectEditForm({
           />
         </FormRow>
         <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          <input
-            name="workloadPersonDay"
-            type="number"
-            step="0.1"
-            min="0"
-            required={workloadRequired}
-            value={workloadPersonDay}
-            onChange={(event) => setWorkloadPersonDay(event.target.value)}
-            placeholder="请输入工作量"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          />
-          <div className="mt-1 text-xs text-muted-foreground">任务工作量合计：{taskWorkloadSum > 0 ? taskWorkloadSum : "—"}</div>
+          {hasTasks ? (
+            <>
+              <div className="min-h-[40px] w-full rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                {workloadPersonDay || "—"}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">由下属任务工作量自动汇总，不可手动修改</div>
+            </>
+          ) : (
+            <input
+              name="workloadPersonDay"
+              type="number"
+              step="0.1"
+              min="0"
+              required={workloadRequired}
+              value={workloadPersonDay}
+              onChange={(event) => setWorkloadPersonDay(event.target.value)}
+              placeholder="请输入工作量"
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            />
+          )}
         </FormRow>
         <FormRow label="其他成本">
           <textarea
@@ -1187,9 +1208,9 @@ function ProjectEditForm({
             <FormRow label="完成时间 *" align="center">
               <input
                 name="completedAt"
-                type="datetime-local"
+                type="date"
                 required
-                defaultValue={toDateTimeLocalValue(item.completedAt)}
+                defaultValue={toDateInputValue(item.completedAt)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
               />
             </FormRow>
@@ -1200,9 +1221,9 @@ function ProjectEditForm({
             <FormRow label="上线时间 *" align="center">
               <input
                 name="launchedAt"
-                type="datetime-local"
+                type="date"
                 required
-                defaultValue={toDateTimeLocalValue(item.launchedAt)}
+                defaultValue={toDateInputValue(item.launchedAt)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
               />
             </FormRow>
@@ -1407,9 +1428,9 @@ function ProjectCreateForm({
             <FormRow label="完成时间 *" align="center">
               <input
                 name="completedAt"
-                type="datetime-local"
+                type="date"
                 required
-                defaultValue={toDateTimeLocalValue(null)}
+                defaultValue={toDateInputValue(null)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
               />
             </FormRow>
@@ -1420,9 +1441,9 @@ function ProjectCreateForm({
             <FormRow label="上线时间 *" align="center">
               <input
                 name="launchedAt"
-                type="datetime-local"
+                type="date"
                 required
-                defaultValue={toDateTimeLocalValue(null)}
+                defaultValue={toDateInputValue(null)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
               />
             </FormRow>
@@ -1472,12 +1493,12 @@ function formatDateTimeLabel(value: Date | string | null | undefined) {
   }).format(date);
 }
 
-function toDateTimeLocalValue(value: Date | string | null | undefined) {
+function toDateInputValue(value: Date | string | null | undefined) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function formatQuarterRange(startQuarter: string | null | undefined, endQuarter: string | null | undefined) {
@@ -2154,12 +2175,12 @@ function CountdownTag({ label, overdue }: { label: string | null; overdue: boole
 
 function taskMatchesStatusFilter(task: ProjectWorkspaceTaskItem, filter: TaskStatusFilter): boolean {
   if (filter === "all") return true;
-  // 延期：仅「进行中 + 已逾期」
-  if (filter === "DELAYED") return task.status === "IN_PROGRESS" && task.isOverdue;
+  // 延期：未完成且已超过计划结束时间（含未启动、进行中）
+  if (filter === "DELAYED") return task.isOverdue;
   if (filter === "COMPLETED") return task.status === "COMPLETED";
   if (filter === "CLOSED") return task.status === "CLOSED";
-  if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS";
-  if (filter === "NOT_STARTED") return task.status === "NOT_STARTED";
+  if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS" && !task.isOverdue;
+  if (filter === "NOT_STARTED") return task.status === "NOT_STARTED" && !task.isOverdue;
   return false;
 }
 
@@ -4233,7 +4254,7 @@ function QuarterlyWorkShell({
 }) {
   const activeGoalId = data.workspaceFilters.goalId ?? "all";
   const [expandedGoalId, setExpandedGoalId] = useState(activeGoalId);
-  const [entityTab, setEntityTab] = useState<WorkspaceEntityTab>("project");
+  const [entityTab, setEntityTab] = useState<WorkspaceEntityTab>(data.workspaceFilters.panel ?? "project");
   const [goalStatusFilter, setGoalStatusFilter] = useState<GoalStatusFilter>("all");
   const activeView = data.workspaceFilters.view === "list" ? "list" : "card";
   const [viewMode, setViewMode] = useState<"card" | "list">(activeView);
@@ -4970,6 +4991,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [valueOverviewDialog, setValueOverviewDialog] = useState<ValueOverviewDialogState>(null);
   const [tabSearchInput, setTabSearchInput] = useState("");
   const [tabSearchQuery, setTabSearchQuery] = useState("");
+  const deepLinkHandledRef = useRef(false);
   const valueTrackLogSectionRef = useRef<HTMLDivElement | null>(null);
   const [productGoalDialog, setProductGoalDialog] = useState<ProductGoalDialogState>(null);
   const [productGoalDeleteDialog, setProductGoalDeleteDialog] = useState<ProductGoalDeleteState>(null);
@@ -5129,6 +5151,42 @@ export function QuarterlyWorkContent({ data }: Props) {
       valueTrackLogSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+
+    const { workId, projectId, panel } = data.workspaceFilters;
+    if (!workId && !(projectId && panel)) return;
+    deepLinkHandledRef.current = true;
+
+    if (workId) {
+      const item = data.taskWorkspaceItems.find((task) => task.id === workId)
+        ?? data.columns.flatMap((column) => column.items).find((task) => task.id === workId);
+      if (item) {
+        setEditDialog({ item, title: columnTitleByStatus[item.status] });
+      }
+      return;
+    }
+
+    if (projectId && panel === "project") {
+      const workspaceItem = data.projectWorkspaceItems.find((project) => project.id === projectId);
+      if (workspaceItem) {
+        setProjectDialog({ item: workspaceItem, title: projectTitleByStatus[workspaceItem.status] });
+        return;
+      }
+      const boardItem = data.projectColumns.flatMap((column) => column.items).find((project) => project.id === projectId);
+      if (boardItem) {
+        setProjectDialog({ item: boardItem, title: projectTitleByStatus[boardItem.status] });
+      }
+      return;
+    }
+
+    if (projectId && panel === "value") {
+      const overview = data.valueOverviewItems.find((item) => item.id === projectId);
+      if (overview) {
+        setValueOverviewDialog(overview);
+      }
+    }
+  }, [data]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setTabSearchInput("");

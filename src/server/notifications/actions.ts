@@ -229,7 +229,7 @@ export async function testNotificationScenario(formData: FormData): Promise<stri
         logs = await deliverTestNotification({ scenario, testRunId });
         revalidatePath("/notifications");
         const summary = summarizeDeliveryLogs(logs);
-        return `当前扫描未命中符合条件的数据（常见原因：部门 KPI 已全部初始化等），已改用示例数据发送测试通知。${summary}`;
+        return `当前扫描未命中符合条件的数据，已改用符合条件的示例数据发送测试通知。${summary}`;
       } catch (error) {
         revalidatePath("/notifications");
         if (error instanceof Error) return error.message;

@@ -26,6 +26,14 @@ function parseStatusParam(value: string | string[] | undefined) {
     : undefined;
 }
 
+function parsePanelParam(value: string | string[] | undefined) {
+  const raw = readParam(value);
+  if (raw === "goal" || raw === "project" || raw === "task" || raw === "value") {
+    return raw;
+  }
+  return undefined;
+}
+
 export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
   const currentUser = await requireCurrentUser();
   const params = searchParams ? await searchParams : undefined;
@@ -40,11 +48,13 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
     goalId: readParam(params?.goalId) ?? undefined,
     view: viewRaw === "list" ? "list" : undefined,
     projectPanel: projectPanelRaw === "value" ? "value" : undefined,
+    panel: parsePanelParam(params?.panel),
     status: parseStatusParam(params?.status),
     orgNodeId: readParam(params?.orgNodeId) ?? null,
     teamId: readParam(params?.teamId) ?? null,
     ownerId: readParam(params?.ownerId) ?? null,
     projectId: readParam(params?.projectId) ?? null,
+    workId: readParam(params?.workId) ?? null,
     query: readParam(params?.q) ?? null,
   });
   return <QuarterlyWorkContent data={data} />;
