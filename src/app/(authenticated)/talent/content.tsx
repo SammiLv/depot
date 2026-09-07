@@ -22,15 +22,11 @@ import {
   updateTalentAbilityCalculationWeights,
 } from "@/server/talent/review-actions";
 import { ConfirmDeleteButton } from "@/components/confirm-delete";
-import { loadTalentProfileExtras } from "@/server/talent/talent-page-actions";
+import { Select } from "@/components/select";
 import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-template-dialog";
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
-import type {
-  CareerWorkspaceData,
-  CompetencyWorkspaceData,
-  TalentDecisionRuleWorkspaceData,
-  TalentOperationWorkspaceData,
-} from "./operation-workspace-types";
+import type { TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
+import type { CareerWorkspaceData, CompetencyWorkspaceData } from "./operation-workspace-types";
 import {
   categoryLabels,
   conditionSummary,
@@ -72,12 +68,15 @@ import {
   type RestrictionRuleDraftActionState,
 } from "@/server/talent/restriction-rule-actions";
 import {
+  TalentDecisionWorkspace,
+  TalentHistoryWorkspace,
+} from "./operation-workspaces";
+import {
   AlertCircle,
   ArrowRight,
   Award,
   CalendarClock,
   Check,
-  ChevronDown,
   ChevronRight,
   CircleDollarSign,
   ClipboardList,
@@ -86,6 +85,7 @@ import {
   FileText,
   Filter,
   History,
+  LayoutGrid,
   Medal,
   MoreHorizontal,
   Plus,
@@ -101,16 +101,92 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useActionState, useEffect, useState } from "react";
+import { formatContractExpiryDateLabel, contractExpiryMonthKey } from "@/server/talent/employee-profile";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { buildTalentHistoryHref } from "./talent-sections";
+import { useActionState, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
-export type Section = "overview" | "review" | "decision" | "history" | "config";
+type Section = "overview" | "review" | "decision" | "history" | "config";
 
 type ConfigKey = "review" | "career" | "competency" | "salary" | "incident" | "kpi-rating" | "decision-rules";
+
+const talentSectionTabs = [
+  { key: "overview", label: "人才总览" },
+  { key: "review", label: "人才盘点" },
+  { key: "decision", label: "人才决策" },
+  { key: "history", label: "人才履历" },
+  { key: "config", label: "配置规则" },
+] as const;
+
+function TalentSectionTabs({
+  value,
+  onChange,
+}: {
+  value: Section;
+  onChange: (section: Section) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [activeKey, setActiveKey] = useState(value);
+  const [slider, setSlider] = useState({ left: 0, width: 0 });
+  const [enableTransition, setEnableTransition] = useState(false);
+
+  useEffect(() => {
+    setActiveKey(value);
+  }, [value]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const updateSlider = () => {
+      const index = talentSectionTabs.findIndex((tab) => tab.key === activeKey);
+      const tab = list.querySelectorAll("button")[index];
+      if (!(tab instanceof HTMLElement)) return;
+      setSlider({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+
+    updateSlider();
+    const frame = window.requestAnimationFrame(() => setEnableTransition(true));
+    const observer = new ResizeObserver(updateSlider);
+    observer.observe(list);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [activeKey]);
+
+  return (
+    <div ref={listRef} className="relative flex h-full items-center gap-6">
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute bottom-0 h-0.5 bg-[#3069F9] ${
+          enableTransition ? "transition-[left,width] duration-200 ease-in-out" : ""
+        }`}
+        style={{ left: slider.left, width: slider.width }}
+      />
+      {talentSectionTabs.map((tabItem) => {
+        const active = activeKey === tabItem.key;
+        return (
+          <button
+            key={tabItem.key}
+            type="button"
+            onClick={() => {
+              setActiveKey(tabItem.key);
+              onChange(tabItem.key);
+            }}
+            className={`relative flex h-full items-center text-sm transition-colors duration-200 ${
+              active ? "font-medium text-[#3069F9]" : "text-[#181818]"
+            }`}
+          >
+            {tabItem.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 type ProfileExtras = {
   yearsOfService: number;
@@ -154,11 +230,44 @@ type Person = {
   profileExtras?: ProfileExtras;
 };
 
+const people: Person[] = [
+  { id: 1, name: "周明轩", team: "B端组", title: "高级产品经理", level: "R3-2", years: 4, grid: "高潜高绩", tone: "success", score: 27, kpi: 103, hasKpi: true, kpiRating: "A", potential: 92, reviewLevel: "S", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-3", recommendation: "建议晋升", contract: "2027-06-30" },
+  { id: 2, name: "吴雨桐", team: "C端组", title: "产品经理", level: "R2", years: 2, grid: "潜力新星", tone: "primary", score: 23, kpi: 91, hasKpi: true, kpiRating: "B", potential: 94, reviewLevel: "A", assessment: 5, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-1", recommendation: "重点培养", contract: "2026-11-30" },
+  { id: 3, name: "郑雅琪", team: "设计组", title: "高级设计师", level: "R3-1", years: 5, grid: "高潜高绩", tone: "success", score: 26, kpi: 106, hasKpi: true, kpiRating: "S", potential: 90, reviewLevel: "S", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-2", recommendation: "建议加薪", contract: "2028-03-31" },
+  { id: 4, name: "孙宇航", team: "采购组", title: "采购经理", level: "R3-1", years: 6, grid: "中坚力量", tone: "info", score: 20, kpi: 88, hasKpi: true, kpiRating: "C", potential: 74, reviewLevel: "A", assessment: 4, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-2", recommendation: "保持观察", contract: "2026-10-15" },
+  { id: 5, name: "王梓涵", team: "B端组", title: "产品组长", level: "R4-1", years: 7, grid: "核心骨干", tone: "brand", score: 25, kpi: 101, hasKpi: true, kpiRating: "A", potential: 86, reviewLevel: "S", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R4-2", recommendation: "建议奖励", contract: "2027-12-31" },
+  { id: 6, name: "李隽贤", team: "C端组", title: "产品经理", level: "R2", years: 3, grid: "中坚力量", tone: "info", score: 19, kpi: 84, hasKpi: true, kpiRating: "C", potential: 78, reviewLevel: "A", assessment: 3, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-1", recommendation: "补足能力项", contract: "2027-04-30" },
+  { id: 7, name: "何晓斌", team: "B端组", title: "项目经理", level: "R2", years: 3, grid: "待发展", tone: "default", score: 14, kpi: 76, hasKpi: true, kpiRating: "C", potential: 68, reviewLevel: "B", assessment: 2, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-1", recommendation: "制定改进计划", contract: "2026-09-30" },
+  { id: 8, name: "孙圣宇", team: "设计组", title: "UI设计师", level: "R3-1", years: 3, grid: "明星员工", tone: "success", score: 24, kpi: 99, hasKpi: true, kpiRating: "B", potential: 82, reviewLevel: "A", assessment: 6, assessmentMax: 6, hasAssessment: true, nextLevel: "R3-2", recommendation: "建议奖励", contract: "2027-08-31" },
+];
+
 const overviewNineBoxLayout = [
-  { code: "HIGH_LOW", defaultLabel: "熟练员工", tone: "primary" }, { code: "HIGH_MID", defaultLabel: "绩效之星", tone: "brand" }, { code: "HIGH_HIGH", defaultLabel: "超级明星", tone: "success" },
-  { code: "MID_LOW", defaultLabel: "基本胜任", tone: "default" }, { code: "MID_MID", defaultLabel: "中坚力量", tone: "primary" }, { code: "MID_HIGH", defaultLabel: "潜力之星", tone: "brand" },
-  { code: "LOW_LOW", defaultLabel: "问题员工", tone: "light" }, { code: "LOW_MID", defaultLabel: "差距员工", tone: "default" }, { code: "LOW_HIGH", defaultLabel: "待发展者", tone: "primary" },
+  { code: "HIGH_LOW", defaultLabel: "熟练员工", tone: "primary", advice: "稳定承接，补足成长目标" },
+  { code: "HIGH_MID", defaultLabel: "绩效之星", tone: "brand", advice: "激励突破，拓展影响范围" },
+  { code: "HIGH_HIGH", defaultLabel: "超级明星", tone: "success", advice: "重点保留，配置关键项目" },
+  { code: "MID_LOW", defaultLabel: "基本胜任", tone: "default", advice: "观察跟进，开展针对性辅导" },
+  { code: "MID_MID", defaultLabel: "中坚力量", tone: "primary", advice: "梯队培养，扩大职责边界" },
+  { code: "MID_HIGH", defaultLabel: "潜力之星", tone: "brand", advice: "实施加速培养，充分挖掘潜力" },
+  { code: "LOW_LOW", defaultLabel: "问题员工", tone: "light", advice: "绩效改进，严格跟进复盘" },
+  { code: "LOW_MID", defaultLabel: "差距员工", tone: "default", advice: "明确目标，建立过程追踪" },
+  { code: "LOW_HIGH", defaultLabel: "待发展者", tone: "primary", advice: "能力补齐，匹配成长任务" },
 ] as const;
+
+const overviewNineBoxCellStyles: Record<string, {
+  bg: string;
+  text: string;
+  corner?: string;
+}> = {
+  HIGH_LOW: { bg: "bg-[#FAFAFA]", text: "text-[#4369A6]", corner: "rounded-tl-2xl" },
+  HIGH_MID: { bg: "bg-[#E8F6FF]", text: "text-[#183A7A]" },
+  HIGH_HIGH: { bg: "bg-[#D8ECFF]", text: "text-[#00184D]", corner: "rounded-tr-2xl" },
+  MID_LOW: { bg: "bg-[#FFF7E8]", text: "text-[#845314]" },
+  MID_MID: { bg: "bg-[#FAFAFA]", text: "text-[#4369A6]" },
+  MID_HIGH: { bg: "bg-[#E8F6FF]", text: "text-[#183A7A]" },
+  LOW_LOW: { bg: "bg-[#FFECE8]", text: "text-[#8C2F2B]", corner: "rounded-bl-2xl" },
+  LOW_MID: { bg: "bg-[#FFF7E8]", text: "text-[#845314]" },
+  LOW_HIGH: { bg: "bg-[#FAFAFA]", text: "text-[#4369A6]", corner: "rounded-br-2xl" },
+};
 const legacyGridCodeByLabel: Record<string, string> = { 潜力新星: "LOW_HIGH", 高潜中绩: "MID_HIGH", 高潜高绩: "HIGH_HIGH", 待发展: "LOW_MID", 中坚力量: "MID_MID", 核心骨干: "HIGH_MID", 观察: "LOW_LOW", 稳定贡献: "MID_LOW", 明星员工: "HIGH_LOW", 熟练员工: "HIGH_LOW", 绩效之星: "HIGH_MID", 超级明星: "HIGH_HIGH", 基本胜任: "MID_LOW", 潜力之星: "MID_HIGH", 问题员工: "LOW_LOW", 差距员工: "LOW_MID", 待发展者: "LOW_HIGH" };
 
 function resolveKpiRatingName(score: number, bands: Array<{ name: string; minScore: number; maxScore: number | null; isUnbounded: boolean }>): string | null {
@@ -194,56 +303,41 @@ function scoreTone(score: number) {
   return "text-amber-600 bg-amber-50";
 }
 
-export function TalentOverviewContent({
+export default function TalentPageContent({
   reviewWorkspace,
   operationWorkspace,
   latestKpiByUserId,
   latestAssessmentByUserId,
   statCards,
-  profileExtrasByUserId: initialProfileExtrasByUserId,
-  overviewKpiRuleVersions,
-  overviewKpiBands,
-  participantUserIds = [],
-  profileExtrasScoreOptions,
+  profileExtrasByUserId,
 }: {
   reviewWorkspace: ReviewWorkspaceData;
-  operationWorkspace: { employeeProfiles: TalentOperationWorkspaceData["employeeProfiles"] };
+  operationWorkspace: TalentOperationWorkspaceData;
   latestKpiByUserId: Record<string, { userId: string; year: number; quarter: number; finalScore: number | null; finalRatingName: string | null }>;
   latestAssessmentByUserId: Record<string, { userId: string; cycleId: string; earnedScore: number; maxScore: number; isOverallPassed: boolean; cycle: { year: number; quarter: number } | null }>;
   statCards: {
     contractsExpiringSoon: number;
-    contractsExpiringSoonNames: string[];
+    contractsExpiringSoonItems: Array<{ userId: string; name: string; endAt: string }>;
+    contractsExpiringSoonMonths: Array<{ year: number; month: number; label: string; count: number }>;
     recentPromotions: number;
     recentPromotionHalfYear: "first" | "second";
-    recentPromotionNames: string[];
+    recentPromotionItems: Array<{ userId: string; name: string }>;
     lowPromotionOpportunityCount: number;
-    lowPromotionOpportunityNames: string[];
+    lowPromotionOpportunityItems: Array<{ userId: string; name: string; remainingCount: number }>;
     currentQuarterRewards: number;
     currentQuarterRewardNames: string[];
   };
   profileExtrasByUserId: Record<string, ProfileExtras>;
-  overviewKpiRuleVersions: Array<{ id: string; departmentOrgNodeId: string; publishedAt: Date | string | null; updatedAt: Date | string }>;
-  overviewKpiBands: Array<{ ruleVersionId: string; name: string; minScore: number; maxScore: number | null; isUnbounded: boolean; sortOrder: number }>;
-  participantUserIds?: string[];
-  profileExtrasScoreOptions: { kpiTotalScore: number; reviewTotalScore: number };
 }) {
-  const router = useRouter();
   const [gridFilter, setGridFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [team, setTeam] = useState("全部团队");
   const [selected, setSelected] = useState<Person | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [notice, setNotice] = useState("");
-  const [profileExtrasByUserId, setProfileExtrasByUserId] = useState(initialProfileExtrasByUserId);
-
-  useEffect(() => {
-    if (participantUserIds.length === 0) return;
-    let cancelled = false;
-    void loadTalentProfileExtras(participantUserIds, profileExtrasScoreOptions).then((extras) => {
-      if (!cancelled) setProfileExtrasByUserId(extras);
-    });
-    return () => { cancelled = true; };
-  }, [participantUserIds, profileExtrasScoreOptions]);
+  const [section, setSection] = useState<Section>("overview");
+  const [historyInitialCategory, setHistoryInitialCategory] = useState<"profiles" | "promotion" | "contract" | "salary" | "reward">("profiles");
+  const [activeConfig, setActiveConfig] = useState<ConfigKey | null>(null);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
   const overviewDetail = reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
   const overviewTemplateId = overviewCycle?.templateVersionId ?? reviewWorkspace.config.templates.find((item) => item.status === "ACTIVE")?.id;
@@ -253,50 +347,63 @@ export function TalentOverviewContent({
   const overviewLabelByCode = new Map<string, string>(overviewGrids.map((item) => [item.code, item.label]));
   const overviewTitle = overviewCycle?.name ?? `${new Date().getFullYear()}年${new Date().getMonth() < 6 ? "上半年" : "下半年"}人才盘点`;
   const overviewResultByParticipant = new Map(overviewDetail?.results.map((item) => [item.participantId, item]) ?? []);
+  const overviewUserById = new Map(overviewDetail?.users.map((item) => [item.id, item]) ?? []);
   const overviewCandidateById = new Map(reviewWorkspace.cycles.candidates.map((item) => [item.id, item]));
+  const employeeProfileByUserId = new Map(operationWorkspace.employeeProfiles.employees.map((item) => [item.id, item]));
   const jobLevelById = new Map(operationWorkspace.employeeProfiles.levels.map((item) => [item.id, item]));
-  const overviewParticipantByUserId = new Map((overviewDetail?.participants ?? []).map((participant) => [participant.userId, participant]));
-  const overviewPeople: Person[] = operationWorkspace.employeeProfiles.employees.map((employee) => {
-    const participant = overviewParticipantByUserId.get(employee.id);
-    const result = participant ? overviewResultByParticipant.get(participant.id) : undefined;
-    const candidate = overviewCandidateById.get(employee.id);
-    const jobLevel = employee.jobLevelId ? jobLevelById.get(employee.jobLevelId) : null;
+  const overviewPeople: Person[] = overviewDetail ? overviewDetail.participants.map((participant) => {
+    const user = overviewUserById.get(participant.userId);
+    const result = overviewResultByParticipant.get(participant.id);
+    const candidate = overviewCandidateById.get(participant.userId);
+    const fallback = people.find((item) => item.name === user?.name);
+    const employeeProfile = employeeProfileByUserId.get(participant.userId);
+    const jobLevel = employeeProfile?.jobLevelId ? jobLevelById.get(employeeProfile.jobLevelId) : null;
     const gridCode = result?.nineBoxCode ?? undefined;
     const toneByGridCode: Record<string, Tone> = { HIGH_HIGH: "success", HIGH_MID: "brand", HIGH_LOW: "primary", MID_HIGH: "brand", MID_MID: "primary", MID_LOW: "warning", LOW_HIGH: "primary", LOW_MID: "warning", LOW_LOW: "danger" };
-    const latestKpi = latestKpiByUserId[employee.id];
-    const activeKpiVersion = latestKpi && candidate?.departmentOrgNodeId
-      ? overviewKpiRuleVersions.find((version) => version.departmentOrgNodeId === candidate.departmentOrgNodeId)
+    const latestKpi = latestKpiByUserId[participant.userId];
+    const activeKpiVersion = latestKpi
+      ? operationWorkspace.decisionRules.kpiRuleVersions
+          .filter((version) => version.departmentOrgNodeId === candidate?.departmentOrgNodeId && version.status === "ACTIVE")
+          .sort((left, right) => {
+            const leftTime = left.publishedAt ? new Date(left.publishedAt).getTime() : 0;
+            const rightTime = right.publishedAt ? new Date(right.publishedAt).getTime() : 0;
+            return rightTime - leftTime;
+          })[0]
       : null;
-    const kpiBands = activeKpiVersion ? overviewKpiBands.filter((band) => band.ruleVersionId === activeKpiVersion.id) : [];
-    const kpiRating = latestKpi?.finalScore != null ? resolveKpiRatingName(latestKpi.finalScore, kpiBands) : null;
+    const kpiBands = activeKpiVersion ? operationWorkspace.decisionRules.kpiBands.filter((band) => band.ruleVersionId === activeKpiVersion.id) : [];
+    const kpiRating = latestKpi?.finalScore != null ? resolveKpiRatingName(latestKpi.finalScore, kpiBands) : fallback?.kpiRating ?? null;
     return {
-      id: employee.id,
-      name: employee.name,
-      team: employee.organization,
-      title: employee.originalTitle || "未配置岗位",
-      level: jobLevel?.code ?? jobLevel?.name ?? "未配置职级",
-      years: 0,
-      grid: gridCode ? overviewLabelByCode.get(gridCode) ?? result?.talentType ?? "未落宫格" : participant ? "待评价" : "未参与盘点",
+      id: participant.userId,
+      name: user?.name ?? "未知员工",
+      team: candidate?.orgNodeName ?? fallback?.team ?? "未配置组织",
+      title: user?.title ?? fallback?.title ?? "未配置岗位",
+      level: jobLevel?.code ?? jobLevel?.name ?? fallback?.level ?? "未配置职级",
+      years: fallback?.years ?? 0,
+      grid: gridCode ? overviewLabelByCode.get(gridCode) ?? result?.talentType ?? "未落宫格" : "待评价",
       gridCode,
       tone: gridCode ? toneByGridCode[gridCode] ?? "default" : "default",
       score: result?.totalScore ?? 0,
-      kpi: latestKpi?.finalScore ?? 0,
-      hasKpi: latestKpi != null,
+      kpi: latestKpi?.finalScore ?? fallback?.kpi ?? 0,
+      hasKpi: latestKpi != null || fallback?.hasKpi === true,
       kpiRating,
-      potential: 0,
-      reviewLevel: result?.gradeCode ?? (participant ? "待评价" : "—"),
-      assessment: latestAssessmentByUserId[employee.id]?.earnedScore ?? 0,
-      assessmentMax: latestAssessmentByUserId[employee.id]?.maxScore ?? 6,
-      hasAssessment: latestAssessmentByUserId[employee.id] != null,
-      nextLevel: "待配置",
-      recommendation: "待部门决策",
-      contract: employee.currentContractEndAt || "",
-      profileExtras: profileExtrasByUserId[employee.id],
+      potential: fallback?.potential ?? 0,
+      reviewLevel: result?.gradeCode ?? "待评价",
+      assessment: latestAssessmentByUserId[participant.userId]?.earnedScore ?? fallback?.assessment ?? 0,
+      assessmentMax: latestAssessmentByUserId[participant.userId]?.maxScore ?? fallback?.assessmentMax ?? 6,
+      hasAssessment: latestAssessmentByUserId[participant.userId] != null || fallback?.hasAssessment === true,
+      nextLevel: fallback?.nextLevel ?? "待配置",
+      recommendation: fallback?.recommendation ?? "待部门决策",
+      contract: fallback?.contract ?? "未配置",
+      profileExtras: profileExtrasByUserId[participant.userId],
     };
-  });
+  }) : people;
   const overviewCompleted = overviewDetail?.results.length ?? 0;
   const overviewTotal = overviewDetail?.participants.length ?? 0;
   const overviewCompletionRate = overviewTotal > 0 ? Math.round((overviewCompleted / overviewTotal) * 100) : 0;
+  const teamOptions = useMemo(() => {
+    const teams = [...new Set(overviewPeople.map((person) => person.team).filter(Boolean))].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    return [{ value: "全部团队", label: "全部团队" }, ...teams.map((name) => ({ value: name, label: name }))];
+  }, [overviewPeople]);
 
   const filtered = overviewPeople.filter((person) => {
     const matchesGrid = !gridFilter || (person.gridCode ?? legacyGridCodeByLabel[person.grid]) === gridFilter;
@@ -318,75 +425,254 @@ export function TalentOverviewContent({
   }
 
   return (
-    <>
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(280px,0.9fr)] gap-4 mb-5">
-        <Card className="!p-0 overflow-hidden">
-          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-            <div><h3 className="font-semibold">{overviewTitle} · 9 宫格</h3><p className="text-xs text-muted-foreground mt-1">名称取自当前盘点模型配置；点击宫格筛选员工</p></div>
-            {gridFilter && <button onClick={() => setGridFilter(null)} className="text-xs text-primary flex items-center gap-1"><RotateCcw className="w-3.5 h-3.5" />清除筛选</button>}
-          </div>
-          <div className="p-5">
-            <div className="grid grid-cols-3 gap-2 min-h-[310px]">
-              {overviewGrids.map((item) => {
-                const count = overviewDetail ? overviewDetail.results.filter((result) => result.nineBoxCode === item.code).length : 0;
-                const active = gridFilter === item.code;
-                const map: Record<string, string> = {
-                  light: "bg-slate-50/40 hover:bg-slate-50/70",
-                  default: "bg-slate-50 hover:bg-slate-100",
-                  primary: "bg-indigo-50/80 hover:bg-indigo-100/80",
-                  success: "bg-emerald-50/80 hover:bg-emerald-100/80",
-                  brand: "bg-cyan-50/80 hover:bg-cyan-100/80",
-                };
-                return <button key={item.code} onClick={() => setGridFilter(active ? null : item.code)} className={`rounded-xl border p-3 text-left flex flex-col justify-between transition-all ${map[item.tone]} ${active ? "border-primary ring-2 ring-primary/15 shadow-sm" : "border-transparent"}`}>
-                  <span className="text-xs text-muted-foreground flex items-center gap-1.5">{item.label}{active && <Check className="w-3.5 h-3.5 text-primary" />}</span>
-                  <span className="text-2xl font-semibold tabular-nums self-end">{count}</span>
-                </button>;
-              })}
-            </div>
-            <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground"><span>← 潜力低</span><span>绩效 ↑</span><span>潜力高 →</span></div>
-          </div>
-        </Card>
+    <div className="flex h-full min-h-0 flex-col bg-[#F5F7F9]">
+      <header className="shrink-0 bg-white px-4 pt-4">
+        <h1 className="text-2xl font-semibold leading-[36px] tracking-tight text-[#181818]">人才发展</h1>
+        <p className="mt-2 text-sm leading-[22px] text-[#777777]">人才画像 · 人才盘点 · 人才决策</p>
+        <div className="mt-2 flex h-12 items-center">
+          <TalentSectionTabs
+            value={section}
+            onChange={(next) => {
+              setSection(next);
+              if (next === "config") setActiveConfig(null);
+            }}
+          />
+        </div>
+      </header>
 
-        <div className="h-full flex flex-col justify-between gap-3">
-          <QuickCard icon={<CalendarClock className="w-5 h-5" />} tone="bg-orange-50 text-orange-500" hoverTone="hover:bg-orange-100/80" label="90 天内合同到期" value={`${statCards.contractsExpiringSoon} 人`} names={statCards.contractsExpiringSoonNames} action={() => { router.push(buildTalentHistoryHref()); showNotice("已切换到人才履历，请查看合同到期人员"); }} />
-          <QuickCard icon={<AlertCircle className="w-5 h-5" />} tone="bg-red-50 text-red-600" hoverTone="hover:bg-red-100/80" label="晋升机会紧张" value={`${statCards.lowPromotionOpportunityCount} 人`} names={statCards.lowPromotionOpportunityNames} action={() => { router.push(buildTalentHistoryHref()); showNotice("已切换到人才履历，请查看晋升机会紧张人员"); }} />
-          <QuickCard icon={<TrendingUp className="w-5 h-5" />} tone="bg-blue-50 text-blue-600" hoverTone="hover:bg-blue-100/80" label={statCards.recentPromotionHalfYear === "first" ? "上半年晋升" : "下半年晋升"} value={`${statCards.recentPromotions} 人`} names={statCards.recentPromotionNames} action={() => { router.push(buildTalentHistoryHref("promotion")); showNotice("已切换到人才履历的晋升记录"); }} />
-          <QuickCard icon={<Award className="w-5 h-5" />} tone="bg-teal-50 text-teal-600" hoverTone="hover:bg-teal-100/80" label="本季奖励记录" value={`${statCards.currentQuarterRewards} 条`} names={statCards.currentQuarterRewardNames} action={() => { router.push(buildTalentHistoryHref("reward")); showNotice("已切换到人才履历的奖励记录"); }} />
-          <Card className="!p-4 border-blue-100 bg-blue-50/80 text-slate-900 cursor-pointer hover:bg-blue-100/80 transition-colors" onClick={() => { router.push("/talent/review"); showNotice("已切换到人才盘点"); }}>
-            <div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-blue-100 text-blue-600"><UserRound className="w-5 h-5" /></div><div><div className="text-xs text-slate-500">本次盘点完成度</div><div className="mt-0.5 text-2xl font-semibold text-blue-700">{overviewCompletionRate}%</div></div></div><div className="text-[11px] text-slate-500 whitespace-nowrap self-end">{overviewCompleted} / {overviewTotal} 人已完成评价</div></div>
-          </Card>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      {section === "overview" ? (
+      <div className="space-y-4 rounded-2xl bg-[#F6F7FA] p-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(300px,564px)] gap-4">
+        <div className="rounded-2xl border border-white bg-white">
+          <div className="flex items-center justify-between gap-3 px-4 py-4">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+              <div className="flex items-center gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[#EEF4FF] text-[#3069F9]">
+                  <LayoutGrid className="h-3 w-3" strokeWidth={2.2} />
+                </span>
+                <h3 className="text-lg font-semibold leading-7 text-[#14171F]">人才决策地图</h3>
+              </div>
+              <p className="text-sm text-[#6B7280]">绩效 × 潜力分布，点击宫格筛选员工</p>
+            </div>
+            {gridFilter && (
+              <button type="button" onClick={() => setGridFilter(null)} className="inline-flex shrink-0 items-center gap-1 text-xs text-[#3069F9] hover:underline">
+                <RotateCcw className="h-3.5 w-3.5" />
+                清除筛选
+              </button>
+            )}
+          </div>
+          <div className="flex gap-3 px-4 pb-4 pt-0">
+            <div className="flex w-[16px] shrink-0 flex-col items-center gap-4 overflow-hidden pb-1 pt-0">
+              <span className="text-sm text-[#3069F9]">高</span>
+              <div className="flex w-[16px] shrink-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-gradient-to-b from-[#CEE4FF] to-[#F4F8FB] py-2">
+                <span className="text-xs leading-none text-[#183A7A]" style={{ writingMode: "vertical-rl" }}>绩效</span>
+              </div>
+              <span className="text-sm text-[#777777]">低</span>
+            </div>
+            <div className="min-w-0 flex-1 mt-[38px] mr-[30px]">
+              <div className="grid grid-cols-3 gap-0 overflow-visible rounded-2xl bg-white">
+                {overviewGrids.map((item) => {
+                  const count = overviewDetail ? overviewDetail.results.filter((result) => result.nineBoxCode === item.code).length : people.filter((person) => legacyGridCodeByLabel[person.grid] === item.code).length;
+                  const active = gridFilter === item.code;
+                  const cellStyle = overviewNineBoxCellStyles[item.code] ?? overviewNineBoxCellStyles.MID_MID;
+                  return (
+                    <button
+                      key={item.code}
+                      type="button"
+                      onClick={() => setGridFilter(active ? null : item.code)}
+                      className={`relative flex min-h-[160px] flex-col justify-between p-4 text-left transition-all ${cellStyle.bg} ${cellStyle.corner ?? ""} ${active ? "z-10 ring-2 ring-[#3069F9] ring-inset shadow-[0px_3px_6px_-4px_rgba(0,0,0,0.12),0px_6px_16px_0px_rgba(0,0,0,0.08),0px_9px_28px_8px_rgba(0,0,0,0.05)]" : "hover:brightness-[0.98]"}`}
+                    >
+                      <div className={`flex items-start justify-between gap-2 ${cellStyle.text}`}>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-sm leading-[22px]">{item.label}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xl font-semibold leading-[30px] tabular-nums">{count}</span>
+                            <span className="text-base font-semibold leading-6">人</span>
+                          </div>
+                        </div>
+                        {active ? <Check className="h-6 w-6 shrink-0 text-[#3069F9]" strokeWidth={2.5} /> : null}
+                      </div>
+                      <p className={`text-sm leading-[22px] ${cellStyle.text}`}>{item.advice}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="relative mt-3">
+                <div className="flex h-4 w-full items-center justify-center rounded-full bg-gradient-to-r from-[#F4F8FB] to-[#CEE4FF]">
+                  <span className="text-xs leading-none text-[#183A7A]">潜力</span>
+                </div>
+                <span className="absolute left-full top-1/2 ml-2 -translate-y-1/2 shrink-0 text-sm text-[#3069F9]">高</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <OverviewMetricCard
+            title="合同到期"
+            onClick={() => { setSection("history"); showNotice("已切换到人才履历，请查看合同到期人员"); }}
+          >
+            <ContractExpiryOverview
+              months={statCards.contractsExpiringSoonMonths}
+              items={statCards.contractsExpiringSoonItems}
+            />
+          </OverviewMetricCard>
+
+          <OverviewMetricCard
+            title="晋升"
+            onClick={() => { setSection("history"); showNotice("已切换到人才履历，请查看晋升机会紧张人员"); }}
+          >
+            <PromotionOverview
+              halfYearLabel={statCards.recentPromotionHalfYear === "first" ? "上半年晋升" : "下半年晋升"}
+              opportunityItems={statCards.lowPromotionOpportunityItems}
+              recentPromotionItems={statCards.recentPromotionItems}
+            />
+          </OverviewMetricCard>
+
+          <OverviewMetricCard
+            title="盘点"
+            onClick={() => { setSection("review"); showNotice("已切换到人才盘点"); }}
+          >
+            <div className="flex min-h-0 flex-1 flex-col items-center gap-4">
+              <OverviewCircularProgress value={overviewCompletionRate} />
+              <div className="flex w-full flex-col items-center gap-2">
+                <div className="text-center text-base text-[#4B4B4B]">
+                  本次人才盘点 <span className="font-medium text-[#3069F9]">{overviewCompleted}</span><span className="font-medium text-[#181818]">/{overviewTotal}</span>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-md bg-[#FAFAFA] px-4 py-2 text-sm text-[#181818]">
+                  <span>{overviewCompletionRate === 100 && overviewTotal > 0 ? "查看盘点结果" : "去完成剩余人才盘点"}</span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[#181818]" />
+                </div>
+              </div>
+            </div>
+          </OverviewMetricCard>
+
+          <OverviewMetricCard
+            title={`本季度奖励（${statCards.currentQuarterRewards}）`}
+            onClick={() => { setHistoryInitialCategory("reward"); setSection("history"); showNotice("已切换到人才履历的奖励记录"); }}
+          >
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className={overviewMetricListClass}>
+              {statCards.currentQuarterRewardNames.slice(0, 3).map((name) => (
+                <div key={name} className="flex items-center gap-2 rounded-xl px-2 py-1">
+                  <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(name)}`}>{name.slice(0, 1)}</span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-[#181818]">{name}</div>
+                    <div className="truncate text-xs text-[#777777]">本季奖励记录</div>
+                  </div>
+                </div>
+              ))}
+              {statCards.currentQuarterRewardNames.length === 0 && (
+                <div className="py-6 text-center text-sm text-[#777777]">暂无本季奖励记录</div>
+              )}
+              </div>
+            </div>
+          </OverviewMetricCard>
         </div>
       </div>
 
-      <Card className="!p-0 overflow-hidden">
-        <div className="px-5 py-4 border-b border-border flex flex-wrap items-center gap-3">
-          <div><h3 className="font-semibold">人才画像</h3><p className="text-xs text-muted-foreground mt-0.5">共 {filtered.length} 位员工</p></div>
-          <div className="relative ml-auto min-w-52"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索姓名、岗位、职级" className="w-full h-9 pl-9 pr-3 rounded-lg bg-muted/70 border border-transparent text-sm focus:outline-none focus:border-primary focus:bg-card" /></div>
-          <div className="relative"><Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" /><select value={team} onChange={(event) => setTeam(event.target.value)} className="h-9 rounded-lg border border-border bg-card pl-8 pr-8 text-xs appearance-none focus:outline-none focus:border-primary"><option>全部团队</option><option>B端组</option><option>C端组</option><option>设计组</option><option>采购组</option></select><ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" /></div>
+      <div className="overflow-hidden rounded-2xl border border-white bg-white">
+        <div className="flex flex-wrap items-center gap-3 border-b border-[#D8DADF] px-4 py-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-[#14171F]">人才画像</h3>
+            <p className="text-sm text-[#6B7280]">共 {filtered.length} 位员工</p>
+          </div>
+          <div className="ml-auto flex h-8 min-w-[196px] flex-1 items-center gap-2 rounded-md bg-[#F5F7F9] px-2 text-sm sm:max-w-[196px]">
+            <Search className="h-4 w-4 shrink-0 text-[#777777]" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="姓名、岗位、职级"
+              className="min-w-0 flex-1 bg-transparent text-sm text-[#181818] outline-none placeholder:text-[#BDBDBD]"
+            />
+          </div>
+          <Select width={128} value={team} options={teamOptions} onChange={setTeam} />
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left font-medium px-5 py-3">员工</th><th className="text-left font-medium px-4 py-3">当前职级</th><th className="text-left font-medium px-4 py-3">人才盘点</th><th className="text-left font-medium px-4 py-3">有效 KPI</th><th className="text-left font-medium px-4 py-3">业务考核</th><th className="text-left font-medium px-4 py-3">能力匹配度</th><th className="text-left font-medium px-4 py-3">当前建议</th><th className="text-right font-medium px-5 py-3">操作</th></tr></thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((person) => <tr key={person.id} className="hover:bg-muted/25 transition-colors cursor-pointer" onClick={() => openPerson(person)}>
-                <td className="px-5 py-3.5"><div><div className="font-medium">{person.name}</div><div className="mt-0.5 text-xs text-muted-foreground">{person.title} · {person.team}</div></div></td>
-                <td className="px-4 py-3.5"><span className="text-sm">{person.level}</span></td>
-                <td className="px-4 py-3.5"><div className="flex items-center gap-2"><Badge tone={person.tone}>{person.grid}</Badge><span className="text-xs text-muted-foreground">{person.reviewLevel === "待评价" ? "尚未完成评价" : `${person.score}分 / ${person.reviewLevel}`}</span></div></td>
-                <td className="px-4 py-3.5">{person.hasKpi ? <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${scoreTone(person.kpi)}`}>{person.kpi} 分{person.kpiRating ? ` / ${person.kpiRating}` : null}</span> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
-                <td className="px-4 py-3.5">{person.hasAssessment ? <><span className="font-medium">{person.assessment}</span><span className="text-xs text-muted-foreground"> / {person.assessmentMax}分</span></> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
-                <td className="px-4 py-3.5">{person.profileExtras?.abilityMatchScore != null ? <span className="text-sm font-medium text-primary">{person.profileExtras.abilityMatchScore}%</span> : <span className="text-xs text-muted-foreground">—</span>}</td>
-                <td className="px-4 py-3.5"><span className="text-xs">{person.recommendation}</span></td>
-                <td className="px-5 py-3.5 text-right"><button onClick={(event) => { event.stopPropagation(); openPerson(person); }} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">查看画像<ChevronRight className="w-3.5 h-3.5" /></button></td>
-              </tr>)}
-              {filtered.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-muted-foreground">没有匹配的员工，请调整筛选条件</td></tr>}
+          <table className="w-full min-w-[1080px] text-sm">
+            <thead>
+              <tr className="bg-[#FAFAFA] text-sm font-medium text-[#6B717A]">
+                <th className="px-3 py-[19px] text-left font-medium">员工</th>
+                <th className="px-3 py-[19px] text-left font-medium">当前职级</th>
+                <th className="px-3 py-[19px] text-left font-medium">人才盘点</th>
+                <th className="px-3 py-[19px] text-right font-medium">有效 KPI</th>
+                <th className="px-3 py-[19px] text-left font-medium">业务考核</th>
+                <th className="px-3 py-[19px] text-left font-medium">能力匹配度</th>
+                <th className="px-3 py-[19px] text-left font-medium">当前建议</th>
+                <th className="px-3 py-[19px] text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((person) => (
+                <tr key={person.id} className="cursor-pointer border-b border-[#D8DADF] transition-colors hover:bg-[#FAFAFA]/80" onClick={() => openPerson(person)}>
+                  <td className="px-3 py-5">
+                    <div className="text-sm font-semibold text-[#1F2329]">{person.name}</div>
+                    <div className="mt-1 text-sm text-[#6B717A]">{person.title} · {person.team}</div>
+                  </td>
+                  <td className="px-3 py-5 text-sm font-medium text-[#24272E]">{person.level}</td>
+                  <td className="px-3 py-5">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex rounded-md bg-[#E8F2FF] px-2 py-1.5 text-sm font-medium text-[#3069F9]">{person.grid}</span>
+                      <span className="text-sm text-[#7F858E]">{person.reviewLevel === "待评价" ? "尚未完成评价" : `${person.score}分 / ${person.reviewLevel}`}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-5 text-right">
+                    {person.hasKpi ? (
+                      <span className="text-sm font-semibold text-[#00A66D]">{person.kpi} 分</span>
+                    ) : (
+                      <span className="text-sm text-[#777777]">暂无</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-5 text-sm text-[#24272E]">
+                    {person.hasAssessment ? (
+                      <><span className="text-sm font-semibold">{person.assessment}</span><span className="text-sm text-[#777777]"> / {person.assessmentMax}分</span></>
+                    ) : (
+                      <span className="text-sm text-[#777777]">暂无</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-5">
+                    {person.profileExtras?.abilityMatchScore != null ? (
+                      <span className="text-sm font-semibold text-[#3069F9]">{person.profileExtras.abilityMatchScore}%</span>
+                    ) : (
+                      <span className="text-sm text-[#7F858E]">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-5 text-sm text-[#24272E]">{person.recommendation}</td>
+                  <td className="px-3 py-5 text-right">
+                    <button
+                      type="button"
+                      onClick={(event) => { event.stopPropagation(); openPerson(person); }}
+                      className="text-sm text-[#2B6CFF] hover:underline"
+                    >
+                      查看画像
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-[#777777]">没有匹配的员工，请调整筛选条件</td></tr>
+              )}
             </tbody>
           </table>
         </div>
-      </Card>
+      </div>
+      </div>
+      ) : (
+        <div className="p-4">
+        <Card className="!p-6">
+      {section === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
+      {section === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
+      {section === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
+      {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
+        </Card>
+        </div>
+      )}
+      </div>
 
       {selected && <PersonDrawer person={selected} tab={tab} setTab={setTab} onClose={() => setSelected(null)} onNotice={showNotice} />}
       {notice && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] rounded-lg bg-slate-900 text-white px-4 py-3 shadow-xl text-sm flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" />{notice}</div>}
-    </>
+    </div>
   );
 }
 
@@ -394,7 +680,7 @@ function WorkbenchHeader({ title, description, action }: { title: string; descri
   return <div className="flex items-center justify-between gap-4 mb-4"><div><h3 className="text-lg font-semibold">{title}</h3><p className="text-xs text-muted-foreground mt-1">{description}</p></div>{action}</div>;
 }
 
-export function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
+function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createDepartmentId, setCreateDepartmentId] = useState(data.cycles.departments[0]?.id ?? "");
@@ -425,7 +711,7 @@ export function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
     </form>{activeTemplates.length === 0 && <p className="mt-2 text-xs text-amber-600">暂无已发布模型，请先到“规则配置 → 人才盘点模型”完成发布。</p>}</Card>}
     {!createPanelVisible && <>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"><Metric label="待评价" value={`${pending} 人`} hint="全部批次" /><Metric label="已评价" value={`${completed} 人`} hint="含待校准结果" /><Metric label="盘点批次" value={`${data.cycles.cycles.length} 个`} hint="历史版本独立保留" /></div>
-    <Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">盘点批次</th><th className="text-left px-4 py-3 font-medium">使用模型</th><th className="text-left px-4 py-3 font-medium">范围</th><th className="text-left px-4 py-3 font-medium">进度</th><th className="text-left px-4 py-3 font-medium">状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{data.cycles.cycles.map((cycle) => { const rows = participantRows.filter((item) => item.cycleId === cycle.id); const done = rows.filter((item) => item.status !== "PENDING").length; return <tr key={cycle.id}><td className="px-5 py-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground mt-1">{cycle.year}年{cycle.halfYear === 1 ? "上半年" : "下半年"}</div></td><td className="px-4 py-4 text-xs">{templateName.get(cycle.templateVersionId) ?? "模型已归档"}</td><td className="px-4 py-4 text-xs">{data.cycles.scopeName ?? departmentName.get(cycle.departmentOrgNodeId)} · {data.cycles.scopeTotalCount ?? rows.length}人</td><td className="px-4 py-4 font-medium">{done}/{data.cycles.scopeTotalCount ?? rows.length}</td><td className="px-4 py-4"><Badge tone={cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "success" : "primary"}>{reviewStatusLabel(cycle.status)}</Badge></td><td className="px-5 py-4"><div className="flex items-center justify-end gap-3"><button onClick={() => setSelectedCycleId(cycle.id)} className="text-xs text-primary">{cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "查看结果" : "继续盘点"}</button>{(cycle.status !== "CONFIRMED" && cycle.status !== "ARCHIVED") && <ConfirmDeleteButton action={deleteReviewCycleWithState} initialState={initialTalentRuleState} hidden={{ cycleId: cycle.id }} title="删除盘点批次" description={`确认删除“${cycle.name}”吗？将删除 ${rows.length} 名员工的盘点数据，其中 ${done} 人已有评价结果。此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>}/>}</div></td></tr>; })}</tbody></table>{data.cycles.cycles.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无盘点批次，请先发布模型并新建批次</div>}</Card>
+    <Card className="!p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">盘点批次</th><th className="text-left px-4 py-3 font-medium">使用模型</th><th className="text-left px-4 py-3 font-medium">范围</th><th className="text-left px-4 py-3 font-medium">进度</th><th className="text-left px-4 py-3 font-medium">状态</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{data.cycles.cycles.map((cycle) => { const rows = participantRows.filter((item) => item.cycleId === cycle.id); const done = rows.filter((item) => item.status !== "PENDING").length; return <tr key={cycle.id}><td className="px-5 py-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground mt-1">{cycle.year}年{cycle.halfYear === 1 ? "上半年" : "下半年"}</div></td><td className="px-4 py-4 text-xs">{templateName.get(cycle.templateVersionId) ?? "模型已归档"}</td><td className="px-4 py-4 text-xs">{departmentName.get(cycle.departmentOrgNodeId)} · {rows.length}人</td><td className="px-4 py-4 font-medium">{done}/{rows.length}</td><td className="px-4 py-4"><Badge tone={cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "success" : "primary"}>{reviewStatusLabel(cycle.status)}</Badge></td><td className="px-5 py-4"><div className="flex items-center justify-end gap-3"><button onClick={() => setSelectedCycleId(cycle.id)} className="text-xs text-primary">{cycle.status === "CONFIRMED" || cycle.status === "ARCHIVED" ? "查看结果" : "继续盘点"}</button>{(cycle.status !== "CONFIRMED" && cycle.status !== "ARCHIVED") && <ConfirmDeleteButton action={deleteReviewCycleWithState} initialState={initialTalentRuleState} hidden={{ cycleId: cycle.id }} title="删除盘点批次" description={`确认删除“${cycle.name}”吗？将删除 ${rows.length} 名员工的盘点数据，其中 ${done} 人已有评价结果。此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>}/>}</div></td></tr>; })}</tbody></table>{data.cycles.cycles.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无盘点批次，请先发布模型并新建批次</div>}</Card>
     </>}
     <ActionFeedback key={createState.requestId} state={createState}/>
   </div>;
@@ -489,7 +775,7 @@ function TalentHistoryWorkbench() {
   return <div><WorkbenchHeader title="人才履历" description="管理员工已经正式发生的晋升、续签、加薪和奖励记录，并支持按员工查询完整历史" action={<Link href="/talent/history" className={primaryActionLinkClass}><Plus className="w-4 h-4" />进入履历管理</Link>} /><div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"><Metric label="晋升记录" value="12 条" hint="近三年" /><Metric label="续签记录" value="18 条" hint="近三年" /><Metric label="加薪记录" value="21 条" hint="近三年" /><Metric label="奖励记录" value="32 条" hint="近三年" /></div><Card className="!p-0 overflow-hidden"><div className="px-5 py-4 border-b border-border flex items-center justify-between"><div><h4 className="font-medium">员工履历记录</h4><p className="text-xs text-muted-foreground mt-1">正式记录可以关联人才决策，也可以来自公司其他管理系统</p></div><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><input placeholder="搜索员工历史" className="h-9 w-48 rounded-lg bg-muted/70 pl-8 pr-3 text-xs focus:outline-none focus:border-primary border border-transparent" /></div></div><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">记录编号</th><th className="text-left px-4 py-3 font-medium">员工</th><th className="text-left px-4 py-3 font-medium">类型</th><th className="text-left px-4 py-3 font-medium">正式结果</th><th className="text-left px-4 py-3 font-medium">生效日期</th><th className="text-left px-4 py-3 font-medium">来源</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{records.map((item) => <tr key={item.id}><td className="px-5 py-4 text-xs text-muted-foreground">{item.id}</td><td className="px-4 py-4 font-medium">{item.name}</td><td className="px-4 py-4"><Badge tone="primary">{item.type}</Badge></td><td className="px-4 py-4 text-xs font-medium">{item.content}</td><td className="px-4 py-4 text-xs">{item.effective}</td><td className="px-4 py-4 text-xs text-muted-foreground">{item.source}</td><td className="px-5 py-4 text-right"><button className="text-xs text-primary">查看员工履历</button></td></tr>)}</tbody></table></Card></div>;
 }
 
-export function TalentConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
+function ConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
   const configs: Array<{ key: ConfigKey; icon: typeof SlidersHorizontal; title: string; detail: string; version: string }> = [
     { key: "review", icon: SlidersHorizontal, title: "人才能力评估", detail: "配置人才能力测算权重与人才盘点评价模型", version: "V1.0 已启用" },
     { key: "career", icon: Route, title: "职业发展通道", detail: "岗位族、岗位、职级组和 R3-1 等职级档", version: "V1.0 已启用" },
@@ -1470,6 +1756,175 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className={`block ${label === "科目名称" ? "md:col-span-2" : ""}`}><span className="block text-xs font-medium mb-2">{label}</span>{children}</label>;
 }
 const inputClass = "w-full h-10 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:border-primary";
+const overviewMetricListClass = "min-h-0 flex-1 space-y-2 overflow-y-auto pb-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden";
+
+function OverviewMetricCard({ title, onClick, children }: { title: string; onClick?: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } } : undefined}
+      className={`flex h-[309px] flex-col rounded-2xl bg-white px-4 pt-4 pb-0 ${onClick ? "cursor-pointer" : ""}`}
+    >
+      <h4 className="shrink-0 text-lg font-semibold leading-7 text-[#181818]">{title}</h4>
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
+    </div>
+  );
+}
+
+function PromotionOverview({
+  halfYearLabel,
+  opportunityItems,
+  recentPromotionItems,
+}: {
+  halfYearLabel: string;
+  opportunityItems: Array<{ userId: string; name: string; remainingCount: number }>;
+  recentPromotionItems: Array<{ userId: string; name: string }>;
+}) {
+  const [activeTab, setActiveTab] = useState<"opportunity" | "recent">("opportunity");
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative grid h-8 w-full shrink-0 grid-cols-2 rounded-[6px] bg-[#F5F5F5] p-1">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1 left-1 h-6 w-[calc(50%-4px)] rounded bg-white transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]"
+          style={{ transform: activeTab === "recent" ? "translateX(100%)" : "translateX(0)" }}
+        />
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setActiveTab("opportunity"); }}
+          className={`relative z-10 px-2 text-sm leading-6 transition-colors duration-200 ${activeTab === "opportunity" ? "text-[#3069F9]" : "text-[#181818] hover:text-[#3069F9]"}`}
+        >
+          机会紧张（{opportunityItems.length}）
+        </button>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setActiveTab("recent"); }}
+          className={`relative z-10 px-2 text-sm leading-6 transition-colors duration-200 ${activeTab === "recent" ? "text-[#3069F9]" : "text-[#181818] hover:text-[#3069F9]"}`}
+        >
+          {halfYearLabel}
+        </button>
+      </div>
+      <div className={`mt-3 ${overviewMetricListClass}`}>
+        {activeTab === "opportunity" ? (
+          opportunityItems.length > 0 ? opportunityItems.map((item) => (
+            <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+              <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
+                <div className="text-xs text-[#777777]">剩余{item.remainingCount}次</div>
+              </div>
+            </div>
+          )) : (
+            <div className="px-2 py-6 text-center text-sm text-[#777777]">暂无机会紧张人员</div>
+          )
+        ) : (
+          recentPromotionItems.length > 0 ? recentPromotionItems.map((item) => (
+            <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+              <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
+                <div className="text-xs text-[#777777]">本半年晋升</div>
+              </div>
+            </div>
+          )) : (
+            <div className="px-2 py-6 text-center text-sm text-[#777777]">本半年暂无晋升记录</div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ContractExpiryOverview({
+  months,
+  items,
+}: {
+  months: Array<{ year: number; month: number; label: string; count: number }>;
+  items: Array<{ userId: string; name: string; endAt: string }>;
+}) {
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
+
+  const visibleItems = useMemo(() => {
+    const sorted = [...items].sort((left, right) => new Date(left.endAt).getTime() - new Date(right.endAt).getTime());
+    if (!selectedMonthKey) return sorted;
+    return sorted.filter((item) => {
+      const endAt = new Date(item.endAt);
+      return contractExpiryMonthKey(endAt.getFullYear(), endAt.getMonth() + 1) === selectedMonthKey;
+    });
+  }, [items, selectedMonthKey]);
+
+  if (months.length === 0) {
+    return <div className="text-sm text-[#777777]">近 90 天内暂无合同到期人员</div>;
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex w-full shrink-0 gap-4">
+        {months.map((tab) => {
+          const key = contractExpiryMonthKey(tab.year, tab.month);
+          const active = key === selectedMonthKey;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedMonthKey((current) => (current === key ? null : key));
+              }}
+              className={`relative flex h-8 min-w-0 flex-1 items-center justify-center overflow-visible rounded-lg px-2 text-sm transition-colors ${active ? "bg-[#3069F9] text-white" : "bg-[#F5F5F5] text-[#181818] hover:bg-[#E8F2FF]"}`}
+            >
+              {tab.label}
+              {tab.count > 0 ? (
+                <span className="pointer-events-none absolute right-0 top-0 z-10 flex h-4 min-w-4 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full bg-[#F53F3F] px-1 text-[10px] font-medium leading-none text-white ring-2 ring-white">
+                  {tab.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className={`mt-3 ${overviewMetricListClass}`}>
+        {visibleItems.length > 0 ? visibleItems.map((item) => (
+          <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+            <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
+              <div className="text-xs text-[#777777]">{formatContractExpiryDateLabel(new Date(item.endAt))}</div>
+            </div>
+          </div>
+        )) : (
+          <div className="px-2 py-6 text-center text-sm text-[#777777]">
+            {selectedMonthKey ? "该月暂无到期人员" : "近 90 天内暂无合同到期人员"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OverviewCircularProgress({ value }: { value: number }) {
+  const size = 160;
+  const stroke = 10;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const safeValue = Math.min(100, Math.max(0, value));
+  const offset = circumference - (safeValue / 100) * circumference;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#F5F5F5" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#3069F9" strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[30px] font-medium leading-[46px] text-[#181818] tabular-nums">{safeValue}<span className="text-[22px]">%</span></span>
+      </div>
+    </div>
+  );
+}
 
 function QuickCard({ icon, tone, hoverTone, label, value, names, action }: { icon: React.ReactNode; tone: string; hoverTone: string; label: string; value: string; names: string[]; action: () => void }) {
   const displayNames = names.join("、");

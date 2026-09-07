@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+pnpm-lock.yaml
 /.pnp
 .pnp.*
 .yarn/*
@@ -22,6 +23,10 @@
 
 # local database rehearsal backups
 /db/backups/
+db/dev.db.pre-*.bak
+
+# broken git worktree backup (local repair artifact)
+.git.worktree-broken.bak
 
 # misc
 .DS_Store

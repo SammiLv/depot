@@ -138,3 +138,23 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 }
+
+@keyframes dropdown-expand {
+  from {
+    grid-template-rows: 0fr;
+  }
+  to {
+    grid-template-rows: 1fr;
+  }
+}
+
+.dropdown-panel-enter {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: dropdown-expand 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dropdown-panel-enter > .dropdown-panel-enter-body {
+  min-height: 0;
+  overflow: hidden;
+}
