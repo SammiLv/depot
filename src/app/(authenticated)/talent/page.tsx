@@ -4,7 +4,7 @@ import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query"
 import { getTalentHistoryData, getTalentRecommendationData } from "@/server/talent/decision-history-query";
 import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
-import { getRemainingPromotionOpportunityCount } from "@/server/talent/employee-profile";
+import { getRemainingPromotionOpportunityCount, getContractExpiryMonthTabs, getContractExpiryWindowEnd } from "@/server/talent/employee-profile";
 import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
 import { getTalentReviewConfig, getTalentReviewCycleDetail, getTalentReviewCycles } from "@/server/talent/review-query";
 import { getTalentDecisionRuleConfiguration } from "@/server/talent/decision-rule-query";
@@ -43,7 +43,7 @@ export default async function TalentPage() {
 
   const participantUserIds = [...new Set(details.flatMap((detail) => detail.participants.map((participant) => participant.userId)))].filter(Boolean);
   const now = new Date();
-  const ninetyDaysLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+  const ninetyDaysLater = getContractExpiryWindowEnd(now);
   const yearStart = new Date(now.getFullYear(), 0, 1);
   const yearEnd = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
   const quarterStart = startOfQuarter(now);
@@ -69,7 +69,7 @@ export default async function TalentPage() {
         deletedAt: null,
         currentContractEndAt: { gte: now, lte: ninetyDaysLater },
       },
-      select: { userId: true },
+      select: { userId: true, currentContractEndAt: true },
     }),
     prisma.promotionRecord.findMany({
       where: {
@@ -169,9 +169,34 @@ export default async function TalentPage() {
     : [];
   const userNameById = new Map(statUsers.map((row) => [row.id, row.name]));
 
-  const contractsExpiringSoonNames = contractsExpiringSoonUserIds.map((id) => userNameById.get(id) ?? id);
-  const lowPromotionOpportunityNames = lowPromotionOpportunityProfiles.map((profile) => userNameById.get(profile.userId) ?? profile.userId);
-  const recentPromotionNames = recentPromotionUserIds.map((id) => userNameById.get(id) ?? id);
+  const contractsExpiringSoonItems = contractsExpiringSoonProfiles
+    .filter((profile): profile is typeof profile & { currentContractEndAt: Date } => Boolean(profile.currentContractEndAt))
+    .map((profile) => ({
+      userId: profile.userId,
+      name: userNameById.get(profile.userId) ?? profile.userId,
+      endAt: profile.currentContractEndAt.toISOString(),
+    }))
+    .sort((left, right) => new Date(left.endAt).getTime() - new Date(right.endAt).getTime());
+
+  const contractsExpiringSoonMonths = getContractExpiryMonthTabs(now).map((tab) => ({
+    ...tab,
+    count: contractsExpiringSoonItems.filter((item) => {
+      const endAt = new Date(item.endAt);
+      return endAt.getFullYear() === tab.year && endAt.getMonth() + 1 === tab.month;
+    }).length,
+  }));
+  const lowPromotionOpportunityItems = lowPromotionOpportunityProfiles
+    .map((profile) => ({
+      userId: profile.userId,
+      name: userNameById.get(profile.userId) ?? profile.userId,
+      remainingCount: getRemainingPromotionOpportunityCount(profile.currentContractEndAt!, now) ?? 0,
+    }))
+    .sort((left, right) => left.remainingCount - right.remainingCount);
+
+  const recentPromotionItems = recentPromotionUserIds.map((userId) => ({
+    userId,
+    name: userNameById.get(userId) ?? userId,
+  }));
   const currentQuarterRewardNames = currentQuarterRewardUserIds.map((id) => userNameById.get(id) ?? id);
 
   const latestKpiByUserId: Record<string, (typeof latestKpis)[number]> = {};
@@ -206,12 +231,13 @@ export default async function TalentPage() {
       latestAssessmentByUserId={latestAssessmentByUserId}
       statCards={{
         contractsExpiringSoon: contractsExpiringSoonProfiles.length,
-        contractsExpiringSoonNames,
+        contractsExpiringSoonItems,
+        contractsExpiringSoonMonths,
         recentPromotions: recentPromotionUserIds.length,
         recentPromotionHalfYear,
-        recentPromotionNames,
+        recentPromotionItems,
         lowPromotionOpportunityCount,
-        lowPromotionOpportunityNames,
+        lowPromotionOpportunityItems,
         currentQuarterRewards: currentQuarterRewardUserIds.length,
         currentQuarterRewardNames,
       }}

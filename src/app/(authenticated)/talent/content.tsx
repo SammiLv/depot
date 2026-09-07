@@ -22,6 +22,7 @@ import {
   updateTalentAbilityCalculationWeights,
 } from "@/server/talent/review-actions";
 import { ConfirmDeleteButton } from "@/components/confirm-delete";
+import { Select } from "@/components/select";
 import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-template-dialog";
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
 import type { TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
@@ -76,7 +77,6 @@ import {
   Award,
   CalendarClock,
   Check,
-  ChevronDown,
   ChevronRight,
   CircleDollarSign,
   ClipboardList,
@@ -85,6 +85,7 @@ import {
   FileText,
   Filter,
   History,
+  LayoutGrid,
   Medal,
   MoreHorizontal,
   Plus,
@@ -100,9 +101,10 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { formatContractExpiryDateLabel, contractExpiryMonthKey } from "@/server/talent/employee-profile";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
@@ -115,7 +117,7 @@ const talentSectionTabs = [
   { key: "review", label: "人才盘点" },
   { key: "decision", label: "人才决策" },
   { key: "history", label: "人才履历" },
-  { key: "config", label: "规则配置" },
+  { key: "config", label: "配置规则" },
 ] as const;
 
 function TalentSectionTabs({
@@ -240,10 +242,32 @@ const people: Person[] = [
 ];
 
 const overviewNineBoxLayout = [
-  { code: "HIGH_LOW", defaultLabel: "熟练员工", tone: "primary" }, { code: "HIGH_MID", defaultLabel: "绩效之星", tone: "brand" }, { code: "HIGH_HIGH", defaultLabel: "超级明星", tone: "success" },
-  { code: "MID_LOW", defaultLabel: "基本胜任", tone: "default" }, { code: "MID_MID", defaultLabel: "中坚力量", tone: "primary" }, { code: "MID_HIGH", defaultLabel: "潜力之星", tone: "brand" },
-  { code: "LOW_LOW", defaultLabel: "问题员工", tone: "light" }, { code: "LOW_MID", defaultLabel: "差距员工", tone: "default" }, { code: "LOW_HIGH", defaultLabel: "待发展者", tone: "primary" },
+  { code: "HIGH_LOW", defaultLabel: "熟练员工", tone: "primary", advice: "稳定承接，补足成长目标" },
+  { code: "HIGH_MID", defaultLabel: "绩效之星", tone: "brand", advice: "激励突破，拓展影响范围" },
+  { code: "HIGH_HIGH", defaultLabel: "超级明星", tone: "success", advice: "重点保留，配置关键项目" },
+  { code: "MID_LOW", defaultLabel: "基本胜任", tone: "default", advice: "观察跟进，开展针对性辅导" },
+  { code: "MID_MID", defaultLabel: "中坚力量", tone: "primary", advice: "梯队培养，扩大职责边界" },
+  { code: "MID_HIGH", defaultLabel: "潜力之星", tone: "brand", advice: "实施加速培养，充分挖掘潜力" },
+  { code: "LOW_LOW", defaultLabel: "问题员工", tone: "light", advice: "绩效改进，严格跟进复盘" },
+  { code: "LOW_MID", defaultLabel: "差距员工", tone: "default", advice: "明确目标，建立过程追踪" },
+  { code: "LOW_HIGH", defaultLabel: "待发展者", tone: "primary", advice: "能力补齐，匹配成长任务" },
 ] as const;
+
+const overviewNineBoxCellStyles: Record<string, {
+  bg: string;
+  text: string;
+  corner?: string;
+}> = {
+  HIGH_LOW: { bg: "bg-[#FAFAFA]", text: "text-[#4369A6]", corner: "rounded-tl-2xl" },
+  HIGH_MID: { bg: "bg-[#E8F6FF]", text: "text-[#183A7A]" },
+  HIGH_HIGH: { bg: "bg-[#D8ECFF]", text: "text-[#00184D]", corner: "rounded-tr-2xl" },
+  MID_LOW: { bg: "bg-[#FFF7E8]", text: "text-[#845314]" },
+  MID_MID: { bg: "bg-[#FAFAFA]", text: "text-[#4369A6]" },
+  MID_HIGH: { bg: "bg-[#E8F6FF]", text: "text-[#183A7A]" },
+  LOW_LOW: { bg: "bg-[#FFECE8]", text: "text-[#8C2F2B]", corner: "rounded-bl-2xl" },
+  LOW_MID: { bg: "bg-[#FFF7E8]", text: "text-[#845314]" },
+  LOW_HIGH: { bg: "bg-[#FAFAFA]", text: "text-[#4369A6]", corner: "rounded-br-2xl" },
+};
 const legacyGridCodeByLabel: Record<string, string> = { 潜力新星: "LOW_HIGH", 高潜中绩: "MID_HIGH", 高潜高绩: "HIGH_HIGH", 待发展: "LOW_MID", 中坚力量: "MID_MID", 核心骨干: "HIGH_MID", 观察: "LOW_LOW", 稳定贡献: "MID_LOW", 明星员工: "HIGH_LOW", 熟练员工: "HIGH_LOW", 绩效之星: "HIGH_MID", 超级明星: "HIGH_HIGH", 基本胜任: "MID_LOW", 潜力之星: "MID_HIGH", 问题员工: "LOW_LOW", 差距员工: "LOW_MID", 待发展者: "LOW_HIGH" };
 
 function resolveKpiRatingName(score: number, bands: Array<{ name: string; minScore: number; maxScore: number | null; isUnbounded: boolean }>): string | null {
@@ -293,12 +317,13 @@ export default function TalentPageContent({
   latestAssessmentByUserId: Record<string, { userId: string; cycleId: string; earnedScore: number; maxScore: number; isOverallPassed: boolean; cycle: { year: number; quarter: number } | null }>;
   statCards: {
     contractsExpiringSoon: number;
-    contractsExpiringSoonNames: string[];
+    contractsExpiringSoonItems: Array<{ userId: string; name: string; endAt: string }>;
+    contractsExpiringSoonMonths: Array<{ year: number; month: number; label: string; count: number }>;
     recentPromotions: number;
     recentPromotionHalfYear: "first" | "second";
-    recentPromotionNames: string[];
+    recentPromotionItems: Array<{ userId: string; name: string }>;
     lowPromotionOpportunityCount: number;
-    lowPromotionOpportunityNames: string[];
+    lowPromotionOpportunityItems: Array<{ userId: string; name: string; remainingCount: number }>;
     currentQuarterRewards: number;
     currentQuarterRewardNames: string[];
   };
@@ -375,6 +400,10 @@ export default function TalentPageContent({
   const overviewCompleted = overviewDetail?.results.length ?? 0;
   const overviewTotal = overviewDetail?.participants.length ?? 0;
   const overviewCompletionRate = overviewTotal > 0 ? Math.round((overviewCompleted / overviewTotal) * 100) : 0;
+  const teamOptions = useMemo(() => {
+    const teams = [...new Set(overviewPeople.map((person) => person.team).filter(Boolean))].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    return [{ value: "全部团队", label: "全部团队" }, ...teams.map((name) => ({ value: name, label: name }))];
+  }, [overviewPeople]);
 
   const filtered = overviewPeople.filter((person) => {
     const matchesGrid = !gridFilter || (person.gridCode ?? legacyGridCodeByLabel[person.grid]) === gridFilter;
@@ -399,7 +428,7 @@ export default function TalentPageContent({
     <div className="flex h-full min-h-0 flex-col bg-[#F5F7F9]">
       <header className="shrink-0 bg-white px-4 pt-4">
         <h1 className="text-2xl font-semibold leading-[36px] tracking-tight text-[#181818]">人才发展</h1>
-        <p className="mt-2 text-sm leading-[22px] text-[#777777]">管理人才盘点、评估与发展。</p>
+        <p className="mt-2 text-sm leading-[22px] text-[#777777]">人才画像 · 人才盘点 · 人才决策</p>
         <div className="mt-2 flex h-12 items-center">
           <TalentSectionTabs
             value={section}
@@ -411,80 +440,234 @@ export default function TalentPageContent({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <Card className="!p-6">
-      {section === "overview" && <>
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(280px,0.9fr)] gap-4 mb-5">
-        <Card className="!p-0 overflow-hidden">
-          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-            <div><h3 className="font-semibold">{overviewTitle} · 9 宫格</h3><p className="text-xs text-muted-foreground mt-1">名称取自当前盘点模型配置；点击宫格筛选员工</p></div>
-            {gridFilter && <button onClick={() => setGridFilter(null)} className="text-xs text-primary flex items-center gap-1"><RotateCcw className="w-3.5 h-3.5" />清除筛选</button>}
-          </div>
-          <div className="p-5">
-            <div className="grid grid-cols-3 gap-2 min-h-[310px]">
-              {overviewGrids.map((item) => {
-                const count = overviewDetail ? overviewDetail.results.filter((result) => result.nineBoxCode === item.code).length : people.filter((person) => legacyGridCodeByLabel[person.grid] === item.code).length;
-                const active = gridFilter === item.code;
-                const map: Record<string, string> = {
-                  light: "bg-slate-50/40 hover:bg-slate-50/70",
-                  default: "bg-slate-50 hover:bg-slate-100",
-                  primary: "bg-indigo-50/80 hover:bg-indigo-100/80",
-                  success: "bg-emerald-50/80 hover:bg-emerald-100/80",
-                  brand: "bg-cyan-50/80 hover:bg-cyan-100/80",
-                };
-                return <button key={item.code} onClick={() => setGridFilter(active ? null : item.code)} className={`rounded-xl border p-3 text-left flex flex-col justify-between transition-all ${map[item.tone]} ${active ? "border-primary ring-2 ring-primary/15 shadow-sm" : "border-transparent"}`}>
-                  <span className="text-xs text-muted-foreground flex items-center gap-1.5">{item.label}{active && <Check className="w-3.5 h-3.5 text-primary" />}</span>
-                  <span className="text-2xl font-semibold tabular-nums self-end">{count}</span>
-                </button>;
-              })}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      {section === "overview" ? (
+      <div className="space-y-4 rounded-2xl bg-[#F6F7FA] p-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(300px,564px)] gap-4">
+        <div className="rounded-2xl border border-white bg-white">
+          <div className="flex items-center justify-between gap-3 px-4 py-4">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+              <div className="flex items-center gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[#EEF4FF] text-[#3069F9]">
+                  <LayoutGrid className="h-3 w-3" strokeWidth={2.2} />
+                </span>
+                <h3 className="text-lg font-semibold leading-7 text-[#14171F]">人才决策地图</h3>
+              </div>
+              <p className="text-sm text-[#6B7280]">绩效 × 潜力分布，点击宫格筛选员工</p>
             </div>
-            <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground"><span>← 潜力低</span><span>绩效 ↑</span><span>潜力高 →</span></div>
+            {gridFilter && (
+              <button type="button" onClick={() => setGridFilter(null)} className="inline-flex shrink-0 items-center gap-1 text-xs text-[#3069F9] hover:underline">
+                <RotateCcw className="h-3.5 w-3.5" />
+                清除筛选
+              </button>
+            )}
           </div>
-        </Card>
+          <div className="flex gap-3 px-4 pb-4 pt-0">
+            <div className="flex w-[16px] shrink-0 flex-col items-center gap-4 overflow-hidden pb-1 pt-0">
+              <span className="text-sm text-[#3069F9]">高</span>
+              <div className="flex w-[16px] shrink-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-gradient-to-b from-[#CEE4FF] to-[#F4F8FB] py-2">
+                <span className="text-xs leading-none text-[#183A7A]" style={{ writingMode: "vertical-rl" }}>绩效</span>
+              </div>
+              <span className="text-sm text-[#777777]">低</span>
+            </div>
+            <div className="min-w-0 flex-1 mt-[38px] mr-[30px]">
+              <div className="grid grid-cols-3 gap-0 overflow-visible rounded-2xl bg-white">
+                {overviewGrids.map((item) => {
+                  const count = overviewDetail ? overviewDetail.results.filter((result) => result.nineBoxCode === item.code).length : people.filter((person) => legacyGridCodeByLabel[person.grid] === item.code).length;
+                  const active = gridFilter === item.code;
+                  const cellStyle = overviewNineBoxCellStyles[item.code] ?? overviewNineBoxCellStyles.MID_MID;
+                  return (
+                    <button
+                      key={item.code}
+                      type="button"
+                      onClick={() => setGridFilter(active ? null : item.code)}
+                      className={`relative flex min-h-[160px] flex-col justify-between p-4 text-left transition-all ${cellStyle.bg} ${cellStyle.corner ?? ""} ${active ? "z-10 ring-2 ring-[#3069F9] ring-inset shadow-[0px_3px_6px_-4px_rgba(0,0,0,0.12),0px_6px_16px_0px_rgba(0,0,0,0.08),0px_9px_28px_8px_rgba(0,0,0,0.05)]" : "hover:brightness-[0.98]"}`}
+                    >
+                      <div className={`flex items-start justify-between gap-2 ${cellStyle.text}`}>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-sm leading-[22px]">{item.label}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xl font-semibold leading-[30px] tabular-nums">{count}</span>
+                            <span className="text-base font-semibold leading-6">人</span>
+                          </div>
+                        </div>
+                        {active ? <Check className="h-6 w-6 shrink-0 text-[#3069F9]" strokeWidth={2.5} /> : null}
+                      </div>
+                      <p className={`text-sm leading-[22px] ${cellStyle.text}`}>{item.advice}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="relative mt-3">
+                <div className="flex h-4 w-full items-center justify-center rounded-full bg-gradient-to-r from-[#F4F8FB] to-[#CEE4FF]">
+                  <span className="text-xs leading-none text-[#183A7A]">潜力</span>
+                </div>
+                <span className="absolute left-full top-1/2 ml-2 -translate-y-1/2 shrink-0 text-sm text-[#3069F9]">高</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-        <div className="h-full flex flex-col justify-between gap-3">
-          <QuickCard icon={<CalendarClock className="w-5 h-5" />} tone="bg-orange-50 text-orange-500" hoverTone="hover:bg-orange-100/80" label="90 天内合同到期" value={`${statCards.contractsExpiringSoon} 人`} names={statCards.contractsExpiringSoonNames} action={() => { setSection("history"); showNotice("已切换到人才履历，请查看合同到期人员"); }} />
-          <QuickCard icon={<AlertCircle className="w-5 h-5" />} tone="bg-red-50 text-red-600" hoverTone="hover:bg-red-100/80" label="晋升机会紧张" value={`${statCards.lowPromotionOpportunityCount} 人`} names={statCards.lowPromotionOpportunityNames} action={() => { setSection("history"); showNotice("已切换到人才履历，请查看晋升机会紧张人员"); }} />
-          <QuickCard icon={<TrendingUp className="w-5 h-5" />} tone="bg-blue-50 text-blue-600" hoverTone="hover:bg-blue-100/80" label={statCards.recentPromotionHalfYear === "first" ? "上半年晋升" : "下半年晋升"} value={`${statCards.recentPromotions} 人`} names={statCards.recentPromotionNames} action={() => { setHistoryInitialCategory("promotion"); setSection("history"); showNotice("已切换到人才履历的晋升记录"); }} />
-          <QuickCard icon={<Award className="w-5 h-5" />} tone="bg-teal-50 text-teal-600" hoverTone="hover:bg-teal-100/80" label="本季奖励记录" value={`${statCards.currentQuarterRewards} 条`} names={statCards.currentQuarterRewardNames} action={() => { setHistoryInitialCategory("reward"); setSection("history"); showNotice("已切换到人才履历的奖励记录"); }} />
-          <Card className="!p-4 border-blue-100 bg-blue-50/80 text-slate-900 cursor-pointer hover:bg-blue-100/80 transition-colors" onClick={() => { setSection("review"); showNotice("已切换到人才盘点"); }}>
-            <div className="flex items-start justify-between gap-3"><div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-blue-100 text-blue-600"><UserRound className="w-5 h-5" /></div><div><div className="text-xs text-slate-500">本次盘点完成度</div><div className="mt-0.5 text-2xl font-semibold text-blue-700">{overviewCompletionRate}%</div></div></div><div className="text-[11px] text-slate-500 whitespace-nowrap self-end">{overviewCompleted} / {overviewTotal} 人已完成评价</div></div>
-          </Card>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <OverviewMetricCard
+            title="合同到期"
+            onClick={() => { setSection("history"); showNotice("已切换到人才履历，请查看合同到期人员"); }}
+          >
+            <ContractExpiryOverview
+              months={statCards.contractsExpiringSoonMonths}
+              items={statCards.contractsExpiringSoonItems}
+            />
+          </OverviewMetricCard>
+
+          <OverviewMetricCard
+            title="晋升"
+            onClick={() => { setSection("history"); showNotice("已切换到人才履历，请查看晋升机会紧张人员"); }}
+          >
+            <PromotionOverview
+              halfYearLabel={statCards.recentPromotionHalfYear === "first" ? "上半年晋升" : "下半年晋升"}
+              opportunityItems={statCards.lowPromotionOpportunityItems}
+              recentPromotionItems={statCards.recentPromotionItems}
+            />
+          </OverviewMetricCard>
+
+          <OverviewMetricCard
+            title="盘点"
+            onClick={() => { setSection("review"); showNotice("已切换到人才盘点"); }}
+          >
+            <div className="flex min-h-0 flex-1 flex-col items-center gap-4">
+              <OverviewCircularProgress value={overviewCompletionRate} />
+              <div className="flex w-full flex-col items-center gap-2">
+                <div className="text-center text-base text-[#4B4B4B]">
+                  本次人才盘点 <span className="font-medium text-[#3069F9]">{overviewCompleted}</span><span className="font-medium text-[#181818]">/{overviewTotal}</span>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-md bg-[#FAFAFA] px-4 py-2 text-sm text-[#181818]">
+                  <span>{overviewCompletionRate === 100 && overviewTotal > 0 ? "查看盘点结果" : "去完成剩余人才盘点"}</span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[#181818]" />
+                </div>
+              </div>
+            </div>
+          </OverviewMetricCard>
+
+          <OverviewMetricCard
+            title={`本季度奖励（${statCards.currentQuarterRewards}）`}
+            onClick={() => { setHistoryInitialCategory("reward"); setSection("history"); showNotice("已切换到人才履历的奖励记录"); }}
+          >
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className={overviewMetricListClass}>
+              {statCards.currentQuarterRewardNames.slice(0, 3).map((name) => (
+                <div key={name} className="flex items-center gap-2 rounded-xl px-2 py-1">
+                  <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(name)}`}>{name.slice(0, 1)}</span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-[#181818]">{name}</div>
+                    <div className="truncate text-xs text-[#777777]">本季奖励记录</div>
+                  </div>
+                </div>
+              ))}
+              {statCards.currentQuarterRewardNames.length === 0 && (
+                <div className="py-6 text-center text-sm text-[#777777]">暂无本季奖励记录</div>
+              )}
+              </div>
+            </div>
+          </OverviewMetricCard>
         </div>
       </div>
 
-      <Card className="!p-0 overflow-hidden">
-        <div className="px-5 py-4 border-b border-border flex flex-wrap items-center gap-3">
-          <div><h3 className="font-semibold">人才画像</h3><p className="text-xs text-muted-foreground mt-0.5">共 {filtered.length} 位员工</p></div>
-          <div className="relative ml-auto min-w-52"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索姓名、岗位、职级" className="w-full h-9 pl-9 pr-3 rounded-lg bg-muted/70 border border-transparent text-sm focus:outline-none focus:border-primary focus:bg-card" /></div>
-          <div className="relative"><Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" /><select value={team} onChange={(event) => setTeam(event.target.value)} className="h-9 rounded-lg border border-border bg-card pl-8 pr-8 text-xs appearance-none focus:outline-none focus:border-primary"><option>全部团队</option><option>B端组</option><option>C端组</option><option>设计组</option><option>采购组</option></select><ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" /></div>
+      <div className="overflow-hidden rounded-2xl border border-white bg-white">
+        <div className="flex flex-wrap items-center gap-3 border-b border-[#D8DADF] px-4 py-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-[#14171F]">人才画像</h3>
+            <p className="text-sm text-[#6B7280]">共 {filtered.length} 位员工</p>
+          </div>
+          <div className="ml-auto flex h-8 min-w-[196px] flex-1 items-center gap-2 rounded-md bg-[#F5F7F9] px-2 text-sm sm:max-w-[196px]">
+            <Search className="h-4 w-4 shrink-0 text-[#777777]" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="姓名、岗位、职级"
+              className="min-w-0 flex-1 bg-transparent text-sm text-[#181818] outline-none placeholder:text-[#BDBDBD]"
+            />
+          </div>
+          <Select width={128} value={team} options={teamOptions} onChange={setTeam} />
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left font-medium px-5 py-3">员工</th><th className="text-left font-medium px-4 py-3">当前职级</th><th className="text-left font-medium px-4 py-3">人才盘点</th><th className="text-left font-medium px-4 py-3">有效 KPI</th><th className="text-left font-medium px-4 py-3">业务考核</th><th className="text-left font-medium px-4 py-3">能力匹配度</th><th className="text-left font-medium px-4 py-3">当前建议</th><th className="text-right font-medium px-5 py-3">操作</th></tr></thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((person) => <tr key={person.id} className="hover:bg-muted/25 transition-colors cursor-pointer" onClick={() => openPerson(person)}>
-                <td className="px-5 py-3.5"><div><div className="font-medium">{person.name}</div><div className="mt-0.5 text-xs text-muted-foreground">{person.title} · {person.team}</div></div></td>
-                <td className="px-4 py-3.5"><span className="text-sm">{person.level}</span></td>
-                <td className="px-4 py-3.5"><div className="flex items-center gap-2"><Badge tone={person.tone}>{person.grid}</Badge><span className="text-xs text-muted-foreground">{person.reviewLevel === "待评价" ? "尚未完成评价" : `${person.score}分 / ${person.reviewLevel}`}</span></div></td>
-                <td className="px-4 py-3.5">{person.hasKpi ? <span className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${scoreTone(person.kpi)}`}>{person.kpi} 分{person.kpiRating ? ` / ${person.kpiRating}` : null}</span> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
-                <td className="px-4 py-3.5">{person.hasAssessment ? <><span className="font-medium">{person.assessment}</span><span className="text-xs text-muted-foreground"> / {person.assessmentMax}分</span></> : <span className="text-xs text-muted-foreground">暂无</span>}</td>
-                <td className="px-4 py-3.5">{person.profileExtras?.abilityMatchScore != null ? <span className="text-sm font-medium text-primary">{person.profileExtras.abilityMatchScore}%</span> : <span className="text-xs text-muted-foreground">—</span>}</td>
-                <td className="px-4 py-3.5"><span className="text-xs">{person.recommendation}</span></td>
-                <td className="px-5 py-3.5 text-right"><button onClick={(event) => { event.stopPropagation(); openPerson(person); }} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">查看画像<ChevronRight className="w-3.5 h-3.5" /></button></td>
-              </tr>)}
-              {filtered.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-muted-foreground">没有匹配的员工，请调整筛选条件</td></tr>}
+          <table className="w-full min-w-[1080px] text-sm">
+            <thead>
+              <tr className="bg-[#FAFAFA] text-sm font-medium text-[#6B717A]">
+                <th className="px-3 py-[19px] text-left font-medium">员工</th>
+                <th className="px-3 py-[19px] text-left font-medium">当前职级</th>
+                <th className="px-3 py-[19px] text-left font-medium">人才盘点</th>
+                <th className="px-3 py-[19px] text-right font-medium">有效 KPI</th>
+                <th className="px-3 py-[19px] text-left font-medium">业务考核</th>
+                <th className="px-3 py-[19px] text-left font-medium">能力匹配度</th>
+                <th className="px-3 py-[19px] text-left font-medium">当前建议</th>
+                <th className="px-3 py-[19px] text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((person) => (
+                <tr key={person.id} className="cursor-pointer border-b border-[#D8DADF] transition-colors hover:bg-[#FAFAFA]/80" onClick={() => openPerson(person)}>
+                  <td className="px-3 py-5">
+                    <div className="text-sm font-semibold text-[#1F2329]">{person.name}</div>
+                    <div className="mt-1 text-sm text-[#6B717A]">{person.title} · {person.team}</div>
+                  </td>
+                  <td className="px-3 py-5 text-sm font-medium text-[#24272E]">{person.level}</td>
+                  <td className="px-3 py-5">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex rounded-md bg-[#E8F2FF] px-2 py-1.5 text-sm font-medium text-[#3069F9]">{person.grid}</span>
+                      <span className="text-sm text-[#7F858E]">{person.reviewLevel === "待评价" ? "尚未完成评价" : `${person.score}分 / ${person.reviewLevel}`}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-5 text-right">
+                    {person.hasKpi ? (
+                      <span className="text-sm font-semibold text-[#00A66D]">{person.kpi} 分</span>
+                    ) : (
+                      <span className="text-sm text-[#777777]">暂无</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-5 text-sm text-[#24272E]">
+                    {person.hasAssessment ? (
+                      <><span className="text-sm font-semibold">{person.assessment}</span><span className="text-sm text-[#777777]"> / {person.assessmentMax}分</span></>
+                    ) : (
+                      <span className="text-sm text-[#777777]">暂无</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-5">
+                    {person.profileExtras?.abilityMatchScore != null ? (
+                      <span className="text-sm font-semibold text-[#3069F9]">{person.profileExtras.abilityMatchScore}%</span>
+                    ) : (
+                      <span className="text-sm text-[#7F858E]">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-5 text-sm text-[#24272E]">{person.recommendation}</td>
+                  <td className="px-3 py-5 text-right">
+                    <button
+                      type="button"
+                      onClick={(event) => { event.stopPropagation(); openPerson(person); }}
+                      className="text-sm text-[#2B6CFF] hover:underline"
+                    >
+                      查看画像
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-[#777777]">没有匹配的员工，请调整筛选条件</td></tr>
+              )}
             </tbody>
           </table>
         </div>
-      </Card>
-      </>}
-
+      </div>
+      </div>
+      ) : (
+        <div className="p-4">
+        <Card className="!p-6">
       {section === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
       {section === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
       {section === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
       {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
         </Card>
+        </div>
+      )}
       </div>
 
       {selected && <PersonDrawer person={selected} tab={tab} setTab={setTab} onClose={() => setSelected(null)} onNotice={showNotice} />}
@@ -1573,6 +1756,175 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className={`block ${label === "科目名称" ? "md:col-span-2" : ""}`}><span className="block text-xs font-medium mb-2">{label}</span>{children}</label>;
 }
 const inputClass = "w-full h-10 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:border-primary";
+const overviewMetricListClass = "min-h-0 flex-1 space-y-2 overflow-y-auto pb-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden";
+
+function OverviewMetricCard({ title, onClick, children }: { title: string; onClick?: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } } : undefined}
+      className={`flex h-[309px] flex-col rounded-2xl bg-white px-4 pt-4 pb-0 ${onClick ? "cursor-pointer" : ""}`}
+    >
+      <h4 className="shrink-0 text-lg font-semibold leading-7 text-[#181818]">{title}</h4>
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
+    </div>
+  );
+}
+
+function PromotionOverview({
+  halfYearLabel,
+  opportunityItems,
+  recentPromotionItems,
+}: {
+  halfYearLabel: string;
+  opportunityItems: Array<{ userId: string; name: string; remainingCount: number }>;
+  recentPromotionItems: Array<{ userId: string; name: string }>;
+}) {
+  const [activeTab, setActiveTab] = useState<"opportunity" | "recent">("opportunity");
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative grid h-8 w-full shrink-0 grid-cols-2 rounded-[6px] bg-[#F5F5F5] p-1">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1 left-1 h-6 w-[calc(50%-4px)] rounded bg-white transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]"
+          style={{ transform: activeTab === "recent" ? "translateX(100%)" : "translateX(0)" }}
+        />
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setActiveTab("opportunity"); }}
+          className={`relative z-10 px-2 text-sm leading-6 transition-colors duration-200 ${activeTab === "opportunity" ? "text-[#3069F9]" : "text-[#181818] hover:text-[#3069F9]"}`}
+        >
+          机会紧张（{opportunityItems.length}）
+        </button>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setActiveTab("recent"); }}
+          className={`relative z-10 px-2 text-sm leading-6 transition-colors duration-200 ${activeTab === "recent" ? "text-[#3069F9]" : "text-[#181818] hover:text-[#3069F9]"}`}
+        >
+          {halfYearLabel}
+        </button>
+      </div>
+      <div className={`mt-3 ${overviewMetricListClass}`}>
+        {activeTab === "opportunity" ? (
+          opportunityItems.length > 0 ? opportunityItems.map((item) => (
+            <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+              <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
+                <div className="text-xs text-[#777777]">剩余{item.remainingCount}次</div>
+              </div>
+            </div>
+          )) : (
+            <div className="px-2 py-6 text-center text-sm text-[#777777]">暂无机会紧张人员</div>
+          )
+        ) : (
+          recentPromotionItems.length > 0 ? recentPromotionItems.map((item) => (
+            <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+              <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
+                <div className="text-xs text-[#777777]">本半年晋升</div>
+              </div>
+            </div>
+          )) : (
+            <div className="px-2 py-6 text-center text-sm text-[#777777]">本半年暂无晋升记录</div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ContractExpiryOverview({
+  months,
+  items,
+}: {
+  months: Array<{ year: number; month: number; label: string; count: number }>;
+  items: Array<{ userId: string; name: string; endAt: string }>;
+}) {
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
+
+  const visibleItems = useMemo(() => {
+    const sorted = [...items].sort((left, right) => new Date(left.endAt).getTime() - new Date(right.endAt).getTime());
+    if (!selectedMonthKey) return sorted;
+    return sorted.filter((item) => {
+      const endAt = new Date(item.endAt);
+      return contractExpiryMonthKey(endAt.getFullYear(), endAt.getMonth() + 1) === selectedMonthKey;
+    });
+  }, [items, selectedMonthKey]);
+
+  if (months.length === 0) {
+    return <div className="text-sm text-[#777777]">近 90 天内暂无合同到期人员</div>;
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex w-full shrink-0 gap-4">
+        {months.map((tab) => {
+          const key = contractExpiryMonthKey(tab.year, tab.month);
+          const active = key === selectedMonthKey;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedMonthKey((current) => (current === key ? null : key));
+              }}
+              className={`relative flex h-8 min-w-0 flex-1 items-center justify-center overflow-visible rounded-lg px-2 text-sm transition-colors ${active ? "bg-[#3069F9] text-white" : "bg-[#F5F5F5] text-[#181818] hover:bg-[#E8F2FF]"}`}
+            >
+              {tab.label}
+              {tab.count > 0 ? (
+                <span className="pointer-events-none absolute right-0 top-0 z-10 flex h-4 min-w-4 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full bg-[#F53F3F] px-1 text-[10px] font-medium leading-none text-white ring-2 ring-white">
+                  {tab.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className={`mt-3 ${overviewMetricListClass}`}>
+        {visibleItems.length > 0 ? visibleItems.map((item) => (
+          <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+            <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
+              <div className="text-xs text-[#777777]">{formatContractExpiryDateLabel(new Date(item.endAt))}</div>
+            </div>
+          </div>
+        )) : (
+          <div className="px-2 py-6 text-center text-sm text-[#777777]">
+            {selectedMonthKey ? "该月暂无到期人员" : "近 90 天内暂无合同到期人员"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OverviewCircularProgress({ value }: { value: number }) {
+  const size = 160;
+  const stroke = 10;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const safeValue = Math.min(100, Math.max(0, value));
+  const offset = circumference - (safeValue / 100) * circumference;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#F5F5F5" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#3069F9" strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[30px] font-medium leading-[46px] text-[#181818] tabular-nums">{safeValue}<span className="text-[22px]">%</span></span>
+      </div>
+    </div>
+  );
+}
 
 function QuickCard({ icon, tone, hoverTone, label, value, names, action }: { icon: React.ReactNode; tone: string; hoverTone: string; label: string; value: string; names: string[]; action: () => void }) {
   const displayNames = names.join("、");

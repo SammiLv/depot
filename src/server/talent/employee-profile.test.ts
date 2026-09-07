@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getContractExpiryStatus, getRemainingPromotionOpportunityCount, parseProfileBoolean, serializeProfileBoolean, shouldSyncCurrentContract, validateCurrentContractPeriod } from "./employee-profile";
+import {
+  contractExpiryMonthKey,
+  formatContractExpiryDateLabel,
+  getContractExpiryMonthTabs,
+  getContractExpiryStatus,
+  getContractExpiryWindowEnd,
+  getRemainingPromotionOpportunityCount,
+  isWithinContractExpiryWindow,
+  parseProfileBoolean,
+  serializeProfileBoolean,
+  shouldSyncCurrentContract,
+  validateCurrentContractPeriod,
+} from "./employee-profile";
 
 test("人才决策事实支持待更新、是、否三态", () => {
   assert.equal(parseProfileBoolean(""), null);
@@ -24,6 +36,33 @@ test("只有已续签和延期会同步人才档案当前聘期", () => {
   assert.equal(shouldSyncCurrentContract("EXTENDED"), true);
   assert.equal(shouldSyncCurrentContract("NOT_RENEWED"), false);
   assert.equal(shouldSyncCurrentContract("TERMINATED"), false);
+});
+
+test("近90天合同到期窗口按自然月生成 Tab", () => {
+  const august = new Date("2026-08-01T12:00:00.000Z");
+  assert.deepEqual(
+    getContractExpiryMonthTabs(august).map((tab) => tab.label),
+    ["8月", "9月", "10月"],
+  );
+  const september = new Date("2026-09-01T12:00:00.000Z");
+  assert.deepEqual(
+    getContractExpiryMonthTabs(september).map((tab) => tab.label),
+    ["9月", "10月", "11月"],
+  );
+});
+
+test("近90天窗口内合同按起止日期判断", () => {
+  const today = new Date("2026-09-01T12:00:00.000Z");
+  const windowEnd = getContractExpiryWindowEnd(today);
+  assert.equal(isWithinContractExpiryWindow(new Date("2026-08-31T12:00:00.000Z"), today), false);
+  assert.equal(isWithinContractExpiryWindow(new Date("2026-09-15T12:00:00.000Z"), today), true);
+  assert.equal(isWithinContractExpiryWindow(windowEnd, today), true);
+  assert.equal(isWithinContractExpiryWindow(new Date(windowEnd.getTime() + 24 * 60 * 60 * 1000), today), false);
+});
+
+test("合同到期日期展示文案", () => {
+  assert.equal(formatContractExpiryDateLabel(new Date("2026-10-24T00:00:00.000Z")), "10月24日到期");
+  assert.equal(contractExpiryMonthKey(2026, 10), "2026-10");
 });
 
 test("合同到期状态按提前三个月的日期边界判断", () => {

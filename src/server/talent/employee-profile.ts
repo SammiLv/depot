@@ -25,6 +25,49 @@ function addUtcMonthsClamped(value: Date, months: number) {
   return new Date(Date.UTC(value.getUTCFullYear(), targetMonth, Math.min(value.getUTCDate(), lastDay)));
 }
 
+export function getContractExpiryWindowEnd(referenceDate = new Date()) {
+  return new Date(referenceDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+}
+
+export function isWithinContractExpiryWindow(endAt: Date, referenceDate = new Date()) {
+  const today = toUtcDateOnly(referenceDate);
+  const endDate = toUtcDateOnly(endAt);
+  const windowEnd = toUtcDateOnly(getContractExpiryWindowEnd(referenceDate));
+  return endDate >= today && endDate <= windowEnd;
+}
+
+export type ContractExpiryMonthTab = {
+  year: number;
+  month: number;
+  label: string;
+};
+
+export function getContractExpiryMonthTabs(referenceDate = new Date()): ContractExpiryMonthTab[] {
+  const windowEnd = getContractExpiryWindowEnd(referenceDate);
+  const tabs: ContractExpiryMonthTab[] = [];
+  let year = referenceDate.getFullYear();
+  let month = referenceDate.getMonth();
+  const endYear = windowEnd.getFullYear();
+  const endMonth = windowEnd.getMonth();
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    tabs.push({ year, month: month + 1, label: `${month + 1}月` });
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return tabs;
+}
+
+export function contractExpiryMonthKey(year: number, month: number) {
+  return `${year}-${month}`;
+}
+
+export function formatContractExpiryDateLabel(endAt: Date) {
+  return `${endAt.getMonth() + 1}月${endAt.getDate()}日到期`;
+}
+
 export function getContractExpiryStatus(endAt: Date | null, referenceDate = new Date()): ContractExpiryStatus {
   if (!endAt) return null;
   const today = toUtcDateOnly(referenceDate);
