@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { DateInput } from "@/components/date-input";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -900,9 +901,8 @@ function QuarterlyWorkForm({
         </FormRow>
         {workStatus === "COMPLETED" ? (
           <FormRow label="完成时间 *" align="center">
-            <input
+            <DateInput
               name="completedAt"
-              type="date"
               required
               defaultValue={toDateInputValue(item?.completedAt)}
               className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
@@ -1206,9 +1206,8 @@ function ProjectEditForm({
         {projectStatus === "COMPLETED" ? (
           <div ref={completedAtRowRef}>
             <FormRow label="完成时间 *" align="center">
-              <input
+              <DateInput
                 name="completedAt"
-                type="date"
                 required
                 defaultValue={toDateInputValue(item.completedAt)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
@@ -1219,9 +1218,8 @@ function ProjectEditForm({
         {projectStatus === "LAUNCHED" ? (
           <div ref={launchedAtRowRef}>
             <FormRow label="上线时间 *" align="center">
-              <input
+              <DateInput
                 name="launchedAt"
-                type="date"
                 required
                 defaultValue={toDateInputValue(item.launchedAt)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
@@ -1426,9 +1424,8 @@ function ProjectCreateForm({
         {createProjectStatus === "COMPLETED" ? (
           <div ref={completedAtRowRef}>
             <FormRow label="完成时间 *" align="center">
-              <input
+              <DateInput
                 name="completedAt"
-                type="date"
                 required
                 defaultValue={toDateInputValue(null)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
@@ -1439,9 +1436,8 @@ function ProjectCreateForm({
         {createProjectStatus === "LAUNCHED" ? (
           <div ref={launchedAtRowRef}>
             <FormRow label="上线时间 *" align="center">
-              <input
+              <DateInput
                 name="launchedAt"
-                type="date"
                 required
                 defaultValue={toDateInputValue(null)}
                 className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
