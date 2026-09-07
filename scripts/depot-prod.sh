@@ -184,13 +184,9 @@ is_app_key_field() {
 # 探测 node.exe 路径,返回其所在目录(标准输出);找不到则 stderr 报错
 # 解决 nohup 子进程不继承完整 PATH + 不想依赖 npx/npm 链式调用的问题
 ensure_node_path() {
-  # 1. 先看 PATH 里有没有 node
-  if command -v node >/dev/null 2>&1; then
-    command -v node | xargs dirname
-    return 0
-  fi
-  # 2. 常见候选位置
+  # 1. 优先用脚本配置的候选路径
   local candidates=(
+    "/c/Users/rj/.workbuddy/binaries/node/versions/24.20.0"
     "/c/Users/rj/.workbuddy/binaries/node/versions/22.22.2"
     "/c/Program Files/nodejs"
     "/c/Program Files (x86)/nodejs"
@@ -202,6 +198,11 @@ ensure_node_path() {
       return 0
     fi
   done
+  # 2. 兜底：PATH 里的 node
+  if command -v node >/dev/null 2>&1; then
+    command -v node | xargs dirname
+    return 0
+  fi
   return 1
 }
 
@@ -377,7 +378,7 @@ cmd_start() {
   # 探测 node 路径(直接调 next 的 JS 入口,绕开 npx/npm/cmd 链)
   local node_dir
   node_dir=$(ensure_node_path) || {
-    err "找不到 node.exe。请安装 Node.js 18+ 或把现有 node 加到 PATH"
+    err "找不到 node.exe。请安装 Node.js 20.9+ 或把现有 node 加到 PATH"
     return 1
   }
   log "node 路径: $node_dir/node"
@@ -523,8 +524,8 @@ cmd_pull() {
     else
       log "package.json / package-lock.json 有变更，执行 npm install"
     fi
-    if ! (cd "$PROJECT_DIR" && npm install --registry=https://registry.npmmirror.com); then
-      err "npm install 失败"
+    if ! (cd "$PROJECT_DIR" && npm ci --ignore-scripts --registry=https://registry.npmmirror.com); then
+      err "npm ci 失败"
       return 1
     fi
   else
@@ -540,10 +541,23 @@ cmd_pull() {
   fi
   echo ""
 
-  # 4. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
-  log "=== 4/6 应用数据库迁移（migrate deploy）==="
+  # 4. 停服务释放 SQLite 锁（migrate deploy 需要独占写库；服务在跑会 database is locked）
+  log "=== 4/6 停止当前服务（释放数据库锁）==="
+  local was_running=0
+  if [ -n "$(pid_listening_on_port)" ]; then
+    was_running=1
+  fi
+  cmd_stop || true
+  echo ""
+
+  # 5. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
+  log "=== 5/6 应用数据库迁移（migrate deploy）==="
   if ! (cd "$PROJECT_DIR" && npx prisma migrate deploy --config db/prisma.config.ts); then
     err "migrate deploy 失败"
+    if [ "$was_running" = "1" ]; then
+      warn "正在恢复旧版本服务..."
+      cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+    fi
     return 1
   fi
   # 兼容旧版误生成的嵌套库目录
@@ -553,20 +567,14 @@ cmd_pull() {
   fi
   echo ""
 
-  # 5. 重新构建（短暂停机；build 失败则回滚 .next 并恢复旧服务）
-  log "=== 5/6 重新构建（短暂停机）==="
-  local was_running=0
-  if [ -n "$(pid_listening_on_port)" ]; then
-    was_running=1
-  fi
-  log "  步骤 5a: 停止当前服务"
-  cmd_stop || true
-  log "  步骤 5b: 备份旧构建产物 .next/ → .next.backup/"
+  # 6. 重新构建（build 失败则回滚 .next 并恢复旧服务）
+  log "=== 6/6 重新构建并启动新版本 ==="
+  log "  步骤 6a: 备份旧构建产物 .next/ → .next.backup/"
   rm -rf "$PROJECT_DIR/.next.backup"
   if [ -d "$PROJECT_DIR/.next" ]; then
     mv "$PROJECT_DIR/.next" "$PROJECT_DIR/.next.backup"
   fi
-  log "  步骤 5c: 执行 next build"
+  log "  步骤 6b: 执行 next build"
   if ! (cd "$PROJECT_DIR" && npm run build); then
     err "build 失败"
     rm -rf "$PROJECT_DIR/.next"
@@ -589,8 +597,7 @@ cmd_pull() {
   rm -rf "$PROJECT_DIR/.next.backup"
   echo ""
 
-  # 6. 启动新版本
-  log "=== 6/6 启动新版本 ==="
+  log "  步骤 6c: 启动新版本"
   cmd_start
 }
 

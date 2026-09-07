@@ -1,34 +1,65 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { RoleType } from "@prisma/client";
 import {
-  getAnnualGoalCapabilities,
+  deriveAnnualGoalCapabilities,
   getAnnualGoalAssignmentPermissions,
   getAnnualGoalPlanPermissions,
+  type AnnualGoalAbilityCoverage,
+  type AnnualGoalPermissionContext,
 } from "@/server/organization/annual-goal-permissions";
 
-type PermissionCode =
-  | "annualGoal.viewDepartmentPlans"
-  | "annualGoal.editDepartmentPlans"
-  | "annualGoal.viewTeamPlans"
-  | "annualGoal.editTeamPlans"
-  | "annualGoal.updateProgress";
+type ScopeInput = { hasAllAccess?: boolean; orgNodeIds?: string[] };
 
-function createPermissionMap(roleType: RoleType, codes: PermissionCode[]) {
-  return new Map<RoleType, Set<PermissionCode>>([
-    [roleType, new Set(codes)],
-  ]);
+function toCoverage(input: ScopeInput | undefined): AnnualGoalAbilityCoverage & { hasPermission: boolean } {
+  const hasAllAccess = input?.hasAllAccess ?? false;
+  const orgNodeIds = new Set(input?.orgNodeIds ?? []);
+  return { hasAllAccess, orgNodeIds, hasPermission: hasAllAccess || orgNodeIds.size > 0 };
+}
+
+function createPermissionContext(input: {
+  departmentView?: ScopeInput;
+  departmentEdit?: ScopeInput;
+  teamView?: ScopeInput;
+  teamEdit?: ScopeInput;
+  progress?: ScopeInput;
+}): AnnualGoalPermissionContext {
+  const departmentView = toCoverage(input.departmentView);
+  const departmentEdit = toCoverage(input.departmentEdit);
+  const teamView = toCoverage(input.teamView);
+  const teamEdit = toCoverage(input.teamEdit);
+  const progress = toCoverage(input.progress);
+
+  return {
+    capabilities: deriveAnnualGoalCapabilities({
+      canViewDepartmentPlans: departmentView.hasPermission,
+      canEditDepartmentPlans: departmentEdit.hasPermission,
+      canViewTeamPlans: teamView.hasPermission,
+      canEditTeamPlans: teamEdit.hasPermission,
+      canUpdateProgress: progress.hasPermission,
+    }),
+    departmentView,
+    departmentEdit,
+    teamView,
+    teamEdit,
+    progress,
+  };
 }
 
 test("edit permissions require matching view permissions", () => {
-  const teamOnlyEdit = getAnnualGoalCapabilities(
-    "TEAM_LEADER",
-    createPermissionMap("TEAM_LEADER", ["annualGoal.editTeamPlans"]),
-  );
-  const departmentOnlyEdit = getAnnualGoalCapabilities(
-    "DEPARTMENT_MANAGER",
-    createPermissionMap("DEPARTMENT_MANAGER", ["annualGoal.editDepartmentPlans"]),
-  );
+  const teamOnlyEdit = deriveAnnualGoalCapabilities({
+    canViewDepartmentPlans: false,
+    canEditDepartmentPlans: false,
+    canViewTeamPlans: false,
+    canEditTeamPlans: true,
+    canUpdateProgress: false,
+  });
+  const departmentOnlyEdit = deriveAnnualGoalCapabilities({
+    canViewDepartmentPlans: false,
+    canEditDepartmentPlans: true,
+    canViewTeamPlans: false,
+    canEditTeamPlans: false,
+    canUpdateProgress: false,
+  });
 
   assert.equal(teamOnlyEdit.canViewTeamPlans, false);
   assert.equal(teamOnlyEdit.canEditTeamPlans, false);
@@ -37,31 +68,16 @@ test("edit permissions require matching view permissions", () => {
 });
 
 test("department manager can edit any team plan in their department with team view+edit", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "DEPARTMENT_MANAGER",
-    createPermissionMap("DEPARTMENT_MANAGER", [
-      "annualGoal.viewTeamPlans",
-      "annualGoal.editTeamPlans",
-    ]),
-  );
+  const context = createPermissionContext({
+    teamView: { orgNodeIds: ["org_dept_dept-1", "org_team_team-a", "org_team_team-b"] },
+    teamEdit: { orgNodeIds: ["org_dept_dept-1", "org_team_team-a", "org_team_team-b"] },
+  });
 
-  const permissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "DEPARTMENT_MANAGER",
-      orgNodeId: "org_dept_dept-1",
-    },
-    capabilities,
-    {
-      ownerType: "TEAM",
-      ownerOrgNodeId: "org_team_team-a",
-      deletedAt: null,
-    },
-    {
-      deptScopeIds: new Set(["org_dept_dept-1", "org_team_team-a", "org_team_team-b"]),
-      teamScopeIds: new Set(["org_dept_dept-1", "org_team_team-a", "org_team_team-b"]),
-      deptAncestorId: "org_dept_dept-1",
-    },
-  );
+  const permissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "TEAM",
+    ownerOrgNodeId: "org_team_team-a",
+    deletedAt: null,
+  });
 
   assert.equal(permissions.canViewPlan, true);
   assert.equal(permissions.canEditTeamPlan, true);
@@ -71,105 +87,53 @@ test("department manager can edit any team plan in their department with team vi
 });
 
 test("department manager with team view can view every team under their department", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "DEPARTMENT_MANAGER",
-    createPermissionMap("DEPARTMENT_MANAGER", ["annualGoal.viewTeamPlans"]),
-  );
+  const context = createPermissionContext({
+    teamView: { orgNodeIds: ["org_dept_dept-1", "org_team_team-a", "org_team_team-b"] },
+  });
 
-  const permissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "DEPARTMENT_MANAGER",
-      orgNodeId: "org_dept_dept-1",
-    },
-    capabilities,
-    {
-      ownerType: "TEAM",
-      ownerOrgNodeId: "org_team_team-b",
-      deletedAt: null,
-    },
-    {
-      deptScopeIds: new Set(["org_dept_dept-1", "org_team_team-a", "org_team_team-b"]),
-      teamScopeIds: new Set(["org_dept_dept-1", "org_team_team-a", "org_team_team-b"]),
-      deptAncestorId: "org_dept_dept-1",
-    },
-  );
+  const permissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "TEAM",
+    ownerOrgNodeId: "org_team_team-b",
+    deletedAt: null,
+  });
 
   assert.equal(permissions.canViewPlan, true);
   assert.equal(permissions.canEditTeamPlan, false);
 });
 
 test("team leader with team view can only view their own team", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "TEAM_LEADER",
-    createPermissionMap("TEAM_LEADER", ["annualGoal.viewTeamPlans"]),
-  );
+  const context = createPermissionContext({
+    teamView: { orgNodeIds: ["org_team_team-a"] },
+  });
 
-  const ownTeamPermissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "TEAM_LEADER",
-      orgNodeId: "org_team_team-a",
-    },
-    capabilities,
-    {
-      ownerType: "TEAM",
-      ownerOrgNodeId: "org_team_team-a",
-      deletedAt: null,
-    },
-    {
-      deptScopeIds: new Set(["org_team_team-a"]),
-      teamScopeIds: new Set(["org_team_team-a"]),
-      deptAncestorId: null,
-    },
-  );
-  const siblingTeamPermissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "TEAM_LEADER",
-      orgNodeId: "org_team_team-a",
-    },
-    capabilities,
-    {
-      ownerType: "TEAM",
-      ownerOrgNodeId: "org_team_team-b",
-      deletedAt: null,
-    },
-    {
-      deptScopeIds: new Set(["org_team_team-a"]),
-      teamScopeIds: new Set(["org_team_team-a"]),
-      deptAncestorId: null,
-    },
-  );
+  const ownTeamPermissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "TEAM",
+    ownerOrgNodeId: "org_team_team-a",
+    deletedAt: null,
+  });
+  const siblingTeamPermissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "TEAM",
+    ownerOrgNodeId: "org_team_team-b",
+    deletedAt: null,
+  });
 
   assert.equal(ownTeamPermissions.canViewPlan, true);
   assert.equal(siblingTeamPermissions.canViewPlan, false);
 });
 
-
 test("updateProgress alone does not grant team visibility or edit", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "MEMBER",
-    createPermissionMap("MEMBER", ["annualGoal.updateProgress"]),
-  );
+  const context = createPermissionContext({
+    progress: { orgNodeIds: ["org_team_team-a"] },
+  });
 
-  const permissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "MEMBER",
-      orgNodeId: "org_team_team-a",
-    },
-    capabilities,
-    {
-      ownerType: "TEAM",
-      ownerOrgNodeId: "org_team_team-a",
-      deletedAt: null,
-    },
-    {
-      deptScopeIds: new Set(["org_team_team-a"]),
-      teamScopeIds: new Set(["org_team_team-a"]),
-      deptAncestorId: null,
-    },
-  );
+  const permissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "TEAM",
+    ownerOrgNodeId: "org_team_team-a",
+    deletedAt: null,
+  });
 
-  assert.equal(capabilities.canViewTeamPlans, false);
-  assert.equal(capabilities.canEditTeamPlans, false);
+  assert.equal(context.capabilities.canViewTeamPlans, false);
+  assert.equal(context.capabilities.canEditTeamPlans, false);
   assert.equal(permissions.canViewPlan, false);
   assert.equal(permissions.canEditTeamPlan, false);
   assert.equal(permissions.canUpdateTeamProgress, true);
@@ -177,55 +141,32 @@ test("updateProgress alone does not grant team visibility or edit", () => {
 });
 
 test("member with department view can view department plan across department scope", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "MEMBER",
-    createPermissionMap("MEMBER", ["annualGoal.viewDepartmentPlans"]),
-  );
+  const context = createPermissionContext({
+    departmentView: { orgNodeIds: ["org_dept_dept-1", "org_team_team-a", "org_team_team-b"] },
+  });
 
-  const permissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "MEMBER",
-      orgNodeId: "org_team_team-a",
-    },
-    capabilities,
-    {
-      ownerType: "DEPARTMENT",
-      ownerOrgNodeId: "org_dept_dept-1",
-      deletedAt: null,
-    },
-    {
-      deptScopeIds: new Set(["org_dept_dept-1", "org_team_team-a", "org_team_team-b"]),
-      teamScopeIds: new Set(["org_team_team-a"]),
-      deptAncestorId: "org_dept_dept-1",
-    },
-  );
+  const permissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "DEPARTMENT",
+    ownerOrgNodeId: "org_dept_dept-1",
+    deletedAt: null,
+  });
 
-  assert.equal(capabilities.canViewDepartmentPlans, true);
+  assert.equal(context.capabilities.canViewDepartmentPlans, true);
   assert.equal(permissions.canViewPlan, true);
   assert.equal(permissions.canEditDepartmentPlan, false);
 });
 
 test("admin with department view+edit can edit department plans without org node", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "ADMIN",
-    createPermissionMap("ADMIN", [
-      "annualGoal.viewDepartmentPlans",
-      "annualGoal.editDepartmentPlans",
-    ]),
-  );
+  const context = createPermissionContext({
+    departmentView: { hasAllAccess: true },
+    departmentEdit: { hasAllAccess: true },
+  });
 
-  const permissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "ADMIN",
-      orgNodeId: null,
-    },
-    capabilities,
-    {
-      ownerType: "DEPARTMENT",
-      ownerOrgNodeId: "org_dept_dept-1",
-      deletedAt: null,
-    },
-  );
+  const permissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "DEPARTMENT",
+    ownerOrgNodeId: "org_dept_dept-1",
+    deletedAt: null,
+  });
 
   assert.equal(permissions.canViewPlan, true);
   assert.equal(permissions.canEditDepartmentPlan, true);
@@ -234,26 +175,16 @@ test("admin with department view+edit can edit department plans without org node
 });
 
 test("admin with team view+edit can edit team plans without department/team ids", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "ADMIN",
-    createPermissionMap("ADMIN", [
-      "annualGoal.viewTeamPlans",
-      "annualGoal.editTeamPlans",
-    ]),
-  );
+  const context = createPermissionContext({
+    teamView: { hasAllAccess: true },
+    teamEdit: { hasAllAccess: true },
+  });
 
-  const permissions = getAnnualGoalPlanPermissions(
-    {
-      roleType: "ADMIN",
-      orgNodeId: null,
-    },
-    capabilities,
-    {
-      ownerType: "TEAM",
-      ownerOrgNodeId: "org_team_team-a",
-      deletedAt: null,
-    },
-  );
+  const permissions = getAnnualGoalPlanPermissions(context, {
+    ownerType: "TEAM",
+    ownerOrgNodeId: "org_team_team-a",
+    deletedAt: null,
+  });
 
   assert.equal(permissions.canViewPlan, true);
   assert.equal(permissions.canEditTeamPlan, true);
@@ -261,41 +192,15 @@ test("admin with team view+edit can edit team plans without department/team ids"
 });
 
 test("assignment permissions require team scope and become read-only when closed", () => {
-  const capabilities = getAnnualGoalCapabilities(
-    "TEAM_LEADER",
-    createPermissionMap("TEAM_LEADER", [
-      "annualGoal.viewTeamPlans",
-      "annualGoal.editTeamPlans",
-      "annualGoal.updateProgress",
-    ]),
-  );
-  const context = {
-    deptScopeIds: new Set(["org_team_team-a"]),
-    teamScopeIds: new Set(["org_team_team-a"]),
-    deptAncestorId: null,
-  };
+  const context = createPermissionContext({
+    teamView: { orgNodeIds: ["org_team_team-a"] },
+    teamEdit: { orgNodeIds: ["org_team_team-a"] },
+    progress: { orgNodeIds: ["org_team_team-a"] },
+  });
 
-  const active = getAnnualGoalAssignmentPermissions(
-    { roleType: "TEAM_LEADER", orgNodeId: "org_team_team-a" },
-    capabilities,
-    "org_team_team-a",
-    "ACTIVE",
-    context,
-  );
-  const sibling = getAnnualGoalAssignmentPermissions(
-    { roleType: "TEAM_LEADER", orgNodeId: "org_team_team-a" },
-    capabilities,
-    "org_team_team-b",
-    "ACTIVE",
-    context,
-  );
-  const closed = getAnnualGoalAssignmentPermissions(
-    { roleType: "TEAM_LEADER", orgNodeId: "org_team_team-a" },
-    capabilities,
-    "org_team_team-a",
-    "CLOSED",
-    context,
-  );
+  const active = getAnnualGoalAssignmentPermissions(context, "org_team_team-a", "ACTIVE");
+  const sibling = getAnnualGoalAssignmentPermissions(context, "org_team_team-b", "ACTIVE");
+  const closed = getAnnualGoalAssignmentPermissions(context, "org_team_team-a", "CLOSED");
 
   assert.equal(active.canViewPlan, true);
   assert.equal(active.canEditMetrics, true);

@@ -7,7 +7,7 @@ import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-u
 type TalentConfigViewer = { id: string; roleType: RoleType; orgNodeId: string | null };
 
 export async function getCareerConfiguration(currentUser: TalentConfigViewer) {
-  const authorizedOrgNodeIds = await resolveAuthorizedOrgNodeIds(currentUser, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig);
+  const authorizedOrgNodeIds = await resolveAuthorizedOrgNodeIds(currentUser, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig);
   const departmentWhere = authorizedOrgNodeIds === null ? { nodeType: "DEPARTMENT" as const } : { nodeType: "DEPARTMENT" as const, id: { in: authorizedOrgNodeIds } };
   const departments = await prisma.orgNode.findMany({ where: departmentWhere, select: { id: true, name: true }, orderBy: { name: "asc" } });
   const departmentIds = departments.map((department) => department.id);
@@ -30,7 +30,7 @@ export async function getCareerConfiguration(currentUser: TalentConfigViewer) {
 }
 
 export async function getCompetencyConfiguration(currentUser: TalentConfigViewer) {
-  const authorizedOrgNodeIds = await resolveAuthorizedOrgNodeIds(currentUser, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig);
+  const authorizedOrgNodeIds = await resolveAuthorizedOrgNodeIds(currentUser, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig);
   const departments = await prisma.orgNode.findMany({ where: authorizedOrgNodeIds === null ? { nodeType: "DEPARTMENT" } : { nodeType: "DEPARTMENT", id: { in: authorizedOrgNodeIds } }, select: { id: true } });
   const tracks = await prisma.careerTrack.findMany({ where: { departmentOrgNodeId: { in: departments.map((row) => row.id) }, deletedAt: null }, select: { id: true } });
   const families = await prisma.jobFamily.findMany({ where: { careerTrackId: { in: tracks.map((row) => row.id) }, deletedAt: null }, select: { id: true } });

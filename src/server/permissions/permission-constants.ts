@@ -28,17 +28,12 @@ export const talentAbilityKeys = {
   viewReview: "VIEW_TALENT_REVIEW",
   manageReview: "MANAGE_TALENT_REVIEW",
   calibrateReview: "CALIBRATE_TALENT_REVIEW",
-  viewCareerModel: "VIEW_CAREER_MODEL",
-  manageCareerModel: "MANAGE_CAREER_MODEL",
-  viewBusinessAssessment: "VIEW_BUSINESS_ASSESSMENT",
-  manageBusinessAssessment: "MANAGE_BUSINESS_ASSESSMENT",
-  viewWorkIncident: "VIEW_WORK_INCIDENT",
-  manageWorkIncident: "MANAGE_WORK_INCIDENT",
   viewRecommendation: "VIEW_RECOMMENDATION",
   manageRecommendation: "MANAGE_RECOMMENDATION",
   viewHistory: "VIEW_TALENT_HISTORY",
   manageHistory: "MANAGE_TALENT_HISTORY",
   viewSensitive: "VIEW_TALENT_SENSITIVE",
+  viewConfig: "VIEW_TALENT_CONFIG",
   manageConfig: "MANAGE_TALENT_CONFIG",
 } satisfies Record<string, OrgPermissionAbilityKey>;
 
@@ -51,6 +46,16 @@ export const productManagementAbilityKeys = {
   manageProjectAndValueTracking: "MANAGE_PROJECT_AND_VALUE_TRACKING",
   manageProductTask: "MANAGE_PRODUCT_TASK",
 } satisfies Record<string, OrgPermissionAbilityKey>;
+
+export const annualGoalAbilityKeys = {
+  viewDepartmentPlans: "VIEW_ANNUAL_GOAL_DEPARTMENT_PLANS",
+  editDepartmentPlans: "EDIT_ANNUAL_GOAL_DEPARTMENT_PLANS",
+  viewTeamPlans: "VIEW_ANNUAL_GOAL_TEAM_PLANS",
+  editTeamPlans: "EDIT_ANNUAL_GOAL_TEAM_PLANS",
+  updateProgress: "UPDATE_ANNUAL_GOAL_PROGRESS",
+} satisfies Record<string, OrgPermissionAbilityKey>;
+
+export type AnnualGoalAbilityKey = (typeof annualGoalAbilityKeys)[keyof typeof annualGoalAbilityKeys];
 
 export const orgPermissionScopePriority: Record<OrgPermissionGrantScopeType, number> = {
   SELF: 0,
@@ -189,15 +194,74 @@ export const kpiDefaultPermissionGrants: Array<{
 export const talentOrdinaryPermissionAbilityKeys = [
   talentAbilityKeys.viewProfile,
   talentAbilityKeys.viewReview,
-  talentAbilityKeys.viewCareerModel,
-  talentAbilityKeys.viewBusinessAssessment,
-  talentAbilityKeys.viewWorkIncident,
   talentAbilityKeys.viewHistory,
+] satisfies OrgPermissionAbilityKey[];
+
+// 组织与权限页的「人才发展权限」矩阵能力项，按所在 tab 归类排序：
+// 人才总览 → 人才盘点 → 人才决策 → 人才履历 → 规则配置。
+export const talentMatrixPermissionAbilityKeys = [
+  talentAbilityKeys.viewProfile,
+  talentAbilityKeys.viewReview,
+  talentAbilityKeys.manageReview,
+  talentAbilityKeys.calibrateReview,
+  talentAbilityKeys.viewRecommendation,
+  talentAbilityKeys.manageRecommendation,
+  talentAbilityKeys.viewHistory,
+  talentAbilityKeys.manageHistory,
+  talentAbilityKeys.editProfile,
+  talentAbilityKeys.viewSensitive,
+  talentAbilityKeys.viewConfig,
+  talentAbilityKeys.manageConfig,
 ] satisfies OrgPermissionAbilityKey[];
 
 export const notificationOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
   notificationAbilityKeys.manageNotificationScenario,
 ];
+
+// 组织与权限页的「指标管理权限」矩阵能力项：部门方案 → 小组指标 → 进度更新。
+export const annualGoalMatrixPermissionAbilityKeys = [
+  annualGoalAbilityKeys.viewDepartmentPlans,
+  annualGoalAbilityKeys.editDepartmentPlans,
+  annualGoalAbilityKeys.viewTeamPlans,
+  annualGoalAbilityKeys.editTeamPlans,
+  annualGoalAbilityKeys.updateProgress,
+] satisfies OrgPermissionAbilityKey[];
+
+// 指标管理按「能力 × 角色」分别定义作用域（组员可查看部门方案、可更新本组进度，
+// 无法套用 KPI/人才发展的统一角色映射）。矩阵保存/同步/读取共用本表；
+// 非默认开启的格子被管理员手动勾选时，也按本表锚定作用域。
+export const annualGoalPermissionScopeByAbilityRole: Record<AnnualGoalAbilityKey, Record<RoleType, OrgPermissionGrantScopeType>> = {
+  [annualGoalAbilityKeys.viewDepartmentPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "SUBTREE",
+    MEMBER: "SUBTREE",
+  },
+  [annualGoalAbilityKeys.editDepartmentPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "SUBTREE",
+    MEMBER: "SUBTREE",
+  },
+  [annualGoalAbilityKeys.viewTeamPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "NODE",
+  },
+  [annualGoalAbilityKeys.editTeamPlans]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "NODE",
+  },
+  [annualGoalAbilityKeys.updateProgress]: {
+    ADMIN: "ALL",
+    DEPARTMENT_MANAGER: "SUBTREE",
+    TEAM_LEADER: "NODE",
+    MEMBER: "NODE",
+  },
+};
 
 export const productManagementOrdinaryPermissionAbilityKeys: OrgPermissionAbilityKey[] = [
   productManagementAbilityKeys.manageProductGoal,
@@ -214,14 +278,10 @@ type DefaultPermissionGrant = {
   orgNodeSeedKey: "ROOT" | "DEPARTMENT" | "TEAM" | null;
 };
 
-const migratedToKpiTalentAbilityKeys = new Set<OrgPermissionAbilityKey>([
-  talentAbilityKeys.manageBusinessAssessment,
-  talentAbilityKeys.manageWorkIncident,
-]);
-
+// 默认矩阵：ADMIN 全部(ALL)；部门主管全部(本部门 SUBTREE，含薪资敏感字段)；
+// 组长查看类 + 盘点录入/决策操作(本组 NODE)；组员查看类(本人 SELF)。
 export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
   ...Object.values(talentAbilityKeys)
-    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
     .map((abilityKey) => ({
       moduleKey: orgPermissionModuleKeys.talent,
       abilityKey,
@@ -231,7 +291,6 @@ export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
       orgNodeSeedKey: null,
     })),
   ...Object.values(talentAbilityKeys)
-    .filter((abilityKey) => !migratedToKpiTalentAbilityKeys.has(abilityKey))
     .map((abilityKey) => ({
       moduleKey: orgPermissionModuleKeys.talent,
       abilityKey,
@@ -244,9 +303,6 @@ export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
     talentAbilityKeys.viewProfile,
     talentAbilityKeys.viewReview,
     talentAbilityKeys.manageReview,
-    talentAbilityKeys.viewCareerModel,
-    talentAbilityKeys.viewBusinessAssessment,
-    talentAbilityKeys.viewWorkIncident,
     talentAbilityKeys.viewRecommendation,
     talentAbilityKeys.manageRecommendation,
     talentAbilityKeys.viewHistory,
@@ -314,3 +370,28 @@ export const notificationDefaultPermissionGrants: DefaultPermissionGrant[] = (
   roleType,
   orgNodeSeedKey: null,
 }));
+
+// 指标管理默认矩阵（对齐收归前实况）：ADMIN 全部(ALL)；查看部门方案 主管/组长/组员 SUBTREE@部门；
+// 编辑部门方案 主管 SUBTREE@部门；查看/编辑小组指标 主管 SUBTREE@部门 + 组长 NODE@本组；
+// 更新季度进度 主管 SUBTREE@部门 + 组长/组员 NODE@本组。
+const annualGoalDefaultEnabledRoles: Record<AnnualGoalAbilityKey, RoleType[]> = {
+  [annualGoalAbilityKeys.viewDepartmentPlans]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+  [annualGoalAbilityKeys.editDepartmentPlans]: ["ADMIN", "DEPARTMENT_MANAGER"],
+  [annualGoalAbilityKeys.viewTeamPlans]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"],
+  [annualGoalAbilityKeys.editTeamPlans]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER"],
+  [annualGoalAbilityKeys.updateProgress]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+};
+
+export const annualGoalDefaultPermissionGrants: DefaultPermissionGrant[] = annualGoalMatrixPermissionAbilityKeys.flatMap((abilityKey) =>
+  annualGoalDefaultEnabledRoles[abilityKey].map((roleType) => {
+    const scopeType = annualGoalPermissionScopeByAbilityRole[abilityKey][roleType];
+    return {
+      moduleKey: orgPermissionModuleKeys.annualGoal,
+      abilityKey,
+      scopeType,
+      subjectType: "ROLE" as const,
+      roleType,
+      orgNodeSeedKey: scopeType === "ALL" ? null : scopeType === "SUBTREE" ? "DEPARTMENT" as const : "TEAM" as const,
+    };
+  })
+);

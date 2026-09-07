@@ -17,24 +17,45 @@ function parseIntParam(value: string | string[] | undefined) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+const workspaceStatuses = ["all", "DELAYED", "NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"] as const;
+
+function parseStatusParam(value: string | string[] | undefined) {
+  const raw = readParam(value);
+  return workspaceStatuses.includes(raw as (typeof workspaceStatuses)[number])
+    ? (raw as (typeof workspaceStatuses)[number])
+    : undefined;
+}
+
+function parsePanelParam(value: string | string[] | undefined) {
+  const raw = readParam(value);
+  if (raw === "goal" || raw === "project" || raw === "task" || raw === "value") {
+    return raw;
+  }
+  return undefined;
+}
+
 export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
   const currentUser = await requireCurrentUser();
   const params = searchParams ? await searchParams : undefined;
   const selectedYear = parseIntParam(params?.year);
   const selectedQuarterRaw = readParam(params?.quarter);
   const selectedQuarter = selectedQuarterRaw === "all" ? "all" : parseIntParam(params?.quarter);
+  const viewRaw = readParam(params?.view);
+  const projectPanelRaw = readParam(params?.projectPanel);
   const data = await getQuarterlyWorkData(currentUser, {
     selectedYear,
     selectedQuarter,
-    goalId: readParam(params?.goalId),
-    view: readParam(params?.view) === "list" ? "list" : "card",
-    projectPanel: readParam(params?.projectPanel) === "value" ? "value" : "task",
-    status: readParam(params?.status) as NonNullable<Parameters<typeof getQuarterlyWorkData>[1]>["status"],
-    orgNodeId: readParam(params?.orgNodeId),
-    teamId: readParam(params?.teamId),
-    ownerId: readParam(params?.ownerId),
-    projectId: readParam(params?.projectId),
-    query: readParam(params?.q),
+    goalId: readParam(params?.goalId) ?? undefined,
+    view: viewRaw === "list" ? "list" : undefined,
+    projectPanel: projectPanelRaw === "value" ? "value" : undefined,
+    panel: parsePanelParam(params?.panel),
+    status: parseStatusParam(params?.status),
+    orgNodeId: readParam(params?.orgNodeId) ?? null,
+    teamId: readParam(params?.teamId) ?? null,
+    ownerId: readParam(params?.ownerId) ?? null,
+    projectId: readParam(params?.projectId) ?? null,
+    workId: readParam(params?.workId) ?? null,
+    query: readParam(params?.q) ?? null,
   });
   return <QuarterlyWorkContent data={data} />;
 }

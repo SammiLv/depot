@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/prisma";
 import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissionCoverage, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
-import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { findNearestDepartmentOrgNodeIdsForOrgNodes, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import type { KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
 import {
   buildKpiCompletedProgressStages,
@@ -984,23 +984,23 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   });
 
   const kpiIds = kpis.map((k) => k.id);
-  const allItems = kpiIds.length
-    ? await prisma.personalKpiItem.findMany({ where: { personalKpiId: { in: kpiIds } } })
-    : [];
-  const approvalStepRows = kpiIds.length
-    ? await prisma.personalKpiApprovalStep.findMany({
-        where: { personalKpiId: { in: kpiIds } },
-        orderBy: [{ stepOrder: "asc" }],
-        select: {
-          personalKpiId: true,
-          approverId: true,
-          status: true,
-          stepOrder: true,
-          stageKey: true,
-          stepLabel: true,
-        },
-      })
-    : [];
+  // allItems 与 approvalStepRows 都只依赖 kpiIds,并行拉取。
+  // kpiIds 为空时 prisma 的 in:[] 会走短路(返回空数组)且开销极小,不再单独 short-circuit,便于类型推断。
+  const [allItems, approvalStepRows] = await Promise.all([
+    prisma.personalKpiItem.findMany({ where: { personalKpiId: { in: kpiIds } } }),
+    prisma.personalKpiApprovalStep.findMany({
+      where: { personalKpiId: { in: kpiIds } },
+      orderBy: [{ stepOrder: "asc" }],
+      select: {
+        personalKpiId: true,
+        approverId: true,
+        status: true,
+        stepOrder: true,
+        stageKey: true,
+        stepLabel: true,
+      },
+    }),
+  ]);
   const activeApprovalStepByKpiId = new Map<string, typeof approvalStepRows[number]>();
   const hasApprovalChainByKpiId = new Map<string, boolean>();
   const approvalStepsByKpiId = new Map<string, typeof approvalStepRows>();
@@ -1021,37 +1021,45 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     itemsByKpi.set(item.personalKpiId, list);
   }
 
-  const users = await prisma.user.findMany({
-    where: {
-      ...(rowUserWhere
-        ? { OR: [rowUserWhere, { id: { in: kpis.map((kpi) => kpi.userId) } }] }
-        : { id: { in: kpis.map((kpi) => kpi.userId) } }),
-      isActive: true,
-    },
-    select: { id: true, name: true, orgNodeId: true, roleType: true },
-    orderBy: { name: "asc" },
-  });
+  // users 与 templateUsersForMatching 相互独立,并行拉取。
+  const [users, templateUsersForMatching] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        ...(rowUserWhere
+          ? { OR: [rowUserWhere, { id: { in: kpis.map((kpi) => kpi.userId) } }] }
+          : { id: { in: kpis.map((kpi) => kpi.userId) } }),
+        isActive: true,
+      },
+      select: { id: true, name: true, orgNodeId: true, roleType: true },
+      orderBy: { name: "asc" },
+    }),
+    canAccessTemplateList
+      ? prisma.user.findMany({
+          where: {
+            ...templateUserWhere,
+            isActive: true,
+          },
+          select: { id: true, name: true, orgNodeId: true, roleType: true },
+        })
+      : Promise.resolve([] as Array<{ id: string; name: string; orgNodeId: string | null; roleType: import("@prisma/client").RoleType }>),
+  ]);
   const totalCount = users.length;
-  const templateUsersForMatching = canAccessTemplateList
-    ? await prisma.user.findMany({
-        where: {
-          ...templateUserWhere,
-          isActive: true,
-        },
-        select: { id: true, name: true, orgNodeId: true, roleType: true },
-      })
-    : [];
   const userMap = new Map(users.map((u) => [u.id, u] as const));
-  const rowUserDepartmentOrgNodeIdEntries = await Promise.all(
-    users.map(async (user) => [user.id, await findNearestDepartmentOrgNodeId(user.orgNodeId)] as const)
-  );
-  const rowUserDepartmentOrgNodeIdByUserId = new Map(rowUserDepartmentOrgNodeIdEntries);
   const templateUserMap = new Map(templateUsersForMatching.map((u) => [u.id, u] as const));
   const orgNodeIds = [...new Set(templateUsersForMatching.map((user) => user.orgNodeId).filter((orgNodeId): orgNodeId is string => Boolean(orgNodeId)))];
-  const templateUserDepartmentOrgNodeIdEntries = await Promise.all(
-    templateUsersForMatching.map(async (user) => [user.id, await findNearestDepartmentOrgNodeId(user.orgNodeId)] as const)
+
+  // 批量解析用户所属部门,避免每个用户单独一次组织树遍历(原两处 Promise.all 循环 = 2*N 次 orgClosure/orgNode 查询)。
+  const allUserOrgNodeIds = [
+    ...users.map((user) => user.orgNodeId),
+    ...templateUsersForMatching.map((user) => user.orgNodeId),
+  ];
+  const departmentOrgNodeIdByOrgNodeId = await findNearestDepartmentOrgNodeIdsForOrgNodes(allUserOrgNodeIds);
+  const rowUserDepartmentOrgNodeIdByUserId = new Map(
+    users.map((user) => [user.id, user.orgNodeId ? departmentOrgNodeIdByOrgNodeId.get(user.orgNodeId) ?? null : null] as const),
   );
-  const templateUserDepartmentOrgNodeIdByUserId = new Map(templateUserDepartmentOrgNodeIdEntries);
+  const templateUserDepartmentOrgNodeIdByUserId = new Map(
+    templateUsersForMatching.map((user) => [user.id, user.orgNodeId ? departmentOrgNodeIdByOrgNodeId.get(user.orgNodeId) ?? null : null] as const),
+  );
   const rows = kpis.flatMap((personalKpi) => {
     const user = userMap.get(personalKpi.userId);
     const items = itemsByKpi.get(personalKpi.id) ?? [];
@@ -1243,39 +1251,41 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   }
 
   const templates = candidateTemplates.filter((template) => visibleTemplateIds.has(template.id));
-  const templateItems = templates.length
-    ? await prisma.kpiTemplateItem.findMany({
-        where: { templateId: { in: templates.map((template) => template.id) } },
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        select: {
-          id: true,
-          templateId: true,
-          name: true,
-          description: true,
-          score: true,
-          scoringStandard: true,
-          sortOrder: true,
-        },
-      })
-    : [];
+  // templateItems 与 templateAssignments 都只依赖 templates.ids,并行拉取。
+  const templateIds = templates.map((template) => template.id);
+  const [templateItems, templateAssignments] = templateIds.length
+    ? await Promise.all([
+        prisma.kpiTemplateItem.findMany({
+          where: { templateId: { in: templateIds } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            templateId: true,
+            name: true,
+            description: true,
+            score: true,
+            scoringStandard: true,
+            sortOrder: true,
+          },
+        }),
+        prisma.kpiTemplateAssignment.findMany({
+          where: { templateId: { in: templateIds }, isActive: true },
+          select: {
+            templateId: true,
+            targetType: true,
+            targetUserId: true,
+            targetOrgNodeId: true,
+            targetRoleType: true,
+          },
+        }),
+      ])
+    : [[], []];
   const templateItemsByTemplateId = new Map<string, typeof templateItems>();
   for (const item of templateItems) {
     const items = templateItemsByTemplateId.get(item.templateId) ?? [];
     items.push(item);
     templateItemsByTemplateId.set(item.templateId, items);
   }
-  const templateAssignments = templates.length
-    ? await prisma.kpiTemplateAssignment.findMany({
-        where: { templateId: { in: templates.map((template) => template.id) }, isActive: true },
-        select: {
-          templateId: true,
-          targetType: true,
-          targetUserId: true,
-          targetOrgNodeId: true,
-          targetRoleType: true,
-        },
-      })
-    : [];
   const templateAssignmentsByTemplateId = new Map<string, typeof templateAssignments>();
   for (const assignment of templateAssignments) {
     const items = templateAssignmentsByTemplateId.get(assignment.templateId) ?? [];

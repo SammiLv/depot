@@ -1,4 +1,5 @@
 import type { OrgPermissionAbilityKey, OrgPermissionGrantScopeType, OrgPermissionModuleKey, RoleType } from "@prisma/client";
+import { cache } from "react";
 import { getAncestorOrgNodeIds, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { getPermissionGrantsByAbility, type PermissionGrantRow } from "@/server/permissions/permission-query";
 import { orgPermissionScopePriority } from "@/server/permissions/permission-constants";
@@ -99,7 +100,7 @@ function isBetterGrant(next: MatchedPermissionGrant, best: MatchedPermissionGran
   return false;
 }
 
-async function resolveMatchedPermissionGrants(
+async function resolveMatchedPermissionGrantsUncached(
   currentUser: DataScopeInput,
   moduleKey: OrgPermissionModuleKey,
   abilityKey: OrgPermissionAbilityKey,
@@ -118,6 +119,32 @@ async function resolveMatchedPermissionGrants(
       ...grant,
       effectiveOrgNodeId: grant.orgNodeId ?? currentUser.orgNodeId ?? null,
     }));
+}
+
+// 请求级 memo:按 (currentUser.id, orgNodeId, roleType, moduleKey, abilityKey) 稳定缓存,
+// 避免同一次 SSR 内 getKpiData 反复触发 ~13 次相同权限解析(每次含 1 次 grant 查询 + 2 次组织树遍历)。
+const memoResolveMatchedPermissionGrants = cache(
+  async (
+    userId: string,
+    orgNodeId: string | null,
+    roleType: RoleType,
+    moduleKey: OrgPermissionModuleKey,
+    abilityKey: OrgPermissionAbilityKey,
+  ) => resolveMatchedPermissionGrantsUncached({ id: userId, orgNodeId, roleType }, moduleKey, abilityKey),
+);
+
+async function resolveMatchedPermissionGrants(
+  currentUser: DataScopeInput,
+  moduleKey: OrgPermissionModuleKey,
+  abilityKey: OrgPermissionAbilityKey,
+): Promise<MatchedPermissionGrant[]> {
+  return memoResolveMatchedPermissionGrants(
+    currentUser.id,
+    currentUser.orgNodeId ?? null,
+    currentUser.roleType,
+    moduleKey,
+    abilityKey,
+  );
 }
 
 export async function resolvePermissionScope(

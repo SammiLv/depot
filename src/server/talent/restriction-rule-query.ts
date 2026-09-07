@@ -49,8 +49,8 @@ export function normalizeTalentRestrictionRuleFilters(input: Record<string, stri
 
 async function configurationScope(viewer: Viewer) {
   const [authorizedOrgNodeIds, permission] = await Promise.all([
-    resolveAuthorizedOrgNodeIds(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig),
-    resolvePermissionCoverage(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.manageConfig),
+    resolveAuthorizedOrgNodeIds(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig),
+    resolvePermissionCoverage(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.viewConfig),
   ]);
   const departments = permission.hasPermission
     ? await prisma.orgNode.findMany({

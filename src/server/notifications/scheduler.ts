@@ -235,9 +235,14 @@ export function startNotificationScheduler() {
   globalThis.__notificationSchedulerStarted = true;
   console.info("[notifications] scheduler started");
 
-  void tickNotificationScheduler();
-  const tickIntervalMs = process.env.NODE_ENV === "development" ? 15_000 : 60_000;
-  setInterval(() => {
+  // 生产 5 分钟一跑,10 类扫描都不是秒级敏感;dev 保持 15s 便于调试。
+  // 首次 tick 延迟 30s,让进程冷启和用户首屏访问错开,避免争抢 SQLite。
+  const tickIntervalMs = process.env.NODE_ENV === "development" ? 15_000 : 300_000;
+  const initialDelayMs = process.env.NODE_ENV === "development" ? 0 : 30_000;
+  setTimeout(() => {
     void tickNotificationScheduler();
-  }, tickIntervalMs);
+    setInterval(() => {
+      void tickNotificationScheduler();
+    }, tickIntervalMs);
+  }, initialDelayMs);
 }

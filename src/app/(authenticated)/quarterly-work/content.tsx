@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { DateInput } from "@/components/date-input";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -207,7 +208,7 @@ function matchesValueOverviewColumn(
 const projectListGridClass =
   "grid-cols-[minmax(0,1.05fr)_minmax(0,0.78fr)_minmax(0,0.52fr)_minmax(0,0.58fr)_minmax(0,1.08fr)_minmax(0,0.46fr)_minmax(0,0.48fr)_minmax(0,0.56fr)_minmax(0,0.56fr)_minmax(88px,0.62fr)]";
 const projectTreeRowClass =
-  "grid grid-cols-[minmax(0,1fr)_88px_60px_100px_160px_96px_100px] gap-6 px-4";
+  "grid grid-cols-[minmax(0,1fr)_88px_100px_80px_72px_160px_96px_100px] gap-6 px-4";
 const goalListRowClass =
   "grid grid-cols-[minmax(160px,1.1fr)_72px_48px_minmax(160px,1.2fr)_minmax(180px,1.3fr)_72px_96px_96px_88px] gap-6";
 const goalStickyNameShadow =
@@ -221,7 +222,7 @@ const goalStickyActionClass =
 const valueListRowClass =
   "grid grid-cols-[minmax(140px,1.2fr)_72px_88px_88px_minmax(140px,1.2fr)_minmax(100px,1fr)_72px_72px_72px_96px_96px] gap-6";
 const taskListRowClass =
-  "grid grid-cols-[minmax(140px,1.2fr)_minmax(100px,1fr)_72px_160px_minmax(140px,1.2fr)_104px_72px_72px_96px_88px] gap-6";
+  "grid grid-cols-[minmax(140px,1.2fr)_minmax(100px,1fr)_minmax(140px,1.2fr)_72px_104px_72px_72px_160px_96px_88px] gap-6";
 
 function formatListQuarterRange(startQuarter: string | null | undefined, endQuarter: string | null | undefined) {
   if (startQuarter && endQuarter) {
@@ -829,6 +830,18 @@ function QuarterlyWorkForm({
             </select>
           </div>
         </FormRow>
+        <FormRow label="是否需要开发 *" align="center">
+          <select
+            name="needsDevelopment"
+            required
+            defaultValue={item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择是否需要开发</option>
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </FormRow>
         <FormRow label="任务描述">
           <textarea
             name="taskDescription"
@@ -886,6 +899,16 @@ function QuarterlyWorkForm({
             ))}
           </select>
         </FormRow>
+        {workStatus === "COMPLETED" ? (
+          <FormRow label="完成时间 *" align="center">
+            <DateInput
+              name="completedAt"
+              required
+              defaultValue={toDateInputValue(item?.completedAt)}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            />
+          </FormRow>
+        ) : null}
         <FormRow label={executionSummaryRequired ? "任务执行概况 *" : "任务执行概况"}>
           <textarea
             name="executionSummary"
@@ -996,20 +1019,48 @@ function ProjectEditForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
+  // 状态切换为已上线/已完成时，把新出现的必填时间字段滚动到可视区域，
+  // 避免字段出现在滚动区折叠线以下导致用户看不到
+  const launchedAtRowRef = useRef<HTMLDivElement>(null);
+  const completedAtRowRef = useRef<HTMLDivElement>(null);
+  const prevProjectStatusRef = useRef(projectStatus);
+  useEffect(() => {
+    if (prevProjectStatusRef.current === projectStatus) return;
+    prevProjectStatusRef.current = projectStatus;
+    const target = projectStatus === "LAUNCHED"
+      ? launchedAtRowRef.current
+      : projectStatus === "COMPLETED"
+        ? completedAtRowRef.current
+        : null;
+    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [projectStatus]);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
-  const taskWorkloadSum = useMemo(
-    () => data.columns.flatMap((column) => column.items).reduce((sum, work) => {
-      if (work.projectId === item.id && work.workloadPersonDay !== null && work.workloadPersonDay !== undefined) {
-        return sum + work.workloadPersonDay;
+  const hasTasks = item.workCount > 0;
+  const taskWorkloadSum = useMemo(() => {
+    if (!hasTasks) return null;
+    const taskIds = new Set<string>();
+    let sum = 0;
+    for (const task of data.taskWorkspaceItems) {
+      if (task.projectId !== item.id || taskIds.has(task.id)) continue;
+      taskIds.add(task.id);
+      if (task.workloadPersonDay != null) sum += task.workloadPersonDay;
+    }
+    for (const column of data.columns) {
+      for (const work of column.items) {
+        if (work.projectId !== item.id || taskIds.has(work.id)) continue;
+        taskIds.add(work.id);
+        if (work.workloadPersonDay != null) sum += work.workloadPersonDay;
       }
-      return sum;
-    }, 0),
-    [data.columns, item.id],
-  );
+    }
+    return Math.round(sum * 10) / 10;
+  }, [data.columns, data.taskWorkspaceItems, hasTasks, item.id]);
   const [workloadPersonDay, setWorkloadPersonDay] = useState<string>(() => {
+    if (hasTasks) {
+      const computed = taskWorkloadSum ?? item.workloadPersonDay;
+      return computed != null ? String(computed) : "";
+    }
     if (item.workloadPersonDay !== null && item.workloadPersonDay !== undefined) return String(item.workloadPersonDay);
-    const rounded = Math.round(taskWorkloadSum * 10) / 10;
-    return rounded > 0 ? String(rounded) : "";
+    return "";
   });
 
   const quarterOptions = useMemo(() => {
@@ -1109,18 +1160,26 @@ function ProjectEditForm({
           />
         </FormRow>
         <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          <input
-            name="workloadPersonDay"
-            type="number"
-            step="0.1"
-            min="0"
-            required={workloadRequired}
-            value={workloadPersonDay}
-            onChange={(event) => setWorkloadPersonDay(event.target.value)}
-            placeholder="请输入工作量"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          />
-          <div className="mt-1 text-xs text-muted-foreground">任务工作量合计：{taskWorkloadSum > 0 ? taskWorkloadSum : "—"}</div>
+          {hasTasks ? (
+            <>
+              <div className="min-h-[40px] w-full rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                {workloadPersonDay || "—"}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">由下属任务工作量自动汇总，不可手动修改</div>
+            </>
+          ) : (
+            <input
+              name="workloadPersonDay"
+              type="number"
+              step="0.1"
+              min="0"
+              required={workloadRequired}
+              value={workloadPersonDay}
+              onChange={(event) => setWorkloadPersonDay(event.target.value)}
+              placeholder="请输入工作量"
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            />
+          )}
         </FormRow>
         <FormRow label="其他成本">
           <textarea
@@ -1144,6 +1203,30 @@ function ProjectEditForm({
             ))}
           </select>
         </FormRow>
+        {projectStatus === "COMPLETED" ? (
+          <div ref={completedAtRowRef}>
+            <FormRow label="完成时间 *" align="center">
+              <DateInput
+                name="completedAt"
+                required
+                defaultValue={toDateInputValue(item.completedAt)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
+        ) : null}
+        {projectStatus === "LAUNCHED" ? (
+          <div ref={launchedAtRowRef}>
+            <FormRow label="上线时间 *" align="center">
+              <DateInput
+                name="launchedAt"
+                required
+                defaultValue={toDateInputValue(item.launchedAt)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
+        ) : null}
       </StickyFormScroll>
       <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
@@ -1185,6 +1268,20 @@ function ProjectCreateForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [createProjectStatus, setCreateProjectStatus] = useState<ProjectStatus>(defaultStatus ?? "NOT_STARTED");
+  // 状态切换为已上线/已完成时，把新出现的必填时间字段滚动到可视区域
+  const launchedAtRowRef = useRef<HTMLDivElement>(null);
+  const completedAtRowRef = useRef<HTMLDivElement>(null);
+  const prevCreateProjectStatusRef = useRef(createProjectStatus);
+  useEffect(() => {
+    if (prevCreateProjectStatusRef.current === createProjectStatus) return;
+    prevCreateProjectStatusRef.current = createProjectStatus;
+    const target = createProjectStatus === "LAUNCHED"
+      ? launchedAtRowRef.current
+      : createProjectStatus === "COMPLETED"
+        ? completedAtRowRef.current
+        : null;
+    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [createProjectStatus]);
   const createWorkloadRequired = createProjectStatus === "LAUNCHED" || createProjectStatus === "COMPLETED";
 
   const quarterOptions = useMemo(() => {
@@ -1219,7 +1316,9 @@ function ProjectCreateForm({
   };
 
   return (
-    <form onSubmit={async (event) => {
+    <form
+      className={stickyDialogFormClassName}
+      onSubmit={async (event) => {
       event.preventDefault();
       const formData = new FormData(event.currentTarget);
       try {
@@ -1233,7 +1332,7 @@ function ProjectCreateForm({
       }
     }}>
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
-      <div className="space-y-4">
+      <StickyFormScroll>
         <FormRow label="项目名称 *" align="center">
           <input
             name="title"
@@ -1322,19 +1421,45 @@ function ProjectCreateForm({
             ))}
           </select>
         </FormRow>
+        {createProjectStatus === "COMPLETED" ? (
+          <div ref={completedAtRowRef}>
+            <FormRow label="完成时间 *" align="center">
+              <DateInput
+                name="completedAt"
+                required
+                defaultValue={toDateInputValue(null)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
+        ) : null}
+        {createProjectStatus === "LAUNCHED" ? (
+          <div ref={launchedAtRowRef}>
+            <FormRow label="上线时间 *" align="center">
+              <DateInput
+                name="launchedAt"
+                required
+                defaultValue={toDateInputValue(null)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              />
+            </FormRow>
+          </div>
+        ) : null}
+      </StickyFormScroll>
+      <StickyFormFooter>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Plus className="h-4 w-4" />
-          创建
-        </Button>
-      </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">
+            <Plus className="h-4 w-4" />
+            创建
+          </Button>
+        </div>
+      </StickyFormFooter>
     </form>
   );
 }
@@ -1362,6 +1487,14 @@ function formatDateTimeLabel(value: Date | string | null | undefined) {
     month: "2-digit",
     day: "2-digit",
   }).format(date);
+}
+
+function toDateInputValue(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function formatQuarterRange(startQuarter: string | null | undefined, endQuarter: string | null | undefined) {
@@ -1569,12 +1702,14 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
   const selectedProject = selectedProjectId ? launchedProjectMap.get(selectedProjectId) ?? null : null;
 
   return (
-    <form action={async (fd: FormData) => {
+    <form
+      className={stickyDialogFormClassName}
+      action={async (fd: FormData) => {
       await runServerAction(() => createValueTrack(fd));
       router.refresh();
       onClose();
     }}>
-      <div className="space-y-4">
+      <StickyFormScroll>
         <FormRow label="项目 *" align="center">
           <ProjectPicker
             name="projectId"
@@ -1629,14 +1764,16 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Plus className="h-4 w-4" />
-          创建
-        </Button>
-      </div>
+      </StickyFormScroll>
+      <StickyFormFooter>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="submit" className="rounded-lg">
+            <Plus className="h-4 w-4" />
+            创建
+          </Button>
+        </div>
+      </StickyFormFooter>
     </form>
   );
 }
@@ -2032,12 +2169,15 @@ function CountdownTag({ label, overdue }: { label: string | null; overdue: boole
   );
 }
 
-function getTaskStatusFilterKey(task: ProjectWorkspaceTaskItem): Exclude<TaskStatusFilter, "all"> {
-  if (task.status === "CLOSED") return "CLOSED";
-  if (task.status === "COMPLETED") return "COMPLETED";
-  if (task.status === "DELAYED_COMPLETED" || task.isOverdue) return "DELAYED";
-  if (task.status === "IN_PROGRESS") return "IN_PROGRESS";
-  return "NOT_STARTED";
+function taskMatchesStatusFilter(task: ProjectWorkspaceTaskItem, filter: TaskStatusFilter): boolean {
+  if (filter === "all") return true;
+  // 延期：未完成且已超过计划结束时间（含未启动、进行中）
+  if (filter === "DELAYED") return task.isOverdue;
+  if (filter === "COMPLETED") return task.status === "COMPLETED";
+  if (filter === "CLOSED") return task.status === "CLOSED";
+  if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS" && !task.isOverdue;
+  if (filter === "NOT_STARTED") return task.status === "NOT_STARTED" && !task.isOverdue;
+  return false;
 }
 
 function getRemainingWeeks(task: ProjectWorkspaceTaskItem) {
@@ -2080,11 +2220,6 @@ function getTaskCardSortRank(task: ProjectWorkspaceTaskItem) {
 
 function sortTaskCards(tasks: ProjectWorkspaceTaskItem[]) {
   return [...tasks].sort((a, b) => getTaskCardSortRank(a) - getTaskCardSortRank(b));
-}
-
-function formatRemainWeeksLabel(weeks: number) {
-  const rounded = Math.max(1, Math.round(Math.abs(weeks)));
-  return weeks < 0 ? `超期${rounded}周` : `剩${rounded}周`;
 }
 
 function projectTaskCardSurface(tone: TaskCardTone, unstartedClass: string) {
@@ -2151,11 +2286,10 @@ function ProjectTaskCard({
 }) {
   const completed = task.status === "COMPLETED";
   const tone = getTaskCardTone(task);
-  const remainingWeeks = getRemainingWeeks(task);
   const description = task.taskDescription || task.description || task.expectedOutcome;
   const periodClass = tone === "red" ? "text-[#F53F3F]" : tone === "orange" ? "text-[#FF7D00]" : "text-[#181818]";
-  const remainTagClass = tone === "red" ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]";
-  const showRemainTag = remainingWeeks != null && (tone === "orange" || (tone === "red" && remainingWeeks < 0));
+  const remain = task.remainingWeeksLabel;
+  const remainOverdue = Boolean(remain?.startsWith("逾期"));
 
   return (
     <div className={`flex h-fit w-full flex-col gap-2 rounded-xl p-4 ${projectTaskCardSurface(tone, unstartedClass)}`}>
@@ -2206,9 +2340,9 @@ function ProjectTaskCard({
             className="h-4 w-4"
           />
           <span className={`text-sm font-light leading-[22px] ${periodClass}`}>{task.periodLabel}</span>
-          {showRemainTag ? (
-            <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-light leading-[18px] ${remainTagClass}`}>
-              {formatRemainWeeksLabel(remainingWeeks)}
+          {remain ? (
+            <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-light leading-[18px] ${remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}>
+              {remain}
             </span>
           ) : null}
         </div>
@@ -2742,6 +2876,13 @@ function ProjectCard({
                 <img src="/icons/project-period.png" alt="" width={16} height={16} className="h-4 w-4" />
                 <span>{formatCompactQuarterRange(project.startQuarter, project.endQuarter)}</span>
               </div>
+              {project.remainingWeeksLabel ? (
+                <span
+                  className={`inline-flex h-5 items-center rounded-full px-2 text-xs leading-[18px] ${project.remainingWeeksLabel.startsWith("逾期") ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}
+                >
+                  {project.remainingWeeksLabel}
+                </span>
+              ) : null}
               <span
                 className={`inline-flex h-5 items-center rounded-[2px] px-2 text-xs leading-[18px] ${projectStatusTagClass[project.status]}`}
               >
@@ -2905,6 +3046,7 @@ function ProjectTreeChildRow({
   statusLabel,
   statusClassName,
   owner,
+  workload,
   period,
   remainLabel,
   remainClassName,
@@ -2923,6 +3065,7 @@ function ProjectTreeChildRow({
   statusLabel: string;
   statusClassName: string;
   owner: string;
+  workload?: number | null;
   period: string;
   remainLabel?: string | null;
   remainClassName?: string;
@@ -2944,10 +3087,11 @@ function ProjectTreeChildRow({
         ) : null}
       </div>
       {meta ? <div className="min-w-0">{meta}</div> : null}
+      <div className="text-sm leading-[22px] text-[#4B4B4B]">{owner}</div>
+      <div className="text-sm leading-[22px] text-[#4B4B4B]">{workload ?? "-"}</div>
       <div>
         <ListStatusTag label={statusLabel} className={statusClassName} />
       </div>
-      <div className="text-sm leading-[22px] text-[#4B4B4B]">{owner}</div>
       <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
         <span>{period}</span>
         {remainLabel && remainClassName ? (
@@ -3045,9 +3189,8 @@ function ProjectExpandedPanel({
         project.tasks.length ? (
           <div>
             {project.tasks.map((task) => {
-              const remainingWeeks = getRemainingWeeks(task);
-              const tone = getTaskCardTone(task);
-              const showRemainTag = remainingWeeks != null && (tone === "orange" || (tone === "red" && remainingWeeks < 0));
+              const remain = task.remainingWeeksLabel;
+              const remainOverdue = Boolean(remain?.startsWith("逾期"));
               return (
                 <ProjectTreeChildRow
                   key={task.id}
@@ -3056,9 +3199,10 @@ function ProjectExpandedPanel({
                   statusLabel={columnTitleByStatus[task.status]}
                   statusClassName={taskListStatusTagClass(task)}
                   owner={task.owner}
+                  workload={task.workloadPersonDay}
                   period={task.periodLabel}
-                  remainLabel={showRemainTag ? formatRemainWeeksLabel(remainingWeeks) : null}
-                  remainClassName={tone === "red" ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}
+                  remainLabel={remain}
+                  remainClassName={remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}
                   completedAt={task.completedAt}
                   canEdit={canManageProductTask}
                   onEdit={() => onEditTask(task)}
@@ -3233,8 +3377,9 @@ function ProjectTreeTable({
       <div className={`${projectTreeRowClass} sticky top-0 z-10 h-11 items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
         <div>名称</div>
         <div className="whitespace-nowrap">所属目标</div>
-        <div>状态</div>
         <div>负责人</div>
+        <div className="whitespace-nowrap">工作量(人天)</div>
+        <div>状态</div>
         <div>周期</div>
         <div>完成时间</div>
         <div className="text-right">操作</div>
@@ -3296,15 +3441,23 @@ function ProjectTreeTable({
                     <span className="max-w-full truncate rounded bg-[#FFECE8] px-2 py-[3px] text-xs leading-[18px] text-[#F53F3F]">未关联目标</span>
                   )}
                 </div>
+                <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.owner}</div>
+                <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.workloadPersonDay ?? "-"}</div>
                 <div>
                   <ListStatusTag
                     label={delayed ? "延期" : projectTitleByStatus[project.status]}
                     className={delayed ? "bg-[#FFF7E8] text-[#FF7D00]" : projectStatusTagClass[project.status]}
                   />
                 </div>
-                <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.owner}</div>
-                <div className="text-sm leading-[22px] text-[#4B4B4B]">
-                  {formatListQuarterRange(project.startQuarter, project.endQuarter)}
+                <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
+                  <span>{formatListQuarterRange(project.startQuarter, project.endQuarter)}</span>
+                  {project.remainingWeeksLabel ? (
+                    <span
+                      className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${project.remainingWeeksLabel.startsWith("逾期") ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}
+                    >
+                      {project.remainingWeeksLabel}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.completedAt)}</div>
                 <div className="flex items-center justify-end">
@@ -3908,19 +4061,19 @@ function TaskListTable({
       <div className={`${taskListRowClass} sticky top-0 z-20 h-11 min-w-[1304px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
         <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>名称</div>
         <div>所属项目</div>
-        <div>负责人</div>
-        <div>周期</div>
         <div>任务目标</div>
+        <div>负责人</div>
         <div className="whitespace-nowrap text-right">工作量(人天)</div>
         <div>任务状态</div>
         <div>任务结果</div>
+        <div>周期</div>
         <div>完成时间</div>
         <div className={`sticky right-0 top-0 z-30 flex h-11 items-center justify-end overflow-visible border-b border-[#F0F0F0] bg-white pr-4 text-right ${pingRight ? goalStickyActionShadow : ""}`}>操作</div>
       </div>
       <div className="min-w-[1304px]">
         {tasks.map((task) => {
           const remain = task.remainingWeeksLabel;
-          const remainOverdue = Boolean(remain?.startsWith("超期"));
+          const remainOverdue = Boolean(remain?.startsWith("逾期"));
           return (
             <div key={task.id} className={`${taskListRowClass} items-start border-b border-[#F2F3F5] bg-white py-3`}>
               <div className={`break-words text-sm font-medium leading-[22px] text-[#181818] ${goalStickyNameClass} ${pingLeft ? goalStickyNameShadow : ""}`}>{task.title}</div>
@@ -3931,7 +4084,13 @@ function TaskListTable({
                   <span className="text-sm leading-[22px] text-[#4B4B4B]">-</span>
                 )}
               </div>
+              <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.expectedOutcome || task.description)}</div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{task.owner}</div>
+              <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
+              <div>
+                <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
+              </div>
+              <div className="text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</div>
               <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
                 <span>{task.periodLabel || formatMonthRange(task.startMonth, task.endMonth)}</span>
                 {remain ? (
@@ -3940,12 +4099,6 @@ function TaskListTable({
                   </span>
                 ) : null}
               </div>
-              <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.expectedOutcome || task.description)}</div>
-              <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
-              <div>
-                <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
-              </div>
-              <div className="text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.completedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`}>
                 {canManage ? (
@@ -4097,7 +4250,7 @@ function QuarterlyWorkShell({
 }) {
   const activeGoalId = data.workspaceFilters.goalId ?? "all";
   const [expandedGoalId, setExpandedGoalId] = useState(activeGoalId);
-  const [entityTab, setEntityTab] = useState<WorkspaceEntityTab>("goal");
+  const [entityTab, setEntityTab] = useState<WorkspaceEntityTab>(data.workspaceFilters.panel ?? "project");
   const [goalStatusFilter, setGoalStatusFilter] = useState<GoalStatusFilter>("all");
   const activeView = data.workspaceFilters.view === "list" ? "list" : "card";
   const [viewMode, setViewMode] = useState<"card" | "list">(activeView);
@@ -4109,28 +4262,71 @@ function QuarterlyWorkShell({
   const isValueHome = entityTab === "value";
   const bleedCardList = (isGoalHome || isTaskHome) && activeView === "card";
   const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusFilter>("all");
+  const [needsDevOnly, setNeedsDevOnly] = useState(false);
   const [valueStatusFilter, setValueStatusFilter] = useState<ValueStatusFilter>("all");
   const [valueJudgementFilter, setValueJudgementFilter] = useState("");
   const projectStatusCounts = data.workspaceSummary.projectStatusCounts;
   const activeProjectId = data.workspaceFilters.projectId ?? "";
+  const selectedDepartmentId = data.workspaceFilters.orgNodeId ?? null;
+  const secondLevelTeamOptions = useMemo(
+    () => data.teamOptions.filter((team) => !selectedDepartmentId || team.departmentOrgNodeId === selectedDepartmentId),
+    [data.teamOptions, selectedDepartmentId],
+  );
+  const secondLevelTeamValue = data.workspaceFilters.teamId && data.workspaceFilters.teamId !== "all"
+    ? data.workspaceFilters.teamId
+    : "";
+  // 部门/业务组/负责人联动：负责人选项随部门与业务组收缩
+  const scopedMemberOptions = useMemo(
+    () => data.memberOptions.filter((member) =>
+      (!selectedDepartmentId || member.departmentOrgNodeId === selectedDepartmentId)
+      && (!secondLevelTeamValue || member.teamOrgNodeId === secondLevelTeamValue),
+    ),
+    [data.memberOptions, selectedDepartmentId, secondLevelTeamValue],
+  );
+  // 失效的筛选值（如不存在的 ID、跨部门的业务组/负责人）自动回收，避免叠加后查无数据
+  const lastFilterResetRef = useRef("");
+  useEffect(() => {
+    let reset: Record<string, string | null> | null = null;
+    if (selectedDepartmentId && !data.departments.some((department) => department.id === selectedDepartmentId)) {
+      reset = { orgNodeId: null, teamId: "all", ownerId: "all" };
+    } else if (secondLevelTeamValue && !secondLevelTeamOptions.some((team) => team.id === secondLevelTeamValue)) {
+      reset = { teamId: "all", ownerId: "all" };
+    } else if (data.workspaceFilters.ownerId && !scopedMemberOptions.some((member) => member.id === data.workspaceFilters.ownerId)) {
+      reset = { ownerId: "all" };
+    }
+    if (!reset) {
+      lastFilterResetRef.current = "";
+      return;
+    }
+    const resetKey = JSON.stringify(reset);
+    if (lastFilterResetRef.current === resetKey) return;
+    lastFilterResetRef.current = resetKey;
+    onUpdateFilters(reset);
+  }, [selectedDepartmentId, secondLevelTeamValue, secondLevelTeamOptions, scopedMemberOptions, data.departments, data.workspaceFilters.ownerId, onUpdateFilters]);
   const taskItems = data.taskWorkspaceItems;
+  const scopedTaskItems = useMemo(
+    () => (needsDevOnly ? taskItems.filter((task) => task.needsDevelopment === true) : taskItems),
+    [taskItems, needsDevOnly],
+  );
   const taskCounts = useMemo(() => {
     const counts: Record<TaskStatusFilter, number> = {
-      all: taskItems.length,
+      all: scopedTaskItems.length,
       IN_PROGRESS: 0,
       DELAYED: 0,
       NOT_STARTED: 0,
       COMPLETED: 0,
       CLOSED: 0,
     };
-    for (const task of taskItems) {
-      counts[getTaskStatusFilterKey(task)] += 1;
+    for (const task of scopedTaskItems) {
+      for (const { key } of taskStatusFilters) {
+        if (key !== "all" && taskMatchesStatusFilter(task, key)) counts[key] += 1;
+      }
     }
     return counts;
-  }, [taskItems]);
+  }, [scopedTaskItems]);
   const visibleTasks = useMemo(
-    () => taskItems.filter((task) => taskStatusFilter === "all" || getTaskStatusFilterKey(task) === taskStatusFilter),
-    [taskItems, taskStatusFilter],
+    () => scopedTaskItems.filter((task) => taskMatchesStatusFilter(task, taskStatusFilter)),
+    [scopedTaskItems, taskStatusFilter],
   );
   const projectFilterOptions = useMemo(() => {
     const titles = new Map<string, string>();
@@ -4197,15 +4393,19 @@ function QuarterlyWorkShell({
   const visibleGoals = useMemo(() => {
     const query = data.workspaceFilters.query?.trim().toLowerCase() ?? "";
     const ownerId = data.workspaceFilters.ownerId;
+    const teamId = data.workspaceFilters.teamId && data.workspaceFilters.teamId !== "all" ? data.workspaceFilters.teamId : null;
+    const orgNodeId = data.workspaceFilters.orgNodeId ?? null;
     return goalItems.filter((goal) => {
       if (goalStatusFilter !== "all" && goal.status !== goalStatusFilter) return false;
+      if (orgNodeId && goal.departmentOrgNodeId !== orgNodeId && goal.teamOrgNodeId !== orgNodeId) return false;
+      if (teamId && goal.teamOrgNodeId !== teamId) return false;
       if (ownerId && goal.ownerId !== ownerId) return false;
       if (!query) return true;
       return goal.title.toLowerCase().includes(query)
         || (goal.expectedOutcome ?? "").toLowerCase().includes(query)
         || (goal.description ?? "").toLowerCase().includes(query);
     });
-  }, [data.workspaceFilters.ownerId, data.workspaceFilters.query, goalItems, goalStatusFilter]);
+  }, [data.workspaceFilters.ownerId, data.workspaceFilters.query, data.workspaceFilters.teamId, data.workspaceFilters.orgNodeId, goalItems, goalStatusFilter]);
 
   useEffect(() => {
     setExpandedGoalId(activeGoalId);
@@ -4252,15 +4452,28 @@ function QuarterlyWorkShell({
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-4 text-sm">
+          {data.isSystemAdmin ? (
+            <WorkspaceFilterSelect
+              width={228}
+              searchable
+              searchPlaceholder="搜索部门"
+              value={data.workspaceFilters.orgNodeId ?? ""}
+              onChange={(value) => onUpdateFilters({ orgNodeId: value || null, teamId: "all" })}
+              options={[
+                { value: "", label: "全部部门" },
+                ...data.departments.map((department) => ({ value: department.id, label: department.name })),
+              ]}
+            />
+          ) : null}
           <WorkspaceFilterSelect
             width={228}
             searchable
             searchPlaceholder="搜索业务组"
-            value={data.workspaceFilters.orgNodeId ?? ""}
-            onChange={(value) => onUpdateFilters({ orgNodeId: value || null, teamId: null })}
+            value={secondLevelTeamValue}
+            onChange={(value) => onUpdateFilters({ teamId: value || "all" })}
             options={[
               { value: "", label: "全部业务组" },
-              ...data.departments.map((department) => ({ value: department.id, label: department.name })),
+              ...secondLevelTeamOptions.map((team) => ({ value: team.id, label: team.name })),
             ]}
           />
           <WorkspaceFilterSelect
@@ -4284,10 +4497,10 @@ function QuarterlyWorkShell({
             searchable
             searchPlaceholder="搜索负责人"
             value={data.workspaceFilters.ownerId ?? ""}
-            onChange={(value) => onUpdateFilters({ ownerId: value || null })}
+            onChange={(value) => onUpdateFilters({ ownerId: value || "all" })}
             options={[
               { value: "", label: "负责人" },
-              ...data.memberOptions.map((member) => ({
+              ...scopedMemberOptions.map((member) => ({
                 value: member.id,
                 label: member.name,
               })),
@@ -4304,6 +4517,7 @@ function QuarterlyWorkShell({
               setEntityTab(nextTab);
               if (nextTab === "task") {
                 setTaskStatusFilter("all");
+                setNeedsDevOnly(false);
                 if (activeStatus !== "all") onUpdateFilters({ status: null });
               }
               if (nextTab === "value") {
@@ -4388,7 +4602,7 @@ function QuarterlyWorkShell({
                 />
               </div>
             ) : isTaskHome ? (
-              <div className="mt-2">
+              <div className="mt-2 flex items-center gap-2">
                 <WorkspaceFilterSelect
                   width={96}
                   plain
@@ -4398,6 +4612,23 @@ function QuarterlyWorkShell({
                   onChange={(value) => onUpdateFilters({ projectId: value || null })}
                   options={projectFilterOptions}
                 />
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={needsDevOnly}
+                  onClick={() => setNeedsDevOnly((current) => !current)}
+                  className="group inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-[#4B4B4B]"
+                >
+                  {needsDevOnly ? (
+                    <img src="/icons/radio-checked.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
+                  ) : (
+                    <>
+                      <img src="/icons/radio-default.png" alt="" width={14} height={14} className="h-3.5 w-3.5 group-hover:hidden" />
+                      <img src="/icons/radio-hover.png" alt="" width={14} height={14} className="hidden h-3.5 w-3.5 group-hover:block" />
+                    </>
+                  )}
+                  仅看需开发
+                </button>
               </div>
             ) : isValueHome ? (
               <div className="mt-2 flex gap-2">
@@ -4742,6 +4973,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<BoardTab>("board");
   const [viewMode, setViewMode] = useState<ViewMode>("card");
+  const [needsDevOnly, setNeedsDevOnly] = useState(false);
   const [departmentTab, setDepartmentTab] = useState<DepartmentTab>(data.defaultDepartmentOrgNodeId ?? data.departments[0]?.id ?? "");
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
@@ -4755,6 +4987,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [valueOverviewDialog, setValueOverviewDialog] = useState<ValueOverviewDialogState>(null);
   const [tabSearchInput, setTabSearchInput] = useState("");
   const [tabSearchQuery, setTabSearchQuery] = useState("");
+  const deepLinkHandledRef = useRef(false);
   const valueTrackLogSectionRef = useRef<HTMLDivElement | null>(null);
   const [productGoalDialog, setProductGoalDialog] = useState<ProductGoalDialogState>(null);
   const [productGoalDeleteDialog, setProductGoalDeleteDialog] = useState<ProductGoalDeleteState>(null);
@@ -4873,9 +5106,11 @@ export function QuarterlyWorkContent({ data }: Props) {
   const filteredTaskColumns = useMemo(
     () => visibleColumns.map((column) => ({
       ...column,
-      items: column.items.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
+      items: column.items.filter((item) =>
+        matchesFuzzySearch(item.title, tabSearchQuery) && (!needsDevOnly || item.needsDevelopment === true)
+      ),
     })),
-    [visibleColumns, tabSearchQuery],
+    [visibleColumns, tabSearchQuery, needsDevOnly],
   );
   const filteredValueOverviewItems = useMemo(
     () => visibleValueOverviewItems.filter((item) => matchesFuzzySearch(item.title, tabSearchQuery)),
@@ -4912,6 +5147,42 @@ export function QuarterlyWorkContent({ data }: Props) {
       valueTrackLogSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+
+    const { workId, projectId, panel } = data.workspaceFilters;
+    if (!workId && !(projectId && panel)) return;
+    deepLinkHandledRef.current = true;
+
+    if (workId) {
+      const item = data.taskWorkspaceItems.find((task) => task.id === workId)
+        ?? data.columns.flatMap((column) => column.items).find((task) => task.id === workId);
+      if (item) {
+        setEditDialog({ item, title: columnTitleByStatus[item.status] });
+      }
+      return;
+    }
+
+    if (projectId && panel === "project") {
+      const workspaceItem = data.projectWorkspaceItems.find((project) => project.id === projectId);
+      if (workspaceItem) {
+        setProjectDialog({ item: workspaceItem, title: projectTitleByStatus[workspaceItem.status] });
+        return;
+      }
+      const boardItem = data.projectColumns.flatMap((column) => column.items).find((project) => project.id === projectId);
+      if (boardItem) {
+        setProjectDialog({ item: boardItem, title: projectTitleByStatus[boardItem.status] });
+      }
+      return;
+    }
+
+    if (projectId && panel === "value") {
+      const overview = data.valueOverviewItems.find((item) => item.id === projectId);
+      if (overview) {
+        setValueOverviewDialog(overview);
+      }
+    }
+  }, [data]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setTabSearchInput("");
@@ -5081,6 +5352,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         </div>
 
         <div className="px-5 pb-5 pt-0">
+          <div key={`${tab}-${viewMode}`}>
           {tab === "goal" ? (
             <>
             <BoardSearchBar
@@ -5190,8 +5462,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                 </div>
                 <div className="divide-y divide-border">
                   {filteredProductGoalColumns.flatMap((column) => column.items).length ? (
-                    filteredProductGoalColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_90px_1.3fr_1.3fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                    filteredProductGoalColumns.flatMap((column) => column.items.map((item) => (
+                      <div key={`${column.key}-${item.id}`} className="px-5 py-4 grid grid-cols-[1.2fr_0.9fr_90px_1.3fr_1.3fr_0.9fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
                         <div className="text-muted-foreground">{item.year}</div>
@@ -5233,7 +5505,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )))
                   ) : (
                     <div className="px-5 py-12 text-center text-sm text-muted-foreground">
                       {tabSearchQuery ? "暂无匹配的产品目标数据" : "暂无产品目标数据"}
@@ -5358,8 +5630,8 @@ export function QuarterlyWorkContent({ data }: Props) {
                 </div>
                 <div className="divide-y divide-border">
                   {filteredProjectColumns.flatMap((column) => column.items).length ? (
-                    filteredProjectColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className={`px-4 py-4 grid ${projectListGridClass} gap-x-2 gap-y-3 items-start text-sm hover:bg-muted/20 transition`}>
+                    filteredProjectColumns.flatMap((column) => column.items.map((item) => (
+                      <div key={`${column.key}-${item.id}`} className={`px-4 py-4 grid ${projectListGridClass} gap-x-2 gap-y-3 items-start text-sm hover:bg-muted/20 transition`}>
                         <div className="min-w-0 font-medium text-foreground break-words">{item.title}</div>
                         <div className="min-w-0 text-muted-foreground break-words">{item.productGoalTitle || "—"}</div>
                         <div className="min-w-0 text-muted-foreground break-words">{item.owner}</div>
@@ -5402,7 +5674,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )))
                   ) : (
                     <div className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {tabSearchQuery ? "暂无匹配的项目数据" : "暂无项目数据"}
@@ -5419,6 +5691,17 @@ export function QuarterlyWorkContent({ data }: Props) {
               placeholder="搜索任务名称"
               {...tabSearchBarProps}
             />
+            <div className="-mt-1 mb-3 flex items-center px-1">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={needsDevOnly}
+                  onChange={(event) => setNeedsDevOnly(event.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                仅看需开发
+              </label>
+            </div>
             {viewMode === "card" ? (
             <>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -5445,7 +5728,10 @@ export function QuarterlyWorkContent({ data }: Props) {
                           <div key={it.id} className="rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-primary/40 hover:shadow-md">
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <div className="text-sm font-medium leading-snug">{it.title}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium leading-snug">{it.title}</div>
+                                  {it.needsDevelopment ? <Badge tone="info">需开发</Badge> : null}
+                                </div>
                                 <div className="mt-1 text-xs text-muted-foreground">关联项目：{it.projectTitle}</div>
                               </div>
                               <div className="flex items-center gap-1">
@@ -5482,7 +5768,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                               <span>{it.owner}</span>
                               {it.taskResult ? <span className="text-foreground">{it.taskResult}</span> : null}
-                              <span className={it.remainingWeeksLabel?.startsWith("超期") ? "text-destructive" : "text-muted-foreground"}>{it.remainingWeeksLabel ?? "—"}</span>
+                              <span className={it.remainingWeeksLabel?.startsWith("逾期") ? "text-destructive" : "text-muted-foreground"}>{it.remainingWeeksLabel ?? "—"}</span>
                             </div>
                             {it.progress !== undefined && (
                               <div className="mt-2">
@@ -5506,35 +5792,37 @@ export function QuarterlyWorkContent({ data }: Props) {
             </>
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
+                <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
                   <div>任务名称</div>
                   <div>所属项目</div>
                   <div>负责人</div>
                   <div>任务周期</div>
-                  <div>剩余/超期</div>
+                  <div>剩余/逾期</div>
                   <div>任务目标</div>
                   <div>工作量(人天)</div>
                   <div>任务状态</div>
                   <div>任务结果</div>
+                  <div>是否需开发</div>
                   <div>创建时间</div>
                   <div>完成时间</div>
                   <div className="text-right">操作</div>
                 </div>
                 <div className="divide-y divide-border">
                   {filteredTaskColumns.flatMap((column) => column.items).length ? (
-                    filteredTaskColumns.flatMap((column) => column.items).map((item) => (
-                      <div key={item.id} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
+                    filteredTaskColumns.flatMap((column) => column.items.map((item) => (
+                      <div key={`${column.key}-${item.id}`} className="px-5 py-4 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 items-start text-sm hover:bg-muted/20 transition">
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
                         <div className="text-muted-foreground">{formatMonthRange(item.startMonth, item.endMonth)}</div>
-                        <div className={item.remainingWeeksLabel?.startsWith("超期") ? "text-destructive" : "text-muted-foreground"}>
+                        <div className={item.remainingWeeksLabel?.startsWith("逾期") ? "text-destructive" : "text-muted-foreground"}>
                           {item.remainingWeeksLabel ?? "—"}
                         </div>
                         <div className="text-muted-foreground whitespace-pre-wrap break-words">{item.description || "—"}</div>
                         <div className="text-muted-foreground">{item.workloadPersonDay ?? "—"}</div>
                         <div className="text-muted-foreground">{columnTitleByStatus[item.status]}</div>
                         <div className="text-muted-foreground">{item.taskResult || "—"}</div>
+                        <div className="text-muted-foreground">{item.needsDevelopment === null ? "—" : item.needsDevelopment ? "是" : "否"}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.createdAt)}</div>
                         <div className="text-muted-foreground">{formatDateTimeLabel(item.completedAt)}</div>
                         <div className="text-right">
@@ -5570,7 +5858,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )))
                   ) : (
                     <div className="px-5 py-12 text-center text-sm text-muted-foreground">
                       {tabSearchQuery ? "暂无匹配的任务数据" : "暂无任务数据"}
@@ -5843,6 +6131,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             </div>
             </>
           )}
+          </div>
         </div>
       </Card>
       ) : (
@@ -5986,7 +6275,7 @@ export function QuarterlyWorkContent({ data }: Props) {
       <Dialog open={createValueTrackDialog} onClose={() => {
         setCreateValueTrackDialog(false);
         setCreateValueTrackProjectId(null);
-      }} title="新增价值跟踪">
+      }} title="新增价值跟踪" stickyLayout>
         {createValueTrackDialog ? (
           <ValueTrackCreateForm
             data={data}
@@ -6047,7 +6336,7 @@ export function QuarterlyWorkContent({ data }: Props) {
       <Dialog open={!!createProjectDialog} onClose={() => {
         setCreateProjectDialog(null);
         setCreateProjectProductGoalIds([]);
-      }} title="新增项目">
+      }} title="新增项目" stickyLayout>
         {createProjectDialog && (
           <ProjectCreateForm
             data={data}

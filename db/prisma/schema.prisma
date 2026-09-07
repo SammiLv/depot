@@ -47,22 +47,31 @@ enum OrgPermissionAbilityKey {
   VIEW_TALENT_REVIEW
   MANAGE_TALENT_REVIEW
   CALIBRATE_TALENT_REVIEW
+  // 历史遗留值（talent 侧已停用），保留仅为兼容历史授权数据可读
   VIEW_CAREER_MODEL
   MANAGE_CAREER_MODEL
   VIEW_BUSINESS_ASSESSMENT
-  MANAGE_BUSINESS_ASSESSMENT
   VIEW_WORK_INCIDENT
+  // 业务考核/工作事故的管理能力点归 KPI 模块使用
+  MANAGE_BUSINESS_ASSESSMENT
   MANAGE_WORK_INCIDENT
   VIEW_RECOMMENDATION
   MANAGE_RECOMMENDATION
   VIEW_TALENT_HISTORY
   MANAGE_TALENT_HISTORY
   VIEW_TALENT_SENSITIVE
+  VIEW_TALENT_CONFIG
   MANAGE_TALENT_CONFIG
   MANAGE_NOTIFICATION_SCENARIO
   MANAGE_PRODUCT_GOAL
   MANAGE_PROJECT_AND_VALUE_TRACKING
   MANAGE_PRODUCT_TASK
+  // 指标管理（年度目标）能力点，归属 ANNUAL_GOAL 模块
+  VIEW_ANNUAL_GOAL_DEPARTMENT_PLANS
+  EDIT_ANNUAL_GOAL_DEPARTMENT_PLANS
+  VIEW_ANNUAL_GOAL_TEAM_PLANS
+  EDIT_ANNUAL_GOAL_TEAM_PLANS
+  UPDATE_ANNUAL_GOAL_PROGRESS
 }
 
 enum NotificationTriggerType {
@@ -513,6 +522,8 @@ model RoleMenuPermission {
   @@index([menuPermissionId])
 }
 
+// 已废弃（2026-08-24 指标管理权限收归 OrgPermissionGrant 模型，moduleKey=ANNUAL_GOAL）：
+// 运行时与权限矩阵均不再读写，仅保留历史数据可读，待「角色可配置」里程碑评估删表。
 model AnnualGoalPermission {
   id                    String                     @id @default(cuid())
   code                  String                     @unique
@@ -524,6 +535,7 @@ model AnnualGoalPermission {
   roleAnnualPermissions RoleAnnualGoalPermission[]
 }
 
+// 已废弃：同 AnnualGoalPermission，仅保留历史数据可读。
 model RoleAnnualGoalPermission {
   id                     String              @id @default(cuid())
   scopeType              PermissionScopeType @default(SYSTEM)
@@ -837,6 +849,7 @@ model QuarterlyWork {
   executionSummary String?
   taskDescription String?
   workloadPersonDay Float?
+  needsDevelopment Boolean?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
@@ -1071,6 +1084,7 @@ model PersonalKpi {
   @@unique([year, quarter, userId])
   @@index([year, quarter])
   @@index([userId])
+  @@index([userId, status])
   @@index([orgNodeId])
   @@index([approvalPolicyId])
   @@index([ratingRuleVersionId])
@@ -1450,6 +1464,7 @@ model TalentReviewCycle {
 
   @@index([templateVersionId])
   @@index([status, deletedAt])
+  @@index([departmentOrgNodeId, deletedAt])
 }
 
 model TalentReviewParticipant {
@@ -2032,6 +2047,7 @@ model PromotionRecord {
   @@index([recommendationId])
   @@index([externalProcessNo])
   @@index([resultStatus, deletedAt])
+  @@index([outcome, resultStatus])
 }
 
 model SalaryAdjustmentRecord {
@@ -2094,6 +2110,7 @@ model RewardRecord {
   @@index([externalProcessNo])
   @@index([resultStatus, deletedAt])
   @@index([rewardCycle, rewardPeriodYear, rewardPeriodMonth, rewardPeriodQuarter])
+  @@index([effectiveDate])
 }
 
 model EmployeeTalentProfile {

@@ -5,13 +5,17 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
-import { annualGoalPermissionCodes, annualGoalPermissionDefinitions, type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
+import { type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
 import {
+  annualGoalMatrixPermissionAbilityKeys,
+  annualGoalPermissionScopeByAbilityRole,
   kpiOrdinaryPermissionAbilityKeys,
   notificationOrdinaryPermissionAbilityKeys,
   productManagementOrdinaryPermissionAbilityKeys,
+  talentMatrixPermissionAbilityKeys,
   orgPermissionModuleKeys,
+  type AnnualGoalAbilityKey,
 } from "@/server/permissions/permission-constants";
 import type { OrgNodeType, OrgPermissionAbilityKey, OrgPermissionGrantScopeType, Prisma, RoleType } from "@prisma/client";
 import {
@@ -25,6 +29,7 @@ import {
   syncNotificationPermissionMatrix,
   syncProductManagementPermissionMatrix,
   syncRoleMenuPermissionMatrix,
+  syncTalentPermissionMatrix,
   type PermissionMatrixSyncMode,
 } from "@/server/organization/permission-matrix-sync";
 
@@ -678,55 +683,47 @@ export async function saveAnnualGoalRolePermissions(formData: FormData) {
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
   await requirePermissionEditor(scope);
-  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+  const validAbilityIds = new Set<OrgPermissionAbilityKey>(annualGoalMatrixPermissionAbilityKeys);
+
+  const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
+  const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
 
   await prisma.$transaction(async (tx) => {
-    for (const definition of annualGoalPermissionDefinitions) {
-      await tx.annualGoalPermission.upsert({
-        where: { code: definition.code },
-        update: {
-          name: definition.name,
-          description: definition.description,
-          sortOrder: definition.sortOrder,
-        },
-        create: definition,
-      });
-    }
-
-    const permissionRows = await tx.annualGoalPermission.findMany({
-      where: { code: { in: [...annualGoalPermissionCodes] } },
-      select: { id: true },
-    });
-    const permissionIdSet = new Set(permissionRows.map((row) => row.id));
-    const requestedCells = parsePermissionCells(permissionsValue, permissionIdSet);
-
-    await tx.roleAnnualGoalPermission.deleteMany({
+    await tx.orgPermissionGrant.deleteMany({
       where: {
-        scopeType: scope.scopeType,
-        departmentOrgNodeId: scope.departmentOrgNodeId,
-        roleType: { in: validRoles },
-        annualGoalPermissionId: { in: permissionRows.map((row) => row.id) },
+        moduleKey: orgPermissionModuleKeys.annualGoal,
+        subjectType: "ROLE",
+        roleType: { in: permissionRoles },
+        abilityKey: { in: annualGoalMatrixPermissionAbilityKeys },
+        ...(scope.scopeType === "SYSTEM"
+          ? { orgNodeId: null }
+          : { orgNodeId }),
       },
     });
 
-    const cellsToPersist = scope.scopeType === "SYSTEM"
+    const cellsToPersist = (scope.scopeType === "SYSTEM"
       ? requestedCells
-      : requestedCells.filter((cell) => cell.explicit);
+      : requestedCells.filter((cell) => cell.explicit))
+      .filter((cell) => cell.allowed);
 
     if (cellsToPersist.length > 0) {
-      await tx.roleAnnualGoalPermission.createMany({
+      await tx.orgPermissionGrant.createMany({
         data: cellsToPersist.map((cell) => ({
-          scopeType: scope.scopeType,
-          departmentOrgNodeId: scope.departmentOrgNodeId,
+          moduleKey: orgPermissionModuleKeys.annualGoal,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: annualGoalPermissionScopeByAbilityRole[cell.permissionId as AnnualGoalAbilityKey][cell.roleType],
+          subjectType: "ROLE",
           roleType: cell.roleType,
-          annualGoalPermissionId: cell.permissionId,
-          allowed: cell.allowed,
+          userId: null,
+          orgNodeId,
+          isActive: true,
         })),
       });
     }
   });
 
   revalidateOrganization();
+  revalidatePath("/annual-goals");
 }
 
 export async function saveKpiRolePermissions(formData: FormData) {
@@ -883,7 +880,53 @@ export async function saveProductManagementRolePermissions(formData: FormData) {
   revalidatePath("/quarterly-work");
 }
 
-type PermissionMatrixKind = "menu" | "annual-goal" | "kpi" | "notification" | "product-management";
+export async function saveTalentRolePermissions(formData: FormData) {
+  const permissionsValue = formData.get("permissions") as string;
+  const scope = await resolvePermissionScope(formData);
+  await requirePermissionEditor(scope);
+  const validAbilityIds = new Set<OrgPermissionAbilityKey>(talentMatrixPermissionAbilityKeys);
+  const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
+  const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.talent,
+        subjectType: "ROLE",
+        roleType: { in: permissionRoles },
+        abilityKey: { in: talentMatrixPermissionAbilityKeys },
+        ...(scope.scopeType === "SYSTEM"
+          ? { orgNodeId: null }
+          : { orgNodeId }),
+      },
+    });
+
+    const cellsToPersist = (scope.scopeType === "SYSTEM"
+      ? requestedCells
+      : requestedCells.filter((cell) => cell.explicit))
+      .filter((cell) => cell.allowed);
+
+    if (cellsToPersist.length > 0) {
+      await tx.orgPermissionGrant.createMany({
+        data: cellsToPersist.map((cell) => ({
+          moduleKey: orgPermissionModuleKeys.talent,
+          abilityKey: cell.permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiPermissionScopeByRole[cell.roleType],
+          subjectType: "ROLE",
+          roleType: cell.roleType,
+          userId: null,
+          orgNodeId,
+          isActive: true,
+        })),
+      });
+    }
+  });
+
+  revalidateOrganization();
+  revalidatePath("/talent");
+}
+
+type PermissionMatrixKind = "menu" | "annual-goal" | "kpi" | "notification" | "product-management" | "talent";
 
 async function saveAndSyncPermissionMatrix(
   formData: FormData,
@@ -904,6 +947,7 @@ async function saveAndSyncPermissionMatrix(
     else if (kind === "annual-goal") await syncAnnualGoalPermissionMatrix(tx, permissions, mode);
     else if (kind === "kpi") await syncKpiPermissionMatrix(tx, permissions, mode);
     else if (kind === "notification") await syncNotificationPermissionMatrix(tx, permissions, mode);
+    else if (kind === "talent") await syncTalentPermissionMatrix(tx, permissions, mode);
     else await syncProductManagementPermissionMatrix(tx, permissions, mode);
   });
   revalidateOrganization();
@@ -947,6 +991,14 @@ export async function saveAndApplyProductManagementPermissionChangesToAllDepartm
 
 export async function saveAndApplyProductManagementPermissionsToAllDepartments(formData: FormData) {
   await saveAndSyncPermissionMatrix(formData, "product-management", "FULL");
+}
+
+export async function saveAndApplyTalentPermissionChangesToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "talent", "CHANGES");
+}
+
+export async function saveAndApplyTalentPermissionsToAllDepartments(formData: FormData) {
+  await saveAndSyncPermissionMatrix(formData, "talent", "FULL");
 }
 
 function parseRepeatedStrings(formData: FormData, fieldName: string) {
@@ -1199,61 +1251,57 @@ export async function applyAnnualGoalPermissionToAllDepartments(formData: FormDa
     throw new Error("缺少必要参数");
   }
   if (roleType === "ADMIN") {
-    throw new Error("系统管理员能力项不可同步至部门");
+    throw new Error("管理员能力不可批量覆盖");
   }
 
-  const permission = await prisma.annualGoalPermission.findUnique({
-    where: { id: permissionId },
-    select: { id: true },
-  });
-  if (!permission) {
-    throw new Error("年度指标权限不存在");
+  if (!new Set<OrgPermissionAbilityKey>(annualGoalMatrixPermissionAbilityKeys).has(permissionId as OrgPermissionAbilityKey)) {
+    throw new Error("指标管理权限不存在");
   }
 
   const departments = await prisma.orgNode.findMany({
     where: { nodeType: "DEPARTMENT" },
     select: { id: true },
   });
+  const scopeType = annualGoalPermissionScopeByAbilityRole[permissionId as AnnualGoalAbilityKey][roleType];
 
   await prisma.$transaction(async (tx) => {
-    await tx.roleAnnualGoalPermission.deleteMany({
+    await tx.orgPermissionGrant.deleteMany({
       where: {
-        scopeType: "SYSTEM",
-        departmentOrgNodeId: "",
+        moduleKey: orgPermissionModuleKeys.annualGoal,
+        subjectType: "ROLE",
         roleType,
-        annualGoalPermissionId: permissionId,
+        abilityKey: permissionId as OrgPermissionAbilityKey,
       },
     });
 
-    await tx.roleAnnualGoalPermission.create({
-      data: {
-        scopeType: "SYSTEM",
-        departmentOrgNodeId: "",
-        roleType,
-        annualGoalPermissionId: permissionId,
-        allowed,
-      },
-    });
-
-    await tx.roleAnnualGoalPermission.deleteMany({
-      where: {
-        scopeType: "DEPARTMENT",
-        departmentOrgNodeId: { in: departments.map((department) => department.id) },
-        roleType,
-        annualGoalPermissionId: permissionId,
-      },
-    });
-
-    if (departments.length > 0) {
-      await tx.roleAnnualGoalPermission.createMany({
-        data: departments.map((department) => ({
-          scopeType: "DEPARTMENT" as const,
-          departmentOrgNodeId: department.id,
+    if (allowed) {
+      await tx.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.annualGoal,
+          abilityKey: permissionId as OrgPermissionAbilityKey,
+          scopeType,
+          subjectType: "ROLE",
           roleType,
-          annualGoalPermissionId: permissionId,
-          allowed,
-        })),
+          userId: null,
+          orgNodeId: null,
+          isActive: true,
+        },
       });
+
+      if (departments.length > 0) {
+        await tx.orgPermissionGrant.createMany({
+          data: departments.map((department) => ({
+            moduleKey: orgPermissionModuleKeys.annualGoal,
+            abilityKey: permissionId as OrgPermissionAbilityKey,
+            scopeType,
+            subjectType: "ROLE" as const,
+            roleType,
+            userId: null,
+            orgNodeId: department.id,
+            isActive: true,
+          })),
+        });
+      }
     }
   });
 
@@ -1463,6 +1511,75 @@ export async function applyProductManagementPermissionToAllDepartments(formData:
 
   revalidateOrganization();
   revalidatePath("/quarterly-work");
+}
+
+export async function applyTalentPermissionToAllDepartments(formData: FormData) {
+  await requireAdmin();
+  const permissionId = formData.get("permissionId") as string;
+  const roleType = formData.get("roleType") as RoleType;
+  const allowed = formData.get("allowed") === "true";
+  const validRoles: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"];
+
+  if (!permissionId || !validRoles.includes(roleType)) {
+    throw new Error("缺少必要参数");
+  }
+
+  if (!new Set<OrgPermissionAbilityKey>(talentMatrixPermissionAbilityKeys).has(permissionId as OrgPermissionAbilityKey)) {
+    throw new Error("人才发展权限不存在");
+  }
+
+  if (roleType === "ADMIN") {
+    throw new Error("管理员能力不可批量覆盖");
+  }
+
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.deleteMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.talent,
+        subjectType: "ROLE",
+        roleType,
+        abilityKey: permissionId as OrgPermissionAbilityKey,
+      },
+    });
+
+    if (allowed) {
+      await tx.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.talent,
+          abilityKey: permissionId as OrgPermissionAbilityKey,
+          scopeType: kpiPermissionScopeByRole[roleType],
+          subjectType: "ROLE",
+          roleType,
+          userId: null,
+          orgNodeId: null,
+          isActive: true,
+        },
+      });
+
+      if (departments.length > 0) {
+        await tx.orgPermissionGrant.createMany({
+          data: departments.map((department) => ({
+            moduleKey: orgPermissionModuleKeys.talent,
+            abilityKey: permissionId as OrgPermissionAbilityKey,
+            scopeType: kpiPermissionScopeByRole[roleType],
+            subjectType: "ROLE" as const,
+            roleType,
+            userId: null,
+            orgNodeId: department.id,
+            isActive: true,
+          })),
+        });
+      }
+    }
+  });
+
+  revalidateOrganization();
+  revalidatePath("/talent");
 }
 
 async function requireKpiApprovalPolicyEditor(policyId: string) {

@@ -1,13 +1,11 @@
 import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds, findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
 import {
-  buildOrgScopeContext,
-  getAnnualGoalCapabilities,
-  getAnnualGoalPermissionMapForUser,
   getAnnualGoalAssignmentPermissions,
   getAnnualGoalPlanPermissions,
   getAnnualGoalPlanWhere,
-  type OrgScopeContext,
+  resolveAnnualGoalPermissionContext,
+  type AnnualGoalPermissionContext,
 } from "@/server/organization/annual-goal-permissions";
 import type { AnnualMetricCalculationType, OrgNodeType, RiskStatus, RoleType } from "@prisma/client";
 
@@ -387,24 +385,10 @@ function comparePlans(a: { ownerType: AnnualGoalViewOwnerType; ownerName: string
 }
 
 function getPlanPermissions(
-  currentUser: DataScopeInput,
+  permissionContext: AnnualGoalPermissionContext,
   plan: { ownerType: AnnualGoalViewOwnerType; ownerOrgNodeId?: string | null; deletedAt: Date | null },
-  capabilities: {
-    canEditDepartmentPlans: boolean;
-    canEditTeamPlans: boolean;
-    canUpdateProgress: boolean;
-    canViewDepartmentPlans?: boolean;
-    canViewTeamPlans?: boolean;
-  },
-  scopeContext?: OrgScopeContext | null,
 ): PlanPermissionFlags {
-  return getAnnualGoalPlanPermissions(currentUser, {
-    canViewDepartmentPlans: Boolean(capabilities.canViewDepartmentPlans),
-    canEditDepartmentPlans: capabilities.canEditDepartmentPlans,
-    canViewTeamPlans: Boolean(capabilities.canViewTeamPlans),
-    canEditTeamPlans: capabilities.canEditTeamPlans,
-    canUpdateProgress: capabilities.canUpdateProgress,
-  }, { ...plan, ownerOrgNodeId: plan.ownerOrgNodeId ?? undefined }, scopeContext);
+  return getAnnualGoalPlanPermissions(permissionContext, { ...plan, ownerOrgNodeId: plan.ownerOrgNodeId ?? undefined });
 }
 
 type GetAnnualGoalsDataOptions = {
@@ -413,10 +397,9 @@ type GetAnnualGoalsDataOptions = {
 
 export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: GetAnnualGoalsDataOptions): Promise<AnnualGoalsResult> {
   const selectedYear = options?.selectedYear;
-  const annualGoalPermissionMap = await getAnnualGoalPermissionMapForUser(currentUser);
-  const annualGoalCapabilities = getAnnualGoalCapabilities(currentUser.roleType, annualGoalPermissionMap);
-  const scopeContext = await buildOrgScopeContext(currentUser, annualGoalCapabilities);
-  const activeWhere = await getAnnualGoalPlanWhere(currentUser, annualGoalCapabilities);
+  const permissionContext = await resolveAnnualGoalPermissionContext(currentUser);
+  const annualGoalCapabilities = permissionContext.capabilities;
+  const activeWhere = await getAnnualGoalPlanWhere(permissionContext);
 
   const plans = (await prisma.annualGoalPlan.findMany({
     where: activeWhere,
@@ -436,10 +419,12 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
       ? currentYear
       : availableYears[0] ?? currentYear;
   const selectedYearPlans = plans.filter((plan) => plan.year === resolvedSelectedYear);
-  const scopedOrgNodeIds = currentUser.roleType === "ADMIN"
+  // 组织树导航仍按组织位置推导（展示层）；「全部可见」改由查看授权的 ALL 覆盖判定。
+  const hasFullNavigation = permissionContext.departmentView.hasAllAccess || permissionContext.teamView.hasAllAccess;
+  const scopedOrgNodeIds = hasFullNavigation
     ? null
     : await getDescendantOrgNodeIds(currentUser.orgNodeId ?? null);
-  const departmentAncestorOrgNodeId = currentUser.roleType === "ADMIN"
+  const departmentAncestorOrgNodeId = hasFullNavigation
     ? null
     : await findNearestDepartmentOrgNodeId(currentUser.orgNodeId ?? null);
   const scopedOrgNodeIdSet = new Set(scopedOrgNodeIds ?? []);
@@ -448,7 +433,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   }
   const scopedOrgNodeIdsForQuery = Array.from(scopedOrgNodeIdSet).filter(Boolean);
   const orgNodes = await prisma.orgNode.findMany({
-    where: currentUser.roleType === "ADMIN"
+    where: hasFullNavigation
       ? { nodeType: { in: ["DEPARTMENT", "TEAM"] } }
       : scopedOrgNodeIdsForQuery.length
         ? { id: { in: scopedOrgNodeIdsForQuery }, nodeType: { in: ["DEPARTMENT", "TEAM"] } }
@@ -734,11 +719,11 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     const scopeDepartmentOrgNodeId = getPlanScopeDepartmentOrgNodeId(plan);
     const departmentName = departmentNameByOrgNodeId.get(scopeDepartmentOrgNodeId);
 
-    const basePermissions = getPlanPermissions(currentUser, {
+    const basePermissions = getPlanPermissions(permissionContext, {
       ownerType: "DEPARTMENT",
       ownerOrgNodeId: plan.departmentOrgNodeId,
       deletedAt: plan.deletedAt,
-    }, annualGoalCapabilities, scopeContext);
+    });
     const permissions = plan.status === "CLOSED"
       ? {
           ...basePermissions,
@@ -803,11 +788,9 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     const authorityPlan = departmentPlanDataById.get(authorityPlanRecord.id);
     if (!authorityPlan) return [];
     const permissions = getAnnualGoalAssignmentPermissions(
-      currentUser,
-      annualGoalCapabilities,
+      permissionContext,
       team.orgNodeId,
       authorityPlanRecord.status,
-      scopeContext,
     );
     if (!permissions.canViewPlan) return [];
     const metrics = teamAssignments.flatMap((assignment): MetricData[] => {
@@ -931,7 +914,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     memberOptionsByDepartment,
     memberOptionsByTeam,
     canManage,
-    showDepartmentNavigation: currentUser.roleType === "ADMIN",
+    showDepartmentNavigation: permissionContext.departmentView.hasAllAccess,
     permissions: {
       canCreatePlan: canManageDepartmentPlans,
       canViewDepartmentPlans: annualGoalCapabilities.canViewDepartmentPlans,

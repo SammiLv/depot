@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
-import { getAnnualGoalCapabilities, getAnnualGoalPermissionMapForUser, getAnnualGoalPlanPermissions, buildOrgScopeContext } from "@/server/organization/annual-goal-permissions";
+import { getAnnualGoalPlanPermissions, resolveAnnualGoalPermissionContext } from "@/server/organization/annual-goal-permissions";
 import {
   findNearestDepartmentOrgNodeId,
   getDescendantOrgNodeIds,
@@ -43,14 +43,12 @@ function revalidateAnnualGoals() {
 
 async function getAnnualGoalActionContext() {
   const user = await requireCurrentUser();
-  const permissionMap = await getAnnualGoalPermissionMapForUser(user);
-  const capabilities = getAnnualGoalCapabilities(user.roleType, permissionMap);
-  const orgScopeContext = await buildOrgScopeContext(user, capabilities);
+  const permissionContext = await resolveAnnualGoalPermissionContext(user);
 
   return {
     user,
-    capabilities,
-    orgScopeContext,
+    capabilities: permissionContext.capabilities,
+    permissionContext,
   };
 }
 
@@ -58,11 +56,11 @@ function getScopedPlanPermissions(
   context: Awaited<ReturnType<typeof getAnnualGoalActionContext>>,
   plan: { ownerType: "DEPARTMENT" | "TEAM"; departmentOrgNodeId: string | null; teamOrgNodeId: string | null; ownerOrgNodeId?: string | null; deletedAt?: Date | null }
 ) {
-  return getAnnualGoalPlanPermissions(context.user, context.capabilities, {
+  return getAnnualGoalPlanPermissions(context.permissionContext, {
     ownerType: plan.ownerType,
     ownerOrgNodeId: plan.ownerOrgNodeId ?? null,
     deletedAt: plan.deletedAt ?? null,
-  }, context.orgScopeContext);
+  });
 }
 
 function canEditDepartmentScope(
@@ -116,10 +114,10 @@ function canUpdateTeamProgressScope(
 async function requireAnnualGoalDepartmentEditor() {
   const context = await getAnnualGoalActionContext();
 
-  if (context.user.roleType === "ADMIN") {
-    if (!context.capabilities.canEditDepartmentPlans) {
-      throw new Error("无权维护部门年度指标");
-    }
+  if (!context.capabilities.canEditDepartmentPlans) {
+    throw new Error("无权维护部门年度指标");
+  }
+  if (context.permissionContext.departmentEdit.hasAllAccess) {
     return context;
   }
 

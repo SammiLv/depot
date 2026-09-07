@@ -17,9 +17,9 @@ export const VALUE_TRACK_STATUS_TONES = {
 } as const;
 
 export const VALUE_JUDGEMENT_TONES = {
-  未达预期: "danger",
-  已达预期: "primary",
-  超出预期: "success",
+  未达预期: "warning",
+  已达预期: "success",
+  超出预期: "primary",
 } as const;
 
 export function isValueTrackStatus(value: string | null | undefined): value is ValueTrackStatus {

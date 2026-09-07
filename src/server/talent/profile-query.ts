@@ -51,7 +51,7 @@ export async function getTalentWorkbenchData(currentUser: TalentViewer) {
         level: level?.code ?? level?.name ?? "未配置",
         joinedAt: user.joinedAt?.toISOString() ?? null,
         contractEndAt: contractByUserId.get(user.id)?.endDate.toISOString() ?? user.contractRenewAt?.toISOString() ?? null,
-        currentSalary: sensitiveCoverage.hasPermission ? profile?.currentSalary ?? null : null,
+        currentSalary: sensitiveCoverage.hasPermission || user.id === currentUser.id ? profile?.currentSalary ?? null : null,
       };
     }),
   };

@@ -1,42 +1,24 @@
 import { prisma } from "@/server/db/prisma";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
+import {
+  getProjectDaysUntilDue,
+  getProjectOverdueDays,
+  getQuarterEndDate,
+  getWorkDaysUntilDue,
+  getWorkOverdueDays,
+  parseQuarterCode,
+} from "@/server/quarterly-work/overdue-utils";
 import { VALUE_TRACK_STATUS_COMPLETED, VALUE_TRACK_STATUS_NOT_OBSERVED } from "@/server/quarterly-work/value-track-constants";
 
-const WORK_OPEN_STATUSES = ["NOT_STARTED", "IN_PROGRESS"] as const;
-const PROJECT_OPEN_STATUSES = ["NOT_STARTED", "IN_PROGRESS"] as const;
-
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
 function daysUntil(endDate: Date, now: Date) {
+  const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
   return Math.round((startOfDay(endDate).getTime() - startOfDay(now).getTime()) / (24 * 60 * 60 * 1000));
-}
-
-function getMonthEndDate(year: number, month: number) {
-  return new Date(year, month, 0);
-}
-
-function parseQuarterCode(value: string | null | undefined) {
-  if (!value) return null;
-  const match = value.match(/^(\d{4})-Q([1-4])$/);
-  if (!match) return null;
-  return {
-    year: Number.parseInt(match[1], 10),
-    quarter: Number.parseInt(match[2], 10),
-  };
-}
-
-function getQuarterEndDate(value: string | null | undefined) {
-  const parsed = parseQuarterCode(value);
-  if (!parsed) return null;
-  return new Date(parsed.year, parsed.quarter * 3, 0);
 }
 
 function getCurrentQuarterEndDate(now: Date) {
   const quarter = Math.floor(now.getMonth() / 3) + 1;
-  return new Date(now.getFullYear(), quarter * 3, 0);
+  return new Date(now.getFullYear(), quarter * 3, 0, 23, 59, 59, 999);
 }
 
 async function loadOwnerMaps(ownerIds: string[]) {
@@ -76,7 +58,7 @@ export async function runQuarterlyWorkOverdueScan(scenarioId: string, options?: 
   const works = await prisma.quarterlyWork.findMany({
     where: {
       deletedAt: null,
-      status: { in: [...WORK_OPEN_STATUSES] },
+      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
       endMonth: { not: null },
     },
     select: {
@@ -86,6 +68,7 @@ export async function runQuarterlyWorkOverdueScan(scenarioId: string, options?: 
       year: true,
       quarter: true,
       endMonth: true,
+      status: true,
       project: { select: { title: true } },
     },
     take: 500,
@@ -93,10 +76,8 @@ export async function runQuarterlyWorkOverdueScan(scenarioId: string, options?: 
   const { nameById, departmentByOwnerId } = await loadOwnerMaps(works.map((work) => work.ownerId));
 
   for (const work of works) {
-    if (!work.endMonth) continue;
-    const endDate = getMonthEndDate(work.year, work.endMonth);
-    const remainingDays = daysUntil(endDate, now);
-    if (remainingDays >= 0) continue;
+    const overdueDays = getWorkOverdueDays(work, now);
+    if (overdueDays == null) continue;
 
     const department = departmentByOwnerId.get(work.ownerId);
     await emitNotificationEvent("quarterly_work.overdue", {
@@ -109,7 +90,7 @@ export async function runQuarterlyWorkOverdueScan(scenarioId: string, options?: 
       year: work.year,
       quarter: work.quarter,
       endMonth: work.endMonth,
-      overdueDays: Math.abs(remainingDays),
+      overdueDays,
       projectTitle: work.project.title,
       departmentOrgNodeId: department?.departmentOrgNodeId,
       departmentName: department?.departmentName,
@@ -125,7 +106,7 @@ export async function runQuarterlyWorkDueSoonScan(scenarioId: string, daysBefore
   const works = await prisma.quarterlyWork.findMany({
     where: {
       deletedAt: null,
-      status: { in: [...WORK_OPEN_STATUSES] },
+      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
       endMonth: { not: null },
     },
     select: {
@@ -135,6 +116,7 @@ export async function runQuarterlyWorkDueSoonScan(scenarioId: string, daysBefore
       year: true,
       quarter: true,
       endMonth: true,
+      status: true,
       project: { select: { title: true } },
     },
     take: 500,
@@ -142,9 +124,8 @@ export async function runQuarterlyWorkDueSoonScan(scenarioId: string, daysBefore
   const { nameById, departmentByOwnerId } = await loadOwnerMaps(works.map((work) => work.ownerId));
 
   for (const work of works) {
-    if (!work.endMonth) continue;
-    const remainingDays = daysUntil(getMonthEndDate(work.year, work.endMonth), now);
-    if (remainingDays < 0 || remainingDays > windowDays) continue;
+    const daysUntilDue = getWorkDaysUntilDue(work, windowDays, now);
+    if (daysUntilDue == null) continue;
 
     const department = departmentByOwnerId.get(work.ownerId);
     await emitNotificationEvent("quarterly_work.due_soon", {
@@ -157,7 +138,7 @@ export async function runQuarterlyWorkDueSoonScan(scenarioId: string, daysBefore
       year: work.year,
       quarter: work.quarter,
       endMonth: work.endMonth,
-      daysUntilDue: remainingDays,
+      daysUntilDue,
       projectTitle: work.project.title,
       departmentOrgNodeId: department?.departmentOrgNodeId,
       departmentName: department?.departmentName,
@@ -172,19 +153,19 @@ export async function runProjectOverdueScan(scenarioId: string, options?: ScanEm
   const projects = await prisma.project.findMany({
     where: {
       deletedAt: null,
-      status: { in: [...PROJECT_OPEN_STATUSES] },
+      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+      endQuarter: { not: null },
     },
-    select: { id: true, title: true, ownerId: true, endQuarter: true, startQuarter: true },
+    select: { id: true, title: true, ownerId: true, endQuarter: true, status: true },
     take: 500,
   });
   const { nameById, departmentByOwnerId } = await loadOwnerMaps(projects.map((project) => project.ownerId));
 
   for (const project of projects) {
-    const endDate = getQuarterEndDate(project.endQuarter ?? project.startQuarter);
-    if (!endDate) continue;
-    const remainingDays = daysUntil(endDate, now);
-    if (remainingDays >= 0) continue;
+    const overdueDays = getProjectOverdueDays(project, now);
+    if (overdueDays == null) continue;
 
+    const parsed = parseQuarterCode(project.endQuarter);
     const department = departmentByOwnerId.get(project.ownerId);
     await emitNotificationEvent("project.overdue", {
       title: project.title,
@@ -193,8 +174,10 @@ export async function runProjectOverdueScan(scenarioId: string, options?: ScanEm
       userId: project.ownerId,
       subjectUserId: project.ownerId,
       userName: nameById.get(project.ownerId) ?? "",
-      endQuarter: project.endQuarter ?? project.startQuarter,
-      overdueDays: Math.abs(remainingDays),
+      endQuarter: project.endQuarter,
+      overdueDays,
+      year: parsed?.year,
+      quarter: parsed?.quarter,
       departmentOrgNodeId: department?.departmentOrgNodeId,
       departmentName: department?.departmentName,
       targetType: "Project",
@@ -209,19 +192,19 @@ export async function runProjectDueSoonScan(scenarioId: string, daysBefore: numb
   const projects = await prisma.project.findMany({
     where: {
       deletedAt: null,
-      status: { in: [...PROJECT_OPEN_STATUSES] },
+      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+      endQuarter: { not: null },
     },
-    select: { id: true, title: true, ownerId: true, endQuarter: true, startQuarter: true },
+    select: { id: true, title: true, ownerId: true, endQuarter: true, status: true },
     take: 500,
   });
   const { nameById, departmentByOwnerId } = await loadOwnerMaps(projects.map((project) => project.ownerId));
 
   for (const project of projects) {
-    const endDate = getQuarterEndDate(project.endQuarter ?? project.startQuarter);
-    if (!endDate) continue;
-    const remainingDays = daysUntil(endDate, now);
-    if (remainingDays < 0 || remainingDays > windowDays) continue;
+    const daysUntilDue = getProjectDaysUntilDue(project, windowDays, now);
+    if (daysUntilDue == null) continue;
 
+    const parsed = parseQuarterCode(project.endQuarter);
     const department = departmentByOwnerId.get(project.ownerId);
     await emitNotificationEvent("project.due_soon", {
       title: project.title,
@@ -230,8 +213,10 @@ export async function runProjectDueSoonScan(scenarioId: string, daysBefore: numb
       userId: project.ownerId,
       subjectUserId: project.ownerId,
       userName: nameById.get(project.ownerId) ?? "",
-      endQuarter: project.endQuarter ?? project.startQuarter,
-      daysUntilDue: remainingDays,
+      endQuarter: project.endQuarter,
+      daysUntilDue,
+      year: parsed?.year,
+      quarter: parsed?.quarter,
       departmentOrgNodeId: department?.departmentOrgNodeId,
       departmentName: department?.departmentName,
       targetType: "Project",

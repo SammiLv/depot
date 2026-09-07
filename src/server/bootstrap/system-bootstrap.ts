@@ -1,7 +1,7 @@
 import { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { ensureAnnualGoalPermissions, annualGoalPermissionDefinitions } from "@/server/organization/annual-goal-permissions";
 import {
+  annualGoalDefaultPermissionGrants,
   kpiAbilityKeys,
   notificationAbilityKeys,
   orgPermissionModuleKeys,
@@ -17,7 +17,8 @@ const systemMenus = [
   ["quarterly-work", "季度工作", "/quarterly-work", 30, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
   ["kpi", "KPI 管理", "/kpi", 40, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
   ["talent", "人才发展", "/talent", 50, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
-  ["todos", "我的待办", "/todos", 60, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
+  // code 沿用 "todos"（复用既有菜单记录，避免遗留孤儿菜单）；对外展示为「数据统计」，待办改由工作台承载
+  ["todos", "数据统计", "/statistics", 60, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
   ["notifications", "通知中心", "/notifications", 70, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
   ["organization", "组织与权限", "/organization", 80, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER]],
 ] as const;
@@ -25,8 +26,7 @@ const systemMenus = [
 export async function ensureInitialSystemBootstrap() {
   await removePermissionMatrixIntegrationTestArtifacts();
   await ensureSystemMenus();
-  await ensureAnnualGoalPermissions();
-  await ensureSystemAnnualGoalRolePermissions();
+  await ensureAnnualGoalPermissionGrants();
   await ensureAdminKpiPermissions();
   await ensureDefaultTalentPermissions();
   await ensureInitialTalentSalaryConfig();
@@ -65,34 +65,60 @@ async function ensureSystemMenus() {
   }
 }
 
-async function ensureSystemAnnualGoalRolePermissions() {
-  const annualGoalPermissions = await prisma.annualGoalPermission.findMany({
-    select: { id: true, code: true },
+// 指标管理默认授权（幂等）：按 annualGoalDefaultPermissionGrants 发系统模板行（orgNodeId=null）
+// + 按部门/组物化行。服务启动与初始化引导都会调用，可重复执行。
+async function ensureAnnualGoalRoleGrant(
+  roleType: RoleType,
+  scopeType: "ALL" | "SUBTREE" | "NODE" | "SELF",
+  orgNodeId: string | null,
+  abilityKey: (typeof annualGoalDefaultPermissionGrants)[number]["abilityKey"],
+) {
+  const result = await prisma.orgPermissionGrant.updateMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.annualGoal,
+      abilityKey,
+      scopeType,
+      subjectType: "ROLE",
+      roleType,
+      userId: null,
+      orgNodeId,
+    },
+    data: { isActive: true },
   });
-  const permissionIdByCode = new Map(annualGoalPermissions.map((permission) => [permission.code, permission.id]));
 
-  for (const code of annualGoalPermissionDefinitions.map((permission) => permission.code)) {
-    const annualGoalPermissionId = permissionIdByCode.get(code);
-    if (!annualGoalPermissionId) continue;
-
-    await prisma.roleAnnualGoalPermission.upsert({
-      where: {
-        scopeType_departmentOrgNodeId_roleType_annualGoalPermissionId: {
-          scopeType: "SYSTEM",
-          departmentOrgNodeId: "",
-          roleType: RoleType.ADMIN,
-          annualGoalPermissionId,
-        },
-      },
-      update: { allowed: true },
-      create: {
-        scopeType: "SYSTEM",
-        departmentOrgNodeId: "",
-        roleType: RoleType.ADMIN,
-        annualGoalPermissionId,
-        allowed: true,
+  if (result.count === 0) {
+    await prisma.orgPermissionGrant.create({
+      data: {
+        moduleKey: orgPermissionModuleKeys.annualGoal,
+        abilityKey,
+        scopeType,
+        subjectType: "ROLE",
+        roleType,
+        userId: null,
+        orgNodeId,
+        isActive: true,
       },
     });
+  }
+}
+
+export async function ensureAnnualGoalPermissionGrants() {
+  const [departments, teams] = await Promise.all([
+    prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } }),
+    prisma.orgNode.findMany({ where: { nodeType: "TEAM" }, select: { id: true } }),
+  ]);
+
+  for (const grant of annualGoalDefaultPermissionGrants) {
+    // 系统模板行（权限矩阵「系统」视图读取的就是 null 节点行）
+    await ensureAnnualGoalRoleGrant(grant.roleType, grant.scopeType, null, grant.abilityKey);
+    const orgNodeIds = grant.orgNodeSeedKey === "DEPARTMENT"
+      ? departments.map((department) => department.id)
+      : grant.orgNodeSeedKey === "TEAM"
+        ? teams.map((team) => team.id)
+        : [];
+    for (const orgNodeId of orgNodeIds) {
+      await ensureAnnualGoalRoleGrant(grant.roleType, grant.scopeType, orgNodeId, grant.abilityKey);
+    }
   }
 }
 
@@ -182,9 +208,6 @@ async function ensureDefaultTalentPermissions() {
     talentAbilityKeys.viewProfile,
     talentAbilityKeys.viewReview,
     talentAbilityKeys.manageReview,
-    talentAbilityKeys.viewCareerModel,
-    talentAbilityKeys.viewBusinessAssessment,
-    talentAbilityKeys.viewWorkIncident,
     talentAbilityKeys.viewRecommendation,
     talentAbilityKeys.manageRecommendation,
     talentAbilityKeys.viewHistory,
@@ -196,6 +219,20 @@ async function ensureDefaultTalentPermissions() {
     for (const abilityKey of talentOrdinaryPermissionAbilityKeys) {
       await ensureTalentRoleGrant(RoleType.MEMBER, "SELF", team.id, abilityKey);
     }
+  }
+}
+
+// 幂等保障（老库升级用）：自动补发新增能力点 VIEW_TALENT_CONFIG 的默认授权
+//（管理员 ALL + 各部门主管 SUBTREE）。只覆盖这一个新 key，不回填其它能力点，
+// 避免覆盖管理员在权限矩阵里对存量 key 的主动调整。服务启动时调用，可重复执行。
+export async function ensureTalentViewConfigPermissionGrants() {
+  await ensureTalentRoleGrant(RoleType.ADMIN, "ALL", null, talentAbilityKeys.viewConfig);
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+  for (const department of departments) {
+    await ensureTalentRoleGrant(RoleType.DEPARTMENT_MANAGER, "SUBTREE", department.id, talentAbilityKeys.viewConfig);
   }
 }
 

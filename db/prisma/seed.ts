@@ -3,7 +3,6 @@ import { randomUUID, scryptSync } from "node:crypto";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { AnnualMetricCalculationType, PrismaClient, RoleType } from "@prisma/client";
-import { annualGoalPermissionDefinitions } from "../../src/server/organization/annual-goal-permissions";
 import {
   kpiDefaultPermissionGrants,
   notificationDefaultPermissionGrants,
@@ -200,87 +199,6 @@ async function ensureSeedPasswordTestAccountsIfMissing() {
   }
 }
 
-const PRODUCT_TEAM_PASSWORD_ACCOUNTS = [
-  {
-    loginName: "b-leader",
-    name: "采购组组长",
-    title: "组长",
-    roleType: RoleType.TEAM_LEADER,
-  },
-  {
-    loginName: "b-member",
-    name: "采购组组员",
-    title: "组员",
-    roleType: RoleType.MEMBER,
-  },
-] as const;
-
-async function ensureProductProcurementPasswordAccounts() {
-  const department = await prisma.orgNode.findFirst({
-    where: { nodeType: "DEPARTMENT", name: "产品部" },
-    select: { id: true, name: true },
-  });
-  if (!department) {
-    console.warn("[seed] 未找到部门「产品部」，跳过 b-leader / b-member");
-    return;
-  }
-
-  const team = await prisma.orgNode.findFirst({
-    where: { nodeType: "TEAM", name: "采购组", parentId: department.id },
-    select: { id: true, name: true },
-  });
-  if (!team) {
-    console.warn("[seed] 未找到产品部下的「采购组」，跳过 b-leader / b-member");
-    return;
-  }
-
-  let created = 0;
-  let updated = 0;
-  for (const account of PRODUCT_TEAM_PASSWORD_ACCOUNTS) {
-    const existing = await prisma.user.findFirst({
-      where: { loginName: account.loginName },
-      select: { id: true },
-    });
-
-    if (existing) {
-      await prisma.user.update({
-        where: { id: existing.id },
-        data: {
-          name: account.name,
-          title: account.title,
-          roleType: account.roleType,
-          orgNodeId: team.id,
-          passwordHash: seedPasswordHash,
-          passwordLoginEnabled: true,
-          isActive: true,
-          deletedAt: null,
-        },
-      });
-      updated += 1;
-      continue;
-    }
-
-    await prisma.user.create({
-      data: {
-        name: account.name,
-        loginName: account.loginName,
-        title: account.title,
-        roleType: account.roleType,
-        orgNodeId: team.id,
-        passwordHash: seedPasswordHash,
-        passwordLoginEnabled: true,
-      },
-    });
-    created += 1;
-  }
-
-  if (created > 0 || updated > 0) {
-    console.info(
-      `[seed] 产品部/采购组密码账号：新建 ${created}、更新 ${updated}（b-leader / b-member，密码：${SEED_DEFAULT_PASSWORD}）`,
-    );
-  }
-}
-
 async function ensureOrgPermissionGrants() {
   const root = await prisma.orgNode.findFirst({ where: { nodeType: "ROOT" }, select: { id: true } });
   const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
@@ -467,7 +385,6 @@ async function main() {
     console.info("[seed] 增量模式：不清理通知/指标/组织；按角色检测密码测试账号，三者齐全则不补建。全量重建请使用 npm run seed:full");
     await ensureOrgPermissionGrants();
     await ensureSeedPasswordTestAccountsIfMissing();
-    await ensureProductProcurementPasswordAccounts();
     await ensurePresetNotificationScenarios();
     await ensureAnnualGoalDemoData(prisma);
     return;
@@ -714,44 +631,7 @@ async function main() {
     }
   }
 
-  for (const permission of annualGoalPermissionDefinitions) {
-    await prisma.annualGoalPermission.upsert({
-      where: { code: permission.code },
-      update: {
-        name: permission.name,
-        description: permission.description,
-        sortOrder: permission.sortOrder,
-      },
-      create: permission,
-    });
-  }
-
-  const annualGoalPermissions = await prisma.annualGoalPermission.findMany();
-  const annualGoalPermissionIdByCode = new Map(annualGoalPermissions.map((permission) => [permission.code, permission.id]));
-  const annualGoalRoleDefaults: Array<[RoleType, string[]]> = [
-    [RoleType.ADMIN, annualGoalPermissionDefinitions.map((permission) => permission.code)],
-    [RoleType.DEPARTMENT_MANAGER, annualGoalPermissionDefinitions.map((permission) => permission.code)],
-    [RoleType.TEAM_LEADER, ["annualGoal.viewDepartmentPlans", "annualGoal.editTeamPlans", "annualGoal.updateProgress"]],
-    [RoleType.MEMBER, ["annualGoal.viewDepartmentPlans", "annualGoal.updateProgress"]],
-  ];
-
-  await prisma.roleAnnualGoalPermission.deleteMany();
   await prisma.orgPermissionGrant.deleteMany();
-  for (const [roleType, codes] of annualGoalRoleDefaults) {
-    for (const code of codes) {
-      const annualGoalPermissionId = annualGoalPermissionIdByCode.get(code);
-      if (!annualGoalPermissionId) continue;
-      await prisma.roleAnnualGoalPermission.create({
-        data: {
-          scopeType: "SYSTEM",
-          departmentOrgNodeId: "",
-          roleType,
-          annualGoalPermissionId,
-          allowed: true,
-        },
-      });
-    }
-  }
 
   for (const grant of [...kpiDefaultPermissionGrants, ...talentDefaultPermissionGrants, ...notificationDefaultPermissionGrants, ...productManagementDefaultPermissionGrants]) {
     const orgNodeIds = grant.orgNodeSeedKey === null
@@ -1308,7 +1188,6 @@ async function main() {
   });
 
   await ensureSeedPasswordTestAccountsIfMissing();
-  await ensureProductProcurementPasswordAccounts();
   await syncLegacyOrgReferences(rootOrgNodeId);
 }
 
