@@ -108,7 +108,7 @@ import { useActionState, useEffect, useLayoutEffect, useMemo, useRef, useState }
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "brand";
 type Tab = "overview" | "review" | "ability" | "decision";
-type Section = "overview" | "review" | "decision" | "history" | "config";
+export type Section = "overview" | "review" | "decision" | "history" | "config";
 
 type ConfigKey = "review" | "career" | "competency" | "salary" | "incident" | "kpi-rating" | "decision-rules";
 
@@ -662,9 +662,9 @@ export default function TalentPageContent({
         <div className="p-4">
         <Card className="!p-6">
       {section === "review" && <TalentReviewWorkbench data={reviewWorkspace} />}
-      {section === "decision" && <TalentDecisionWorkspace data={operationWorkspace.decision} />}
-      {section === "history" && <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} />}
-      {section === "config" && <ConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} />}
+      {section === "decision" && operationWorkspace.decision ? <TalentDecisionWorkspace data={operationWorkspace.decision} /> : null}
+      {section === "history" && operationWorkspace.history ? <TalentHistoryWorkspace data={operationWorkspace.history} employeeProfiles={operationWorkspace.employeeProfiles} initialCategory={historyInitialCategory} /> : null}
+      {section === "config" && operationWorkspace.career && operationWorkspace.competency ? <TalentConfigWorkbench data={reviewWorkspace} career={operationWorkspace.career} competency={operationWorkspace.competency} decisionRules={operationWorkspace.decisionRules} activeConfig={activeConfig} onSelect={setActiveConfig} onBack={() => setActiveConfig(null)} onNotice={showNotice} /> : null}
         </Card>
         </div>
       )}
@@ -680,7 +680,7 @@ function WorkbenchHeader({ title, description, action }: { title: string; descri
   return <div className="flex items-center justify-between gap-4 mb-4"><div><h3 className="text-lg font-semibold">{title}</h3><p className="text-xs text-muted-foreground mt-1">{description}</p></div>{action}</div>;
 }
 
-function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
+export function TalentReviewWorkbench({ data }: { data: ReviewWorkspaceData }) {
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createDepartmentId, setCreateDepartmentId] = useState(data.cycles.departments[0]?.id ?? "");
@@ -775,7 +775,7 @@ function TalentHistoryWorkbench() {
   return <div><WorkbenchHeader title="人才履历" description="管理员工已经正式发生的晋升、续签、加薪和奖励记录，并支持按员工查询完整历史" action={<Link href="/talent/history" className={primaryActionLinkClass}><Plus className="w-4 h-4" />进入履历管理</Link>} /><div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"><Metric label="晋升记录" value="12 条" hint="近三年" /><Metric label="续签记录" value="18 条" hint="近三年" /><Metric label="加薪记录" value="21 条" hint="近三年" /><Metric label="奖励记录" value="32 条" hint="近三年" /></div><Card className="!p-0 overflow-hidden"><div className="px-5 py-4 border-b border-border flex items-center justify-between"><div><h4 className="font-medium">员工履历记录</h4><p className="text-xs text-muted-foreground mt-1">正式记录可以关联人才决策，也可以来自公司其他管理系统</p></div><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><input placeholder="搜索员工历史" className="h-9 w-48 rounded-lg bg-muted/70 pl-8 pr-3 text-xs focus:outline-none focus:border-primary border border-transparent" /></div></div><table className="w-full text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="text-left px-5 py-3 font-medium">记录编号</th><th className="text-left px-4 py-3 font-medium">员工</th><th className="text-left px-4 py-3 font-medium">类型</th><th className="text-left px-4 py-3 font-medium">正式结果</th><th className="text-left px-4 py-3 font-medium">生效日期</th><th className="text-left px-4 py-3 font-medium">来源</th><th className="text-right px-5 py-3 font-medium">操作</th></tr></thead><tbody className="divide-y divide-border">{records.map((item) => <tr key={item.id}><td className="px-5 py-4 text-xs text-muted-foreground">{item.id}</td><td className="px-4 py-4 font-medium">{item.name}</td><td className="px-4 py-4"><Badge tone="primary">{item.type}</Badge></td><td className="px-4 py-4 text-xs font-medium">{item.content}</td><td className="px-4 py-4 text-xs">{item.effective}</td><td className="px-4 py-4 text-xs text-muted-foreground">{item.source}</td><td className="px-5 py-4 text-right"><button className="text-xs text-primary">查看员工履历</button></td></tr>)}</tbody></table></Card></div>;
 }
 
-function ConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
+export function TalentConfigWorkbench({ data, career, competency, decisionRules, activeConfig, onSelect, onBack, onNotice }: { data: ReviewWorkspaceData; career: CareerWorkspaceData; competency: CompetencyWorkspaceData; decisionRules: TalentDecisionRuleWorkspaceData; activeConfig: ConfigKey | null; onSelect: (key: ConfigKey) => void; onBack: () => void; onNotice: (message: string) => void }) {
   const configs: Array<{ key: ConfigKey; icon: typeof SlidersHorizontal; title: string; detail: string; version: string }> = [
     { key: "review", icon: SlidersHorizontal, title: "人才能力评估", detail: "配置人才能力测算权重与人才盘点评价模型", version: "V1.0 已启用" },
     { key: "career", icon: Route, title: "职业发展通道", detail: "岗位族、岗位、职级组和 R3-1 等职级档", version: "V1.0 已启用" },
