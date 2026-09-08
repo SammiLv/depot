@@ -45,6 +45,8 @@ set -u
 # ===================== 脚本默认值（仅端口/地址这种运行时参数） =====================
 DEFAULT_PORT=80
 DEFAULT_HOSTNAME="0.0.0.0"
+PNPM_VERSION="11.20.0"             # 与 package.json packageManager 对齐
+PNPM_REGISTRY="https://registry.npmmirror.com"
 # =======================================================================
 
 # ----- 路径 -----
@@ -204,6 +206,75 @@ ensure_node_path() {
     return 0
   fi
   return 1
+}
+
+# 安装/激活 pnpm（优先 corepack，与 packageManager 字段对齐）
+install_pnpm() {
+  local node_dir npm_bin
+  node_dir=$(ensure_node_path) || return 1
+  npm_bin="$node_dir/npm"
+  [ -x "$npm_bin.exe" ] && npm_bin="$npm_bin.exe"
+  [ -x "$node_dir/npm.exe" ] && npm_bin="$node_dir/npm.exe"
+
+  log "尝试通过 corepack 激活 pnpm@$PNPM_VERSION..."
+  if [ -x "$node_dir/corepack.exe" ] || [ -x "$node_dir/corepack" ]; then
+    "$node_dir/corepack" enable >/dev/null 2>&1 || true
+    if "$node_dir/corepack" prepare "pnpm@$PNPM_VERSION" --activate 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  warn "corepack 不可用，改用 npm 全局安装 pnpm@$PNPM_VERSION"
+  if [ -x "$npm_bin" ]; then
+    "$npm_bin" install -g "pnpm@$PNPM_VERSION" --registry="$PNPM_REGISTRY"
+    return $?
+  fi
+  err "corepack 和 npm 都不可用，无法安装 pnpm"
+  return 1
+}
+
+# 确保 pnpm 可用且版本正确（npm → pnpm 11 迁移时自动安装）
+ensure_pnpm() {
+  local node_dir pnpm_ver
+
+  node_dir=$(ensure_node_path) || {
+    err "找不到 node.exe（pull 需要 node/pnpm）"
+    return 1
+  }
+  export PATH="/c/Windows/System32:$node_dir:$PATH"
+  log "node 路径: $node_dir/node (已加入 PATH)"
+
+  if ! command -v pnpm >/dev/null 2>&1; then
+    warn "找不到 pnpm，正在安装 pnpm@$PNPM_VERSION..."
+    install_pnpm || return 1
+  fi
+
+  pnpm_ver=$(pnpm --version 2>/dev/null || echo "")
+  if [ "$pnpm_ver" != "$PNPM_VERSION" ]; then
+    warn "pnpm 版本 $pnpm_ver 与要求 $PNPM_VERSION 不一致，正在重新安装..."
+    install_pnpm || return 1
+    pnpm_ver=$(pnpm --version 2>/dev/null || echo "")
+  fi
+
+  if [ "$pnpm_ver" != "$PNPM_VERSION" ]; then
+    err "pnpm 版本仍为 $pnpm_ver，需要 $PNPM_VERSION"
+    err "请手动执行: npm install -g pnpm@$PNPM_VERSION --registry=$PNPM_REGISTRY"
+    return 1
+  fi
+
+  if ! pnpm --version >/dev/null 2>&1; then
+    if [ -f "$node_dir/node_modules/pnpm/bin/pnpm.cjs" ]; then
+      warn "pnpm 包装脚本异常，改用 node 直接调用 pnpm.cjs"
+      pnpm() { "$node_dir/node" "$node_dir/node_modules/pnpm/bin/pnpm.cjs" "$@"; }
+      export -f pnpm
+    else
+      err "pnpm 不可用且找不到 $node_dir/node_modules/pnpm/bin/pnpm.cjs"
+      return 1
+    fi
+  fi
+
+  ok "pnpm 版本: $(pnpm --version)"
+  return 0
 }
 
 # 探测 Windows System32 路径(next 在某些场景下会调 cmd 等系统工具)
@@ -496,19 +567,10 @@ cmd_pull() {
   ok "工作区干净"
   echo ""
 
-  # 0.5 把 node 和 System32 加到 PATH(让 pnpm 跑得起来)
-  local pull_node_dir
-  pull_node_dir=$(ensure_node_path) || {
-    err "找不到 node.exe（pull 需要 node/pnpm）"
-    return 1
-  }
-  export PATH="/c/Windows/System32:$pull_node_dir:$PATH"
-  log "node 路径: $pull_node_dir/node (已加入 PATH)"
-  if ! command -v pnpm >/dev/null 2>&1; then
-    err "找不到 pnpm。请先在生产机安装: npm install -g pnpm@11.20.0（或 corepack enable && corepack prepare pnpm@11.20.0 --activate）"
+  # 0.5 确保 node/pnpm 可用（npm → pnpm 11 迁移时自动安装）
+  if ! ensure_pnpm; then
     return 1
   fi
-  log "pnpm 版本: $(pnpm --version)"
   echo ""
 
   # 1. 拉取最新代码（用项目里配置好的镜像: ghfast.top 代理 github.com）
@@ -539,7 +601,7 @@ cmd_pull() {
     else
       log "package.json / pnpm-lock.yaml 有变更，执行 pnpm install"
     fi
-    if ! (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com); then
+    if ! (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile); then
       err "pnpm install 失败"
       if [ "$was_running" = "1" ]; then
         warn "正在恢复旧版本服务..."
