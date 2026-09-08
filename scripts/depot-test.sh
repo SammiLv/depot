@@ -6,21 +6,25 @@
 #   - 跨平台：macOS / Windows Git Bash 均可运行
 #   - 服务跑 next dev（热更新），而非 next start
 #   - 数据库用 prisma db push（开发库），不用 migrate deploy
-#   - push 默认推共享集成分支 depot-KPI，也可用 push main 指定推 main
+#   - 按「角色」分工（git config --local depot.role，init 时指定一次）:
+#       developer（同事，默认）: 从 main 拉代码 → 推到共享集成分支 depot-test，跟踪固定 origin/depot-test
+#       reviewer（审核人）:     从 depot-test 拉代码 → 验证后推到 main，跟踪固定 origin/main
 #
 # 用法:
 #   bash scripts/depot-test.sh init                 # 新环境初始化（检查并安装 git/node/pnpm，装依赖，建库）
-#   bash scripts/depot-test.sh pull                 # 拉 main 最新代码 + 重建环境 + 重启服务
-#   bash scripts/depot-test.sh pull depot-KPI       # 拉 depot-KPI 最新代码 + 重建环境 + 重启服务
-#   bash scripts/depot-test.sh push                 # 推当前代码到 origin/depot-KPI（跟踪 main 时自动改跟踪 depot-KPI）
-#   bash scripts/depot-test.sh push main            # 推当前代码到 origin/main（不改跟踪关系）
+#   bash scripts/depot-test.sh init --role=reviewer # 同上，但初始化为审核人角色
+#   bash scripts/depot-test.sh pull                 # 拉默认源分支最新代码 + 重建环境 + 重启服务
+#   bash scripts/depot-test.sh pull main            # 临时指定拉 main（不改角色默认）
+#   bash scripts/depot-test.sh push                 # 推到角色默认目标分支（跟踪不符时自动纠正）
+#   bash scripts/depot-test.sh push main            # 临时指定推 main（不改跟踪关系）
 #   bash scripts/depot-test.sh commit -m "fix: xx"  # 提交当前改动到本地当前分支
 #   bash scripts/depot-test.sh start|stop|restart   # 日常运维
 #   bash scripts/depot-test.sh status|config|tail   # 状态 / 配置 / 日志
 #
-# init 选项（持久化到 .env，可选）:
+# init 选项（持久化到 .env / git 本地配置，可选）:
 #   --app-key=KEY    钉钉 AppKey
 #   --app-url=URL    APP_URL（默认 http://localhost:3000）
+#   --role=ROLE      角色: developer（默认）| reviewer（写入 git config --local depot.role）
 #
 # start / restart 选项（仅本次生效）:
 #   --port=N         绑端口（默认 3000）
@@ -39,11 +43,44 @@ set -u
 # ===================== 脚本默认值 =====================
 DEFAULT_PORT=3000
 DEFAULT_HOSTNAME="0.0.0.0"
-DEFAULT_PUSH_BRANCH="depot-KPI"    # push 的默认目标分支（可用 push main 或 --to=main 改推 main）
+INTEGRATION_BRANCH="depot-test"    # 共享集成分支（同事推送目标 / 审核人拉取源）
 PNPM_VERSION="11.20.0"             # 与 package.json packageManager 对齐
-NODE_MIN_MAJOR=22                  # 最低 Node 大版本（推荐 24）
+NODE_MIN_MAJOR=24                  # 必须 Node 24+（better-sqlite3 原生绑定 ABI 与 Node 大版本绑定）
 PNPM_REGISTRY="https://registry.npmmirror.com"
 # =======================================================================
+
+# ----- 角色（git config --local depot.role: developer|reviewer） -----
+# developer（同事，默认）: pull 拉 main，push 推集成分支，跟踪固定为集成分支
+# reviewer（代码审核人）:  pull 拉集成分支，push 推 main，跟踪固定为 main
+resolve_role() {
+  ROLE="$(cd "$PROJECT_DIR" && git config --local depot.role 2>/dev/null || true)"
+  [ -z "$ROLE" ] && ROLE="developer"
+  if [ "$ROLE" = "reviewer" ]; then
+    DEFAULT_PULL_BRANCH="$INTEGRATION_BRANCH"
+    DEFAULT_PUSH_BRANCH="main"
+    TRACK_UPSTREAM="origin/main"
+  else
+    ROLE="developer"
+    DEFAULT_PULL_BRANCH="main"
+    DEFAULT_PUSH_BRANCH="$INTEGRATION_BRANCH"
+    TRACK_UPSTREAM="origin/${INTEGRATION_BRANCH}"
+  fi
+}
+
+# 固定跟踪关系：pull/push 成功后调用，当前分支跟踪不等于角色目标时自动纠正
+ensure_tracking() {
+  local branch upstream
+  branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "")
+  [ -z "$branch" ] && return 0
+  upstream=$(cd "$PROJECT_DIR" && git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo "")
+  if [ "$upstream" != "$TRACK_UPSTREAM" ]; then
+    if (cd "$PROJECT_DIR" && git branch --set-upstream-to="$TRACK_UPSTREAM" "$branch" 2>/dev/null); then
+      ok "分支跟踪已固定为 ${TRACK_UPSTREAM}（角色: ${ROLE}）"
+    else
+      warn "跟踪设置失败（远端分支可能不存在，先 pull/push 一次），可手动: git branch --set-upstream-to=${TRACK_UPSTREAM}"
+    fi
+  fi
+}
 
 # ----- 路径 -----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -233,6 +270,8 @@ find_node_dir() {
     )
   else
     candidates=(
+      "/opt/homebrew/opt/node@24/bin"
+      "/usr/local/opt/node@24/bin"
       "/usr/local/bin"
       "/opt/homebrew/bin"
     )
@@ -274,25 +313,26 @@ install_git() {
   fi
 }
 
-# 安装 node（按平台）
+# 安装 node（按平台，固定装 24 大版本，保证与项目原生依赖 ABI 一致）
 install_node() {
-  log "尝试安装 Node.js..."
+  log "尝试安装 Node.js 24..."
   if [ "$OS" = "mac" ]; then
     if command -v brew >/dev/null 2>&1; then
-      brew install node
+      brew install node@24 || return 1
+      brew link --overwrite node@24 2>/dev/null || true
     else
-      err "未检测到 Homebrew。请安装 Node.js $NODE_MIN_MAJOR+（推荐 nvm: https://github.com/nvm-sh/nvm）"
+      err "未检测到 Homebrew。请安装 Node.js 24（推荐 nvm: https://github.com/nvm-sh/nvm ，nvm install 24）"
       return 1
     fi
   elif [ "$OS" = "windows" ]; then
     if command -v winget >/dev/null 2>&1; then
-      winget install --id OpenJS.NodeJS -e --source winget
+      winget install --id OpenJS.NodeJS.LTS -e --source winget
     else
-      err "未检测到 winget。请手动安装 Node.js $NODE_MIN_MAJOR+: https://nodejs.org/"
+      err "未检测到 winget。请手动安装 Node.js 24 LTS: https://nodejs.org/"
       return 1
     fi
   else
-    err "请用系统包管理器或 nvm 安装 Node.js $NODE_MIN_MAJOR+"
+    err "请用系统包管理器或 nvm 安装 Node.js 24（nvm install 24）"
     return 1
   fi
 }
@@ -333,17 +373,21 @@ ensure_runtime() {
 # ----- 用法 -----
 print_usage() {
   cat <<USAGE
-depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}）
+depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}，角色: ${ROLE}）
+
+角色分工（git config --local depot.role，init 时指定一次）:
+  developer（同事，默认）: pull 默认拉 main      → push 默认推 ${INTEGRATION_BRANCH}，跟踪固定 origin/${INTEGRATION_BRANCH}
+  reviewer（审核人）:      pull 默认拉 ${INTEGRATION_BRANCH} → push 默认推 main，跟踪固定 origin/main
 
 新环境（一次性）:
-  bash scripts/depot-test.sh init [--app-url=URL] [--app-key=KEY]
+  bash scripts/depot-test.sh init [--role=developer|reviewer] [--app-url=URL] [--app-key=KEY]
 
 日常开发（反复用）:
-  bash scripts/depot-test.sh pull                  # 拉 origin/main 最新代码 + 重建 + 重启
-  bash scripts/depot-test.sh pull depot-KPI        # 拉 origin/depot-KPI 最新代码 + 重建 + 重启
-  bash scripts/depot-test.sh pull --from=depot-KPI # 同上（等号语法）
-  bash scripts/depot-test.sh push                  # 推当前代码到 origin/${DEFAULT_PUSH_BRANCH}
-  bash scripts/depot-test.sh push main             # 推当前代码到 origin/main
+  bash scripts/depot-test.sh pull                  # 拉角色默认源分支最新代码 + 重建 + 重启
+  bash scripts/depot-test.sh pull main             # 临时指定拉 origin/main（不改角色默认）
+  bash scripts/depot-test.sh pull --from=main      # 同上（等号语法）
+  bash scripts/depot-test.sh push                  # 推当前代码到 origin/${DEFAULT_PUSH_BRANCH}（角色默认目标）
+  bash scripts/depot-test.sh push main             # 临时指定推 origin/main（不改跟踪关系）
   bash scripts/depot-test.sh push --to=main        # 同上（等号语法）
   bash scripts/depot-test.sh commit -m "fix: xxx"  # 提交改动到本地当前分支
 
@@ -352,14 +396,13 @@ depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}）
   bash scripts/depot-test.sh stop
   bash scripts/depot-test.sh restart
   bash scripts/depot-test.sh status
-  bash scripts/depot-test.sh config
+  bash scripts/depot-test.sh config [--role=developer|reviewer]   # 查看配置 / 切换角色
   bash scripts/depot-test.sh tail
 
 说明:
   - 服务跑 next dev（热更新），默认端口 $DEFAULT_PORT
-  - push 默认推到 ${DEFAULT_PUSH_BRANCH} 分支；若本地分支跟踪的是 origin/main，
-    push 后自动改为跟踪 origin/${DEFAULT_PUSH_BRANCH}
-  - push main 可指定推送到 main 分支（不改变跟踪关系）
+  - 每次 pull/push 成功后自动检查分支跟踪，与角色目标不符则自动纠正
+  - 显式指定非默认目标的 push（如 push xxx）不会改动跟踪关系
   - 配置优先级: CLI 参数 > .env > 脚本默认
 USAGE
 }
@@ -367,6 +410,20 @@ USAGE
 # ----- 命令实现 -----
 
 cmd_config() {
+  # 切换角色: config --role=reviewer
+  if [ -n "$CLI_ROLE" ]; then
+    if [ "$CLI_ROLE" != "developer" ] && [ "$CLI_ROLE" != "reviewer" ]; then
+      err "无效角色: ${CLI_ROLE}（可选: developer | reviewer）"
+      return 1
+    fi
+    (cd "$PROJECT_DIR" && git config --local depot.role "$CLI_ROLE")
+    ok "角色已切换为: $CLI_ROLE"
+    resolve_role
+    ensure_tracking
+    echo ""
+  fi
+  log "当前角色: ${ROLE}（pull 默认拉 ${DEFAULT_PULL_BRANCH}，push 默认推 ${DEFAULT_PUSH_BRANCH}，跟踪固定 ${TRACK_UPSTREAM}）"
+  echo ""
   if [ ! -f "$ENV_FILE" ]; then
     warn ".env 不存在: $ENV_FILE"
     warn "可先执行: bash scripts/depot-test.sh init"
@@ -392,7 +449,7 @@ cmd_config() {
 
 # 新环境初始化：检查并按需安装 git / node / pnpm，然后装依赖、建库
 cmd_init() {
-  log "=== 1/5 检查 git ==="
+  log "=== 1/6 检查 git ==="
   if command -v git >/dev/null 2>&1; then
     ok "git 已安装: $(git --version)"
   else
@@ -402,7 +459,22 @@ cmd_init() {
   fi
   echo ""
 
-  log "=== 2/5 检查 Node.js（要求 $NODE_MIN_MAJOR+，推荐 24）==="
+  # 写入角色（--role=reviewer 时；不写则保持现状/默认 developer）
+  if [ -n "$CLI_ROLE" ]; then
+    if [ "$CLI_ROLE" != "developer" ] && [ "$CLI_ROLE" != "reviewer" ]; then
+      err "无效角色: ${CLI_ROLE}（可选: developer | reviewer）"
+      return 1
+    fi
+    (cd "$PROJECT_DIR" && git config --local depot.role "$CLI_ROLE")
+    resolve_role
+    ok "角色已设置为: ${ROLE}（pull 默认拉 ${DEFAULT_PULL_BRANCH}，push 默认推 ${DEFAULT_PUSH_BRANCH}）"
+  else
+    ok "当前角色: ${ROLE}（如需修改: bash scripts/depot-test.sh config --role=reviewer）"
+  fi
+  ensure_tracking
+  echo ""
+
+  log "=== 2/6 检查 Node.js（必须 $NODE_MIN_MAJOR+）==="
   local node_dir
   node_dir=$(find_node_dir || true)
   if [ -n "$node_dir" ]; then
@@ -411,9 +483,8 @@ cmd_init() {
     major=$(node_major_version)
     if [ "$major" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
       ok "node 已安装: $(node --version)（${node_dir}）"
-      [ "$major" -lt 24 ] && warn "推荐 Node 24，当前 $major 也可运行"
     else
-      warn "node 版本过低（$(node --version)），需要 $NODE_MIN_MAJOR+"
+      warn "node 版本不符（$(node --version)），必须 Node $NODE_MIN_MAJOR+"
       install_node || return 1
     fi
   else
@@ -425,7 +496,7 @@ cmd_init() {
   fi
   echo ""
 
-  log "=== 3/5 检查 pnpm（${PNPM_VERSION}）==="
+  log "=== 3/6 检查 pnpm（${PNPM_VERSION}）==="
   if command -v pnpm >/dev/null 2>&1; then
     ok "pnpm 已安装: $(pnpm --version)"
   else
@@ -435,7 +506,7 @@ cmd_init() {
   fi
   echo ""
 
-  log "=== 4/5 安装项目依赖（pnpm install）==="
+  log "=== 4/6 安装项目依赖（pnpm install）==="
   if ! (cd "$PROJECT_DIR" && pnpm install --registry="$PNPM_REGISTRY"); then
     err "pnpm install 失败"
     return 1
@@ -443,16 +514,20 @@ cmd_init() {
   ok "依赖安装完成"
   echo ""
 
-  log "=== 5/5 初始化数据库（prisma generate + db push）==="
+  log "=== 5/6 初始化数据库（prisma generate + db push）==="
   if ! (cd "$PROJECT_DIR" && pnpm run prisma:generate); then
     err "prisma generate 失败"
     return 1
   fi
-  if ! (cd "$PROJECT_DIR" && pnpm exec prisma db push --config db/prisma.config.ts --accept-data-loss); then
-    err "prisma db push 失败"
-    return 1
+  if [ -f "$PROJECT_DIR/db/dev.db" ]; then
+    ok "检测到已有本地数据库（db/dev.db），跳过数据库初始化（不动现有数据）"
+  else
+    if ! (cd "$PROJECT_DIR" && pnpm exec prisma db push --config db/prisma.config.ts --accept-data-loss); then
+      err "prisma db push 失败"
+      return 1
+    fi
+    ok "数据库已创建（db/dev.db）"
   fi
-  ok "数据库就绪（db/dev.db）"
   echo ""
 
   # 可选：写入 .env
@@ -464,7 +539,23 @@ cmd_init() {
   fi
 
   ok "初始化完成！启动服务: bash scripts/depot-test.sh start"
-  log "首次访问请先打开 $APP_URL/login?mode=init 初始化系统管理员账号"
+  if has_admin_account; then
+    ok "检测到已存在系统管理员账号，跳过账号初始化（直接登录即可）"
+  else
+    log "首次访问请先打开 $APP_URL/login?mode=init 初始化系统管理员账号"
+  fi
+}
+
+# 检测本地数据库是否已有系统管理员账号（库文件不存在/表不存在/查询失败都视为没有）
+has_admin_account() {
+  [ -f "$PROJECT_DIR/db/dev.db" ] || return 1
+  (cd "$PROJECT_DIR" && node -e '
+    try {
+      const db = require("better-sqlite3")("db/dev.db", { readonly: true });
+      const n = db.prepare("SELECT COUNT(*) c FROM User WHERE roleType=\x27ADMIN\x27 AND isActive=1 AND deletedAt IS NULL").get();
+      process.exit(n.c > 0 ? 0 : 1);
+    } catch { process.exit(1); }
+  ') 2>/dev/null
 }
 
 cmd_status() {
@@ -519,7 +610,7 @@ cmd_start() {
   # 项目本地 next 入口（Windows 转 Windows 路径，避免 MSYS 的 /c/ 被解析成 C:\c\）
   local next_bin="$PROJECT_DIR/node_modules/next/dist/bin/next"
   if [ ! -f "$next_bin" ]; then
-    err "找不到 next 入口: $next_bin（请先跑 pnpm install 或 bash scripts/depot-test.sh init）"
+    err "找不到 next 入口: ${next_bin}（请先跑 pnpm install 或 bash scripts/depot-test.sh init）"
     return 1
   fi
   if [ "$OS" = "windows" ]; then
@@ -647,6 +738,7 @@ cmd_pull() {
     err "git pull 失败（可能是冲突或网络问题）"
     return 1
   fi
+  ensure_tracking
   echo ""
 
   # 2. 装依赖（仅 node_modules 缺失或依赖清单有变更时）
@@ -788,18 +880,13 @@ cmd_push() {
   fi
   ok "push 成功: $branch → origin/${PUSH_TARGET}"
 
-  # 推到默认集成分支且当前跟踪的是 origin/main 时，改为跟踪 origin/$PUSH_TARGET
-  # （指定 push main 时不改动跟踪关系）
-  local upstream
-  upstream=$(cd "$PROJECT_DIR" && git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo "")
-  if [ "$PUSH_TARGET" != "main" ] && [ "$upstream" = "origin/main" ]; then
-    if (cd "$PROJECT_DIR" && git branch --set-upstream-to="origin/${PUSH_TARGET}" "$branch"); then
-      ok "分支跟踪已从 origin/main 切换为 origin/${PUSH_TARGET}"
-    else
-      warn "跟踪切换失败，可手动: git branch --set-upstream-to=origin/${PUSH_TARGET}"
-    fi
-  elif [ -n "$upstream" ]; then
-    log "当前跟踪: ${upstream}（保持不变）"
+  # 推到角色默认目标时固定跟踪关系；显式指定其他目标（如 push xxx）不动跟踪
+  if [ "$PUSH_TARGET" = "$DEFAULT_PUSH_BRANCH" ]; then
+    ensure_tracking
+  else
+    local upstream
+    upstream=$(cd "$PROJECT_DIR" && git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo "")
+    [ -n "$upstream" ] && log "当前跟踪: ${upstream}（非默认目标 push，保持不变）"
   fi
   (cd "$PROJECT_DIR" && git status -sb)
 }
@@ -886,6 +973,7 @@ parse_options() {
       --app-key=*)    DINGTALK_APP_KEY="${1#*=}" ;;
       --from=*)       PULL_BRANCH="${1#*=}"      ;;
       --to=*)         PUSH_TARGET="${1#*=}"      ;;
+      --role=*)       CLI_ROLE="${1#*=}"         ;;
       -m)             COMMIT_MSG="$2"; shift    ;;
       --message=*)    COMMIT_MSG="${1#*=}"      ;;
       -h|--help)      print_usage; exit 0        ;;
@@ -906,10 +994,12 @@ APP_URL=""
 CLI_APP_URL=""
 DINGTALK_APP_KEY=""
 COMMIT_MSG=""
-PULL_BRANCH="main"
+CLI_ROLE=""
+resolve_role
+PULL_BRANCH="$DEFAULT_PULL_BRANCH"
 PUSH_TARGET="$DEFAULT_PUSH_BRANCH"
 
-# pull 的位置参数：pull depot-KPI 等价于 pull --from=depot-KPI
+# pull 的位置参数：pull depot-test 等价于 pull --from=depot-test
 if [ "$CMD" = "pull" ] && [ $# -gt 0 ] && [[ "$1" != -* ]]; then
   PULL_BRANCH="$1"
   shift
