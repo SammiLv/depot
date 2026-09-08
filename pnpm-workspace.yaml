@@ -5,11 +5,11 @@ overrides:
   # 强制所有层级（含 @prisma/adapter-better-sqlite3 的嵌套依赖）使用 v13。
   better-sqlite3: ^13.0.3
 # pnpm 11.20 用 allowBuilds 取代 onlyBuiltDependencies：以下依赖的安装脚本允许执行。
-# better-sqlite3 需要 prebuild-install 下载/编译原生绑定；prisma 系需要下载引擎；
-# esbuild/sharp/unrs-resolver 为平台二进制校验，与 npm 默认行为对齐。
+# better-sqlite3 v13 自带 prebuilds/*.node，无需 node-gyp；若设为 true 会在无 Python 的生产机编译失败。
+# prisma 系需要下载引擎；esbuild/sharp/unrs-resolver 为平台二进制校验。
 allowBuilds:
   '@prisma/engines': true
-  better-sqlite3: true
+  better-sqlite3: false
   esbuild: true
   prisma: true
   sharp: true
