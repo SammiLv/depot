@@ -13,10 +13,10 @@
 # 用法:
 #   bash scripts/depot-test.sh init                 # 新环境初始化（检查并安装 git/node/pnpm，装依赖，建库）
 #   bash scripts/depot-test.sh init --role=reviewer # 同上，但初始化为审核人角色
-#   bash scripts/depot-test.sh pull                 # 拉默认源分支最新代码 + 重建环境 + 重启服务
-#   bash scripts/depot-test.sh pull main            # 临时指定拉 main（不改角色默认）
-#   bash scripts/depot-test.sh push                 # 推到角色默认目标分支（跟踪不符时自动纠正）
-#   bash scripts/depot-test.sh push main            # 临时指定推 main（不改跟踪关系）
+#   bash scripts/depot-test.sh pull main            # 拉 main 最新代码 + 重建环境 + 重启服务（必须带分支）
+#   bash scripts/depot-test.sh pull depot-test      # 拉 depot-test 最新代码 + 重建环境 + 重启服务
+#   bash scripts/depot-test.sh push depot-test      # 推到 origin/depot-test（必须带目标分支）
+#   bash scripts/depot-test.sh push main            # 推到 origin/main（推到角色推荐目标时才固定跟踪）
 #   bash scripts/depot-test.sh commit -m "fix: xx"  # 提交当前改动到本地当前分支
 #   bash scripts/depot-test.sh start|stop|restart   # 日常运维
 #   bash scripts/depot-test.sh status|config|tail   # 状态 / 配置 / 日志
@@ -375,20 +375,18 @@ print_usage() {
   cat <<USAGE
 depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}，角色: ${ROLE}）
 
-角色分工（git config --local depot.role，init 时指定一次）:
-  developer（同事，默认）: pull 默认拉 main      → push 默认推 ${INTEGRATION_BRANCH}，跟踪固定 origin/${INTEGRATION_BRANCH}
-  reviewer（审核人）:      pull 默认拉 ${INTEGRATION_BRANCH} → push 默认推 main，跟踪固定 origin/main
+角色分工（git config --local depot.role，init 时指定一次；角色决定提示的推荐分支与固定跟踪）:
+  developer（同事，默认）: pull main        → push ${INTEGRATION_BRANCH}，跟踪固定 origin/${INTEGRATION_BRANCH}
+  reviewer（审核人）:      pull ${INTEGRATION_BRANCH} → push main，跟踪固定 origin/main
 
 新环境（一次性）:
   bash scripts/depot-test.sh init [--role=developer|reviewer] [--app-url=URL] [--app-key=KEY]
 
-日常开发（反复用）:
-  bash scripts/depot-test.sh pull                  # 拉角色默认源分支最新代码 + 重建 + 重启
-  bash scripts/depot-test.sh pull main             # 临时指定拉 origin/main（不改角色默认）
-  bash scripts/depot-test.sh pull --from=main      # 同上（等号语法）
-  bash scripts/depot-test.sh push                  # 推当前代码到 origin/${DEFAULT_PUSH_BRANCH}（角色默认目标）
-  bash scripts/depot-test.sh push main             # 临时指定推 origin/main（不改跟踪关系）
-  bash scripts/depot-test.sh push --to=main        # 同上（等号语法）
+日常开发（反复用，pull/push 必须显式指定分支）:
+  bash scripts/depot-test.sh pull main             # 拉 origin/main 最新代码 + 重建 + 重启
+  bash scripts/depot-test.sh pull depot-test       # 拉 origin/depot-test（等号语法: --from=depot-test）
+  bash scripts/depot-test.sh push depot-test       # 推当前代码到 origin/depot-test（等号语法: --to=depot-test）
+  bash scripts/depot-test.sh push main             # 推当前代码到 origin/main
   bash scripts/depot-test.sh commit -m "fix: xxx"  # 提交改动到本地当前分支
 
 日常运维:
@@ -401,8 +399,8 @@ depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}，
 
 说明:
   - 服务跑 next dev（热更新），默认端口 $DEFAULT_PORT
-  - 每次 pull/push 成功后自动检查分支跟踪，与角色目标不符则自动纠正
-  - 显式指定非默认目标的 push（如 push xxx）不会改动跟踪关系
+  - pull / push 必须显式指定分支，不带参数会直接报错并提示当前角色的推荐分支
+  - 推到角色推荐目标（${DEFAULT_PUSH_BRANCH}）后自动固定跟踪为 ${TRACK_UPSTREAM}；推其他分支不动跟踪
   - 配置优先级: CLI 参数 > .env > 脚本默认
 USAGE
 }
@@ -422,7 +420,7 @@ cmd_config() {
     ensure_tracking
     echo ""
   fi
-  log "当前角色: ${ROLE}（pull 默认拉 ${DEFAULT_PULL_BRANCH}，push 默认推 ${DEFAULT_PUSH_BRANCH}，跟踪固定 ${TRACK_UPSTREAM}）"
+  log "当前角色: ${ROLE}（推荐: pull ${DEFAULT_PULL_BRANCH} / push ${DEFAULT_PUSH_BRANCH}，跟踪固定 ${TRACK_UPSTREAM}）"
   echo ""
   if [ ! -f "$ENV_FILE" ]; then
     warn ".env 不存在: $ENV_FILE"
@@ -467,7 +465,7 @@ cmd_init() {
     fi
     (cd "$PROJECT_DIR" && git config --local depot.role "$CLI_ROLE")
     resolve_role
-    ok "角色已设置为: ${ROLE}（pull 默认拉 ${DEFAULT_PULL_BRANCH}，push 默认推 ${DEFAULT_PUSH_BRANCH}）"
+    ok "角色已设置为: ${ROLE}（推荐: pull ${DEFAULT_PULL_BRANCH} / push ${DEFAULT_PUSH_BRANCH}）"
   else
     ok "当前角色: ${ROLE}（如需修改: bash scripts/depot-test.sh config --role=reviewer）"
   fi
@@ -716,6 +714,10 @@ pull_needs_pnpm_install() {
 }
 
 cmd_pull() {
+  if [ -z "$PULL_BRANCH" ]; then
+    err "pull 必须指定分支，例如: bash scripts/depot-test.sh pull ${DEFAULT_PULL_BRANCH}（角色: ${ROLE}）"
+    return 2
+  fi
   # 0. 工作区状态检查（有未提交改动就拒绝，避免覆盖本地修改）
   log "=== 0/5 检查工作区状态 ==="
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
@@ -732,7 +734,7 @@ cmd_pull() {
   log "node: $(node --version)  pnpm: $(pnpm --version)"
   echo ""
 
-  # 1. 拉取指定分支最新代码（默认 main；用项目里配置好的镜像: ghfast.top 代理 github.com）
+  # 1. 拉取指定分支最新代码（用项目里配置好的镜像: ghfast.top 代理 github.com）
   log "=== 1/5 拉取 ${PULL_BRANCH} 最新代码（git pull origin ${PULL_BRANCH}）==="
   if ! (cd "$PROJECT_DIR" && git pull --no-rebase origin "$PULL_BRANCH"); then
     err "git pull 失败（可能是冲突或网络问题）"
@@ -819,6 +821,10 @@ github_reachable() {
 }
 
 cmd_push() {
+  if [ -z "$PUSH_TARGET" ]; then
+    err "push 必须指定目标分支，例如: bash scripts/depot-test.sh push ${DEFAULT_PUSH_BRANCH}（角色: ${ROLE}）"
+    return 2
+  fi
   # 0/4 网络预检(关键:不通就告诉用户怎么开代理,不要瞎试)
   log "=== 0/4 网络预检(必须可达 GitHub)==="
   if ! github_reachable; then
@@ -951,7 +957,7 @@ cmd_commit() {
   log "=== 4/4 总结 ==="
   (cd "$PROJECT_DIR" && git log --oneline -3)
   log ""
-  warn "改动还在本地仓库,跑 'bash scripts/depot-test.sh push' 推到 ${DEFAULT_PUSH_BRANCH}（或 push main 推到 main）"
+  warn "改动还在本地仓库,跑 'bash scripts/depot-test.sh push ${DEFAULT_PUSH_BRANCH}' 推到远端（角色: ${ROLE}）"
 }
 
 cmd_tail() {
@@ -996,8 +1002,8 @@ DINGTALK_APP_KEY=""
 COMMIT_MSG=""
 CLI_ROLE=""
 resolve_role
-PULL_BRANCH="$DEFAULT_PULL_BRANCH"
-PUSH_TARGET="$DEFAULT_PUSH_BRANCH"
+PULL_BRANCH=""
+PUSH_TARGET=""
 
 # pull 的位置参数：pull depot-test 等价于 pull --from=depot-test
 if [ "$CMD" = "pull" ] && [ $# -gt 0 ] && [[ "$1" != -* ]]; then
