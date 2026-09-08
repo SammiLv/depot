@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TalentConfigWorkbench } from "./content";
+import { ConfigWorkbench } from "./content";
 import type { ReviewWorkspaceData } from "./review-workspace-types";
 import type { CareerWorkspaceData, CompetencyWorkspaceData, TalentDecisionRuleWorkspaceData } from "./operation-workspace-types";
 
@@ -28,7 +28,7 @@ export function TalentConfigPageContent({
 
   return (
     <>
-      <TalentConfigWorkbench
+      <ConfigWorkbench
         data={reviewWorkspace}
         career={career}
         competency={competency}
