@@ -6,13 +6,14 @@
 #   - 跨平台：macOS / Windows Git Bash 均可运行
 #   - 服务跑 next dev（热更新），而非 next start
 #   - 数据库用 prisma db push（开发库），不用 migrate deploy
-#   - push 目标是共享集成分支 depot-KPI，不是 main
+#   - push 默认推共享集成分支 depot-KPI，也可用 push main 指定推 main
 #
 # 用法:
 #   bash scripts/depot-test.sh init                 # 新环境初始化（检查并安装 git/node/pnpm，装依赖，建库）
 #   bash scripts/depot-test.sh pull                 # 拉 main 最新代码 + 重建环境 + 重启服务
 #   bash scripts/depot-test.sh pull depot-KPI       # 拉 depot-KPI 最新代码 + 重建环境 + 重启服务
 #   bash scripts/depot-test.sh push                 # 推当前代码到 origin/depot-KPI（跟踪 main 时自动改跟踪 depot-KPI）
+#   bash scripts/depot-test.sh push main            # 推当前代码到 origin/main（不改跟踪关系）
 #   bash scripts/depot-test.sh commit -m "fix: xx"  # 提交当前改动到本地当前分支
 #   bash scripts/depot-test.sh start|stop|restart   # 日常运维
 #   bash scripts/depot-test.sh status|config|tail   # 状态 / 配置 / 日志
@@ -38,7 +39,7 @@ set -u
 # ===================== 脚本默认值 =====================
 DEFAULT_PORT=3000
 DEFAULT_HOSTNAME="0.0.0.0"
-PUSH_TARGET_BRANCH="depot-KPI"     # push 的固定目标分支
+DEFAULT_PUSH_BRANCH="depot-KPI"    # push 的默认目标分支（可用 push main 或 --to=main 改推 main）
 PNPM_VERSION="11.20.0"             # 与 package.json packageManager 对齐
 NODE_MIN_MAJOR=22                  # 最低 Node 大版本（推荐 24）
 PNPM_REGISTRY="https://registry.npmmirror.com"
@@ -341,7 +342,9 @@ depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}）
   bash scripts/depot-test.sh pull                  # 拉 origin/main 最新代码 + 重建 + 重启
   bash scripts/depot-test.sh pull depot-KPI        # 拉 origin/depot-KPI 最新代码 + 重建 + 重启
   bash scripts/depot-test.sh pull --from=depot-KPI # 同上（等号语法）
-  bash scripts/depot-test.sh push                  # 推当前代码到 origin/$PUSH_TARGET_BRANCH
+  bash scripts/depot-test.sh push                  # 推当前代码到 origin/${DEFAULT_PUSH_BRANCH}
+  bash scripts/depot-test.sh push main             # 推当前代码到 origin/main
+  bash scripts/depot-test.sh push --to=main        # 同上（等号语法）
   bash scripts/depot-test.sh commit -m "fix: xxx"  # 提交改动到本地当前分支
 
 日常运维:
@@ -354,8 +357,9 @@ depot-test.sh — Depot 开发/测试环境一键脚本（当前平台: ${OS}）
 
 说明:
   - 服务跑 next dev（热更新），默认端口 $DEFAULT_PORT
-  - push 固定推到 $PUSH_TARGET_BRANCH 分支；若本地分支跟踪的是 origin/main，
-    push 后自动改为跟踪 origin/$PUSH_TARGET_BRANCH
+  - push 默认推到 ${DEFAULT_PUSH_BRANCH} 分支；若本地分支跟踪的是 origin/main，
+    push 后自动改为跟踪 origin/${DEFAULT_PUSH_BRANCH}
+  - push main 可指定推送到 main 分支（不改变跟踪关系）
   - 配置优先级: CLI 参数 > .env > 脚本默认
 USAGE
 }
@@ -752,7 +756,7 @@ cmd_push() {
   fi
   echo ""
 
-  # 2/4 实际 push：当前分支 → origin/$PUSH_TARGET_BRANCH
+  # 2/4 实际 push：当前分支 → origin/$PUSH_TARGET
   local branch
   branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "")
   if [ -z "$branch" ]; then
@@ -760,9 +764,9 @@ cmd_push() {
     push_mirror_restore
     return 1
   fi
-  log "=== 2/4 git push origin $branch:$PUSH_TARGET_BRANCH ==="
+  log "=== 2/4 git push origin ${branch}:${PUSH_TARGET} ==="
   local push_ok=0
-  (cd "$PROJECT_DIR" && git push origin "$branch:$PUSH_TARGET_BRANCH") || push_ok=1
+  (cd "$PROJECT_DIR" && git push origin "$branch:$PUSH_TARGET") || push_ok=1
 
   # 3/4 恢复镜像规则
   echo ""
@@ -777,24 +781,25 @@ cmd_push() {
     err "git push 失败"
     err ""
     err "可能原因:"
-    err "  - $PUSH_TARGET_BRANCH 上有别人的新提交 → 先 bash scripts/depot-test.sh pull 同步后再推"
+    err "  - ${PUSH_TARGET} 上有别人的新提交 → 先 bash scripts/depot-test.sh pull ${PUSH_TARGET} 同步后再推"
     err "  - 403:PAT 权限不够 → 检查 https://github.com/settings/tokens"
     err "  - 401:PAT 无效 / 已过期"
     return 1
   fi
-  ok "push 成功: $branch → origin/$PUSH_TARGET_BRANCH"
+  ok "push 成功: $branch → origin/${PUSH_TARGET}"
 
-  # 若当前分支跟踪的是 origin/main，改为跟踪 origin/$PUSH_TARGET_BRANCH
+  # 推到默认集成分支且当前跟踪的是 origin/main 时，改为跟踪 origin/$PUSH_TARGET
+  # （指定 push main 时不改动跟踪关系）
   local upstream
   upstream=$(cd "$PROJECT_DIR" && git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo "")
-  if [ "$upstream" = "origin/main" ]; then
-    if (cd "$PROJECT_DIR" && git branch --set-upstream-to="origin/$PUSH_TARGET_BRANCH" "$branch"); then
-      ok "分支跟踪已从 origin/main 切换为 origin/$PUSH_TARGET_BRANCH"
+  if [ "$PUSH_TARGET" != "main" ] && [ "$upstream" = "origin/main" ]; then
+    if (cd "$PROJECT_DIR" && git branch --set-upstream-to="origin/${PUSH_TARGET}" "$branch"); then
+      ok "分支跟踪已从 origin/main 切换为 origin/${PUSH_TARGET}"
     else
-      warn "跟踪切换失败，可手动: git branch --set-upstream-to=origin/$PUSH_TARGET_BRANCH"
+      warn "跟踪切换失败，可手动: git branch --set-upstream-to=origin/${PUSH_TARGET}"
     fi
   elif [ -n "$upstream" ]; then
-    log "当前跟踪: $upstream（保持不变）"
+    log "当前跟踪: ${upstream}（保持不变）"
   fi
   (cd "$PROJECT_DIR" && git status -sb)
 }
@@ -859,7 +864,7 @@ cmd_commit() {
   log "=== 4/4 总结 ==="
   (cd "$PROJECT_DIR" && git log --oneline -3)
   log ""
-  warn "改动还在本地仓库,跑 'bash scripts/depot-test.sh push' 推到 $PUSH_TARGET_BRANCH"
+  warn "改动还在本地仓库,跑 'bash scripts/depot-test.sh push' 推到 ${DEFAULT_PUSH_BRANCH}（或 push main 推到 main）"
 }
 
 cmd_tail() {
@@ -880,6 +885,7 @@ parse_options() {
       --app-url=*)    APP_URL="${1#*=}"; CLI_APP_URL="${1#*=}" ;;
       --app-key=*)    DINGTALK_APP_KEY="${1#*=}" ;;
       --from=*)       PULL_BRANCH="${1#*=}"      ;;
+      --to=*)         PUSH_TARGET="${1#*=}"      ;;
       -m)             COMMIT_MSG="$2"; shift    ;;
       --message=*)    COMMIT_MSG="${1#*=}"      ;;
       -h|--help)      print_usage; exit 0        ;;
@@ -901,10 +907,17 @@ CLI_APP_URL=""
 DINGTALK_APP_KEY=""
 COMMIT_MSG=""
 PULL_BRANCH="main"
+PUSH_TARGET="$DEFAULT_PUSH_BRANCH"
 
 # pull 的位置参数：pull depot-KPI 等价于 pull --from=depot-KPI
 if [ "$CMD" = "pull" ] && [ $# -gt 0 ] && [[ "$1" != -* ]]; then
   PULL_BRANCH="$1"
+  shift
+fi
+
+# push 的位置参数：push main 等价于 push --to=main
+if [ "$CMD" = "push" ] && [ $# -gt 0 ] && [[ "$1" != -* ]]; then
+  PUSH_TARGET="$1"
   shift
 fi
 
