@@ -204,12 +204,26 @@ is_app_key_field() {
 # ----- node / pnpm 探测与安装 -----
 
 # 探测 node 所在目录（标准输出）；找不到返回非 0
-# 顺序：PATH → 平台常见安装位置 → nvm 版本目录
+# 顺序：nvm 管理的 Node 24+（项目标准版本）→ PATH → 平台常见安装位置
+# 注意必须与本机安装依赖时的 Node 大版本一致，否则 better-sqlite3 原生绑定 ABI 不匹配
 find_node_dir() {
+  # 1. nvm 版本目录（mac/linux ~/.nvm，windows 常见挂载），优先 v24+
+  local nvm_dir latest
+  for nvm_dir in "$HOME/.nvm/versions/node" "/c/nvm/versions/node" "$HOME/AppData/Roaming/nvm"; do
+    if [ -d "$nvm_dir" ]; then
+      latest=$(ls -d "$nvm_dir"/v2[4-9]*/bin "$nvm_dir"/v2[4-9]* 2>/dev/null | sort -V | tail -1)
+      if [ -n "$latest" ] && { [ -x "$latest/node" ] || [ -x "$latest/node.exe" ]; }; then
+        echo "$latest"
+        return 0
+      fi
+    fi
+  done
+  # 2. PATH 里的 node
   if command -v node >/dev/null 2>&1; then
     command -v node | xargs dirname
     return 0
   fi
+  # 3. 平台常见安装位置
   local candidates=()
   if [ "$OS" = "windows" ]; then
     candidates=(
@@ -227,18 +241,6 @@ find_node_dir() {
     if [ -x "$d/node.exe" ] || [ -x "$d/node" ]; then
       echo "$d"
       return 0
-    fi
-  done
-  # nvm 版本目录（mac/linux ~/.nvm，windows %APPDATA%/nvm 常见挂载）
-  local nvm_dir
-  for nvm_dir in "$HOME/.nvm/versions/node" "/c/nvm/versions/node" "$HOME/AppData/Roaming/nvm"; do
-    if [ -d "$nvm_dir" ]; then
-      local latest
-      latest=$(ls -d "$nvm_dir"/v*/bin "$nvm_dir"/v* 2>/dev/null | sort -V | tail -1)
-      if [ -n "$latest" ] && { [ -x "$latest/node" ] || [ -x "$latest/node.exe" ]; }; then
-        echo "$latest"
-        return 0
-      fi
     fi
   done
   return 1
@@ -637,7 +639,7 @@ cmd_pull() {
 
   # 1. 拉取指定分支最新代码（默认 main；用项目里配置好的镜像: ghfast.top 代理 github.com）
   log "=== 1/5 拉取 ${PULL_BRANCH} 最新代码（git pull origin ${PULL_BRANCH}）==="
-  if ! (cd "$PROJECT_DIR" && git pull origin "$PULL_BRANCH"); then
+  if ! (cd "$PROJECT_DIR" && git pull --no-rebase origin "$PULL_BRANCH"); then
     err "git pull 失败（可能是冲突或网络问题）"
     return 1
   fi
