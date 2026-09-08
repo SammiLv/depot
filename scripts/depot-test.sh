@@ -404,7 +404,7 @@ cmd_init() {
     local major
     major=$(node_major_version)
     if [ "$major" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
-      ok "node 已安装: $(node --version)（$node_dir）"
+      ok "node 已安装: $(node --version)（${node_dir}）"
       [ "$major" -lt 24 ] && warn "推荐 Node 24，当前 $major 也可运行"
     else
       warn "node 版本过低（$(node --version)），需要 $NODE_MIN_MAJOR+"
@@ -419,7 +419,7 @@ cmd_init() {
   fi
   echo ""
 
-  log "=== 3/5 检查 pnpm（$PNPM_VERSION）==="
+  log "=== 3/5 检查 pnpm（${PNPM_VERSION}）==="
   if command -v pnpm >/dev/null 2>&1; then
     ok "pnpm 已安装: $(pnpm --version)"
   else
@@ -556,7 +556,7 @@ cmd_start() {
     ok "服务已启动: $APP_URL"
     cmd_status
   else
-    err "服务启动失败（20 秒内未监听端口 $PORT）"
+    err "服务启动失败（20 秒内未监听端口 ${PORT}）"
     err "最近 $LOG_TAIL_LINES 行日志:"
     tail -n "$LOG_TAIL_LINES" "$LOG_FILE" >&2 || true
     return 1
@@ -573,7 +573,7 @@ cmd_stop() {
     return 0
   fi
 
-  log "停止服务（kill PID: $pids）"
+  log "停止服务（kill PID: ${pids}）"
   for pid in $pids; do
     if kill_pid "$pid"; then
       ok "已结束 PID $pid"
@@ -636,7 +636,7 @@ cmd_pull() {
   echo ""
 
   # 1. 拉取指定分支最新代码（默认 main；用项目里配置好的镜像: ghfast.top 代理 github.com）
-  log "=== 1/5 拉取 $PULL_BRANCH 最新代码（git pull origin $PULL_BRANCH）==="
+  log "=== 1/5 拉取 ${PULL_BRANCH} 最新代码（git pull origin ${PULL_BRANCH}）==="
   if ! (cd "$PROJECT_DIR" && git pull origin "$PULL_BRANCH"); then
     err "git pull 失败（可能是冲突或网络问题）"
     return 1
