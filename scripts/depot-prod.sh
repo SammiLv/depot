@@ -182,7 +182,7 @@ is_app_key_field() {
 }
 
 # 探测 node.exe 路径,返回其所在目录(标准输出);找不到则 stderr 报错
-# 解决 nohup 子进程不继承完整 PATH + 不想依赖 npx/npm 链式调用的问题
+# 解决 nohup 子进程不继承完整 PATH + 不想依赖 pnpm/cmd 链式调用的问题
 ensure_node_path() {
   # 1. 优先用脚本配置的候选路径
   local candidates=(
@@ -206,7 +206,7 @@ ensure_node_path() {
   return 1
 }
 
-# 探测 Windows System32 路径(npm/next 在某些场景下会调 cmd 等系统工具)
+# 探测 Windows System32 路径(next 在某些场景下会调 cmd 等系统工具)
 ensure_system32_in_path() {
   local sys32="/c/Windows/System32"
   if [ -d "$sys32" ] && [[ ":$PATH:" != *":$sys32:"* ]]; then
@@ -375,7 +375,7 @@ cmd_start() {
   log "  APP_KEY=$(secret_status "$DINGTALK_APP_KEY")"
   log "日志写入: $LOG_FILE"
 
-  # 探测 node 路径(直接调 next 的 JS 入口,绕开 npx/npm/cmd 链)
+  # 探测 node 路径(直接调 next 的 JS 入口,绕开 pnpm/cmd 链)
   local node_dir
   node_dir=$(ensure_node_path) || {
     err "找不到 node.exe。请安装 Node.js 20.9+ 或把现有 node 加到 PATH"
@@ -386,7 +386,7 @@ cmd_start() {
   # 项目本地 next 入口（转 Windows 路径，避免 MSYS 的 /c/ 被解析成 C:\c\）
   local next_bin="$PROJECT_DIR/node_modules/next/dist/bin/next"
   if [ ! -f "$next_bin" ]; then
-    err "找不到 next 入口: $next_bin（请先跑 npm install）"
+    err "找不到 next 入口: $next_bin（请先跑 pnpm install）"
     return 1
   fi
   local next_bin_win
@@ -394,7 +394,7 @@ cmd_start() {
 
   (
     cd "$PROJECT_DIR" || exit 1
-    # 加 System32(npm/next 偶尔会调 cmd.exe 等系统工具)
+    # 加 System32(next 偶尔会调 cmd.exe 等系统工具)
     PATH="/c/Windows/System32:$node_dir:$PATH"
     export PATH
     # CLI 临时覆盖优先于 .env 文件（export 后 Next.js 进程内生效）
@@ -469,8 +469,8 @@ cmd_restart() {
   cmd_start
 }
 
-# pull 是否需要 npm install：node_modules 缺失，或本次 pull 改动了 package*.json
-pull_needs_npm_install() {
+# pull 是否需要 pnpm install：node_modules 缺失，或本次 pull 改动了 package.json / pnpm-lock.yaml
+pull_needs_pnpm_install() {
   if [ ! -d "$PROJECT_DIR/node_modules" ]; then
     return 0
   fi
@@ -478,7 +478,7 @@ pull_needs_npm_install() {
     return 0
   fi
   if (cd "$PROJECT_DIR" && git diff --name-only ORIG_HEAD HEAD 2>/dev/null \
-    | grep -qE '^package(-lock)?\.json$'); then
+    | grep -qE '^(package\.json|pnpm-lock\.yaml)$'); then
     return 0
   fi
   return 1
@@ -496,14 +496,19 @@ cmd_pull() {
   ok "工作区干净"
   echo ""
 
-  # 0.5 把 node 和 System32 加到 PATH(让 npm/npx 跑得起来)
+  # 0.5 把 node 和 System32 加到 PATH(让 pnpm 跑得起来)
   local pull_node_dir
   pull_node_dir=$(ensure_node_path) || {
-    err "找不到 node.exe（pull 需要 npm/npx）"
+    err "找不到 node.exe（pull 需要 node/pnpm）"
     return 1
   }
   export PATH="/c/Windows/System32:$pull_node_dir:$PATH"
   log "node 路径: $pull_node_dir/node (已加入 PATH)"
+  if ! command -v pnpm >/dev/null 2>&1; then
+    err "找不到 pnpm。请先在生产机安装: npm install -g pnpm@11.20.0（或 corepack enable && corepack prepare pnpm@11.20.0 --activate）"
+    return 1
+  fi
+  log "pnpm 版本: $(pnpm --version)"
   echo ""
 
   # 1. 拉取最新代码（用项目里配置好的镜像: ghfast.top 代理 github.com）
@@ -514,28 +519,28 @@ cmd_pull() {
   fi
   echo ""
 
-  # 2. 装依赖（仅 node_modules 缺失或 package*.json 有变更时）
-  log "=== 2/6 检查/安装依赖（npm install）==="
-  if pull_needs_npm_install; then
+  # 2. 装依赖（仅 node_modules 缺失或 package.json / pnpm-lock.yaml 有变更时）
+  log "=== 2/6 检查/安装依赖（pnpm install）==="
+  if pull_needs_pnpm_install; then
     if [ ! -d "$PROJECT_DIR/node_modules" ]; then
-      log "node_modules 不存在，执行 npm install"
+      log "node_modules 不存在，执行 pnpm install"
     elif [ ! -d "$PROJECT_DIR/node_modules/next" ]; then
-      log "node_modules 不完整（缺少 next），执行 npm install"
+      log "node_modules 不完整（缺少 next），执行 pnpm install"
     else
-      log "package.json / package-lock.json 有变更，执行 npm install"
+      log "package.json / pnpm-lock.yaml 有变更，执行 pnpm install"
     fi
-    if ! (cd "$PROJECT_DIR" && npm ci --ignore-scripts --registry=https://registry.npmmirror.com); then
-      err "npm ci 失败"
+    if ! (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com); then
+      err "pnpm install 失败"
       return 1
     fi
   else
-    ok "依赖未变且 node_modules 已存在，跳过 npm install"
+    ok "依赖未变且 node_modules 已存在，跳过 pnpm install"
   fi
   echo ""
 
   # 3. Prisma 客户端（idempotent，重新生成无副作用）
   log "=== 3/6 重新生成 Prisma 客户端 ==="
-  if ! (cd "$PROJECT_DIR" && npm run prisma:generate); then
+  if ! (cd "$PROJECT_DIR" && pnpm run prisma:generate); then
     err "prisma generate 失败"
     return 1
   fi
@@ -552,7 +557,7 @@ cmd_pull() {
 
   # 5. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
   log "=== 5/6 应用数据库迁移（migrate deploy）==="
-  if ! (cd "$PROJECT_DIR" && npx prisma migrate deploy --config db/prisma.config.ts); then
+  if ! (cd "$PROJECT_DIR" && pnpm exec prisma migrate deploy --config db/prisma.config.ts); then
     err "migrate deploy 失败"
     if [ "$was_running" = "1" ]; then
       warn "正在恢复旧版本服务..."
@@ -575,7 +580,7 @@ cmd_pull() {
     mv "$PROJECT_DIR/.next" "$PROJECT_DIR/.next.backup"
   fi
   log "  步骤 6b: 执行 next build"
-  if ! (cd "$PROJECT_DIR" && npm run build); then
+  if ! (cd "$PROJECT_DIR" && pnpm run build); then
     err "build 失败"
     rm -rf "$PROJECT_DIR/.next"
     if [ -d "$PROJECT_DIR/.next.backup" ]; then

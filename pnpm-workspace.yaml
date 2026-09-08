@@ -1,3 +1,12 @@
+# pnpm 11 起，overrides / 构建脚本白名单等配置不再读 package.json 的 pnpm 字段，
+# 统一放在 pnpm-workspace.yaml（本文件不是多包工作区，仅作配置载体）。
+overrides:
+  # Node 24 下 better-sqlite3 v12 有 GC 崩溃（RemoveEnvironmentCleanupHook 断言），
+  # 强制所有层级（含 @prisma/adapter-better-sqlite3 的嵌套依赖）使用 v13。
+  better-sqlite3: ^13.0.3
+# pnpm 11.20 用 allowBuilds 取代 onlyBuiltDependencies：以下依赖的安装脚本允许执行。
+# better-sqlite3 需要 prebuild-install 下载/编译原生绑定；prisma 系需要下载引擎；
+# esbuild/sharp/unrs-resolver 为平台二进制校验，与 npm 默认行为对齐。
 allowBuilds:
   '@prisma/engines': true
   better-sqlite3: true

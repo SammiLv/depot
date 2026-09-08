@@ -17,7 +17,7 @@ list_service_scripts() {
 }
 
 print_usage() {
-  echo "Usage: $0 <npm-start-script>"
+  echo "Usage: $0 <start-script>"
   echo
   echo "Supported scripts:"
   list_service_scripts | sed 's/^/  - /'
@@ -29,7 +29,7 @@ if [[ -z "$START_SCRIPT" ]]; then
 fi
 
 if [[ ! "$START_SCRIPT" =~ ^(dev|start): ]]; then
-  echo "Unsupported npm script: $START_SCRIPT"
+  echo "Unsupported script: $START_SCRIPT"
   echo "Only dev:* and start:* scripts are allowed."
   echo
   print_usage
@@ -69,7 +69,7 @@ NODE
 2>/dev/null)"
 
 if [[ -z "$SCRIPT_ENVS" ]]; then
-  echo "Unknown npm script: $START_SCRIPT"
+  echo "Unknown script: $START_SCRIPT"
   echo
   print_usage
   exit 1
@@ -206,19 +206,19 @@ if [[ -n "$DEV_ALLOWED_ORIGINS_VALUE" ]]; then
 fi
 
 echo "==> Installing dependencies"
-npm install
+pnpm install
 
 echo "==> Stopping existing managed service (if any)"
 stop_managed_service
 
 echo "==> Generating Prisma client"
-npm run prisma:generate
+pnpm run prisma:generate
 
 echo "==> Syncing Prisma schema"
-npx prisma db push --config db/prisma.config.ts --accept-data-loss
+pnpm exec prisma db push --config db/prisma.config.ts --accept-data-loss
 
 echo "==> Building app"
-npm run build
+pnpm run build
 
 echo "==> Starting service with $START_SCRIPT"
 if [[ -n "$DEV_ALLOWED_ORIGINS_VALUE" ]]; then
@@ -227,13 +227,13 @@ if [[ -n "$DEV_ALLOWED_ORIGINS_VALUE" ]]; then
     PORT="$PORT" \
     APP_URL="$APP_URL" \
     DEV_ALLOWED_ORIGINS="$DEV_ALLOWED_ORIGINS_VALUE" \
-    npm run "$START_SCRIPT" >"$LOG_FILE" 2>&1 &
+    pnpm run "$START_SCRIPT" >"$LOG_FILE" 2>&1 &
 else
   nohup env \
     NODE_ENV="$NODE_ENV" \
     PORT="$PORT" \
     APP_URL="$APP_URL" \
-    npm run "$START_SCRIPT" >"$LOG_FILE" 2>&1 &
+    pnpm run "$START_SCRIPT" >"$LOG_FILE" 2>&1 &
 fi
 SERVICE_PID=$!
 printf '%s\n' "$SERVICE_PID" > "$PID_FILE"
