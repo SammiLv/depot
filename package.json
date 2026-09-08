@@ -26,7 +26,6 @@
     "prisma:studio": "prisma studio --schema db/prisma/schema.prisma",
     "seed": "tsx db/prisma/seed.ts",
     "seed:full": "SEED_FULL_RESET=true tsx db/prisma/seed.ts",
-    "seed:talent-demo": "tsx scripts/seed-talent-demo-data.ts",
     "restore-annual-goals": "tsx scripts/restore-annual-goals-demo.ts",
     "backfill-notifications": "tsx scripts/backfill-notifications-from-delivery-log.ts",
     "set-admin-password": "tsx scripts/set-admin-password.ts"
