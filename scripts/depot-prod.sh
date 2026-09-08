@@ -519,8 +519,18 @@ cmd_pull() {
   fi
   echo ""
 
-  # 2. 装依赖（仅 node_modules 缺失或 package.json / pnpm-lock.yaml 有变更时）
-  log "=== 2/6 检查/安装依赖（pnpm install）==="
+  # 2. 先停服务：pnpm install 要替换 @next/swc 原生文件，Windows 上被 next 进程占用会 EPERM unlink
+  log "=== 2/6 停止当前服务（释放 SWC/SQLite 文件锁）==="
+  local was_running=0
+  if [ -n "$(pid_listening_on_port)" ]; then
+    was_running=1
+  fi
+  cmd_stop || true
+  sleep 2
+  echo ""
+
+  # 3. 装依赖（仅 node_modules 缺失或 package*.json 有变更时）
+  log "=== 3/6 检查/安装依赖（pnpm install）==="
   if pull_needs_pnpm_install; then
     if [ ! -d "$PROJECT_DIR/node_modules" ]; then
       log "node_modules 不存在，执行 pnpm install"
@@ -531,6 +541,10 @@ cmd_pull() {
     fi
     if ! (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com); then
       err "pnpm install 失败"
+      if [ "$was_running" = "1" ]; then
+        warn "正在恢复旧版本服务..."
+        cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+      fi
       return 1
     fi
   else
@@ -538,21 +552,16 @@ cmd_pull() {
   fi
   echo ""
 
-  # 3. Prisma 客户端（idempotent，重新生成无副作用）
-  log "=== 3/6 重新生成 Prisma 客户端 ==="
+  # 4. Prisma 客户端（idempotent，重新生成无副作用）
+  log "=== 4/6 重新生成 Prisma 客户端 ==="
   if ! (cd "$PROJECT_DIR" && pnpm run prisma:generate); then
     err "prisma generate 失败"
+    if [ "$was_running" = "1" ]; then
+      warn "正在恢复旧版本服务..."
+      cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+    fi
     return 1
   fi
-  echo ""
-
-  # 4. 停服务释放 SQLite 锁（migrate deploy 需要独占写库；服务在跑会 database is locked）
-  log "=== 4/6 停止当前服务（释放数据库锁）==="
-  local was_running=0
-  if [ -n "$(pid_listening_on_port)" ]; then
-    was_running=1
-  fi
-  cmd_stop || true
   echo ""
 
   # 5. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）

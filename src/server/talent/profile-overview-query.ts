@@ -170,3 +170,13 @@ export async function getProfileOverviewExtras(
     reviewWeight,
   };
 }
+
+export async function getProfileOverviewExtrasForUsers(
+  userIds: string[],
+  options: { kpiTotalScore: number; reviewTotalScore: number },
+) {
+  const extras = await Promise.all(
+    userIds.map(async (userId) => [userId, await getProfileOverviewExtras(userId, options)] as const),
+  );
+  return Object.fromEntries(extras);
+}
