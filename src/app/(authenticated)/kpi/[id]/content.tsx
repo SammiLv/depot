@@ -281,10 +281,10 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
   const hasLeaderSummary = Boolean(data.summary.leader.praise.trim() || data.summary.leader.opportunity.trim());
   const hasManagerSummary = Boolean(data.summary.manager.praise.trim() || data.summary.manager.opportunity.trim());
 
-  const canEditSelf = !viewOnly && data.editableStage === "SELF";
-  const canEditLeader = !viewOnly && data.editableStage === "LEADER";
-  const canEditManager = !viewOnly && data.editableStage === "MANAGER";
-  const canEditFinal = !viewOnly && data.editableStage === "FINAL";
+  const canEditSelf = !viewOnly && data.editableStage === "SELF" && data.availableActions.canSave;
+  const canEditLeader = !viewOnly && data.editableStage === "LEADER" && data.availableActions.canSave;
+  const canEditManager = !viewOnly && data.editableStage === "MANAGER" && data.availableActions.canSave;
+  const canEditFinal = !viewOnly && data.editableStage === "FINAL" && data.availableActions.canSave;
 
   async function runAction(action: "save" | "submit" | "approve" | "reject") {
     if (!formRef.current) return;

@@ -88,6 +88,17 @@ export function isUserActiveApproverAtStage<T extends ApprovalStepLike>(
   return step?.stageKey === stageKey;
 }
 
+/** 自评未完成时审批链首步可能已是 PENDING，需结合 KPI 状态排除误显「组长评」等 */
+export function canUserActOnApprovalStage<T extends ApprovalStepLike>(
+  steps: T[],
+  userId: string,
+  stageKey: string,
+  kpiInSelfReview: boolean,
+): boolean {
+  if (kpiInSelfReview) return false;
+  return isUserActiveApproverAtStage(steps, userId, stageKey);
+}
+
 export function hasCompletedApprovalStage(
   steps: Array<Pick<ApprovalStepLike, "stageKey" | "status">>,
   stageKey: string,

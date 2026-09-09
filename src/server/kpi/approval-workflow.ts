@@ -111,6 +111,26 @@ export function isSelfReviewStatus(status: KpiStatus) {
   return status === "DRAFT" || status === "PENDING_SELF_REVIEW";
 }
 
+/** 按 KPI 状态、审批链与当前登录用户解析可编辑阶段（自评期仅本人可编辑 SELF） */
+export function resolveKpiEditableStage(input: {
+  status: KpiStatus;
+  currentUserId: string;
+  ownerUserId: string;
+  hasApprovalChain: boolean;
+  currentApprovalStepStageKey?: string | null;
+}): KpiApprovalStageKey | null {
+  if (isSelfReviewStatus(input.status)) {
+    return input.currentUserId === input.ownerUserId ? "SELF" : null;
+  }
+  if (input.hasApprovalChain) {
+    return getEditableStageFromApprovalStep(input.currentApprovalStepStageKey);
+  }
+  if (input.status === "PENDING_LEADER_SCORE") return "LEADER";
+  if (input.status === "PENDING_MANAGER_SCORE") return "MANAGER";
+  if (input.status === "PENDING_FINAL_REVIEW") return "FINAL";
+  return null;
+}
+
 export function getLegacyNextKpiStatus(status: KpiStatus): KpiStatus {
   if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") return "PENDING_LEADER_SCORE";
   if (status === "PENDING_LEADER_SCORE") return "PENDING_MANAGER_SCORE";

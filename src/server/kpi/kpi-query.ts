@@ -6,13 +6,13 @@ import type { KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "
 import {
   buildKpiCompletedProgressStages,
   getApprovalStepDisplayLabel,
-  getEditableStageFromApprovalStep,
   isSelfReviewStatus,
+  resolveKpiEditableStage,
   kpiProgressStageLabels,
   kpiProgressStageOrder,
 } from "@/server/kpi/approval-workflow";
 import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
-import { findUserPendingApprovalStep, isUserActiveApproverAtStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
+import { findUserPendingApprovalStep, canUserActOnApprovalStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 
 
@@ -459,22 +459,6 @@ function buildOrgNodeRelationships(scopedOrgNodes: OrgNodeSummary[]): OrgNodeRel
   };
 }
 
-function getEditableStage(status: string): "SELF" | "LEADER" | "MANAGER" | "FINAL" | null {
-  if (status === "DRAFT" || status === "PENDING_SELF_REVIEW") {
-    return "SELF";
-  }
-  if (status === "PENDING_LEADER_SCORE") {
-    return "LEADER";
-  }
-  if (status === "PENDING_MANAGER_SCORE") {
-    return "MANAGER";
-  }
-  if (status === "PENDING_FINAL_REVIEW") {
-    return "FINAL";
-  }
-  return null;
-}
-
 function resolveScopeNodes(currentUser: DataScopeInput, viewScope: ViewScopeSummary, scopedOrgNodes: OrgNodeSummary[]): ResolvedScopeNodes {
   const relationships = buildOrgNodeRelationships(scopedOrgNodes);
 
@@ -688,11 +672,13 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const hasApprovalChain = approvalSteps.length > 0;
   const currentApprovalStep = findUserPendingApprovalStep(approvalSteps, currentUser.id);
   const selfReviewActive = isSelfReviewStatus(personalKpi.status);
-  const editableStage = isSelfReviewStatus(personalKpi.status)
-    ? "SELF"
-    : hasApprovalChain
-      ? getEditableStageFromApprovalStep(currentApprovalStep?.stageKey)
-      : getEditableStage(personalKpi.status);
+  const editableStage = resolveKpiEditableStage({
+    status: personalKpi.status,
+    currentUserId: currentUser.id,
+    ownerUserId: personalKpi.userId,
+    hasApprovalChain,
+    currentApprovalStepStageKey: currentApprovalStep?.stageKey,
+  });
   const scoringAbilityKey = getScoringAbilityKey(editableStage);
   const hasStagePermission = scoringAbilityKey
     ? Boolean(await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, scoringAbilityKey))
@@ -1107,13 +1093,28 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),
         canLeaderScore: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? isUserActiveApproverAtStage(approvalStepsByKpiId.get(personalKpi.id) ?? [], currentUser.id, "LEADER")
+          ? canUserActOnApprovalStage(
+            approvalStepsByKpiId.get(personalKpi.id) ?? [],
+            currentUser.id,
+            "LEADER",
+            isSelfReviewStatus(personalKpi.status),
+          )
           : canScoreLeader && personalKpi.status === "PENDING_LEADER_SCORE",
         canManagerScore: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? isUserActiveApproverAtStage(approvalStepsByKpiId.get(personalKpi.id) ?? [], currentUser.id, "MANAGER")
+          ? canUserActOnApprovalStage(
+            approvalStepsByKpiId.get(personalKpi.id) ?? [],
+            currentUser.id,
+            "MANAGER",
+            isSelfReviewStatus(personalKpi.status),
+          )
           : canScoreManager && personalKpi.status === "PENDING_MANAGER_SCORE",
         canFinalReview: hasApprovalChainByKpiId.get(personalKpi.id)
-          ? isUserActiveApproverAtStage(approvalStepsByKpiId.get(personalKpi.id) ?? [], currentUser.id, "FINAL")
+          ? canUserActOnApprovalStage(
+            approvalStepsByKpiId.get(personalKpi.id) ?? [],
+            currentUser.id,
+            "FINAL",
+            isSelfReviewStatus(personalKpi.status),
+          )
           : canScoreFinal && personalKpi.status === "PENDING_FINAL_REVIEW",
       },
       completedProgressStages,

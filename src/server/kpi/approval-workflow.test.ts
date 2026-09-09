@@ -7,6 +7,7 @@ import {
   getKpiStatusForApprovalStep,
   hasCompletedKpiProgressStage,
   isSelfReviewStatus,
+  resolveKpiEditableStage,
 } from "@/server/kpi/approval-workflow";
 
 test("approval step stage drives the compatible KPI status", () => {
@@ -69,4 +70,28 @@ test("self review status remains independent from approval steps", () => {
   assert.equal(isSelfReviewStatus("DRAFT"), true);
   assert.equal(isSelfReviewStatus("PENDING_SELF_REVIEW"), true);
   assert.equal(isSelfReviewStatus("PENDING_LEADER_SCORE"), false);
+});
+
+test("resolveKpiEditableStage limits self review editing to the KPI owner", () => {
+  assert.equal(resolveKpiEditableStage({
+    status: "PENDING_SELF_REVIEW",
+    currentUserId: "owner",
+    ownerUserId: "owner",
+    hasApprovalChain: true,
+    currentApprovalStepStageKey: "LEADER",
+  }), "SELF");
+  assert.equal(resolveKpiEditableStage({
+    status: "PENDING_SELF_REVIEW",
+    currentUserId: "leader",
+    ownerUserId: "owner",
+    hasApprovalChain: true,
+    currentApprovalStepStageKey: "LEADER",
+  }), null);
+  assert.equal(resolveKpiEditableStage({
+    status: "PENDING_LEADER_SCORE",
+    currentUserId: "leader",
+    ownerUserId: "owner",
+    hasApprovalChain: true,
+    currentApprovalStepStageKey: "LEADER",
+  }), "LEADER");
 });

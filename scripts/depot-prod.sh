@@ -75,6 +75,21 @@ ok()   { printf "%s[ ok ]%s %s\n" "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf "%s[warn]%s %s\n" "$C_YELLOW" "$C_RESET" "$*"; }
 err()  { printf "%s[fail]%s %s\n" "$C_RED"   "$C_RESET" "$*" >&2; }
 
+# pull 步骤计时（秒）
+PULL_STEP_T0=0
+pull_step_begin() {
+  PULL_STEP_LABEL="$1"
+  PULL_STEP_T0=$(date +%s)
+  log "=== $PULL_STEP_LABEL ==="
+}
+pull_step_end() {
+  local elapsed=$(( $(date +%s) - PULL_STEP_T0 ))
+  ok "$PULL_STEP_LABEL 完成 (${elapsed}s)"
+}
+pull_step_skip() {
+  ok "$PULL_STEP_LABEL 跳过 — $*"
+}
+
 # 取占用 $PORT 的 PID
 pid_listening_on_port() {
   # 不用 sort -u:Git Bash 的 sort 在精简 PATH 下吞输出
@@ -540,6 +555,17 @@ cmd_restart() {
   cmd_start
 }
 
+# pull 本次拉取变更的文件列表（git pull 后 ORIG_HEAD → HEAD）
+pull_changed_files() {
+  (cd "$PROJECT_DIR" && git diff --name-only ORIG_HEAD HEAD 2>/dev/null)
+}
+
+# pull 变更是否匹配 pattern（grep -E）
+pull_has_changes() {
+  local pattern="$1"
+  pull_changed_files | grep -qE "$pattern"
+}
+
 # pull 是否需要 pnpm install：node_modules 缺失，或本次 pull 改动了 package.json / pnpm-lock.yaml
 pull_needs_pnpm_install() {
   if [ ! -d "$PROJECT_DIR/node_modules" ]; then
@@ -548,133 +574,219 @@ pull_needs_pnpm_install() {
   if [ ! -d "$PROJECT_DIR/node_modules/next" ]; then
     return 0
   fi
-  if (cd "$PROJECT_DIR" && git diff --name-only ORIG_HEAD HEAD 2>/dev/null \
-    | grep -qE '^(package\.json|pnpm-lock\.yaml)$'); then
+  if pull_has_changes '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc)$'; then
     return 0
   fi
   return 1
 }
 
+# pull 部署计划（在 git pull 之后调用，结果写入 PULL_* 变量）
+pull_compute_plan() {
+  PULL_NEED_INSTALL=0
+  PULL_NEED_GENERATE=0
+  PULL_NEED_MIGRATE=0
+  PULL_NEED_BUILD=0
+  PULL_NEED_STOP=0
+
+  local changes
+  changes="$(pull_changed_files)"
+  if [ -z "$changes" ]; then
+    return 0
+  fi
+
+  if pull_needs_pnpm_install; then
+    PULL_NEED_INSTALL=1
+    PULL_NEED_BUILD=1
+    PULL_NEED_STOP=1
+    # pnpm install 的 postinstall 已执行 prisma generate，无需重复
+  fi
+
+  if pull_has_changes '^db/prisma/schema\.prisma$'; then
+    PULL_NEED_MIGRATE=1
+    PULL_NEED_BUILD=1
+    PULL_NEED_STOP=1
+    if [ "$PULL_NEED_INSTALL" = "0" ]; then
+      PULL_NEED_GENERATE=1
+    fi
+  fi
+
+  if pull_has_changes '^db/prisma/migrations/'; then
+    PULL_NEED_MIGRATE=1
+    PULL_NEED_STOP=1
+  fi
+
+  if pull_has_changes '^(src/|public/|next\.config|middleware\.|instrumentation\.|postcss|tailwind|tsconfig)'; then
+    PULL_NEED_BUILD=1
+  fi
+
+  if [ ! -d "$PROJECT_DIR/.next" ]; then
+    PULL_NEED_BUILD=1
+  fi
+
+  if [ "$PULL_NEED_BUILD" = "1" ] || [ "$PULL_NEED_MIGRATE" = "1" ] || [ "$PULL_NEED_INSTALL" = "1" ]; then
+    PULL_NEED_STOP=1
+  fi
+}
+
+pull_restore_service_if_needed() {
+  local was_running="$1"
+  if [ "$was_running" = "1" ]; then
+    warn "正在恢复旧版本服务..."
+    cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+  fi
+}
+
 cmd_pull() {
+  local was_running=0 pull_t0 pull_elapsed
+
+  pull_t0=$(date +%s)
+
   # 0. 工作区状态检查（有未提交改动就拒绝，避免覆盖本地修改）
-  log "=== 0/6 检查工作区状态 ==="
+  pull_step_begin "0/6 检查工作区状态"
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
     err "工作区有未提交的本地改动："
     git status --short | head -20
     err "请先 commit 或 stash 再 pull"
     return 1
   fi
-  ok "工作区干净"
+  pull_step_end
   echo ""
 
   # 0.5 确保 node/pnpm 可用（npm → pnpm 11 迁移时自动安装）
+  pull_step_begin "0.5/6 检查 node/pnpm"
   if ! ensure_pnpm; then
     return 1
   fi
+  pull_step_end
   echo ""
 
   # 1. 拉取最新代码（用项目里配置好的镜像: ghfast.top 代理 github.com）
-  log "=== 1/6 拉取最新代码（git pull）==="
+  pull_step_begin "1/6 拉取最新代码（git pull）"
   if ! (cd "$PROJECT_DIR" && git pull); then
     err "git pull 失败（可能是冲突或网络问题）"
     return 1
   fi
+  pull_step_end
   echo ""
 
-  # 2. 先停服务：pnpm install 要替换 @next/swc 原生文件，Windows 上被 next 进程占用会 EPERM unlink
-  log "=== 2/6 停止当前服务（释放 SWC/SQLite 文件锁）==="
-  local was_running=0
+  # 1.5 分析变更，决定哪些步骤需要执行
+  pull_compute_plan
+  if [ -z "$(pull_changed_files)" ]; then
+    pull_elapsed=$(( $(date +%s) - pull_t0 ))
+    ok "代码已是最新，无需停服/构建/迁移（总耗时 ${pull_elapsed}s）"
+    return 0
+  fi
+
+  log "部署计划: install=$PULL_NEED_INSTALL generate=$PULL_NEED_GENERATE migrate=$PULL_NEED_MIGRATE build=$PULL_NEED_BUILD stop=$PULL_NEED_STOP"
+  if [ "$PULL_NEED_STOP" = "0" ]; then
+    pull_elapsed=$(( $(date +%s) - pull_t0 ))
+    ok "本次变更不涉及运行时代码/依赖/数据库，跳过停服与构建（总耗时 ${pull_elapsed}s）"
+    log "变更文件:"
+    pull_changed_files | sed 's/^/  /'
+    return 0
+  fi
+  echo ""
+
+  # 2. 先停服务：pnpm install / migrate 需要释放 SWC/SQLite 文件锁
+  pull_step_begin "2/6 停止当前服务（释放 SWC/SQLite 文件锁）"
   if [ -n "$(pid_listening_on_port)" ]; then
     was_running=1
   fi
   cmd_stop || true
   sleep 2
+  pull_step_end
   echo ""
 
-  # 3. 装依赖（仅 node_modules 缺失或 package*.json 有变更时）
-  log "=== 3/6 检查/安装依赖（pnpm install）==="
-  if pull_needs_pnpm_install; then
+  # 3. 装依赖（仅计划需要时）
+  pull_step_begin "3/6 检查/安装依赖（pnpm install）"
+  if [ "$PULL_NEED_INSTALL" = "1" ]; then
     if [ ! -d "$PROJECT_DIR/node_modules" ]; then
       log "node_modules 不存在，执行 pnpm install"
     elif [ ! -d "$PROJECT_DIR/node_modules/next" ]; then
       log "node_modules 不完整（缺少 next），执行 pnpm install"
     else
-      log "package.json / pnpm-lock.yaml 有变更，执行 pnpm install"
+      log "依赖清单有变更，执行 pnpm install"
     fi
     if ! (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile); then
       err "pnpm install 失败"
-      if [ "$was_running" = "1" ]; then
-        warn "正在恢复旧版本服务..."
-        cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
-      fi
+      pull_restore_service_if_needed "$was_running"
       return 1
     fi
+    pull_step_end
   else
-    ok "依赖未变且 node_modules 已存在，跳过 pnpm install"
+    pull_step_skip "依赖未变且 node_modules 已存在"
   fi
   echo ""
 
-  # 4. Prisma 客户端（idempotent，重新生成无副作用）
-  log "=== 4/6 重新生成 Prisma 客户端 ==="
-  if ! (cd "$PROJECT_DIR" && pnpm run prisma:generate); then
-    err "prisma generate 失败"
-    if [ "$was_running" = "1" ]; then
-      warn "正在恢复旧版本服务..."
-      cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+  # 4. Prisma 客户端（schema 变更且未由 postinstall 生成时）
+  pull_step_begin "4/6 重新生成 Prisma 客户端"
+  if [ "$PULL_NEED_GENERATE" = "1" ]; then
+    if ! (cd "$PROJECT_DIR" && pnpm run prisma:generate); then
+      err "prisma generate 失败"
+      pull_restore_service_if_needed "$was_running"
+      return 1
     fi
-    return 1
+    pull_step_end
+  else
+    if [ "$PULL_NEED_INSTALL" = "1" ]; then
+      pull_step_skip "pnpm install postinstall 已生成"
+    else
+      pull_step_skip "schema 未变更"
+    fi
   fi
   echo ""
 
-  # 5. 数据库迁移（migrate deploy 是幂等的，只应用新迁移）
-  log "=== 5/6 应用数据库迁移（migrate deploy）==="
-  if ! (cd "$PROJECT_DIR" && pnpm exec prisma migrate deploy --config db/prisma.config.ts); then
-    err "migrate deploy 失败"
-    if [ "$was_running" = "1" ]; then
-      warn "正在恢复旧版本服务..."
-      cmd_start || err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+  # 5. 数据库迁移（仅 migration/schema 变更时）
+  pull_step_begin "5/6 应用数据库迁移（migrate deploy）"
+  if [ "$PULL_NEED_MIGRATE" = "1" ]; then
+    if ! (cd "$PROJECT_DIR" && pnpm exec prisma migrate deploy --config db/prisma.config.ts); then
+      err "migrate deploy 失败"
+      pull_restore_service_if_needed "$was_running"
+      return 1
     fi
-    return 1
-  fi
-  # 兼容旧版误生成的嵌套库目录
-  if [ -d "$PROJECT_DIR/db/db" ]; then
-    warn "清理嵌套的 db/db/ 目录"
-    rm -rf "$PROJECT_DIR/db/db"
+    if [ -d "$PROJECT_DIR/db/db" ]; then
+      warn "清理嵌套的 db/db/ 目录"
+      rm -rf "$PROJECT_DIR/db/db"
+    fi
+    pull_step_end
+  else
+    pull_step_skip "migration/schema 未变更"
   fi
   echo ""
 
   # 6. 重新构建（build 失败则回滚 .next 并恢复旧服务）
-  log "=== 6/6 重新构建并启动新版本 ==="
-  log "  步骤 6a: 备份旧构建产物 .next/ → .next.backup/"
-  rm -rf "$PROJECT_DIR/.next.backup"
-  if [ -d "$PROJECT_DIR/.next" ]; then
-    mv "$PROJECT_DIR/.next" "$PROJECT_DIR/.next.backup"
-  fi
-  log "  步骤 6b: 执行 next build"
-  if ! (cd "$PROJECT_DIR" && pnpm run build); then
-    err "build 失败"
-    rm -rf "$PROJECT_DIR/.next"
-    if [ -d "$PROJECT_DIR/.next.backup" ]; then
-      mv "$PROJECT_DIR/.next.backup" "$PROJECT_DIR/.next"
-      ok "已回滚到备份的 .next/"
+  pull_step_begin "6/6 重新构建并启动新版本"
+  if [ "$PULL_NEED_BUILD" = "1" ]; then
+    log "  步骤 6a: 备份旧构建产物 .next/ → .next.backup/"
+    rm -rf "$PROJECT_DIR/.next.backup"
+    if [ -d "$PROJECT_DIR/.next" ]; then
+      mv "$PROJECT_DIR/.next" "$PROJECT_DIR/.next.backup"
     fi
-    if [ "$was_running" = "1" ]; then
-      warn "正在恢复旧版本服务..."
-      if cmd_start; then
-        ok "旧版本服务已恢复运行"
-      else
-        err "旧版本服务恢复失败，请手动: bash scripts/depot-prod.sh start"
+    log "  步骤 6b: 执行 next build"
+    if ! (cd "$PROJECT_DIR" && pnpm run build); then
+      err "build 失败"
+      rm -rf "$PROJECT_DIR/.next"
+      if [ -d "$PROJECT_DIR/.next.backup" ]; then
+        mv "$PROJECT_DIR/.next.backup" "$PROJECT_DIR/.next"
+        ok "已回滚到备份的 .next/"
       fi
-    else
-      warn "部署前服务未运行，请排查 build 错误后手动 start"
+      pull_restore_service_if_needed "$was_running"
+      return 1
     fi
-    return 1
+    rm -rf "$PROJECT_DIR/.next.backup"
+    log "  步骤 6c: 启动新版本"
+    cmd_start
+    pull_step_end
+  else
+    pull_step_skip ".next 已存在且无前端/配置变更"
+    log "  步骤 6c: 重启服务（加载 migrate 等变更）"
+    cmd_start
+    pull_step_end
   fi
-  rm -rf "$PROJECT_DIR/.next.backup"
   echo ""
 
-  log "  步骤 6c: 启动新版本"
-  cmd_start
+  pull_elapsed=$(( $(date +%s) - pull_t0 ))
+  ok "pull 完成（总耗时 ${pull_elapsed}s）"
 }
 
 cmd_tail() {

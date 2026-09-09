@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildGroupedApprovalStepDisplays,
+  canUserActOnApprovalStage,
   formatParallelApproverNames,
   getGroupedApprovalStepProgress,
 } from "@/server/kpi/approval-step-utils";
@@ -29,6 +30,15 @@ test("same step order is merged into one progress node", () => {
   assert.equal(groups[0]?.completed, false);
   assert.equal(groups[1]?.approverName, "吕夏苗");
   assert.equal(groups[1]?.active, false);
+});
+
+test("approval stage action is blocked while KPI is still in self review", () => {
+  const steps = [
+    { stepOrder: 1, stageKey: "LEADER", status: "PENDING", approverId: "leader-a" },
+    { stepOrder: 2, stageKey: "MANAGER", status: "WAITING", approverId: "manager-a" },
+  ];
+  assert.equal(canUserActOnApprovalStage(steps, "leader-a", "LEADER", true), false);
+  assert.equal(canUserActOnApprovalStage(steps, "leader-a", "LEADER", false), true);
 });
 
 test("group is completed when any parallel approver completes", () => {

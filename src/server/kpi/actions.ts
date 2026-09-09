@@ -15,9 +15,9 @@ import {
   type KpiApprovalSnapshot,
 } from "@/server/kpi/approval-snapshot";
 import {
-  getEditableStageFromApprovalStep,
   getLegacyNextKpiStatus,
   isSelfReviewStatus,
+  resolveKpiEditableStage,
   type KpiEditableStage,
 } from "@/server/kpi/approval-workflow";
 import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
@@ -1526,21 +1526,18 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
           return approvalSteps.find((step) => step.stepOrder === minOrder && step.status === "PENDING") ?? null;
         })()
       : null;
-    const editableStage = isSelfReviewStatus(personalKpi.status)
-      ? "SELF"
-      : hasApprovalChain
-        ? getEditableStageFromApprovalStep(currentApprovalStep?.stageKey ?? activeStageStep?.stageKey)
-        : getEditableStageFromApprovalStep(
-            personalKpi.status === "PENDING_LEADER_SCORE"
-              ? "LEADER"
-              : personalKpi.status === "PENDING_MANAGER_SCORE"
-                ? "MANAGER"
-                : personalKpi.status === "PENDING_FINAL_REVIEW"
-                  ? "FINAL"
-                  : null
-          );
+    const editableStage = resolveKpiEditableStage({
+      status: personalKpi.status,
+      currentUserId: currentUser.id,
+      ownerUserId: personalKpi.userId,
+      hasApprovalChain,
+      currentApprovalStepStageKey: currentApprovalStep?.stageKey ?? activeStageStep?.stageKey,
+    });
     if (!editableStage) {
       throw new Error("当前 KPI 阶段不支持评分操作");
+    }
+    if (editableStage === "SELF" && currentUser.id !== personalKpi.userId) {
+      throw new Error("只有本人可以进行自评");
     }
     assertKpiScoringActionAllowed(editableStage, action);
 
