@@ -118,7 +118,7 @@ export function resolveKpiEditableStage(input: {
   ownerUserId: string;
   hasApprovalChain: boolean;
   currentApprovalStepStageKey?: string | null;
-}): KpiApprovalStageKey | null {
+}): KpiEditableStage | null {
   if (isSelfReviewStatus(input.status)) {
     return input.currentUserId === input.ownerUserId ? "SELF" : null;
   }
