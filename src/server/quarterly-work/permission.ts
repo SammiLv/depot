@@ -72,6 +72,6 @@ export async function requireManageProjectAndValueTracking() {
 export async function requireManageProductTask() {
   return requireProductManagementAbility(
     productManagementAbilityKeys.manageProductTask,
-    "当前角色不能管理任务",
+    "当前角色不能管理需求",
   );
 }

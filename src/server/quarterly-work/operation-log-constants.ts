@@ -4,7 +4,7 @@ export type OperationLogTargetType = (typeof OPERATION_LOG_TARGET_TYPES)[number]
 export const OPERATION_LOG_TARGET_TYPE_LABELS: Record<OperationLogTargetType, string> = {
   PRODUCT_GOAL: "产品目标",
   PROJECT: "项目",
-  QUARTERLY_WORK: "任务",
+  QUARTERLY_WORK: "需求",
 };
 
 export const OPERATION_LOG_ACTION_CREATE = "新增";

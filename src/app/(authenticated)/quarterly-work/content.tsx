@@ -128,7 +128,7 @@ const workspaceStatusTabs: Array<{ key: WorkspaceStatus; label: string }> = [
 const workspaceEntityTabs = [
   { key: "goal", label: "目标" },
   { key: "project", label: "项目" },
-  { key: "task", label: "任务" },
+  { key: "task", label: "需求" },
   { key: "value", label: "价值跟踪" },
 ] as const;
 type WorkspaceEntityTab = (typeof workspaceEntityTabs)[number]["key"];
@@ -786,12 +786,12 @@ function QuarterlyWorkForm({
             <div className="whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? "-"}</div>
           </div>
         </FormRow>
-        <FormRow label="任务名称 *" align="center">
+        <FormRow label="需求名称 *" align="center">
           <input
             name="title"
             required
             defaultValue={item?.title ?? ""}
-            placeholder="请输入任务名称"
+            placeholder="请输入需求名称"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
@@ -807,7 +807,7 @@ function QuarterlyWorkForm({
             )}
           />
         </FormRow>
-        <FormRow label="任务周期" align="center">
+        <FormRow label="需求周期" align="center">
           <div className="flex items-center gap-2">
             <select
               name="startMonth"
@@ -842,22 +842,22 @@ function QuarterlyWorkForm({
             <option value="false">否</option>
           </select>
         </FormRow>
-        <FormRow label="任务描述">
+        <FormRow label="需求描述">
           <textarea
             name="taskDescription"
             rows={3}
             defaultValue={item?.taskDescription ?? ""}
-            placeholder="请输入任务描述"
+            placeholder="请输入需求描述"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="任务目标 *">
+        <FormRow label="需求目标 *">
           <textarea
             name="description"
             required
             defaultValue={item?.description ?? ""}
             rows={4}
-            placeholder="请输入任务目标"
+            placeholder="请输入需求目标"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
@@ -873,7 +873,7 @@ function QuarterlyWorkForm({
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label="任务状态" align="center">
+        <FormRow label="需求状态" align="center">
           <select
             name="status"
             required
@@ -886,14 +886,14 @@ function QuarterlyWorkForm({
             ))}
           </select>
         </FormRow>
-        <FormRow label={taskResultRequired ? "任务结果 *" : "任务结果"} align="center">
+        <FormRow label={taskResultRequired ? "需求结果 *" : "需求结果"} align="center">
           <select
             name="taskResult"
             required={taskResultRequired}
             defaultValue={item?.taskResult ?? ""}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
-            <option value="" disabled>请选择任务结果</option>
+            <option value="" disabled>请选择需求结果</option>
             {TASK_RESULTS.map((option) => (
               <option key={option} value={option}>{option}</option>
             ))}
@@ -909,13 +909,13 @@ function QuarterlyWorkForm({
             />
           </FormRow>
         ) : null}
-        <FormRow label={executionSummaryRequired ? "任务执行概况 *" : "任务执行概况"}>
+        <FormRow label={executionSummaryRequired ? "需求执行概况 *" : "需求执行概况"}>
           <textarea
             name="executionSummary"
             rows={3}
             required={executionSummaryRequired}
             defaultValue={item?.executionSummary ?? ""}
-            placeholder="请输入任务最终执行情况的描述"
+            placeholder="请输入需求最终执行情况的描述"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
@@ -1165,7 +1165,7 @@ function ProjectEditForm({
               <div className="min-h-[40px] w-full rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
                 {workloadPersonDay || "—"}
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">由下属任务工作量自动汇总，不可手动修改</div>
+              <div className="mt-1 text-xs text-muted-foreground">由下属需求工作量自动汇总，不可手动修改</div>
             </>
           ) : (
             <input
@@ -1230,7 +1230,7 @@ function ProjectEditForm({
       </StickyFormScroll>
       <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-          项目变更为已完成或关闭时，将同步更新其下所有任务状态，且不再有价值跟踪等后续事项。
+          项目变更为已完成或关闭时，将同步更新其下所有需求状态，且不再有价值跟踪等后续事项。
         </div>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -2139,9 +2139,9 @@ function QuarterlyWorkDeleteForm({ item, onClose }: { item: Props["data"]["colum
     }}>
       <input type="hidden" name="workId" value={item.id} />
       <div className="space-y-4">
-        <p className="text-sm text-foreground">确定删除这个任务吗？</p>
+        <p className="text-sm text-foreground">确定删除这个需求吗？</p>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          任务：{item.title}
+          需求：{item.title}
           <br />
           所属项目：{item.projectTitle}
         </div>
@@ -2751,7 +2751,7 @@ function ProjectCreateMenu({
           className="flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm leading-[22px] text-[#181818] hover:bg-[#F5F5F5]"
         >
           <img src="/icons/create-task.svg" alt="" width={16} height={16} className="h-4 w-4" />
-          创建任务
+          创建需求
         </button>
       ) : null}
       {canCreateValueTrack ? (
@@ -2914,7 +2914,7 @@ function ProjectCard({
             style={{ transform: panel === "value" ? "translateX(100%)" : "translateX(0)" }}
           />
           {[
-            { key: "task" as const, label: "任务" },
+            { key: "task" as const, label: "需求" },
             { key: "value" as const, label: "价值跟踪" },
           ].map((item) => (
             <button
@@ -2946,8 +2946,8 @@ function ProjectCard({
               </div>
             ) : (
               <EmptyProjectSection
-                title="暂未创建任务"
-                description="创建任务，开始你的工作吧！"
+                title="暂未创建需求"
+                description="创建需求，开始你的工作吧！"
                 buttonLabel="去创建"
                 canCreate={canCreateTask}
                 onCreate={onCreateTask}
@@ -3168,7 +3168,7 @@ function ProjectExpandedPanel({
             style={{ transform: showingTasks ? "translateX(0)" : "translateX(100%)" }}
           />
           {[
-            { key: "task" as const, label: "任务" },
+            { key: "task" as const, label: "需求" },
             { key: "value" as const, label: "价值跟踪" },
           ].map((item) => (
             <button
@@ -3215,8 +3215,8 @@ function ProjectExpandedPanel({
         ) : (
           <div className="py-6">
             <EmptyProjectSection
-              title="暂未创建任务"
-              description="创建任务，开始你的工作吧！"
+              title="暂未创建需求"
+              description="创建需求，开始你的工作吧！"
               buttonLabel="去创建"
               canCreate={canCreateTask}
               onCreate={onCreateTask}
@@ -3730,7 +3730,7 @@ function GoalNavCard({
             active ? "pointer-events-none opacity-0" : "opacity-100"
           }`}
         >
-          {goal.projectCount} 项目 · {goal.taskCount} 任务
+          {goal.projectCount} 项目 · {goal.taskCount} 需求
         </div>
         <div
           ref={statsRef}
@@ -3744,7 +3744,7 @@ function GoalNavCard({
           </div>
           <div className="flex min-w-0 flex-1 flex-col justify-center gap-[2px] rounded-[8px] bg-[#FAFAFA] px-2 py-1">
             <div className="text-[14px] font-medium leading-[22px] text-[#181818]">{goal.taskCount}</div>
-            <div className="text-xs leading-[18px] text-[#777777]">项目任务</div>
+            <div className="text-xs leading-[18px] text-[#777777]">项目需求</div>
           </div>
         </div>
       </div>
@@ -4061,11 +4061,11 @@ function TaskListTable({
       <div className={`${taskListRowClass} sticky top-0 z-20 h-11 min-w-[1304px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
         <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>名称</div>
         <div>所属项目</div>
-        <div>任务目标</div>
+        <div>需求目标</div>
         <div>负责人</div>
         <div className="whitespace-nowrap text-right">工作量(人天)</div>
-        <div>任务状态</div>
-        <div>任务结果</div>
+        <div>需求状态</div>
+        <div>需求结果</div>
         <div>周期</div>
         <div>完成时间</div>
         <div className={`sticky right-0 top-0 z-30 flex h-11 items-center justify-end overflow-visible border-b border-[#F0F0F0] bg-white pr-4 text-right ${pingRight ? goalStickyActionShadow : ""}`}>操作</div>
@@ -4443,7 +4443,7 @@ function QuarterlyWorkShell({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-semibold leading-[36px] tracking-tight text-[#181818]">产品管理</h1>
-            <p className="mt-2 text-sm leading-[22px] text-[#777777]">以产品目标为核心管理年度目标、关联项目、项目任务与上线后价值跟踪，每周更新进展，延期自动预警。</p>
+            <p className="mt-2 text-sm leading-[22px] text-[#777777]">以产品目标为核心管理年度目标、关联项目、项目需求与上线后价值跟踪，每周更新进展，延期自动预警。</p>
           </div>
           <Button variant="ghost" size="sm" className="h-6 shrink-0 rounded px-2 text-sm text-[#181818]" onClick={onOpenOperationLogs}>
             <img src="/icons/operation-log.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
@@ -4567,7 +4567,7 @@ function QuarterlyWorkShell({
         <aside className={`flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white ${bleedCardList ? "my-4" : ""}`}>
           <div className="shrink-0 px-4 pb-3 pt-5">
             <h2 className="text-sm font-medium leading-[22px] text-[rgba(0,0,0,0.85)]">
-              {isTaskHome ? "任务" : isProjectHome ? "项目" : isValueHome ? "价值跟踪" : "目标"}
+              {isTaskHome ? "需求" : isProjectHome ? "项目" : isValueHome ? "价值跟踪" : "目标"}
             </h2>
             <form
               className="mt-2 flex h-8 shrink-0 items-center gap-2 rounded-md bg-[#F5F7F9] px-2 text-sm"
@@ -4581,7 +4581,7 @@ function QuarterlyWorkShell({
               <input
                 name="q"
                 defaultValue={data.workspaceFilters.query}
-                placeholder="搜索目标、项目、任务"
+                placeholder="搜索目标、项目、需求"
                 className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-[#BDBDBD]"
               />
             </form>
@@ -4677,7 +4677,7 @@ function QuarterlyWorkShell({
                 >
                   <span className="inline-flex items-center gap-2">
                     <img src="/icons/add-project.png" alt="" width={16} height={16} className="h-4 w-4" />
-                    <span className="text-sm text-[rgba(0,0,0,0.85)]">新建任务</span>
+                    <span className="text-sm text-[rgba(0,0,0,0.85)]">新建需求</span>
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <kbd className="flex h-5 w-5 items-center justify-center rounded bg-[#F5F6F7] text-[11px] text-black/25">⌘</kbd>
@@ -4856,9 +4856,9 @@ function QuarterlyWorkShell({
             ) : (
               <div className={`${bleedCardList ? "my-4" : ""} flex h-full min-h-0 flex-col rounded-2xl bg-white`}>
                 <EmptyProjectSection
-                  title="暂无任务"
-                  description="调整筛选条件，或新建任务开始规划。"
-                  buttonLabel="新建任务"
+                  title="暂无需求"
+                  description="调整筛选条件，或新建需求开始规划。"
+                  buttonLabel="新建需求"
                   canCreate={canCreateTask}
                   onCreate={() => onCreateTask(activeProjectId || undefined)}
                 />
@@ -5225,7 +5225,7 @@ export function QuarterlyWorkContent({ data }: Props) {
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
           <h1 className="text-3xl font-semibold tracking-tight">产品管理</h1>
-          <p className="mt-2 text-sm text-muted-foreground">按小组规划年度产品目标、项目规划 · 任务拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
+          <p className="mt-2 text-sm text-muted-foreground">按小组规划年度产品目标、项目规划 · 需求拆解 · 每周更新进展，延期自动预警；上线后跟踪需求价值</p>
         </div>
 
         {data.isSystemAdmin ? (
@@ -5271,7 +5271,7 @@ export function QuarterlyWorkContent({ data }: Props) {
               {[
                 { k: "goal" as const, label: "产品目标" },
                 { k: "project" as const, label: "项目看板" },
-                { k: "board" as const, label: "任务看板" },
+                { k: "board" as const, label: "需求看板" },
                 { k: "value" as const, label: "需求价值跟踪" },
                 { k: "log" as const, label: "操作日志" },
               ].map((t) => (
@@ -5296,7 +5296,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
                 ) : null}
                 {canCreateTask ? (
-                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增任务</Button>
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增需求</Button>
                 ) : null}
                 {canCreateValueTrack ? (
                   <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => {
@@ -5568,7 +5568,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                                   type="button"
                                   onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}
                                   className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                                  aria-label={`为${item.title}新增任务`}
+                                  aria-label={`为${item.title}新增需求`}
                                 >
                                   <Plus className="h-4 w-4" />
                                 </button>
@@ -5597,11 +5597,11 @@ export function QuarterlyWorkContent({ data }: Props) {
                           </div>
                           <div className="mt-3 flex items-center justify-between gap-4 text-xs text-muted-foreground">
                             <div>
-                              <span className="text-[11px]">总任务数：</span>
+                              <span className="text-[11px]">总需求数：</span>
                               <span className="font-medium text-foreground">{item.workCount}</span>
                             </div>
                             <div>
-                              <span className="text-[11px]">未完成任务数：</span>
+                              <span className="text-[11px]">未完成需求数：</span>
                               <span className="font-medium text-foreground">{item.activeQuarterCount}</span>
                             </div>
                           </div>
@@ -5687,8 +5687,8 @@ export function QuarterlyWorkContent({ data }: Props) {
           ) : tab === "board" ? (
             <>
             <BoardSearchBar
-              title="任务看板"
-              placeholder="搜索任务名称"
+              title="需求看板"
+              placeholder="搜索需求名称"
               {...tabSearchBarProps}
             />
             <div className="-mt-1 mb-3 flex items-center px-1">
@@ -5793,15 +5793,15 @@ export function QuarterlyWorkContent({ data }: Props) {
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-border bg-card">
                 <div className="px-5 py-3 border-b border-border bg-muted/30 grid grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_1.2fr_0.7fr_0.9fr_0.8fr_0.7fr_1fr_1fr_120px] gap-4 text-xs text-muted-foreground">
-                  <div>任务名称</div>
+                  <div>需求名称</div>
                   <div>所属项目</div>
                   <div>负责人</div>
-                  <div>任务周期</div>
+                  <div>需求周期</div>
                   <div>剩余/逾期</div>
-                  <div>任务目标</div>
+                  <div>需求目标</div>
                   <div>工作量(人天)</div>
-                  <div>任务状态</div>
-                  <div>任务结果</div>
+                  <div>需求状态</div>
+                  <div>需求结果</div>
                   <div>是否需开发</div>
                   <div>创建时间</div>
                   <div>完成时间</div>
@@ -5861,7 +5861,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                     )))
                   ) : (
                     <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-                      {tabSearchQuery ? "暂无匹配的任务数据" : "暂无任务数据"}
+                      {tabSearchQuery ? "暂无匹配的需求数据" : "暂无需求数据"}
                     </div>
                   )}
                 </div>
@@ -6186,7 +6186,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         />
       )}
 
-      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增任务" stickyLayout>
+      <Dialog open={!!createDialog} onClose={() => setCreateDialog(null)} title="新增需求" stickyLayout>
         {createDialog && (
           <QuarterlyWorkForm
             data={data}
@@ -6202,7 +6202,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         )}
       </Dialog>
 
-      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title="编辑任务" stickyLayout>
+      <Dialog open={!!editDialog} onClose={() => setEditDialog(null)} title="编辑需求" stickyLayout>
         {editDialog && (
           <QuarterlyWorkForm
             data={data}
@@ -6324,7 +6324,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
-      <Dialog open={!!boardDeleteDialog} onClose={() => setBoardDeleteDialog(null)} title="删除任务">
+      <Dialog open={!!boardDeleteDialog} onClose={() => setBoardDeleteDialog(null)} title="删除需求">
         {boardDeleteDialog ? (
           <QuarterlyWorkDeleteForm
             item={boardDeleteDialog}

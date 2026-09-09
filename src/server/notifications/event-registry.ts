@@ -85,28 +85,28 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
   },
   "quarterly_work.assigned": {
     code: "quarterly_work.assigned",
-    label: "季度任务负责人变更",
+    label: "季度需求负责人变更",
     module: "产品管理",
     payloadFields: ["title", "ownerId", "ownerName", "year", "quarter", "projectTitle", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
   },
   "quarterly_work.status.changed": {
     code: "quarterly_work.status.changed",
-    label: "季度任务状态变更",
+    label: "季度需求状态变更",
     module: "产品管理",
     payloadFields: ["title", "ownerId", "ownerName", "status", "previousStatus", "year", "quarter", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
   },
   "quarterly_work.overdue": {
     code: "quarterly_work.overdue",
-    label: "季度任务延期",
+    label: "季度需求延期",
     module: "产品管理",
     payloadFields: ["title", "ownerId", "ownerName", "endMonth", "overdueDays", "year", "quarter", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
   },
   "quarterly_work.due_soon": {
     code: "quarterly_work.due_soon",
-    label: "季度任务即将延期",
+    label: "季度需求即将延期",
     module: "产品管理",
     payloadFields: ["title", "ownerId", "ownerName", "endMonth", "daysUntilDue", "year", "quarter", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
@@ -219,11 +219,11 @@ export const SCHEDULE_SCAN_REGISTRY: Record<ScheduleScanType, { label: string; e
     emitEvent: "annual_goal.quarter_target.missing",
   },
   quarterly_work_overdue: {
-    label: "季度任务延期提醒",
+    label: "季度需求延期提醒",
     emitEvent: "quarterly_work.overdue",
   },
   quarterly_work_due_soon: {
-    label: "季度任务即将延期提醒",
+    label: "季度需求即将延期提醒",
     emitEvent: "quarterly_work.due_soon",
   },
   project_overdue: {

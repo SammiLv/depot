@@ -189,7 +189,7 @@ export async function buildQuarterlyWorkTestEventPayload(
   if (triggerEvent === "quarterly_work.overdue") {
     const work = await findOverdueWork();
     if (!work) {
-      throw new Error("当前没有已延期的任务，无法发送示例测试通知（任务延期按任务 endMonth 判断）。");
+      throw new Error("当前没有已延期的需求，无法发送示例测试通知（需求延期按需求 endMonth 判断）。");
     }
     const ownerName = await findSampleOwnerName(work.ownerId);
     return buildWorkPayload(work, base, ownerName, { overdueDays: getWorkOverdueDays(work, now) });
@@ -198,7 +198,7 @@ export async function buildQuarterlyWorkTestEventPayload(
   if (triggerEvent === "quarterly_work.due_soon") {
     const work = await findDueSoonWork();
     if (!work) {
-      throw new Error("当前没有即将延期的任务，无法发送示例测试通知。");
+      throw new Error("当前没有即将延期的需求，无法发送示例测试通知。");
     }
     const ownerName = await findSampleOwnerName(work.ownerId);
     return buildWorkPayload(work, base, ownerName, { daysUntilDue: getWorkDaysUntilDue(work, 7, now) });
@@ -217,7 +217,7 @@ export async function buildQuarterlyWorkTestEventPayload(
   if (triggerEvent === "project.overdue") {
     const project = await findOverdueProject();
     if (!project) {
-      throw new Error("当前没有已延期的项目，无法发送示例测试通知（项目延期仅看项目 endQuarter，不含下属任务）。");
+      throw new Error("当前没有已延期的项目，无法发送示例测试通知（项目延期仅看项目 endQuarter，不含下属需求）。");
     }
     const ownerName = await findSampleOwnerName(project.ownerId);
     return buildProjectPayload(project, base, ownerName, { overdueDays: getProjectOverdueDays(project, now) });

@@ -257,7 +257,7 @@ function resolveCompletedAtByStatus(
   const parsed = parseDateTimeInput(formValue);
   if (parsed) return parsed;
   if (existingCompletedAt) return existingCompletedAt;
-  throw new Error("任务状态为已完成时，完成时间为必填项");
+  throw new Error("需求状态为已完成时，完成时间为必填项");
 }
 
 function resolveProjectCompletedAtByStatus(
@@ -279,7 +279,7 @@ function getProjectCompletedAtByStatus(status: ProjectStatus) {
 function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
   const text = (value as string | null)?.trim();
   if (status === "COMPLETED" && (!text || !(TASK_RESULTS as readonly string[]).includes(text))) {
-    throw new Error("任务结果为必填项");
+    throw new Error("需求结果为必填项");
   }
   return text || null;
 }
@@ -287,7 +287,7 @@ function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
 function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkStatus) {
   const text = (value as string | null)?.trim() || null;
   if (status === "COMPLETED" && !text) {
-    throw new Error("任务状态为已完成时，任务执行概况为必填项");
+    throw new Error("需求状态为已完成时，需求执行概况为必填项");
   }
   return text;
 }
@@ -479,10 +479,10 @@ export async function createQuarterlyWork(formData: FormData) {
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   if (status === "COMPLETED" && workloadPersonDay === null) {
-    throw new Error("任务状态为已完成时，工作量(人天)为必填项");
+    throw new Error("需求状态为已完成时，工作量(人天)为必填项");
   }
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
-    throw new Error("任务状态为已完成时，完成时间为必填项");
+    throw new Error("需求状态为已完成时，完成时间为必填项");
   }
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
   const description = requiredString(formData.get("description"), "本季度工作目标");
@@ -542,7 +542,7 @@ export async function createQuarterlyWork(formData: FormData) {
     targetTitle: title,
     action: OPERATION_LOG_ACTION_CREATE,
     operatorId: currentUser.id,
-    remark: `新增任务「${title}」`,
+    remark: `新增需求「${title}」`,
   });
 
   revalidateQuarterlyWork();
@@ -561,10 +561,10 @@ export async function updateQuarterlyWork(formData: FormData) {
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   if (status === "COMPLETED" && workloadPersonDay === null) {
-    throw new Error("任务状态为已完成时，工作量(人天)为必填项");
+    throw new Error("需求状态为已完成时，工作量(人天)为必填项");
   }
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
-    throw new Error("任务状态为已完成时，完成时间为必填项");
+    throw new Error("需求状态为已完成时，完成时间为必填项");
   }
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
   const description = requiredString(formData.get("description"), "本季度工作目标");
@@ -657,19 +657,19 @@ export async function updateQuarterlyWork(formData: FormData) {
   });
   const projectTitleById = new Map(projectTitles.map((item) => [item.id, item.title]));
   const updateRemark = buildFieldChangeRemark([
-    { label: "任务名称", previous: existingWork.title, next: title },
+    { label: "需求名称", previous: existingWork.title, next: title },
     { label: "所属项目", previous: projectTitleById.get(previousProjectId), next: projectTitleById.get(project.id) },
     { label: "负责人", previous: userNameById.get(existingWork.ownerId), next: userNameById.get(owner.id) },
     {
-      label: "任务周期",
+      label: "需求周期",
       previous: existingWork.startMonth ? `${existingWork.startMonth}月~${existingWork.endMonth ?? existingWork.startMonth}月` : null,
       next: `${periodStartMonth}月~${periodEndMonth}月`,
     },
-    { label: "任务目标", previous: existingWork.description, next: description },
-    { label: "任务描述", previous: existingWork.taskDescription, next: taskDescription },
-    { label: "任务状态", previous: WORK_STATUS_LABELS[existingWork.status], next: WORK_STATUS_LABELS[status] },
-    { label: "任务结果", previous: existingWork.taskResult, next: taskResult },
-    { label: "任务执行概况", previous: existingWork.executionSummary, next: executionSummary },
+    { label: "需求目标", previous: existingWork.description, next: description },
+    { label: "需求描述", previous: existingWork.taskDescription, next: taskDescription },
+    { label: "需求状态", previous: WORK_STATUS_LABELS[existingWork.status], next: WORK_STATUS_LABELS[status] },
+    { label: "需求结果", previous: existingWork.taskResult, next: taskResult },
+    { label: "需求执行概况", previous: existingWork.executionSummary, next: executionSummary },
     { label: "工作量(人天)", previous: existingWork.workloadPersonDay, next: workloadPersonDay },
     {
       label: "是否需要开发",
@@ -1195,7 +1195,7 @@ export async function deleteValueTrack(formData: FormData) {
 
 export async function deleteQuarterlyWork(formData: FormData) {
   const { currentUser } = await requireManageProductTask();
-  const workId = requiredString(formData.get("workId"), "任务");
+  const workId = requiredString(formData.get("workId"), "需求");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const work = await prisma.quarterlyWork.findFirst({
@@ -1206,7 +1206,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
     select: { id: true, title: true, projectId: true },
   });
 
-  if (!work) throw new Error("任务不存在或无权限删除");
+  if (!work) throw new Error("需求不存在或无权限删除");
 
   await prisma.quarterlyWork.update({
     where: { id: work.id },
@@ -1220,7 +1220,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
     targetTitle: work.title,
     action: OPERATION_LOG_ACTION_DELETE,
     operatorId: currentUser.id,
-    remark: `删除任务「${work.title}」`,
+    remark: `删除需求「${work.title}」`,
   });
 
   revalidateQuarterlyWork();
