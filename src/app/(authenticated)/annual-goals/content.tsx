@@ -54,14 +54,10 @@ function getTakenTeamAssignments(
 ) {
   const takenSourceMetricIds = new Set<string>();
   const takenParentMetricIds = new Set<string>();
-  for (const teamPlan of data.plans) {
-    if (teamPlan.ownerType !== "TEAM" || !teamPlan.teamOrgNodeId) continue;
-    if (teamPlan.authorityPlanId !== options.authorityPlanId) continue;
-    if (teamPlan.teamOrgNodeId === options.excludeTeamOrgNodeId) continue;
-    for (const teamMetric of teamPlan.metrics) {
-      if (teamMetric.sourceMetricId) takenSourceMetricIds.add(teamMetric.sourceMetricId);
-      else takenParentMetricIds.add(teamMetric.authorityMetricId);
-    }
+  for (const item of data.teamMetricAuthoritiesByPlanId[options.authorityPlanId] ?? []) {
+    if (item.teamOrgNodeId === options.excludeTeamOrgNodeId) continue;
+    if (item.sourceMetricId) takenSourceMetricIds.add(item.sourceMetricId);
+    else if (item.metricId) takenParentMetricIds.add(item.metricId);
   }
   return { takenSourceMetricIds, takenParentMetricIds };
 }

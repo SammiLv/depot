@@ -167,6 +167,12 @@ type AnnualGoalsResult = {
     canUpdateProgress: boolean;
   };
   defaultDepartmentOrgNodeId: string | null;
+  /** 各年度方案下小组已承接的指标项 / 元指标（来自 assignment 表，不依赖可见 plan 列表） */
+  teamMetricAuthoritiesByPlanId: Record<string, Array<{
+    teamOrgNodeId: string;
+    sourceMetricId: string | null;
+    metricId: string | null;
+  }>>;
   summary: {
     planCount: number;
     metricCount: number;
@@ -881,6 +887,23 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
   // Build scope items: all visible departments + teams, with or without plans
   const deptPlanByDept = new Map(plansWithProgress.filter((p) => p.ownerType === "DEPARTMENT").map((p) => [p.scopeDepartmentOrgNodeId!, p]));
   const teamPlanByTeam = new Map(plansWithProgress.filter((p) => p.ownerType === "TEAM").map((p) => [p.teamOrgNodeId!, p]));
+  const teamMetricAuthoritiesByPlanId: Record<string, Array<{
+    teamOrgNodeId: string;
+    sourceMetricId: string | null;
+    metricId: string | null;
+  }>> = {};
+  for (const assignment of assignments) {
+    const authorityPlan = assignment.sourceMetric?.parentMetric.plan ?? assignment.metric?.plan;
+    if (!authorityPlan || authorityPlan.year !== resolvedSelectedYear || authorityPlan.deletedAt) continue;
+    const list = teamMetricAuthoritiesByPlanId[authorityPlan.id] ?? [];
+    list.push({
+      teamOrgNodeId: assignment.teamOrgNodeId,
+      sourceMetricId: assignment.sourceMetricId,
+      metricId: assignment.metricId,
+    });
+    teamMetricAuthoritiesByPlanId[authorityPlan.id] = list;
+  }
+
   const scopeItems: ScopeItem[] = [
     ...scopeDepartments.map((department) => ({
       type: "DEPARTMENT" as const,
@@ -924,6 +947,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
       canUpdateProgress: annualGoalCapabilities.canUpdateProgress,
     },
     defaultDepartmentOrgNodeId,
+    teamMetricAuthoritiesByPlanId,
     summary: {
       planCount: summaryPlans.length,
       metricCount: totalMetrics,
