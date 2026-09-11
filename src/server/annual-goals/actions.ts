@@ -392,6 +392,25 @@ async function assertSourceMetricAvailable(
   return sourceMetric;
 }
 
+async function assertTeamMetricAuthorityAvailable(
+  authority: { metricId: string | null; sourceMetricId: string | null },
+  teamOrgNodeId: string,
+) {
+  const taken = await prisma.annualGoalMetricAssignment.findFirst({
+    where: {
+      deletedAt: null,
+      teamOrgNodeId: { not: teamOrgNodeId },
+      ...(authority.sourceMetricId
+        ? { sourceMetricId: authority.sourceMetricId, metricId: null }
+        : { metricId: authority.metricId, sourceMetricId: null }),
+    },
+    select: { id: true },
+  });
+  if (taken) {
+    throw new Error(authority.sourceMetricId ? "该元指标已被其他小组选用" : "该指标项已被其他小组选用");
+  }
+}
+
 const sourceMetricTargetLimitMessage = "同一指标项下的所有元指标的目标数额总额不得大于指标项的目标总额，请重新填写。";
 const quarterTargetLimitMessage = "季度指标的目标数额总额不得大于对应指标项/元指标的目标总额，请重新填写。";
 
@@ -616,6 +635,7 @@ export async function createAnnualGoalMetric(formData: FormData) {
       throw new Error("指标权重合计不能超过 100%");
     }
     const authority = sourceMetricId ? { metricId: null, sourceMetricId } : { metricId: parentMetricId, sourceMetricId: null };
+    await assertTeamMetricAuthorityAvailable(authority, teamOrgNodeId);
     const existing = await prisma.annualGoalMetricAssignment.findFirst({ where: { teamOrgNodeId, ...authority } });
     if (existing && !existing.deletedAt) throw new Error("该指标已添加过，无需重复添加");
     if (existing) {

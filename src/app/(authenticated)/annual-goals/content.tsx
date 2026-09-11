@@ -47,6 +47,25 @@ function formatInputValue(value: number | null | undefined, fallback = "") {
   return value === null || value === undefined ? fallback : formatValue(value);
 }
 
+/** 同年度方案下，已被其他小组承接的指标项 / 元指标（当前小组编辑时排除自身） */
+function getTakenTeamAssignments(
+  data: Data,
+  options: { authorityPlanId: string; excludeTeamOrgNodeId: string | null },
+) {
+  const takenSourceMetricIds = new Set<string>();
+  const takenParentMetricIds = new Set<string>();
+  for (const teamPlan of data.plans) {
+    if (teamPlan.ownerType !== "TEAM" || !teamPlan.teamOrgNodeId) continue;
+    if (teamPlan.authorityPlanId !== options.authorityPlanId) continue;
+    if (teamPlan.teamOrgNodeId === options.excludeTeamOrgNodeId) continue;
+    for (const teamMetric of teamPlan.metrics) {
+      if (teamMetric.sourceMetricId) takenSourceMetricIds.add(teamMetric.sourceMetricId);
+      else takenParentMetricIds.add(teamMetric.authorityMetricId);
+    }
+  }
+  return { takenSourceMetricIds, takenParentMetricIds };
+}
+
 function roundValue(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -281,8 +300,16 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<"name" | "targetValue" | "currentValue" | "unit" | "weight", string>>>({});
   const isTeamPlan = plan.ownerType === "TEAM";
+  const { takenSourceMetricIds, takenParentMetricIds } = getTakenTeamAssignments(data, {
+    authorityPlanId: plan.authorityPlanId,
+    excludeTeamOrgNodeId: plan.teamOrgNodeId,
+  });
   const availableParentMetrics = data.availableParentMetrics.filter(
-    (m) => m.scopeDepartmentOrgNodeId === plan.scopeDepartmentOrgNodeId && (!plan.metrics.some((pm) => !pm.sourceMetricId && pm.metricCode === m.metricCode) || m.metricCode === metric?.metricCode)
+    (m) => m.scopeDepartmentOrgNodeId === plan.scopeDepartmentOrgNodeId
+      && (
+        (!plan.metrics.some((pm) => !pm.sourceMetricId && pm.metricCode === m.metricCode) && !takenParentMetricIds.has(m.id))
+        || m.metricCode === metric?.metricCode
+      )
   );
   const editingParentMetricId = metric?.sourceMetricId
     ? (availableParentMetrics.find((parentMetric) => parentMetric.sources.some((source) => source.id === metric.sourceMetricId))?.id ?? "")
@@ -292,7 +319,10 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
   const [unitValue, setUnitValue] = useState(metric?.unit ?? "");
   const selectedParentMetric = availableParentMetrics.find((m) => m.id === (metric?.sourceMetricId ? editingParentMetricId : selectedParentMetricId));
   const availableSourceMetrics = (selectedParentMetric?.sources ?? []).filter(
-    (m) => !plan.metrics.some((pm) => pm.sourceMetricId === m.id) || m.id === metric?.sourceMetricId
+    (m) => (
+      !plan.metrics.some((pm) => pm.sourceMetricId === m.id)
+      && !takenSourceMetricIds.has(m.id)
+    ) || m.id === metric?.sourceMetricId
   );
   const teamMemberOptions = plan.teamOrgNodeId ? (data.memberOptionsByTeam[plan.teamOrgNodeId] ?? []) : [];
   const departmentMemberOptions = !isTeamPlan && plan.scopeDepartmentOrgNodeId
