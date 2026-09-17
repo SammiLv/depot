@@ -1442,14 +1442,43 @@ function assertRequiredScoringSummary(
   }
 }
 
+// 沿组织树向上找最近的部门节点（KPI 归属可能是小组，而等级规则配置在部门上）
+async function resolveNearestDepartmentOrgNodeId(
+  tx: Prisma.TransactionClient,
+  orgNodeId: string,
+) {
+  const node = await tx.orgNode.findFirst({
+    where: { id: orgNodeId },
+    select: { nodeType: true },
+  });
+  if (!node) return null;
+  if (node.nodeType === "DEPARTMENT") return orgNodeId;
+  const closure = await tx.orgClosure.findMany({
+    where: { descendantId: orgNodeId, depth: { gt: 0 } },
+    orderBy: { depth: "asc" },
+    select: { ancestorId: true },
+  });
+  for (const link of closure) {
+    const ancestor = await tx.orgNode.findFirst({
+      where: { id: link.ancestorId, nodeType: "DEPARTMENT" },
+      select: { id: true },
+    });
+    if (ancestor) return ancestor.id;
+  }
+  return null;
+}
+
 async function resolveActiveKpiRatingSnapshot(
   tx: Prisma.TransactionClient,
   score: number,
   orgNodeId: string | null | undefined,
 ) {
   if (!Number.isFinite(score) || !orgNodeId) return null;
+  // 依次尝试：KPI 归属节点本身 → 最近的部门祖先
+  const departmentOrgNodeId = await resolveNearestDepartmentOrgNodeId(tx, orgNodeId);
+  const candidateOrgNodeIds = [...new Set([orgNodeId, departmentOrgNodeId].filter((id): id is string => Boolean(id)))];
   const rule = await tx.kpiRatingRuleVersion.findFirst({
-    where: { departmentOrgNodeId: orgNodeId, status: "ACTIVE", deletedAt: null },
+    where: { departmentOrgNodeId: { in: candidateOrgNodeIds }, status: "ACTIVE", deletedAt: null },
     orderBy: { publishedAt: "desc" },
   });
   if (!rule) return null;
