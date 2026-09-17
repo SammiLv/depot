@@ -1617,7 +1617,10 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                     <th className="px-5 py-3 font-medium">小组</th>
                     <th className="px-5 py-3 font-medium">阶段</th>
                     <th className="w-48 px-5 py-3 font-medium">完成度</th>
-                    <th className="px-5 py-3 font-medium">得分</th>
+                    <th className="px-5 py-3 font-medium">自评</th>
+                    <th className="px-5 py-3 font-medium">组长评</th>
+                    <th className="px-5 py-3 font-medium">主管评</th>
+                    <th className="px-5 py-3 font-medium">最终绩效总分</th>
                     <th className="px-5 py-3 font-medium">KPI 等级</th>
                     <th className="px-5 py-3 text-right font-medium">操作</th>
                   </tr>
@@ -1632,7 +1635,10 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                         <td className="px-5 py-3 text-sm text-muted-foreground">{r.teamName}</td>
                         <td className="px-5 py-3"><Badge tone={r.tone}>{r.status}</Badge></td>
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
-                        <td className="px-5 py-3 text-sm font-semibold tabular-nums">{r.score}</td>
+                        <td className={`px-5 py-3 text-sm tabular-nums ${r.scores.self === "—" ? "text-muted-foreground" : "font-semibold"}`}>{r.scores.self}</td>
+                        <td className={`px-5 py-3 text-sm tabular-nums ${r.scores.leader === "—" ? "text-muted-foreground" : "font-semibold"}`}>{r.scores.leader}</td>
+                        <td className={`px-5 py-3 text-sm tabular-nums ${r.scores.manager === "—" ? "text-muted-foreground" : "font-semibold"}`}>{r.scores.manager}</td>
+                        <td className={`px-5 py-3 text-sm tabular-nums ${r.scores.final === "—" ? "text-muted-foreground" : "font-semibold"}`}>{r.scores.final}</td>
                         <td className="px-5 py-3 text-sm font-medium tabular-nums">{r.rating ?? "—"}</td>
                         <td className="px-5 py-3 text-right">
                           <div className="flex items-center justify-end gap-3">
@@ -1656,7 +1662,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
+                      <td colSpan={10} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
                     </tr>
                   )}
                 </tbody>

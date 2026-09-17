@@ -132,7 +132,7 @@ function ScoreInput({ value }: { value: number | string }) {
     <input
       value={String(value)}
       readOnly
-      className="h-10 w-full rounded-lg border border-border bg-muted/20 px-3 text-right text-sm"
+      className="h-10 w-full rounded-lg border border-border bg-muted px-3 text-right text-sm"
     />
   );
 }
@@ -145,7 +145,7 @@ function EditableScoreInput({ name, value, onChange }: { name: string; value: st
       inputMode="decimal"
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-right text-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      className="h-10 w-full rounded-lg border border-border bg-white px-3 text-right text-sm focus:border-ring focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
     />
   );
 }
@@ -174,7 +174,7 @@ function SummaryTextarea({
       onChange={onChange ? (event) => onChange(event.target.value) : undefined}
       placeholder={placeholder}
       rows={4}
-      className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm read-only:bg-muted/20"
+      className="block w-full rounded-lg border border-border bg-white px-3 py-2 text-sm read-only:bg-muted"
     />
   );
 }
@@ -220,7 +220,7 @@ function ConfirmDialog({
               onChange={onRemarkChange ? (event) => onRemarkChange(event.target.value) : undefined}
               placeholder="请输入退回原因"
               rows={4}
-              className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              className="block w-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
             />
           </div>
         ) : null}

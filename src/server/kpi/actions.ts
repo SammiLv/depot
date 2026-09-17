@@ -1667,14 +1667,19 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
     const submittedAt = action === "submit" ? new Date() : null;
     const eventAt = action !== "save" ? new Date() : null;
 
+    // 仅写当前阶段对应的汇总字段；未进入的阶段保持 null，禁止用「满分−0扣分」预写
+    const stageSummaryData = (() => {
+      if (editableStage === "SELF") return { selfScore: selfTotal };
+      if (editableStage === "LEADER") return { leaderScore: leaderTotal };
+      if (editableStage === "MANAGER") return { managerScore: managerTotal };
+      return { finalScore };
+    })();
+
     await tx.personalKpi.update({
       where: { id: personalKpiId },
       data: {
         status: nextStatus,
-        selfScore: selfTotal,
-        leaderScore: leaderTotal,
-        managerScore: managerTotal,
-        finalScore,
+        ...stageSummaryData,
         finalRatingName: ratingSnapshot?.finalRatingName ?? null,
         ratingRuleVersionId: ratingSnapshot?.ratingRuleVersionId ?? null,
         ratingSnapshotJson: ratingSnapshot?.ratingSnapshotJson ?? null,

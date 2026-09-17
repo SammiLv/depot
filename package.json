@@ -18,7 +18,7 @@
     "test:permissions": "node --import tsx --test src/server/organization/permission-matrix.test.ts src/server/organization/annual-goal-permissions.test.ts",
     "test:permissions:integration": "bash scripts/test-permission-matrix-sync.sh",
     "test:permissions:all": "pnpm run test:permissions && pnpm run test:permissions:integration",
-    "test:kpi": "node --import tsx --test src/server/kpi/approval-policy.test.ts src/server/kpi/approval-policy-admin.test.ts src/server/kpi/approval-snapshot.test.ts src/server/kpi/approval-workflow.test.ts src/server/kpi/approval-org-tree.test.ts",
+    "test:kpi": "node --import tsx --test src/server/kpi/*.test.ts",
     "test:talent": "node --import tsx --test src/server/talent/*.test.ts",
     "postinstall": "prisma generate --schema db/prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema db/prisma/schema.prisma",
