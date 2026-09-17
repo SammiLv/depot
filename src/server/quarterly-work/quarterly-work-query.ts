@@ -57,8 +57,10 @@ type BoardItem = {
   departmentOrgNodeId: string | null;
   teamOrgNodeId: string | null;
   teamName: string | null;
+  year: number;
   startMonth: number | null;
   endMonth: number | null;
+  startDate: Date | null;
   endDate: Date | null;
   status: WorkStatus;
   description: string | null;
@@ -401,7 +403,26 @@ function formatProjectRemainLabel(project: {
   return null;
 }
 
-function formatTaskPeriodLabel(startMonth: number | null | undefined, endMonth: number | null | undefined) {
+// 需求周期展示：优先精确日期（短格式 9月1日 ~ 9月30日），老数据退到月份
+function formatTaskPeriodLabel(work: {
+  startDate?: Date | null;
+  endDate?: Date | null;
+  startMonth?: number | null;
+  endMonth?: number | null;
+}) {
+  const { startDate, endDate } = work;
+  if (startDate && endDate) {
+    const startText = `${startDate.getMonth() + 1}月${startDate.getDate()}日`;
+    const endText = `${endDate.getMonth() + 1}月${endDate.getDate()}日`;
+    return startText === endText ? startText : `${startText} - ${endText}`;
+  }
+  if (startDate) {
+    return `${startDate.getMonth() + 1}月${startDate.getDate()}日起`;
+  }
+  if (endDate) {
+    return `${endDate.getMonth() + 1}月${endDate.getDate()}日前`;
+  }
+  const { startMonth, endMonth } = work;
   if (startMonth && endMonth) {
     return startMonth === endMonth ? `${startMonth}月` : `${startMonth}月 - ${endMonth}月`;
   }
@@ -782,8 +803,10 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       departmentOrgNodeId,
       teamOrgNodeId,
       teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
+      year: work.year,
       startMonth: work.startMonth,
       endMonth: work.endMonth,
+      startDate: work.startDate,
       endDate: work.endDate,
       status: work.status,
       description: work.description,
@@ -1075,7 +1098,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     ...toBoardItem(work),
     year: work.year,
     quarter: work.quarter,
-    periodLabel: formatTaskPeriodLabel(work.startMonth, work.endMonth),
+    periodLabel: formatTaskPeriodLabel(work),
     isOverdue: isWorkOverdue(work),
   });
 

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DateInput } from "@/components/date-input";
+import { DateRangePicker } from "@/components/date-range-picker";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -726,10 +727,6 @@ function QuarterlyWorkForm({
   onSuccess: FormSuccessHandler;
   stickyLayout?: boolean;
 }) {
-  const monthOptions = useMemo(
-    () => Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: `${index + 1}月` })),
-    []
-  );
   const statusOptions = useMemo(() => editableStatuses, []);
   const projectOptionById = useMemo(
     () => new Map(data.projectOptions.map((project) => [project.id, project])),
@@ -808,27 +805,21 @@ function QuarterlyWorkForm({
           />
         </FormRow>
         <FormRow label="需求周期" align="center">
-          <div className="flex items-center gap-2">
-            <select
-              name="startMonth"
-              defaultValue={String(item?.startMonth ?? (new Date().getMonth() + 1))}
-              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              {monthOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <span className="text-muted-foreground">~</span>
-            <select
-              name="endMonth"
-              defaultValue={String(item?.endMonth ?? item?.startMonth ?? (new Date().getMonth() + 1))}
-              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              {monthOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
+          <DateRangePicker
+            nameStart="startDate"
+            nameEnd="endDate"
+            defaultStart={
+              item?.startDate
+                ?? (item?.startMonth ? new Date(item.year ?? new Date().getFullYear(), item.startMonth - 1, 1) : new Date())
+            }
+            defaultEnd={
+              item?.endDate
+                ?? (item?.endMonth
+                  ? new Date(item.year ?? new Date().getFullYear(), item.endMonth, 0)
+                  : item?.startDate
+                    ?? (item?.startMonth ? new Date(item.year ?? new Date().getFullYear(), item.startMonth, 0) : new Date()))
+            }
+          />
         </FormRow>
         <FormRow label="是否需要开发 *" align="center">
           <select
@@ -1542,9 +1533,27 @@ function ProjectQuarterRangeLabel({
   return <div className="min-w-0 break-words text-muted-foreground">{formatQuarterRange(startQuarter, endQuarter)}</div>;
 }
 
-function formatMonthRange(startMonth: number | null | undefined, endMonth: number | null | undefined) {
+// 需求周期展示：优先精确日期（短格式 9月1日 ~ 9月30日），老数据退到月份
+function formatTaskPeriodText(item: {
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
+  startMonth?: number | null;
+  endMonth?: number | null;
+}) {
+  const start = item.startDate ? new Date(item.startDate) : null;
+  const end = item.endDate ? new Date(item.endDate) : null;
+  const startValid = start && !Number.isNaN(start.getTime());
+  const endValid = end && !Number.isNaN(end.getTime());
+  if (startValid && endValid) {
+    const startText = `${start.getMonth() + 1}月${start.getDate()}日`;
+    const endText = `${end.getMonth() + 1}月${end.getDate()}日`;
+    return startText === endText ? startText : `${startText} ~ ${endText}`;
+  }
+  if (startValid) return `${start.getMonth() + 1}月${start.getDate()}日起`;
+  if (endValid) return `${end.getMonth() + 1}月${end.getDate()}日前`;
+  const { startMonth, endMonth } = item;
   if (startMonth && endMonth) {
-    return `${startMonth}月 ~ ${endMonth}月`;
+    return startMonth === endMonth ? `${startMonth}月` : `${startMonth}月 ~ ${endMonth}月`;
   }
   if (startMonth) {
     return `${startMonth}月`;
@@ -2345,6 +2354,7 @@ function ProjectTaskCard({
               {remain}
             </span>
           ) : null}
+          <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
         </div>
         {completed && task.workloadPersonDay != null ? (
           <div className="flex items-center gap-1">
@@ -4092,7 +4102,7 @@ function TaskListTable({
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</div>
               <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
-                <span>{task.periodLabel || formatMonthRange(task.startMonth, task.endMonth)}</span>
+                <span>{task.periodLabel || formatTaskPeriodText(task)}</span>
                 {remain ? (
                   <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}>
                     {remain}
@@ -5814,7 +5824,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                         <div className="font-medium text-foreground break-words">{item.title}</div>
                         <div className="text-muted-foreground break-words">{item.projectTitle}</div>
                         <div className="text-muted-foreground break-words">{item.owner}</div>
-                        <div className="text-muted-foreground">{formatMonthRange(item.startMonth, item.endMonth)}</div>
+                        <div className="text-muted-foreground">{formatTaskPeriodText(item)}</div>
                         <div className={item.remainingWeeksLabel?.startsWith("逾期") ? "text-destructive" : "text-muted-foreground"}>
                           {item.remainingWeeksLabel ?? "—"}
                         </div>

@@ -77,18 +77,24 @@ export function getMonthEndDate(year: number, month: number) {
 type WorkOverdueInput = {
   year: number;
   endMonth: number | null;
+  endDate?: Date | null;
   status: string;
 };
 
-/** 任务延期天数：仅依据任务自身的 endMonth。 */
+// 需求截止点：优先精确 endDate（当天 23:59:59），老数据退到结束月份最后一天
+function resolveWorkPlanEndDate(work: WorkOverdueInput) {
+  return work.endDate ?? (work.endMonth ? getMonthEndDate(work.year, work.endMonth) : null);
+}
+
+/** 需求延期天数：仅依据需求自身的 endDate/endMonth。 */
 export function getWorkOverdueDays(work: WorkOverdueInput, now = new Date()) {
   if (work.status !== "NOT_STARTED" && work.status !== "IN_PROGRESS") {
     return null;
   }
-  if (!work.endMonth) {
+  const endDate = resolveWorkPlanEndDate(work);
+  if (!endDate) {
     return null;
   }
-  const endDate = getMonthEndDate(work.year, work.endMonth);
   const remainingDays = daysUntil(endDate, now);
   return remainingDays < 0 ? Math.abs(remainingDays) : null;
 }
@@ -97,10 +103,11 @@ export function getWorkDaysUntilDue(work: WorkOverdueInput, windowDays: number, 
   if (work.status !== "NOT_STARTED" && work.status !== "IN_PROGRESS") {
     return null;
   }
-  if (!work.endMonth) {
+  const endDate = resolveWorkPlanEndDate(work);
+  if (!endDate) {
     return null;
   }
-  const remainingDays = daysUntil(getMonthEndDate(work.year, work.endMonth), now);
+  const remainingDays = daysUntil(endDate, now);
   if (remainingDays < 0 || remainingDays > windowDays) {
     return null;
   }

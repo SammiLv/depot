@@ -39,6 +39,7 @@ async function findOverdueWork() {
       year: true,
       quarter: true,
       endMonth: true,
+      endDate: true,
       status: true,
       project: { select: { title: true } },
     },
@@ -63,6 +64,7 @@ async function findDueSoonWork(windowDays = 7) {
       year: true,
       quarter: true,
       endMonth: true,
+      endDate: true,
       status: true,
       project: { select: { title: true } },
     },
@@ -189,7 +191,7 @@ export async function buildQuarterlyWorkTestEventPayload(
   if (triggerEvent === "quarterly_work.overdue") {
     const work = await findOverdueWork();
     if (!work) {
-      throw new Error("当前没有已延期的需求，无法发送示例测试通知（需求延期按需求 endMonth 判断）。");
+      throw new Error("当前没有已延期的需求，无法发送示例测试通知（需求延期按需求结束日期判断）。");
     }
     const ownerName = await findSampleOwnerName(work.ownerId);
     return buildWorkPayload(work, base, ownerName, { overdueDays: getWorkOverdueDays(work, now) });

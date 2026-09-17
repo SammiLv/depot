@@ -294,8 +294,9 @@ const PRESET_SCENARIOS = [
     sortOrder: 100,
   },
   {
-    name: "季度任务负责人变更通知",
-    description: "新增任务或变更任务负责人时通知新负责人",
+    name: "季度需求负责人变更通知",
+    previousNames: ["季度任务负责人变更通知"],
+    description: "新增需求或变更需求负责人时通知新负责人",
     module: resolveEventModule("quarterly_work.assigned"),
     triggerType: "EVENT" as const,
     triggerEvent: "quarterly_work.assigned",
@@ -304,7 +305,7 @@ const PRESET_SCENARIOS = [
       channels: ["IN_APP", "DINGTALK"],
       notificationType: "GOAL_UPDATE",
       dingtalkNotifyType: 5,
-      titleTemplate: "您被指派为任务负责人：{{title}}",
+      titleTemplate: "您被指派为需求负责人：{{title}}",
       contentTemplate: "{{ownerName}}，请及时跟进「{{title}}」。",
       messageUrlTemplate: quarterlyWorkMessageUrls.task,
     },
@@ -378,8 +379,9 @@ const PRESET_SCENARIOS = [
     sortOrder: 130,
   },
   {
-    name: "季度任务延期提醒",
-    description: "每周一扫描结束月份已过且仍未完成的任务",
+    name: "季度需求延期提醒",
+    previousNames: ["季度任务延期提醒"],
+    description: "每周一扫描结束日期已过且仍未完成的需求",
     module: resolveEventModule("quarterly_work.overdue"),
     triggerType: "SCHEDULE" as const,
     triggerEvent: "quarterly_work.overdue",
@@ -393,16 +395,17 @@ const PRESET_SCENARIOS = [
       channels: ["IN_APP", "DINGTALK"],
       notificationType: "WORK_DELAY",
       dingtalkNotifyType: 5,
-      titleTemplate: "任务已延期：{{title}}",
-      contentTemplate: "「{{title}}」已超过结束月份 {{overdueDays}} 天，请尽快更新进展。",
+      titleTemplate: "需求已延期：{{title}}",
+      contentTemplate: "「{{title}}」已超过结束日期 {{overdueDays}} 天，请尽快更新进展。",
       messageUrlTemplate: quarterlyWorkMessageUrls.task,
     },
     isActive: true,
     sortOrder: 140,
   },
   {
-    name: "季度任务即将延期提醒",
-    description: "每周一扫描距离任务结束月份不足 1 周的未完成任务",
+    name: "季度需求即将延期提醒",
+    previousNames: ["季度任务即将延期提醒"],
+    description: "每周一扫描距离需求结束日期不足 1 周的未完成需求",
     module: resolveEventModule("quarterly_work.due_soon"),
     triggerType: "SCHEDULE" as const,
     triggerEvent: "quarterly_work.due_soon",
@@ -416,8 +419,8 @@ const PRESET_SCENARIOS = [
       channels: ["IN_APP", "DINGTALK"],
       notificationType: "WORK_DELAY",
       dingtalkNotifyType: 5,
-      titleTemplate: "任务即将延期：{{title}}",
-      contentTemplate: "「{{title}}」距结束月份还剩 {{daysUntilDue}} 天，请及时推进。",
+      titleTemplate: "需求即将延期：{{title}}",
+      contentTemplate: "「{{title}}」距结束日期还剩 {{daysUntilDue}} 天，请及时推进。",
       messageUrlTemplate: quarterlyWorkMessageUrls.task,
     },
     isActive: true,
@@ -496,13 +499,38 @@ const PRESET_SCENARIOS = [
 
 export async function ensurePresetNotificationScenarios() {
   for (const preset of PRESET_SCENARIOS) {
-    const existing = await prisma.notificationScenario.findFirst({
+    const { previousNames, ...presetData } = preset as typeof preset & { previousNames?: string[] };
+    let existing = await prisma.notificationScenario.findFirst({
       where: { name: preset.name },
-      select: { id: true, channelConfig: true },
+      select: { id: true, name: true, channelConfig: true },
     });
 
+    // 旧名（如「任务」时代命名）命中的行：改名并同步最新文案模板
+    if (!existing && previousNames?.length) {
+      existing = await prisma.notificationScenario.findFirst({
+        where: { name: { in: previousNames } },
+        select: { id: true, name: true, channelConfig: true },
+      });
+      if (existing) {
+        await prisma.notificationScenario.update({
+          where: { id: existing.id },
+          data: {
+            name: preset.name,
+            description: preset.description,
+            channelConfig: {
+              ...((existing.channelConfig ?? {}) as Record<string, unknown>),
+              titleTemplate: preset.channelConfig.titleTemplate,
+              contentTemplate: preset.channelConfig.contentTemplate,
+              messageUrlTemplate: preset.channelConfig.messageUrlTemplate,
+            },
+          },
+        });
+        continue;
+      }
+    }
+
     if (!existing) {
-      await prisma.notificationScenario.create({ data: { ...preset } });
+      await prisma.notificationScenario.create({ data: { ...presetData } });
       continue;
     }
 

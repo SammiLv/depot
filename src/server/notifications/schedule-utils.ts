@@ -23,7 +23,7 @@ export function scheduleScanDaysBeforeHint(scanType: ScheduleScanType): string |
     return "扫描小组承接的当前季度指标：距本次扫描时间超过该天数仍未更新进度时通知责任人。";
   }
   if (scanType === "quarterly_work_due_soon") {
-    return "到执行时间后，扫描距离任务结束月份不足该天数的未完成任务并提醒。";
+    return "到执行时间后，扫描距离需求结束日期不足该天数的未完成需求并提醒。";
   }
   if (scanType === "project_due_soon") {
     return "到执行时间后，扫描距离项目结束季度不足该天数的未完成项目并提醒。";

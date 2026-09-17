@@ -190,14 +190,37 @@ function parseRequiredYear(value: FormDataEntryValue | null, fieldName: string) 
   return Number(text);
 }
 
-function parseOptionalMonth(value: FormDataEntryValue | null, fieldName = "月份") {
-  const text = (value as string | null)?.trim();
-  if (!text) return null;
-  const month = Number.parseInt(text, 10);
-  if (!Number.isInteger(month) || month < 1 || month > 12) {
-    throw new Error(`${fieldName}格式不正确`);
+// 需求周期：YYYY-MM-DD → 本地零点（开始）/ 当天 23:59:59.999（结束，视为包含当天）
+function parsePeriodStartDate(value: FormDataEntryValue | null) {
+  return parseDateTimeInput(value);
+}
+
+function parsePeriodEndDate(value: FormDataEntryValue | null) {
+  const date = parseDateTimeInput(value);
+  if (!date) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function formatWorkPeriodLabel(start: Date | null, end: Date | null) {
+  if (start && end) {
+    const startText = `${start.getMonth() + 1}月${start.getDate()}日`;
+    const endText = `${end.getMonth() + 1}月${end.getDate()}日`;
+    return startText === endText ? startText : `${startText}~${endText}`;
   }
-  return month;
+  if (start) return `${start.getMonth() + 1}月${start.getDate()}日起`;
+  if (end) return `${end.getMonth() + 1}月${end.getDate()}日前`;
+  return null;
+}
+
+// 由周期日期推导归属年/季/月（startMonth/endMonth 仅作兼容冗余，逾期与展示一律以 startDate/endDate 为准）
+function derivePeriodFields(start: Date, end: Date) {
+  return {
+    year: start.getFullYear(),
+    quarter: Math.floor(start.getMonth() / 3) + 1,
+    startMonth: start.getMonth() + 1,
+    endMonth: end.getMonth() + 1,
+    endYear: end.getFullYear(),
+  };
 }
 
 function parseStatus(value: FormDataEntryValue | null) {
@@ -471,8 +494,13 @@ export async function createQuarterlyWork(formData: FormData) {
   const { currentUser } = await requireManageProductTask();
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
-  const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
-  const endMonth = parseOptionalMonth(formData.get("endMonth"), "结束月份");
+  const startDate = parsePeriodStartDate(formData.get("startDate")) ?? startOfToday();
+  const endDate = parsePeriodEndDate(formData.get("endDate"))
+    ?? new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 23, 59, 59, 999);
+  if (startDate.getTime() > endDate.getTime()) {
+    throw new Error("开始时间不能晚于结束时间");
+  }
+  const period = derivePeriodFields(startDate, endDate);
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
@@ -489,14 +517,8 @@ export async function createQuarterlyWork(formData: FormData) {
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
-  const now = new Date();
-  const year = now.getFullYear();
-  const periodStartMonth = startMonth ?? (now.getMonth() + 1);
-  const periodEndMonth = endMonth ?? periodStartMonth;
-  if (periodStartMonth > periodEndMonth) {
-    throw new Error("起始月份不能晚于结束月份");
-  }
-  const quarter = Math.floor((periodStartMonth - 1) / 3) + 1;
+  const year = period.year;
+  const quarter = period.quarter;
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const project = await ensureProjectForWork({
     currentUser,
@@ -513,8 +535,10 @@ export async function createQuarterlyWork(formData: FormData) {
       projectId: project.id,
       year,
       quarter,
-      startMonth: periodStartMonth,
-      endMonth: periodEndMonth,
+      startMonth: period.startMonth,
+      endMonth: period.endMonth,
+      startDate,
+      endDate,
       title,
       description,
       taskDescription,
@@ -553,8 +577,8 @@ export async function updateQuarterlyWork(formData: FormData) {
   const workId = parseWorkId(formData.get("workId"));
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
-  const startMonth = parseOptionalMonth(formData.get("startMonth"), "起始月份");
-  const endMonth = parseOptionalMonth(formData.get("endMonth"), "结束月份");
+  const inputStartDate = parsePeriodStartDate(formData.get("startDate"));
+  const inputEndDate = parsePeriodEndDate(formData.get("endDate"));
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
@@ -584,6 +608,9 @@ export async function updateQuarterlyWork(formData: FormData) {
       projectId: true,
       startMonth: true,
       endMonth: true,
+      startDate: true,
+      endDate: true,
+      year: true,
       ownerId: true,
       completedAt: true,
       title: true,
@@ -611,12 +638,20 @@ export async function updateQuarterlyWork(formData: FormData) {
     owner,
     workStatus: status,
   });
-  const periodStartMonth = startMonth ?? existingWork.startMonth ?? 1;
-  const periodEndMonth = endMonth ?? periodStartMonth;
-  if (periodStartMonth > periodEndMonth) {
-    throw new Error("起始月份不能晚于结束月份");
+  // 周期：优先用表单日期；未传则沿用已有日期；老数据再退到 年+月份 推导
+  const fallbackStart = existingWork.startDate
+    ?? (existingWork.startMonth ? new Date(existingWork.year, existingWork.startMonth - 1, 1) : startOfToday());
+  const fallbackEnd = existingWork.endDate
+    ?? (existingWork.endMonth
+      ? new Date(existingWork.year, existingWork.endMonth, 0, 23, 59, 59, 999)
+      : new Date(fallbackStart.getFullYear(), fallbackStart.getMonth(), fallbackStart.getDate(), 23, 59, 59, 999));
+  const startDate = inputStartDate ?? fallbackStart;
+  const endDate = inputEndDate ?? fallbackEnd;
+  if (startDate.getTime() > endDate.getTime()) {
+    throw new Error("开始时间不能晚于结束时间");
   }
-  const quarter = Math.floor((periodStartMonth - 1) / 3) + 1;
+  const period = derivePeriodFields(startDate, endDate);
+  const quarter = period.quarter;
   const previousProjectId = existingWork.projectId;
 
   await prisma.quarterlyWork.update({
@@ -627,8 +662,11 @@ export async function updateQuarterlyWork(formData: FormData) {
       description,
       taskDescription,
       expectedOutcome,
-      startMonth: periodStartMonth,
-      endMonth: periodEndMonth,
+      startMonth: period.startMonth,
+      endMonth: period.endMonth,
+      startDate,
+      endDate,
+      year: period.year,
       quarter,
       status,
       taskResult,
@@ -662,8 +700,10 @@ export async function updateQuarterlyWork(formData: FormData) {
     { label: "负责人", previous: userNameById.get(existingWork.ownerId), next: userNameById.get(owner.id) },
     {
       label: "需求周期",
-      previous: existingWork.startMonth ? `${existingWork.startMonth}月~${existingWork.endMonth ?? existingWork.startMonth}月` : null,
-      next: `${periodStartMonth}月~${periodEndMonth}月`,
+      previous: existingWork.startDate || existingWork.endDate
+        ? formatWorkPeriodLabel(existingWork.startDate, existingWork.endDate)
+        : (existingWork.startMonth ? `${existingWork.startMonth}月~${existingWork.endMonth ?? existingWork.startMonth}月` : null),
+      next: formatWorkPeriodLabel(startDate, endDate),
     },
     { label: "需求目标", previous: existingWork.description, next: description },
     { label: "需求描述", previous: existingWork.taskDescription, next: taskDescription },
