@@ -75,6 +75,26 @@ ok()   { printf "%s[ ok ]%s %s\n" "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf "%s[warn]%s %s\n" "$C_YELLOW" "$C_RESET" "$*"; }
 err()  { printf "%s[fail]%s %s\n" "$C_RED"   "$C_RESET" "$*" >&2; }
 
+# Git Bash 里 git pull 若遇 pack unlink 失败，会交互询问 y/n，但 stdin 常无法传给 git，输入 y 仍报
+# “did not understand” 并死循环。Windows 下改由 cmd 直接执行 git pull，避免该交互。
+run_git_pull() {
+  local dir="$1"
+  if [[ "${OS:-}" == "Windows_NT" ]] || [[ -n "${MSYSTEM:-}" ]]; then
+    local win_dir=""
+    if command -v cygpath >/dev/null 2>&1; then
+      win_dir="$(cygpath -w "$dir")"
+    else
+      win_dir="$(cd "$dir" && pwd -W 2>/dev/null | sed 's|/|\\|g')"
+    fi
+    if [ -n "$win_dir" ]; then
+      # MSYS 默认会改写 cmd 参数里的路径，导致 cd /d 报「文件名、目录名或卷标语法不正确」
+      MSYS2_ARG_CONV_EXCL='*' cmd //c "cd /d ${win_dir} && git pull"
+      return $?
+    fi
+  fi
+  (cd "$dir" && git pull)
+}
+
 # pull 步骤计时（秒）
 PULL_STEP_T0=0
 pull_step_begin() {
@@ -662,7 +682,7 @@ cmd_pull() {
 
   # 1. 拉取最新代码（用项目里配置好的镜像: ghfast.top 代理 github.com）
   pull_step_begin "1/6 拉取最新代码（git pull）"
-  if ! (cd "$PROJECT_DIR" && git pull); then
+  if ! run_git_pull "$PROJECT_DIR"; then
     err "git pull 失败（可能是冲突或网络问题）"
     return 1
   fi
