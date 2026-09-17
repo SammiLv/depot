@@ -12,6 +12,7 @@ import {
   kpiProgressStageOrder,
 } from "@/server/kpi/approval-workflow";
 import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
+import { buildKpiListScoreDisplay, type KpiListScoreDisplay } from "@/server/kpi/kpi-list-score-display";
 import { findUserPendingApprovalStep, canUserActOnApprovalStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 
@@ -61,7 +62,7 @@ type KpiPageData = {
     status: string;
     tone: "primary" | "warning" | "success" | "default" | "info";
     progress: number;
-    score: string;
+    scores: KpiListScoreDisplay;
     rating: string | null;
     availableActions: {
       canSelfReview: boolean;
@@ -1049,26 +1050,32 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const rows = kpis.flatMap((personalKpi) => {
     const user = userMap.get(personalKpi.userId);
     const items = itemsByKpi.get(personalKpi.id) ?? [];
-    const totalScore = items.reduce((sum, item) => sum + item.score, 0);
+    const completedProgressStages = buildKpiCompletedProgressStages({
+      status: personalKpi.status,
+      approvalSteps: approvalStepsByKpiId.get(personalKpi.id),
+    });
+    // 完成度 = 已完成阶段数 / 适用阶段数（自评 + 审批链实际包含的审批阶段；无审批链按组长/主管/终审 3 段）
     const progress = (() => {
-      if (personalKpi.status === "COMPLETED") return 100;
-      if (items.length === 0) return 0;
-      if (totalScore <= 0) return 0;
-      const scoredTotal = items.reduce((sum, item) => {
-        const score = item.finalScore ?? item.managerScore ?? item.leaderScore ?? item.selfScore ?? 0;
-        return sum + score;
-      }, 0);
-      return Math.min(100, Math.round((scoredTotal / totalScore) * 100));
+      const chainStageKeys = new Set(
+        (approvalStepsByKpiId.get(personalKpi.id) ?? []).map((step) => step.stageKey),
+      );
+      const stageDoneByKey = {
+        LEADER: completedProgressStages.leader,
+        MANAGER: completedProgressStages.manager,
+        FINAL: completedProgressStages.final,
+      } as const;
+      const applicableApprovalStages = chainStageKeys.size > 0
+        ? (["LEADER", "MANAGER", "FINAL"] as const).filter((key) => chainStageKeys.has(key))
+        : (["LEADER", "MANAGER", "FINAL"] as const);
+      const doneCount = (completedProgressStages.selfReview ? 1 : 0)
+        + applicableApprovalStages.filter((key) => stageDoneByKey[key]).length;
+      return Math.round((doneCount / (applicableApprovalStages.length + 1)) * 100);
     })();
     const teamOrgNodeId = getTeamOrgNodeIdForRecord(personalKpi.orgNodeId, relationships.nearestTeamOrgNodeIdByNodeId);
     const departmentOrgNodeId = rowUserDepartmentOrgNodeIdByUserId.get(personalKpi.userId)
       ?? getDepartmentOrgNodeIdForRecord(personalKpi.orgNodeId, relationships.nearestDepartmentOrgNodeIdByNodeId)
       ?? null;
     stageCounts[personalKpi.status] += 1;
-    const completedProgressStages = buildKpiCompletedProgressStages({
-      status: personalKpi.status,
-      approvalSteps: approvalStepsByKpiId.get(personalKpi.id),
-    });
     const listStageLabel = personalKpi.status === "COMPLETED"
       ? "已完成"
       : isSelfReviewStatus(personalKpi.status)
@@ -1088,7 +1095,13 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
       status: listStageLabel,
       tone: getKpiTone(personalKpi.status),
       progress,
-      score: `${personalKpi.finalScore ?? personalKpi.managerScore ?? personalKpi.leaderScore ?? personalKpi.selfScore ?? 0}`,
+      scores: buildKpiListScoreDisplay({
+        selfScore: personalKpi.selfScore,
+        leaderScore: personalKpi.leaderScore,
+        managerScore: personalKpi.managerScore,
+        finalScore: personalKpi.finalScore,
+        completedProgressStages,
+      }),
       rating: personalKpi.finalRatingName ?? null,
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),
