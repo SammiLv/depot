@@ -57,6 +57,15 @@ const quarterlyWorkDueSoonSchedule = {
   daysBefore: 7,
 };
 
+// KPI 绩效分布预警：每季度末窗口内每日扫描（默认距季度末 3 天内，即最后 3 天每天提醒）
+const kpiDistributionAlertSchedule = {
+  frequency: "quarterly" as const,
+  timeOfDay: "09:00",
+  timezone: "Asia/Shanghai",
+  scanType: "kpi_distribution_alert" as const,
+  daysBefore: 3,
+};
+
 const projectOverdueSchedule = {
   ...weeklyMondaySchedule,
   scanType: "project_overdue" as const,
@@ -425,6 +434,29 @@ const PRESET_SCENARIOS = [
     },
     isActive: true,
     sortOrder: 150,
+  },
+  {
+    name: "KPI 绩效分布预警",
+    description: "每季度末窗口内每日扫描：距季度末 ≤ 设定天数时检查各部门绩效分布规则（分差/低分占比），任一不达标则通知部门主管",
+    module: resolveEventModule("kpi.distribution.alert"),
+    triggerType: "SCHEDULE" as const,
+    triggerEvent: "kpi.distribution.alert",
+    scheduleConfig: kpiDistributionAlertSchedule,
+    nextRunAt: computeNextRunAt(kpiDistributionAlertSchedule),
+    recipientConfig: {
+      rules: [{ type: "DEPARTMENT_MANAGER" }],
+      dedupeWindowHours: 24,
+    },
+    channelConfig: {
+      channels: ["IN_APP", "DINGTALK"],
+      notificationType: "WORK_DELAY",
+      dingtalkNotifyType: 5,
+      titleTemplate: "KPI 绩效分布预警：{{departmentName}}",
+      contentTemplate: "{{year}}年Q{{quarter}}「{{departmentName}}」绩效分布未达标：{{failReasons}}。",
+      messageUrlTemplate: "{{appUrl}}/kpi?year={{year}}&quarter={{quarter}}",
+    },
+    isActive: true,
+    sortOrder: 155,
   },
   {
     name: "项目延期提醒",

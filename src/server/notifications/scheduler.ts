@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/prisma";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 import { runKpiInitializationPendingScan } from "@/server/notifications/kpi-initialization-scan";
+import { runKpiDistributionAlertScan } from "@/server/notifications/kpi-distribution-scan";
 import {
   runAnnualGoalQuarterTargetMissingScan,
   runAnnualGoalWeeklyProgressPendingScan,
@@ -134,7 +135,9 @@ async function runScanForSchedule(
   const daysBefore = schedule.daysBefore ?? 0;
   const scheduleSlot = getScheduleSlot();
   const emitOptions = { scenarioIds: [scenarioId], testRunId, scheduleSlot };
-  if (schedule.scanType === "kpi_initialization_pending") {
+  if (schedule.scanType === "kpi_distribution_alert") {
+    await runKpiDistributionAlertScan(scenarioId, daysBefore, emitOptions);
+  } else if (schedule.scanType === "kpi_initialization_pending") {
     await runKpiInitializationPendingScan(scenarioId, emitOptions);
   } else if (schedule.scanType === "kpi_self_review_pending") {
     await runKpiSelfReviewPendingScan(scenarioId, daysBefore, emitOptions);

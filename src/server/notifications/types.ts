@@ -34,9 +34,10 @@ export type ChannelConfig = {
   messageUrlTemplate?: string;
 };
 
-export type ScheduleFrequency = "daily" | "weekly";
+export type ScheduleFrequency = "daily" | "weekly" | "quarterly";
 
 export type ScheduleScanType =
+  | "kpi_distribution_alert"
   | "kpi_initialization_pending"
   | "kpi_self_review_pending"
   | "todo_due"

@@ -13,6 +13,7 @@ import {
 } from "@/server/kpi/approval-workflow";
 import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
 import { buildKpiListScoreDisplay, type KpiListScoreDisplay } from "@/server/kpi/kpi-list-score-display";
+import { evaluateKpiDistribution, type KpiDistributionEvaluation } from "@/server/kpi/kpi-distribution";
 import { findUserPendingApprovalStep, canUserActOnApprovalStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 
@@ -87,6 +88,18 @@ type KpiPageData = {
     teamOrgNodeId: string | null;
     departmentOrgNodeId: string | null;
     roleType: RoleType;
+  }>;
+  distributionAlerts: Array<{
+    departmentOrgNodeId: string;
+    departmentName: string;
+    rule: {
+      minHeadcount: number;
+      minGap: number;
+      belowScore: number;
+      belowMinPercent: number;
+      excludeManager: boolean;
+    };
+    evaluation: KpiDistributionEvaluation;
   }>;
   teamOptions: Array<{
     id: string;
@@ -519,6 +532,7 @@ function buildEmptyKpiPageData(
     stages: emptyStages,
     totalCount: 0,
     memberOptions: [],
+    distributionAlerts: [],
     teamOptions: scopeNodes.teamOptions,
     departmentOptions: scopeNodes.departments,
     departmentAllTabOrgNodeIds,
@@ -839,6 +853,91 @@ function parsePeriodValue(value: number | null | undefined) {
 function buildAvailableYears(nowYear: number, yearsFromData: number[]) {
   const uniqueYears = new Set<number>([nowYear, ...yearsFromData.filter((year) => Number.isFinite(year))]);
   return [...uniqueYears].sort((a, b) => b - a);
+}
+
+// 部门绩效分布预警：按可见部门 + 部门已发布规则（distributionEnabled）实时计算
+// 分母 = 部门应考核全员（可选排除主管）；分差/低分统计仅取终审完成的 finalScore
+async function buildKpiDistributionAlerts(input: {
+  departments: Array<{ id: string; name: string }>;
+  memberOptions: Array<{ id: string; departmentOrgNodeId: string | null; roleType: RoleType }>;
+  kpis: Array<{ id: string; userId: string; status: KpiStatus; finalScore: number | null }>;
+  rows: Array<{ id: string; departmentOrgNodeId: string | null }>;
+}): Promise<KpiPageData["distributionAlerts"]> {
+  const departmentIds = input.departments.map((department) => department.id);
+  if (departmentIds.length === 0) return [];
+  const rules = await prisma.kpiRatingRuleVersion.findMany({
+    where: {
+      departmentOrgNodeId: { in: departmentIds },
+      status: "ACTIVE",
+      deletedAt: null,
+      distributionEnabled: true,
+    },
+    orderBy: { publishedAt: "desc" },
+  });
+  if (rules.length === 0) return [];
+  // publishedAt desc：每个部门取最新发布版本
+  const ruleByDepartment = new Map<string, (typeof rules)[number]>();
+  for (const rule of rules) {
+    if (!ruleByDepartment.has(rule.departmentOrgNodeId)) {
+      ruleByDepartment.set(rule.departmentOrgNodeId, rule);
+    }
+  }
+
+  // KPI → 部门映射在循环外构建一次（rows 含权限范围内全部 KPI 的部门归属，含已删除成员的历史单据）
+  const departmentByKpiId = new Map(input.rows.map((row) => [row.id, row.departmentOrgNodeId] as const));
+  const memberDepartmentById = new Map(input.memberOptions.map((member) => [member.id, member.departmentOrgNodeId] as const));
+
+  return input.departments.flatMap((department) => {
+    const rule = ruleByDepartment.get(department.id);
+    if (!rule) return [];
+    const members = input.memberOptions.filter((member) => member.departmentOrgNodeId === department.id);
+    const countedMembers = rule.distributionExcludeManager
+      ? members.filter((member) => member.roleType !== "DEPARTMENT_MANAGER")
+      : members;
+    // 分母：应考核全员（在职成员，可选排除主管）
+    // 分数：KPI 归属部门的所有单据（含已删除成员的历史单据，与列表可见范围一致），仅排除现任主管的
+    const managerUserIds = new Set(
+      input.memberOptions
+        .filter((member) => rule.distributionExcludeManager && member.roleType === "DEPARTMENT_MANAGER")
+        .map((member) => member.id),
+    );
+    const departmentKpis = input.kpis.filter((kpi) => {
+      const kpiDepartmentOrgNodeId = departmentByKpiId.get(kpi.id)
+        ?? memberDepartmentById.get(kpi.userId)
+        ?? null;
+      if (kpiDepartmentOrgNodeId !== department.id) return false;
+      return !managerUserIds.has(kpi.userId);
+    });
+    const completedScores = departmentKpis
+      .filter((kpi) => kpi.status === "COMPLETED" && kpi.finalScore !== null)
+      .map((kpi) => kpi.finalScore!);
+    const evaluation = evaluateKpiDistribution(
+      {
+        enabled: rule.distributionEnabled,
+        minHeadcount: rule.distributionMinHeadcount,
+        minGap: rule.distributionMinGap,
+        belowScore: rule.distributionBelowScore,
+        belowMinPercent: rule.distributionBelowMinPercent,
+      },
+      {
+        initialized: departmentKpis.length > 0,
+        headcount: countedMembers.length,
+        completedScores,
+      },
+    );
+    return [{
+      departmentOrgNodeId: department.id,
+      departmentName: department.name,
+      rule: {
+        minHeadcount: rule.distributionMinHeadcount,
+        minGap: rule.distributionMinGap,
+        belowScore: rule.distributionBelowScore,
+        belowMinPercent: rule.distributionBelowMinPercent,
+        excludeManager: rule.distributionExcludeManager,
+      },
+      evaluation,
+    }];
+  });
 }
 
 export async function getKpiData(currentUser: DataScopeInput, periodOptions: KpiPeriodOptions = {}): Promise<KpiPageData> {
@@ -1324,6 +1423,25 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const teamNameById = new Map(teamOptions.map((team) => [team.id, team.name] as const));
   const memberNameById = new Map(users.map((user) => [user.id, user.name] as const));
 
+  const memberOptions = users.map((user) => ({
+    id: user.id,
+    name: user.name,
+    orgNodeId: user.orgNodeId,
+    teamOrgNodeId: getTeamOrgNodeIdForRecord(user.orgNodeId, relationships.nearestTeamOrgNodeIdByNodeId),
+    departmentOrgNodeId: getDepartmentOrgNodeIdForRecord(user.orgNodeId, relationships.nearestDepartmentOrgNodeIdByNodeId),
+    roleType: user.roleType,
+  }));
+
+  // 部门绩效分布预警：仅持有 VIEW_KPI_DISTRIBUTION_ALERT 权限时计算（通常仅主管）
+  const distributionAlertCoverage = await resolvePermissionCoverage(
+    currentUser,
+    orgPermissionModuleKeys.kpi,
+    kpiAbilityKeys.viewKpiDistributionAlert,
+  );
+  const distributionAlerts = distributionAlertCoverage.hasPermission
+    ? await buildKpiDistributionAlerts({ departments, memberOptions, kpis, rows })
+    : [];
+
   return {
     year,
     quarter,
@@ -1332,14 +1450,8 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     rows,
     stages,
     totalCount,
-    memberOptions: users.map((user) => ({
-      id: user.id,
-      name: user.name,
-      orgNodeId: user.orgNodeId,
-      teamOrgNodeId: getTeamOrgNodeIdForRecord(user.orgNodeId, relationships.nearestTeamOrgNodeIdByNodeId),
-      departmentOrgNodeId: getDepartmentOrgNodeIdForRecord(user.orgNodeId, relationships.nearestDepartmentOrgNodeIdByNodeId),
-      roleType: user.roleType,
-    })),
+    memberOptions,
+    distributionAlerts,
     teamOptions,
     departmentOptions: departments,
     departmentAllTabOrgNodeIds: viewScope.departmentAllTabOrgNodeIds,

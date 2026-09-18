@@ -14,7 +14,7 @@ export function scheduleScanUsesDaysBefore(scanType: ScheduleScanType): boolean 
 
 export function scheduleScanDaysBeforeLabel(scanType: ScheduleScanType): string {
   if (scanType === "annual_goal_weekly_progress_pending") return "未更新天数";
-  if (scanType === "project_value_track_pending") return "季度末提前天数";
+  if (scanType === "project_value_track_pending" || scanType === "kpi_distribution_alert") return "季度末提前天数";
   return "提前天数";
 }
 
@@ -30,6 +30,9 @@ export function scheduleScanDaysBeforeHint(scanType: ScheduleScanType): string |
   }
   if (scanType === "project_value_track_pending") {
     return "到执行时间后，扫描距本季度结束不足该天数且价值跟踪尚未完成的项目并提醒。";
+  }
+  if (scanType === "kpi_distribution_alert") {
+    return "仅在距季度末该天数内每日扫描：绩效分布（分差/低分占比）不达标的部门通知部门主管。如 3 表示最后 3 天每天提醒一次，1 表示仅最后一天。";
   }
   if (scanType === "quarterly_work_overdue" || scanType === "project_overdue") {
     return "到执行时间后直接扫描已延期的记录，无需设置提前天数。";
@@ -48,6 +51,19 @@ function parseTimeOfDay(timeOfDay: string) {
 /** 定时任务去重槽位（按东八区自然日）。 */
 export function getScheduleSlot(date = new Date()) {
   return date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+}
+
+/** 该日期所在季度的最后一天（23:59:59.999） */
+export function getQuarterEndOf(date: Date) {
+  const quarter = Math.floor(date.getMonth() / 3) + 1;
+  return new Date(date.getFullYear(), quarter * 3, 0, 23, 59, 59, 999);
+}
+
+/** 是否处于「距季度末 daysBefore 天内」窗口（含季度最后一天；daysBefore=1 表示仅最后一天） */
+export function isWithinQuarterEndWindow(date: Date, daysBefore: number) {
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const remain = Math.round((startOfDay(getQuarterEndOf(date)).getTime() - startOfDay(date).getTime()) / (24 * 60 * 60 * 1000));
+  return remain >= 0 && remain < Math.max(1, daysBefore);
 }
 
 /** 按 Asia/Shanghai 近似：使用本地时区（服务器应设为东八区）。 */
@@ -83,13 +99,21 @@ export function computeNextRunAt(
     advanceOneDay();
   }
 
-  if (schedule.frequency === "weekly" || schedule.frequency === "daily") {
+  if (schedule.frequency === "weekly") {
     const weekdays = (schedule.weekdays?.length ? schedule.weekdays : [1]).map((day) => Number(day));
     for (let i = 0; i < 14; i += 1) {
       if (weekdays.includes(candidate.getDay())) break;
       advanceOneDay();
     }
+  } else if (schedule.frequency === "quarterly") {
+    // 每季度：下次执行 = 距季度末 daysBefore 天窗口内的第一个候选日（窗口内每日执行）
+    const windowDays = Math.max(1, schedule.daysBefore ?? 1);
+    for (let i = 0; i < 400; i += 1) {
+      if (isWithinQuarterEndWindow(candidate, windowDays)) break;
+      advanceOneDay();
+    }
   }
+  // daily：每天执行，不参与星期匹配
 
   return candidate;
 }
@@ -101,6 +125,10 @@ export type ScheduleNextRunPreview = {
 
 /** 预览保存后的下次执行计划（不含 skipGrace，与保存逻辑一致）。 */
 export function previewScheduleNextRun(schedule: ScheduleConfig, from = new Date()): ScheduleNextRunPreview {
+  // 每季度频率受季末窗口约束，直接走完整计算（今日在窗口外时不应提示今日执行）
+  if (schedule.frequency === "quarterly") {
+    return { nextRunAt: computeNextRunAt(schedule, from, { skipGrace: true }), mode: "future" };
+  }
   const { hour, minute } = parseTimeOfDay(schedule.timeOfDay || "09:00");
   const candidate = new Date(from);
   candidate.setSeconds(0, 0);
@@ -145,7 +173,7 @@ export function parseScheduleConfig(value: unknown): ScheduleConfig | null {
   const raw = value as Partial<ScheduleConfig>;
   const scanType = raw.scanType;
   if (!scanType || !(scanType in SCHEDULE_SCAN_REGISTRY)) return null;
-  if (raw.frequency !== "daily" && raw.frequency !== "weekly") return null;
+  if (raw.frequency !== "daily" && raw.frequency !== "weekly" && raw.frequency !== "quarterly") return null;
   return {
     frequency: raw.frequency,
     timeOfDay: typeof raw.timeOfDay === "string" ? raw.timeOfDay : "09:00",

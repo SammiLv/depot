@@ -11,6 +11,7 @@ export const orgPermissionModuleKeys = {
 export const kpiAbilityKeys = {
   viewKpi: "VIEW_KPI",
   initializeKpi: "INITIALIZE_KPI",
+  viewKpiDistributionAlert: "VIEW_KPI_DISTRIBUTION_ALERT",
   viewKpiTemplate: "VIEW_KPI_TEMPLATE",
   manageKpiTemplate: "MANAGE_KPI_TEMPLATE",
   toggleKpiTemplate: "TOGGLE_KPI_TEMPLATE",
@@ -69,6 +70,7 @@ export const manageableRoleTypes: RoleType[] = ["ADMIN", "DEPARTMENT_MANAGER", "
 export const kpiOrdinaryPermissionAbilityKeys = [
   kpiAbilityKeys.viewKpi,
   kpiAbilityKeys.initializeKpi,
+  kpiAbilityKeys.viewKpiDistributionAlert,
   kpiAbilityKeys.viewKpiTemplate,
   kpiAbilityKeys.manageKpiTemplate,
   kpiAbilityKeys.toggleKpiTemplate,
@@ -128,6 +130,15 @@ export const kpiDefaultPermissionGrants: Array<{
   {
     moduleKey: orgPermissionModuleKeys.kpi,
     abilityKey: kpiAbilityKeys.initializeKpi,
+    scopeType: "SUBTREE",
+    subjectType: "ROLE",
+    roleType: "DEPARTMENT_MANAGER",
+    orgNodeSeedKey: "DEPARTMENT",
+  },
+  {
+    // 部门绩效分布预警：默认仅主管（本部门）可见
+    moduleKey: orgPermissionModuleKeys.kpi,
+    abilityKey: kpiAbilityKeys.viewKpiDistributionAlert,
     scopeType: "SUBTREE",
     subjectType: "ROLE",
     roleType: "DEPARTMENT_MANAGER",

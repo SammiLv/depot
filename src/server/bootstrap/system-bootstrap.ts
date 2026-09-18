@@ -28,6 +28,7 @@ export async function ensureInitialSystemBootstrap() {
   await ensureSystemMenus();
   await ensureAnnualGoalPermissionGrants();
   await ensureAdminKpiPermissions();
+  await ensureKpiDistributionAlertGrants();
   await ensureDefaultTalentPermissions();
   await ensureInitialTalentSalaryConfig();
   await ensureNotificationScenarioPermissions();
@@ -147,6 +148,44 @@ async function ensureAdminKpiPermissions() {
           roleType: RoleType.ADMIN,
           userId: null,
           orgNodeId: null,
+          isActive: true,
+        },
+      });
+    }
+  }
+}
+
+// KPI 部门绩效分布预警授权（幂等）：服务启动时补发，老库升级用
+// ADMIN 由 ensureAdminKpiPermissions 覆盖；此处补 DEPARTMENT_MANAGER 的系统模板行 + 按部门物化行
+export async function ensureKpiDistributionAlertGrants() {
+  const departments = await prisma.orgNode.findMany({
+    where: { nodeType: "DEPARTMENT" },
+    select: { id: true },
+  });
+  const targets: Array<string | null> = [null, ...departments.map((department) => department.id)];
+  for (const orgNodeId of targets) {
+    const result = await prisma.orgPermissionGrant.updateMany({
+      where: {
+        moduleKey: orgPermissionModuleKeys.kpi,
+        abilityKey: kpiAbilityKeys.viewKpiDistributionAlert,
+        scopeType: "SUBTREE",
+        subjectType: "ROLE",
+        roleType: RoleType.DEPARTMENT_MANAGER,
+        userId: null,
+        orgNodeId,
+      },
+      data: { isActive: true },
+    });
+    if (result.count === 0) {
+      await prisma.orgPermissionGrant.create({
+        data: {
+          moduleKey: orgPermissionModuleKeys.kpi,
+          abilityKey: kpiAbilityKeys.viewKpiDistributionAlert,
+          scopeType: "SUBTREE",
+          subjectType: "ROLE",
+          roleType: RoleType.DEPARTMENT_MANAGER,
+          userId: null,
+          orgNodeId,
           isActive: true,
         },
       });

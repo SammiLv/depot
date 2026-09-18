@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/prisma";
 import type { NotificationEventPayload } from "@/server/notifications/types";
 import { findKpiInitializationPendingSample, getCurrentYearQuarter } from "@/server/notifications/kpi-initialization-scan";
+import { findKpiDistributionAlertSample } from "@/server/notifications/kpi-distribution-scan";
 
 type TestPayloadBase = {
   appUrl: string;
@@ -104,7 +105,44 @@ export async function buildKpiTestEventPayload(
       return buildKpiInitializationPendingTestPayload(base);
     case "kpi.self_review.pending":
       return buildKpiSelfReviewPendingTestPayload(base);
+    case "kpi.distribution.alert":
+      return buildKpiDistributionAlertTestPayload(base);
     default:
       return null;
   }
+}
+
+async function buildKpiDistributionAlertTestPayload(
+  base: TestPayloadBase,
+): Promise<NotificationEventPayload | null> {
+  const sample = await findKpiDistributionAlertSample();
+  if (!sample) return null;
+  const { rule, evaluation } = sample;
+  const formatNum = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1));
+  const failReasons = [
+    evaluation.gapPass === false
+      ? `最高最低分差距 ${formatNum(evaluation.gap!)} 分（要求 ≥ ${rule.distributionMinGap} 分）`
+      : null,
+    evaluation.belowPass
+      ? null
+      : `低于 ${rule.distributionBelowScore} 分员工占比 ${formatNum(evaluation.belowPercent)}%（要求 ≥ ${rule.distributionBelowMinPercent}%）`,
+  ].filter(Boolean).join("；");
+  return {
+    ...base,
+    year: sample.year,
+    quarter: sample.quarter,
+    userId: sample.subjectUser.id,
+    subjectUserId: sample.subjectUser.id,
+    userName: sample.subjectUser.name,
+    departmentOrgNodeId: sample.department.id,
+    departmentName: sample.department.name,
+    gap: evaluation.gap,
+    belowPercent: evaluation.belowPercent,
+    belowCount: evaluation.belowCount,
+    headcount: evaluation.headcount,
+    failReasons,
+    targetType: "OrgNode",
+    targetId: sample.department.id,
+    title: "测试通知：KPI 绩效分布预警",
+  };
 }

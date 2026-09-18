@@ -433,7 +433,7 @@ async function buildTestEventPayload(
     if (productPayload) return productPayload;
   }
 
-  if (scenario.triggerEvent === "kpi.initialization.pending" || scenario.triggerEvent === "kpi.self_review.pending") {
+  if (scenario.triggerEvent === "kpi.initialization.pending" || scenario.triggerEvent === "kpi.self_review.pending" || scenario.triggerEvent === "kpi.distribution.alert") {
     const kpiPayload = await buildKpiTestEventPayload(scenario.triggerEvent, base);
     if (kpiPayload) return kpiPayload;
   }

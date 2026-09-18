@@ -353,6 +353,10 @@ export default async function OrgPage({
       name: "维护KPI",
       description: "允许维护季度 KPI，包括初始化与删除个人 KPI。",
     },
+    VIEW_KPI_DISTRIBUTION_ALERT: {
+      name: "查看部门绩效分布预警",
+      description: "允许在 KPI 管理列表查看部门绩效分布规则与达标预警（通常仅授予主管）。",
+    },
     VIEW_KPI_TEMPLATE: {
       name: "查看 KPI 模板",
       description: "允许查看 KPI 模板列表与适用范围。",

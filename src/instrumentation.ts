@@ -20,4 +20,12 @@ export async function register() {
   } catch (error) {
     console.error("[bootstrap] 补发指标管理默认授权失败", error);
   }
+
+  // KPI 部门绩效分布预警授权：重启时补发（系统模板行 + 按部门物化行），失败不阻断启动
+  try {
+    const { ensureKpiDistributionAlertGrants } = await import("@/server/bootstrap/system-bootstrap");
+    await ensureKpiDistributionAlertGrants();
+  } catch (error) {
+    console.error("[bootstrap] 补发 KPI 分布预警授权失败", error);
+  }
 }

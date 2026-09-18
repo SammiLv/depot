@@ -461,7 +461,7 @@ function parseScheduleConfig(value: unknown): ScheduleConfig {
       ? raw.scanType
       : defaults.scanType;
   return {
-    frequency: raw.frequency === "weekly" ? "weekly" : "daily",
+    frequency: raw.frequency === "weekly" ? "weekly" : raw.frequency === "quarterly" ? "quarterly" : "daily",
     timeOfDay: raw.timeOfDay ?? "09:00",
     weekdays: Array.isArray(raw.weekdays) ? raw.weekdays : defaults.weekdays,
     scanType,
@@ -842,13 +842,15 @@ function ScenarioForm({
                 value={scheduleConfig.frequency}
                 onChange={(event) => setScheduleConfig((prev) => ({
                   ...prev,
-                  frequency: event.target.value as "daily" | "weekly",
+                  frequency: event.target.value as "daily" | "weekly" | "quarterly",
                   weekdays: event.target.value === "weekly" ? [1] : [1, 2, 3, 4, 5, 6, 0],
+                  daysBefore: event.target.value === "quarterly" ? (prev.daysBefore || 3) : prev.daysBefore,
                 }))}
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               >
                 <option value="daily">每天</option>
                 <option value="weekly">每周</option>
+                <option value="quarterly">每季度（距季度末 N 天内每日）</option>
               </select>
             </div>
             <div>
@@ -861,17 +863,19 @@ function ScenarioForm({
               />
             </div>
           </div>
+          {scheduleConfig.frequency === "weekly" ? (
           <div className="space-y-1">
             <label className="block text-sm font-medium">执行日期（周一 ~ 周日）</label>
             <WeekdaySelector
               value={scheduleConfig.weekdays ?? []}
               onChange={(weekdays) => setScheduleConfig((prev) => ({ ...prev, weekdays }))}
             />
-            {scheduleConfig.frequency === "weekly" && (!scheduleConfig.weekdays || scheduleConfig.weekdays.length === 0) ? (
+            {(!scheduleConfig.weekdays || scheduleConfig.weekdays.length === 0) ? (
               <p className="text-xs text-destructive">每周执行至少选择一天</p>
             ) : null}
           </div>
-          {scheduleScanUsesDaysBefore(scheduleConfig.scanType) ? (
+          ) : null}
+          {(scheduleScanUsesDaysBefore(scheduleConfig.scanType) || scheduleConfig.frequency === "quarterly") ? (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">

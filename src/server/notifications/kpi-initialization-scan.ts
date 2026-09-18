@@ -14,7 +14,7 @@ export function getCurrentYearQuarter(date = new Date()) {
   };
 }
 
-function buildNearestDepartmentByOrgNodeId(
+export function buildNearestDepartmentByOrgNodeId(
   departmentIds: Set<string>,
   closureRows: Array<{ descendantId: string; ancestorId: string; depth: number }>,
 ) {

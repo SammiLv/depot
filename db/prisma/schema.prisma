@@ -38,6 +38,8 @@ enum OrgPermissionAbilityKey {
   MANAGE_KPI_TEMPLATE
   TOGGLE_KPI_TEMPLATE
   INITIALIZE_KPI
+  // 查看部门绩效分布预警（KPI 列表上方预警条，通常仅授予主管）
+  VIEW_KPI_DISTRIBUTION_ALERT
   SCORE_SELF
   SCORE_LEADER
   SCORE_MANAGER
@@ -1880,6 +1882,13 @@ model KpiRatingRuleVersion {
   baInitialPassPercent            Float              @default(100)
   baRetestPassPercent             Float              @default(50)
   baFinalFailPercent              Float              @default(0)
+  /// 部门绩效分布规则，随版本冻结；草稿可编辑，发布后只读。KPI 管理页预警条按部门已发布版本读取。
+  distributionEnabled             Boolean            @default(false)
+  distributionMinHeadcount        Int                @default(5)
+  distributionMinGap              Float              @default(10)
+  distributionBelowScore          Float              @default(100)
+  distributionBelowMinPercent     Float              @default(10)
+  distributionExcludeManager      Boolean            @default(true)
   createdById          String
   publishedById        String?
   publishedAt          DateTime?

@@ -27,6 +27,13 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     payloadFields: ["userId", "userName", "kpiId", "year", "quarter", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
   },
+  "kpi.distribution.alert": {
+    code: "kpi.distribution.alert",
+    label: "KPI 绩效分布预警",
+    module: "KPI管理",
+    payloadFields: ["departmentName", "departmentOrgNodeId", "year", "quarter", "gap", "belowPercent", "belowCount", "headcount", "failReasons", "targetId"],
+    recipientResolvers: ["DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
+  },
   "kpi.initialization.pending": {
     code: "kpi.initialization.pending",
     label: "KPI 待初始化",
@@ -198,6 +205,10 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
 };
 
 export const SCHEDULE_SCAN_REGISTRY: Record<ScheduleScanType, { label: string; emitEvent: string }> = {
+  kpi_distribution_alert: {
+    label: "KPI 绩效分布预警",
+    emitEvent: "kpi.distribution.alert",
+  },
   kpi_initialization_pending: {
     label: "KPI 待初始化提醒",
     emitEvent: "kpi.initialization.pending",

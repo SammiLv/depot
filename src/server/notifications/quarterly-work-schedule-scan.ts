@@ -11,12 +11,12 @@ import {
 } from "@/server/quarterly-work/overdue-utils";
 import { VALUE_TRACK_STATUS_COMPLETED, VALUE_TRACK_STATUS_NOT_OBSERVED } from "@/server/quarterly-work/value-track-constants";
 
-function daysUntil(endDate: Date, now: Date) {
+export function daysUntil(endDate: Date, now: Date) {
   const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
   return Math.round((startOfDay(endDate).getTime() - startOfDay(now).getTime()) / (24 * 60 * 60 * 1000));
 }
 
-function getCurrentQuarterEndDate(now: Date) {
+export function getCurrentQuarterEndDate(now: Date) {
   const quarter = Math.floor(now.getMonth() / 3) + 1;
   return new Date(now.getFullYear(), quarter * 3, 0, 23, 59, 59, 999);
 }

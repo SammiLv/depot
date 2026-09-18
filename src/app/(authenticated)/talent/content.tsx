@@ -1255,6 +1255,7 @@ function KpiRatingRuleConfiguration({ data, onDetailChange }: { data: TalentDeci
     {selected.status === "DRAFT" ? <KpiRuleDraftEditor rule={selected} bands={bands} departmentName={departmentNames.get(selected.departmentOrgNodeId)} headerAction={backButton}/> : <>
       <section><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="font-medium">{selected.name} · V{selected.version}</div><div className="mt-1 text-xs text-muted-foreground">{departmentNames.get(selected.departmentOrgNodeId)} · 季度KPI总分 {selected.quarterlyKpiTotalScore ?? "—"}</div></div><div className="flex items-center gap-2">{backButton}<Badge tone={selected.status === "ACTIVE" ? "success" : "default"}>{selected.status === "ACTIVE" ? "已发布" : "已归档"}</Badge></div></div><KpiRuleOverview bands={bands}/></section>
       <section><h3 className="mb-2 font-semibold">业务考核计分规则</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">计分规则随版本冻结，发布后只读；新建业务考核（KPI管理 → 业务考核）时按部门已发布版本冻结快照。</p><BusinessAssessmentScoringReadonly rule={selected}/></section>
+      <section><h3 className="mb-2 font-semibold">部门绩效分布规则</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">随版本冻结，发布后只读；KPI 管理列表按本部门已发布版本计算并展示达标预警。</p><DistributionRuleReadonly rule={selected}/></section>
     </>}
   </div>;
 }
@@ -1284,6 +1285,16 @@ function KpiRuleDraftEditor({ rule, bands, departmentName, headerAction }: { rul
       <Field label="补考不及格（%）"><input form={formId} name="baFinalFailPercent" type="number" min="0" max="100" step="0.01" required defaultValue={rule.baFinalFailPercent} className={inputClass}/></Field>
       <Field label="科目分配"><select disabled className={inputClass}><option>按科目平均摊分</option></select></Field>
     </div></section>
+    <section><h3 className="mb-2 font-semibold">部门绩效分布规则</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">随版本冻结：与等级区间一起通过「保存草稿」整页保存，发布后只读。启用后，KPI 管理列表会向持有「查看部门绩效分布预警」权限的角色（通常为主管）展示达标预警。</p>
+      <label className="mb-3 flex items-center gap-2 text-sm"><input form={formId} name="distributionEnabled" type="checkbox" defaultChecked={rule.distributionEnabled}/>启用部门绩效分布规则</label>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Field label="生效人数门槛（人）"><input form={formId} name="distributionMinHeadcount" type="number" min="1" step="1" required defaultValue={rule.distributionMinHeadcount} className={inputClass}/></Field>
+        <Field label="最高最低分差距 ≥（分）"><input form={formId} name="distributionMinGap" type="number" min="0" step="0.01" required defaultValue={rule.distributionMinGap} className={inputClass}/></Field>
+        <Field label="低分线（分）"><input form={formId} name="distributionBelowScore" type="number" min="0" step="0.01" required defaultValue={rule.distributionBelowScore} className={inputClass}/></Field>
+        <Field label="低分占比下限（%）"><input form={formId} name="distributionBelowMinPercent" type="number" min="0" max="100" step="0.01" required defaultValue={rule.distributionBelowMinPercent} className={inputClass}/></Field>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-sm"><input form={formId} name="distributionExcludeManager" type="checkbox" defaultChecked={rule.distributionExcludeManager}/>统计时排除主管（DEPARTMENT_MANAGER 角色）</label>
+    </section>
   </div>;
 }
 
@@ -1306,6 +1317,22 @@ function BusinessAssessmentScoringReadonly({ rule }: { rule: TalentDecisionRuleW
     { label: "补考及格（%）", value: rule.baRetestPassPercent },
     { label: "补考不及格（%）", value: rule.baFinalFailPercent },
     { label: "科目分配", value: "按科目平均摊分" },
+  ];
+  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    {readOnlyItems.map((item) => <div key={item.label} className="text-sm"><span className="text-muted-foreground">{item.label}：</span><span className="font-medium">{item.value}</span></div>)}
+  </div>;
+}
+
+function DistributionRuleReadonly({ rule }: { rule: TalentDecisionRuleWorkspaceData["kpiRuleVersions"][number] }) {
+  if (!rule.distributionEnabled) {
+    return <div className="text-sm text-muted-foreground">未启用</div>;
+  }
+  const readOnlyItems = [
+    { label: "生效人数门槛", value: `${rule.distributionMinHeadcount} 人` },
+    { label: "最高最低分差距", value: `≥ ${rule.distributionMinGap} 分` },
+    { label: "低分线", value: `< ${rule.distributionBelowScore} 分` },
+    { label: "低分占比下限", value: `≥ ${rule.distributionBelowMinPercent}%` },
+    { label: "排除主管", value: rule.distributionExcludeManager ? "是" : "否" },
   ];
   return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
     {readOnlyItems.map((item) => <div key={item.label} className="text-sm"><span className="text-muted-foreground">{item.label}：</span><span className="font-medium">{item.value}</span></div>)}

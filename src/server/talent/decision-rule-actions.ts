@@ -83,7 +83,8 @@ export async function publishKpiRatingRule(_state: TalentRuleActionState, formDa
     const bands = await prisma.kpiRatingBand.findMany({ where: { ruleVersionId: id } });
     validateKpiRatingBands(bands);
     const row = await prisma.$transaction(async (tx) => {
-      await tx.kpiRatingRuleVersion.updateMany({ where: { departmentOrgNodeId: rule.departmentOrgNodeId, name: rule.name, status: "ACTIVE", id: { not: id }, deletedAt: null }, data: { status: "RETIRED" } });
+      // 一个部门同一时刻只能有一个已发布版本：发布新版本时退休本部门其他 ACTIVE 版本（不限同名）
+      await tx.kpiRatingRuleVersion.updateMany({ where: { departmentOrgNodeId: rule.departmentOrgNodeId, status: "ACTIVE", id: { not: id }, deletedAt: null }, data: { status: "RETIRED" } });
       return tx.kpiRatingRuleVersion.update({ where: { id }, data: { status: "ACTIVE", publishedById: user.id, publishedAt: new Date() } });
     });
     await audit("KpiRatingRuleVersion", id, "PUBLISH", user.id, row); refresh();
@@ -120,11 +121,22 @@ export async function saveKpiRatingDraft(_state: TalentRuleActionState, formData
       return value;
     });
     // 计分规则随绩效管理规则版本冻结：草稿可编辑、发布只读；新建业务考核时按部门已发布版本冻结快照。
+    // 部门绩效分布规则（同样随版本冻结）：启用时校验各阈值
+    const distributionEnabled = formData.get("distributionEnabled") === "on";
+    const distributionExcludeManager = formData.get("distributionExcludeManager") === "on";
+    const distributionMinHeadcount = Number(required(formData, "distributionMinHeadcount"));
+    const distributionMinGap = Number(required(formData, "distributionMinGap"));
+    const distributionBelowScore = Number(required(formData, "distributionBelowScore"));
+    const distributionBelowMinPercent = Number(required(formData, "distributionBelowMinPercent"));
+    if (!Number.isInteger(distributionMinHeadcount) || distributionMinHeadcount < 1) throw new Error("生效人数门槛必须是 ≥1 的整数");
+    if (!Number.isFinite(distributionMinGap) || distributionMinGap < 0) throw new Error("最高最低分差距不能为负");
+    if (!Number.isFinite(distributionBelowScore) || distributionBelowScore < 0) throw new Error("低分线不能为负");
+    if (!Number.isFinite(distributionBelowMinPercent) || distributionBelowMinPercent < 0 || distributionBelowMinPercent > 100) throw new Error("低分占比下限必须在 0 至 100 之间");
     const row = await prisma.$transaction(async (tx) => {
       for (const band of nextBands) {
         await tx.kpiRatingBand.update({ where: { id: band.id }, data: { name: band.name, minScore: band.minScore, maxScore: band.maxScore, isUnbounded: band.isUnbounded, description: band.description } });
       }
-      return tx.kpiRatingRuleVersion.update({ where: { id }, data: { businessAssessmentTotalScore, baInitialPassPercent, baRetestPassPercent, baFinalFailPercent } });
+      return tx.kpiRatingRuleVersion.update({ where: { id }, data: { businessAssessmentTotalScore, baInitialPassPercent, baRetestPassPercent, baFinalFailPercent, distributionEnabled, distributionMinHeadcount, distributionMinGap, distributionBelowScore, distributionBelowMinPercent, distributionExcludeManager } });
     });
     await audit("KpiRatingRuleVersion", id, "SAVE_DRAFT", user.id, { version: row, bands: nextBands }); refresh();
     return { status: "success", message: `“${rule.name}”V${rule.version} 草稿已保存`, id };

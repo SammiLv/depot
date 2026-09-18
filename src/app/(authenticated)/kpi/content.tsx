@@ -32,6 +32,44 @@ type TemplateImportResult = Awaited<ReturnType<typeof importKpiTemplates>>;
 type TemplateUpdateResult = Awaited<ReturnType<typeof updateKpiTemplate>>;
 type TemplateCreateResult = Awaited<ReturnType<typeof createKpiTemplate>>;
 type QuarterlyKpiRow = Props["data"]["rows"][number];
+type DistributionAlert = Props["data"]["distributionAlerts"][number];
+
+function formatAlertNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+// 部门绩效分布预警（仅持有「查看部门绩效分布预警」权限时服务端才会下发数据）
+// 两个指标各自独立展示达标结果：达标绿色、未达标红色、数据不足灰色
+function KpiDistributionAlertBanner({ alert }: { alert: DistributionAlert | null }) {
+  if (!alert) return null;
+  const { rule, evaluation } = alert;
+  if (evaluation.status !== "pass" && evaluation.status !== "fail") return null;
+
+  const tagClass = (ok: boolean | null) =>
+    ok === null
+      ? "bg-muted text-muted-foreground"
+      : ok
+        ? "bg-[#E8FFEA] text-[#00B42A]"
+        : "bg-[#FFECE8] text-[#F53F3F]";
+  const mark = (ok: boolean | null) => (ok === null ? "" : ok ? " ✓" : " ✗");
+
+  return (
+    <div className="ml-auto flex items-center gap-2">
+      <span
+        className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${tagClass(evaluation.gapPass)}`}
+        title={`最高最低分差距要求 ≥ ${rule.minGap} 分${evaluation.gapPass === null ? "（终审完成不足 2 人，暂不判定）" : ""}`}
+      >
+        最高最低分差 {evaluation.gap === null ? "—" : `${formatAlertNumber(evaluation.gap)}分`}{mark(evaluation.gapPass)}
+      </span>
+      <span
+        className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${tagClass(evaluation.belowPass)}`}
+        title={`低于 ${rule.belowScore} 分员工占比要求 ≥ ${rule.belowMinPercent}%（分母为应考核全员${rule.excludeManager ? "、不含主管" : ""}）`}
+      >
+        低于{rule.belowScore}分占比 {formatAlertNumber(evaluation.belowPercent)}%{mark(evaluation.belowPass)}
+      </span>
+    </div>
+  );
+}
 
 type QuarterOption = {
   value: number;
@@ -1609,6 +1647,9 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                   <span>小组：</span>
                   <button className="rounded-md bg-primary/10 px-2 py-1 text-primary">{teamTab === "all" ? "全部" : teamTabs.find((team) => team.id === teamTab)?.name ?? "全部"}</button>
                 </div>
+                <KpiDistributionAlertBanner
+                  alert={data.distributionAlerts?.find((item) => item.departmentOrgNodeId === departmentTab) ?? null}
+                />
               </div>
               <table className="w-full">
                 <thead className="bg-muted/40">
