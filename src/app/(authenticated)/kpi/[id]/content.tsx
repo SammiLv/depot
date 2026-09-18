@@ -290,17 +290,17 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
   const [attendanceScore, setAttendanceScore] = useState(formatEditableScore(data.totals.attendanceScore));
   const [rejectRemark, setRejectRemark] = useState("");
 
-  const scorePenaltyTotal = useMemo(() => {
+  const scoreAdjustmentTotal = useMemo(() => {
     if (data.editableStage !== "SELF" && data.editableStage !== "LEADER" && data.editableStage !== "MANAGER") {
       return 0;
     }
-    return scoreValues.reduce((sum, value) => sum + Math.abs(Math.min(parseScoreInput(value), 0)), 0);
+    return scoreValues.reduce((sum, value) => sum + parseScoreInput(value), 0);
   }, [data.editableStage, scoreValues]);
 
   const derivedTotals = useMemo(() => {
-    const selfTotal = data.editableStage === "SELF" ? data.totals.scoreTotal - scorePenaltyTotal : data.totals.selfTotal;
-    const leaderTotal = data.editableStage === "LEADER" ? data.totals.scoreTotal - scorePenaltyTotal : data.totals.leaderTotal;
-    const managerTotal = data.editableStage === "MANAGER" ? data.totals.scoreTotal - scorePenaltyTotal : data.totals.managerTotal;
+    const selfTotal = data.editableStage === "SELF" ? data.totals.scoreTotal + scoreAdjustmentTotal : data.totals.selfTotal;
+    const leaderTotal = data.editableStage === "LEADER" ? data.totals.scoreTotal + scoreAdjustmentTotal : data.totals.leaderTotal;
+    const managerTotal = data.editableStage === "MANAGER" ? data.totals.scoreTotal + scoreAdjustmentTotal : data.totals.managerTotal;
     const normalizedAttendanceScore = data.editableStage === "FINAL" ? parseScoreInput(attendanceScore) : data.totals.attendanceScore;
     return {
       selfTotal,
@@ -309,7 +309,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       attendanceScore: normalizedAttendanceScore,
       finalTotal: managerTotal + normalizedAttendanceScore,
     };
-  }, [attendanceScore, data.editableStage, data.totals.attendanceScore, data.totals.leaderTotal, data.totals.managerTotal, data.totals.scoreTotal, data.totals.selfTotal, scorePenaltyTotal]);
+  }, [attendanceScore, data.editableStage, data.totals.attendanceScore, data.totals.leaderTotal, data.totals.managerTotal, data.totals.scoreTotal, data.totals.selfTotal, scoreAdjustmentTotal]);
 
   const hasLeaderSummary = Boolean(data.summary.leader.praise.trim() || data.summary.leader.opportunity.trim());
   const hasManagerSummary = Boolean(data.summary.manager.praise.trim() || data.summary.manager.opportunity.trim());
@@ -323,6 +323,27 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
     if (!formRef.current) return;
     if (action !== "save" && action !== "reject" && !formRef.current.reportValidity()) {
       return;
+    }
+    if (action !== "reject" && data.editableStage !== "FINAL") {
+      for (const [index, rawValue] of scoreValues.entries()) {
+        const value = rawValue.trim() ? Number.parseFloat(rawValue) : 0;
+        const item = data.items[index];
+        if (!Number.isFinite(value)) {
+          setPendingAction(null);
+          setErrorMessage(`第${index + 1}项“${item.name}”评分格式不正确`);
+          return;
+        }
+        if (item.name.includes("奖励") && value < 0) {
+          setPendingAction(null);
+          setErrorMessage(`第${index + 1}项“${item.name}”是奖励项，只能填写 0 或正数`);
+          return;
+        }
+        if (!item.name.includes("奖励") && value > 0) {
+          setPendingAction(null);
+          setErrorMessage(`第${index + 1}项“${item.name}”只能填写 0 或负数`);
+          return;
+        }
+      }
     }
     try {
       setIsSubmitting(true);
