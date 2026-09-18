@@ -1354,6 +1354,21 @@ function parseNonPositiveScore(value: FormDataEntryValue | null, fieldName: stri
   return parsed;
 }
 
+function parseKpiItemScore(value: FormDataEntryValue | null, fieldName: string, itemName: string) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return 0;
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${fieldName}格式不正确`);
+  }
+  if (itemName.includes("奖励")) {
+    if (parsed < 0) throw new Error(`${fieldName}为奖励项，只能填写 0 或正数`);
+  } else if (parsed > 0) {
+    throw new Error(`${fieldName}只能填写 0 或负数`);
+  }
+  return parsed;
+}
+
 function serializeStructuredSummary(firstLabel: string, firstValue: string, secondLabel: string, secondValue: string) {
   const normalizedFirst = firstValue.trim();
   const normalizedSecond = secondValue.trim();
@@ -1416,8 +1431,8 @@ function getApprovalStepComment(editableStage: KpiEditableStage, summary: Summar
   return null;
 }
 
-function calculatePenaltyTotal(values: Array<number | null | undefined>) {
-  return values.reduce<number>((sum, value) => sum + Math.abs(Math.min(value ?? 0, 0)), 0);
+function calculateAdjustedTotal(scoreTotal: number, values: Array<number | null | undefined>) {
+  return values.reduce<number>((sum, value) => sum + (value ?? 0), scoreTotal);
 }
 
 function assertRequiredScoringSummary(
@@ -1612,8 +1627,18 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       if (stageScores.length !== itemIds.length) {
         throw new Error("评分项数据不完整，请刷新后重试");
       }
+      const scoringItems = await tx.personalKpiItem.findMany({
+        where: { personalKpiId, id: { in: itemIds } },
+        select: { id: true, name: true },
+      });
+      const scoringItemById = new Map(scoringItems.map((item) => [item.id, item]));
+      if (scoringItems.length !== itemIds.length) {
+        throw new Error("评分项数据不完整，请刷新后重试");
+      }
       for (const [index, itemId] of itemIds.entries()) {
-        const scoreValue = parseNonPositiveScore(stageScores[index] ?? null, `第${index + 1}项评分`);
+        const scoringItem = scoringItemById.get(itemId);
+        if (!scoringItem) throw new Error("评分项数据不完整，请刷新后重试");
+        const scoreValue = parseKpiItemScore(stageScores[index] ?? null, `第${index + 1}项评分`, scoringItem.name);
         if (editableStage === "SELF") {
           await tx.personalKpiItem.update({ where: { id: itemId }, data: { selfScore: scoreValue } });
         } else if (editableStage === "LEADER") {
@@ -1648,9 +1673,9 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
     });
 
     const scoreTotal = items.reduce<number>((sum, item) => sum + item.score, 0);
-    const selfTotal = scoreTotal - calculatePenaltyTotal(items.map((item) => item.selfScore));
-    const leaderTotal = scoreTotal - calculatePenaltyTotal(items.map((item) => item.leaderScore));
-    const managerTotal = scoreTotal - calculatePenaltyTotal(items.map((item) => item.managerScore));
+    const selfTotal = calculateAdjustedTotal(scoreTotal, items.map((item) => item.selfScore));
+    const leaderTotal = calculateAdjustedTotal(scoreTotal, items.map((item) => item.leaderScore));
+    const managerTotal = calculateAdjustedTotal(scoreTotal, items.map((item) => item.managerScore));
     const currentAttendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
       ? personalKpi.finalScore - personalKpi.managerScore
       : 0;
