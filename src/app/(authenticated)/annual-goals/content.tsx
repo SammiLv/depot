@@ -755,7 +755,9 @@ function QuarterTargetForm({ metric, sourceMetric, onClose }: { metric: Metric; 
   return (
     <form onSubmit={handleSubmit} noValidate>
       <input type="hidden" name="metricId" value={metric.authorityMetricId} />
-      {sourceMetric && <input type="hidden" name="sourceMetricId" value={sourceMetric.id} />}
+      {(sourceMetric?.id ?? metric.sourceMetricId) && (
+        <input type="hidden" name="sourceMetricId" value={sourceMetric?.id ?? metric.sourceMetricId ?? ""} />
+      )}
       {metric.teamOrgNodeId && <input type="hidden" name="teamOrgNodeId" value={metric.teamOrgNodeId} />}
       <div className="space-y-4">
         <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
@@ -902,7 +904,9 @@ function QuarterTargetSetupForm({ plan, onClose }: { plan: Plan; onClose: () => 
         {selected && subject ? (
           <>
             <input type="hidden" name="metricId" value={selected.metric.authorityMetricId} />
-            {selected.sourceMetric && <input type="hidden" name="sourceMetricId" value={selected.sourceMetric.id} />}
+            {(selected.sourceMetric?.id ?? selected.metric.sourceMetricId) && (
+              <input type="hidden" name="sourceMetricId" value={selected.sourceMetric?.id ?? selected.metric.sourceMetricId ?? ""} />
+            )}
             {selected.metric.teamOrgNodeId && <input type="hidden" name="teamOrgNodeId" value={selected.metric.teamOrgNodeId} />}
             <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
               拆解对象：<span className="font-medium text-foreground">{subject.name}</span> · 年度目标 {formatValue(subject.targetValue)}{subject.unit}
@@ -1017,7 +1021,9 @@ function QuarterProgressUpdateForm({ metric, sourceMetric, onClose }: { metric: 
   return (
     <form onSubmit={handleSubmit} noValidate>
       <input type="hidden" name="metricId" value={metric.authorityMetricId} />
-      {sourceMetric && <input type="hidden" name="sourceMetricId" value={sourceMetric.id} />}
+      {(sourceMetric?.id ?? metric.sourceMetricId) && (
+        <input type="hidden" name="sourceMetricId" value={sourceMetric?.id ?? metric.sourceMetricId ?? ""} />
+      )}
       {metric.teamOrgNodeId && <input type="hidden" name="teamOrgNodeId" value={metric.teamOrgNodeId} />}
       <div className="space-y-4">
         <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
@@ -1262,7 +1268,9 @@ function DeleteQuarterTargetsConfirm({ metric, sourceMetric, onClose }: { metric
         <Button variant="outline" onClick={onClose}>取消</Button>
         <form onSubmit={handleSubmit} noValidate>
           <input type="hidden" name="metricId" value={metric.authorityMetricId} />
-          {sourceMetric && <input type="hidden" name="sourceMetricId" value={sourceMetric.id} />}
+          {(sourceMetric?.id ?? metric.sourceMetricId) && (
+            <input type="hidden" name="sourceMetricId" value={sourceMetric?.id ?? metric.sourceMetricId ?? ""} />
+          )}
           {metric.teamOrgNodeId && <input type="hidden" name="teamOrgNodeId" value={metric.teamOrgNodeId} />}
           <Button type="submit" className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
         </form>

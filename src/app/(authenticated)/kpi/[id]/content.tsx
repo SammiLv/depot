@@ -1,14 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import { Badge, Button, Card } from "@/components/ui-kit";
 
 type EditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL" | null;
 type PendingAction = "submit" | "approve" | "reject" | null;
+
+const KPI_DETAIL_SUCCESS_NOTICE_KEY = "depot:kpi-detail-success-notice";
+
+function readKpiDetailSuccessNotice(kpiId: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(KPI_DETAIL_SUCCESS_NOTICE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { kpiId?: string; message?: string };
+    if (parsed.kpiId !== kpiId || !parsed.message) return null;
+    sessionStorage.removeItem(KPI_DETAIL_SUCCESS_NOTICE_KEY);
+    return parsed.message;
+  } catch {
+    sessionStorage.removeItem(KPI_DETAIL_SUCCESS_NOTICE_KEY);
+    return null;
+  }
+}
+
+function writeKpiDetailSuccessNotice(kpiId: string, message: string) {
+  sessionStorage.setItem(KPI_DETAIL_SUCCESS_NOTICE_KEY, JSON.stringify({ kpiId, message }));
+}
 
 type Props = {
   data: {
@@ -237,8 +258,20 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const pending = readKpiDetailSuccessNotice(data.id);
+    if (pending) setSuccessMessage(pending);
+  }, [data.id, data.status, data.stageKey]);
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = window.setTimeout(() => setSuccessMessage(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [successMessage]);
   const [scoreValues, setScoreValues] = useState(
     data.items.map((item) => {
       if (data.editableStage === "LEADER") return formatEditableScore(item.leaderScore);
@@ -294,6 +327,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
     try {
       setIsSubmitting(true);
       setErrorMessage(null);
+      setSuccessMessage(null);
       const formData = new FormData(formRef.current);
       if (action === "reject") {
         formData.set("rejectRemark", rejectRemark);
@@ -309,8 +343,23 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       }
       setPendingAction(null);
       setRejectRemark("");
-      router.refresh();
+      setErrorMessage(null);
+      const successNoticeByAction: Partial<Record<typeof action, string>> = {
+        save: "保存成功",
+        submit: "提交成功",
+        approve: "审核通过",
+        reject: "已退回上一阶段",
+      };
+      const successNotice = successNoticeByAction[action];
+      if (successNotice) {
+        writeKpiDetailSuccessNotice(data.id, successNotice);
+        setSuccessMessage(successNotice);
+      }
+      startTransition(() => {
+        router.refresh();
+      });
     } catch (error) {
+      setSuccessMessage(null);
       setErrorMessage(error instanceof Error ? error.message : "KPI 评分保存失败，请稍后重试");
     } finally {
       setIsSubmitting(false);
@@ -688,6 +737,16 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       <ConfirmDialog open={pendingAction === "submit"} title="确认提交" description="确认提交后，当前 KPI 将流转到下一阶段。" confirmLabel="确认提交" submitting={isSubmitting} onClose={() => setPendingAction(null)} onConfirm={() => void runAction("submit")} />
       <ConfirmDialog open={pendingAction === "approve"} title="确认审核通过" description="确认审核通过后，当前 KPI 将流转到下一阶段。" confirmLabel="确认通过" submitting={isSubmitting} onClose={() => setPendingAction(null)} onConfirm={() => void runAction("approve")} />
       <ConfirmDialog open={pendingAction === "reject"} title="确认退回" description="确认退回后，当前 KPI 将回退到上一阶段。" confirmLabel="确认退回" submitting={isSubmitting} requireRemark remark={rejectRemark} onRemarkChange={setRejectRemark} onClose={() => { setPendingAction(null); setRejectRemark(""); }} onConfirm={() => void runAction("reject")} />
+      {successMessage ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-[200] flex -translate-x-1/2 items-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm text-white shadow-xl"
+        >
+          <Check className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+          {successMessage}
+        </div>
+      ) : null}
     </>
   );
 }

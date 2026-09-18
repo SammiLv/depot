@@ -15,6 +15,7 @@ import {
   type KpiApprovalSnapshot,
 } from "@/server/kpi/approval-snapshot";
 import {
+  getApprovalStepDisplayLabel,
   getLegacyNextKpiStatus,
   isSelfReviewStatus,
   resolveKpiEditableStage,
@@ -1739,7 +1740,7 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       ? await tx.personalKpiApprovalStep.findFirst({
           where: { personalKpiId, status: "PENDING" },
           orderBy: { stepOrder: "asc" },
-          select: { approverId: true },
+          select: { approverId: true, stageKey: true },
         })
       : null;
 
@@ -1758,6 +1759,11 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       submittedAt,
       eventAt,
       actorId: currentUser.id,
+      actorName: currentUser.name,
+      completedStageLabel: editableStage === "SELF"
+        ? "自评"
+        : getApprovalStepDisplayLabel(editableStage) ?? "上一阶段评分",
+      pendingStageLabel: getApprovalStepDisplayLabel(nextApprover?.stageKey) ?? "下一阶段评分或审批",
     };
   });
 
@@ -1772,7 +1778,13 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       year: result.year,
       quarter: result.quarter,
       status: result.nextStatus,
-      submitterId: result.userId,
+      submitterId: result.actorId,
+      actorName: result.actorName,
+      completedStageLabel: result.completedStageLabel,
+      previousStageSummary: result.editableStage === "SELF"
+        ? `${result.actorName} 已完成自评`
+        : `${result.actorName} 已完成对 ${result.userName} 的${result.completedStageLabel}`,
+      pendingStageLabel: result.pendingStageLabel,
       currentApproverId: result.currentApproverId ?? undefined,
       comment: result.rejectRemark ?? undefined,
       submittedAt: result.submittedAt?.toISOString(),
