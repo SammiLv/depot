@@ -43,6 +43,15 @@ function formatAlertNumber(value: number) {
 function KpiDistributionAlertBanner({ alert }: { alert: DistributionAlert | null }) {
   if (!alert) return null;
   const { rule, evaluation } = alert;
+  if (evaluation.status === "no_completed_scores") {
+    return (
+      <div className="ml-auto">
+        <span className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs leading-[18px] text-muted-foreground">
+          绩效分布待终审（已完成 0/{evaluation.headcount}）
+        </span>
+      </div>
+    );
+  }
   if (evaluation.status !== "pass" && evaluation.status !== "fail") return null;
 
   const tagClass = (ok: boolean | null) =>

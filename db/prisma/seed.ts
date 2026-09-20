@@ -799,7 +799,7 @@ async function main() {
           notificationType: "APPROVAL_TODO",
           dingtalkNotifyType: 5,
           titleTemplate: "{{userName}} 的 {{year}}年Q{{quarter}} KPI 待您处理",
-          contentTemplate: "请及时完成评分或审批。",
+          contentTemplate: "【提醒】{{previousStageSummary}}，请及时进行{{pendingStageLabel}}。",
           messageUrlTemplate: "{{appUrl}}/kpi/{{targetId}}",
         },
         isActive: true,

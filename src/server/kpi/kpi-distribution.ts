@@ -20,7 +20,7 @@ export type KpiDistributionInput = {
 };
 
 export type KpiDistributionEvaluation = {
-  status: "inactive" | "not_initialized" | "below_headcount" | "pass" | "fail";
+  status: "inactive" | "not_initialized" | "below_headcount" | "no_completed_scores" | "pass" | "fail";
   /** 应考核全员人数（已按规则排除主管） */
   headcount: number;
   /** 已终审人数 */
@@ -60,6 +60,10 @@ export function evaluateKpiDistribution(
   }
 
   const scores = input.completedScores.filter((score) => Number.isFinite(score));
+  if (scores.length === 0) {
+    return { ...base, status: "no_completed_scores" };
+  }
+
   const gap = scores.length >= 2 ? Math.max(...scores) - Math.min(...scores) : null;
   const gapPass = gap === null ? null : gap >= rule.minGap;
   const belowCount = scores.filter((score) => score < rule.belowScore).length;

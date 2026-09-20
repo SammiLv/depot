@@ -59,6 +59,12 @@ export function hasCompletedKpiProgressStage(
     return !isSelfReviewStatus(status);
   }
 
+  // 历史已完成 KPI 可能保留与最终状态不一致的 PENDING/WAITING 审批步骤。
+  // COMPLETED 是最终事实，不能让这些步骤遮蔽已有阶段汇总分和最终分。
+  if (status === "COMPLETED") {
+    return true;
+  }
+
   if (approvalSteps && approvalSteps.length > 0) {
     const approvalStageKey = stage as KpiApprovalStageKey;
     return hasCompletedApprovalStage(approvalSteps, approvalStageKey);
