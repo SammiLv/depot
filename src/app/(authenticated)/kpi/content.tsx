@@ -50,7 +50,7 @@ function KpiDistributionAlertBanner({ alert }: { alert: DistributionAlert | null
           className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs leading-[18px] text-muted-foreground"
           title="未终审人员按主管评分统计，已终审人员按最终绩效总分统计"
         >
-          绩效分布待评分（主管评及以上 {evaluation.effectiveCount}/{evaluation.headcount}）
+          绩效分布待主管评分（主管评及以上 {evaluation.effectiveCount}/{evaluation.headcount}）
         </span>
       </div>
     );
