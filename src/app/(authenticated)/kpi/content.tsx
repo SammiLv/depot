@@ -350,6 +350,7 @@ function TemplateDetailDrawer({ row }: { row: TemplateRow }) {
               <tr>
                 <th className="px-4 py-3 font-medium">指标项</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">计分方向</th>
                 <th className="px-4 py-3 font-medium">评分标准</th>
               </tr>
             </thead>
@@ -358,6 +359,7 @@ function TemplateDetailDrawer({ row }: { row: TemplateRow }) {
                 <tr key={item.id} className="border-t border-border align-top">
                   <td className="px-4 py-3 text-sm font-medium">{item.name}</td>
                   <td className="px-4 py-3 text-sm tabular-nums text-muted-foreground">{item.score}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{item.scoreDirection === "BONUS" ? "加分项" : "扣分项"}</td>
                   <td className="px-4 py-3 text-sm text-muted-foreground whitespace-pre-wrap">{item.scoringStandard || item.description || "—"}</td>
                 </tr>
               ))}
@@ -428,7 +430,7 @@ function CreateTemplateDrawer({
   onComplete: (result: TemplateCreateResult) => void;
 }) {
   const [draftItems, setDraftItems] = useState([
-    { id: "new-0", name: "", score: "0", description: "", scoringStandard: "" },
+    { id: "new-0", name: "", score: "0", description: "", scoringStandard: "", scoreDirection: "DEDUCTION" as "DEDUCTION" | "BONUS" },
   ]);
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -651,7 +653,7 @@ function CreateTemplateDrawer({
             onClick={() =>
               setDraftItems([
                 ...draftItems,
-                { id: `new-${nextDraftItemIdRef.current++}`, name: "", score: "0", description: "", scoringStandard: "" },
+                { id: `new-${nextDraftItemIdRef.current++}`, name: "", score: "0", description: "", scoringStandard: "", scoreDirection: "DEDUCTION" as "DEDUCTION" | "BONUS" },
               ])
             }
           >
@@ -664,8 +666,9 @@ function CreateTemplateDrawer({
             <thead className="bg-muted/40 text-left text-sm text-muted-foreground">
               <tr>
                 <th className="w-12 px-3 py-3 font-medium whitespace-nowrap"></th>
-                <th className="w-[22%] px-4 py-3 font-medium whitespace-nowrap">指标项</th>
-                <th className="w-[12%] px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                <th className="w-[20%] px-4 py-3 font-medium whitespace-nowrap">指标项</th>
+                <th className="w-[10%] px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                <th className="w-[13%] px-4 py-3 font-medium whitespace-nowrap">计分方向</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">评分标准</th>
                 <th className="w-24 px-4 py-3 text-right font-medium whitespace-nowrap">操作</th>
               </tr>
@@ -734,6 +737,21 @@ function CreateTemplateDrawer({
                     />
                   </td>
                   <td className="px-4 py-3">
+                    <select
+                      name="itemScoreDirection"
+                      value={item.scoreDirection}
+                      onChange={(event) => {
+                        const nextItems = [...draftItems];
+                        nextItems[index] = { ...nextItems[index], scoreDirection: event.target.value as "DEDUCTION" | "BONUS" };
+                        setDraftItems(nextItems);
+                      }}
+                      className="block h-10 w-full min-w-0 rounded-lg border border-border bg-background px-2 text-sm"
+                    >
+                      <option value="DEDUCTION">扣分项</option>
+                      <option value="BONUS">加分项</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
                     <textarea
                       name="itemScoringStandard"
                       value={item.scoringStandard ?? ""}
@@ -800,6 +818,7 @@ function TemplateEditDrawer({
       score: item.score?.toString() ?? "0",
       description: item.description ?? "",
       scoringStandard: item.scoringStandard ?? "",
+      scoreDirection: item.scoreDirection,
     }))
   );
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>(row.scopeTeamIds ?? []);
@@ -1047,6 +1066,7 @@ function TemplateEditDrawer({
                     score: "0",
                     description: "",
                     scoringStandard: "",
+                    scoreDirection: "DEDUCTION" as "DEDUCTION" | "BONUS",
                   },
                 ])
               }
@@ -1060,8 +1080,9 @@ function TemplateEditDrawer({
               <thead className="bg-muted/40 text-left text-sm text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-3 font-medium whitespace-nowrap"></th>
-                  <th className="w-[22%] px-4 py-3 font-medium whitespace-nowrap">指标项</th>
-                  <th className="w-[12%] px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                  <th className="w-[20%] px-4 py-3 font-medium whitespace-nowrap">指标项</th>
+                  <th className="w-[10%] px-4 py-3 font-medium whitespace-nowrap">分值</th>
+                  <th className="w-[13%] px-4 py-3 font-medium whitespace-nowrap">计分方向</th>
                   <th className="px-4 py-3 font-medium whitespace-nowrap">评分标准</th>
                   <th className="w-24 px-4 py-3 text-right font-medium whitespace-nowrap">操作</th>
                 </tr>
@@ -1131,6 +1152,21 @@ function TemplateEditDrawer({
                         required
                         className="block h-10 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm"
                       />
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        name="itemScoreDirection"
+                        value={item.scoreDirection}
+                        onChange={(event) => {
+                          const nextItems = [...draftItems];
+                          nextItems[index] = { ...nextItems[index], scoreDirection: event.target.value as "DEDUCTION" | "BONUS" };
+                          setDraftItems(nextItems);
+                        }}
+                        className="block h-10 w-full min-w-0 rounded-lg border border-border bg-background px-2 text-sm"
+                      >
+                        <option value="DEDUCTION">扣分项</option>
+                        <option value="BONUS">加分项</option>
+                      </select>
                     </td>
                     <td className="px-4 py-3">
                       <textarea

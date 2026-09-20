@@ -2,7 +2,7 @@
 
 import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
-import type { KpiStatus, KpiTemplate, KpiTemplateAssignment, OrgNodeType, OrgPermissionAbilityKey, Prisma, RoleType } from "@prisma/client";
+import type { KpiScoreDirection, KpiStatus, KpiTemplate, KpiTemplateAssignment, OrgNodeType, OrgPermissionAbilityKey, Prisma, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { buildKpiWhereByPermission, buildUserWhereByPermission, resolveAuthorizedOrgNodeIds, resolvePermissionScope } from "@/server/permissions/permission-resolver";
@@ -23,6 +23,7 @@ import {
 } from "@/server/kpi/approval-workflow";
 import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
 import { resolveKpiRating } from "@/server/talent/decision-rule-config";
+import { sumStageTotal, validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
 import { findUserPendingApprovalStep, getMinPendingStepOrder } from "@/server/kpi/approval-step-utils";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 
@@ -119,6 +120,7 @@ type PersonalKpiSnapshotInput = {
     description: string | null;
     score: number;
     scoringStandard: string | null;
+    scoreDirection: KpiScoreDirection;
     sortOrder: number;
   }>;
 };
@@ -148,6 +150,7 @@ type TemplateItemInput = {
   description: string | null;
   score: number;
   scoringStandard: string | null;
+  scoreDirection: KpiScoreDirection;
   sortOrder: number;
 };
 
@@ -242,6 +245,7 @@ function parseTemplateItemsFromFormData(formData: FormData) {
   const itemScores = formData.getAll("itemScore");
   const itemDescriptions = formData.getAll("itemDescription");
   const itemScoringStandards = formData.getAll("itemScoringStandard");
+  const itemScoreDirections = formData.getAll("itemScoreDirection");
 
   const items = itemNames.map((value, index) => {
     const name = requiredString(value, `模板项${index + 1}`);
@@ -249,11 +253,13 @@ function parseTemplateItemsFromFormData(formData: FormData) {
       Number.parseFloat(requiredString(itemScores[index] ?? null, `模板项${index + 1}分值`)),
       `模板项${index + 1}分值`
     );
+    const rawDirection = String(itemScoreDirections[index] ?? "").trim();
     return {
       name,
       description: optionalString(itemDescriptions[index] ?? null),
       score,
       scoringStandard: optionalString(itemScoringStandards[index] ?? null),
+      scoreDirection: rawDirection === "BONUS" ? "BONUS" : "DEDUCTION",
       sortOrder: (index + 1) * 10,
     } satisfies TemplateItemInput;
   }).filter((item) => item.name);
@@ -354,6 +360,7 @@ function parseTemplateImportRows(buffer: Buffer) {
             score,
             description: itemName,
             scoringStandard,
+            scoreDirection: "DEDUCTION",
             sortOrder: (index + 1) * 10,
           } satisfies TemplateItemInput;
         }),
@@ -900,6 +907,8 @@ async function createPersonalKpiSnapshot(
         score: item.score,
         weight: 0,
         scoringStandard: item.scoringStandard,
+        // 计分方向冻结拷贝：模板后续修改不影响已生成单据
+        scoreDirection: item.scoreDirection,
         sortOrder: item.sortOrder,
       })),
     });
@@ -1018,6 +1027,7 @@ export async function importKpiTemplates(formData: FormData): Promise<TemplateIm
           score: row.score,
           weight: 0,
           scoringStandard: row.scoringStandard,
+          scoreDirection: "DEDUCTION",
           sortOrder: (index + 1) * 10,
         })),
       });
@@ -1090,6 +1100,7 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
         score: item.score,
         weight: 0,
         scoringStandard: item.scoringStandard,
+        scoreDirection: item.scoreDirection,
         sortOrder: item.sortOrder,
       })),
     });
@@ -1184,6 +1195,7 @@ export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpd
         score: item.score,
         weight: 0,
         scoringStandard: item.scoringStandard,
+        scoreDirection: item.scoreDirection,
         sortOrder: item.sortOrder,
       })),
     });
@@ -1354,18 +1366,16 @@ function parseNonPositiveScore(value: FormDataEntryValue | null, fieldName: stri
   return parsed;
 }
 
-function parseKpiItemScore(value: FormDataEntryValue | null, fieldName: string, itemName: string) {
+// 按指标项计分方向校验输入：扣分项只能 ≤0，加分项只能 ≥0
+function parseKpiItemScore(value: FormDataEntryValue | null, fieldName: string, scoreDirection: KpiScoreDirection) {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) return 0;
   const parsed = Number.parseFloat(text);
   if (!Number.isFinite(parsed)) {
     throw new Error(`${fieldName}格式不正确`);
   }
-  if (itemName.includes("奖励")) {
-    if (parsed < 0) throw new Error(`${fieldName}为奖励项，只能填写 0 或正数`);
-  } else if (parsed > 0) {
-    throw new Error(`${fieldName}只能填写 0 或负数`);
-  }
+  const directionError = validateScoreByDirection(parsed, scoreDirection);
+  if (directionError) throw new Error(`${fieldName}${directionError}`);
   return parsed;
 }
 
@@ -1429,10 +1439,6 @@ function getApprovalStepComment(editableStage: KpiEditableStage, summary: Summar
     return `考勤分：${summary.attendanceScore}`;
   }
   return null;
-}
-
-function calculateAdjustedTotal(scoreTotal: number, values: Array<number | null | undefined>) {
-  return values.reduce<number>((sum, value) => sum + (value ?? 0), scoreTotal);
 }
 
 function assertRequiredScoringSummary(
@@ -1629,7 +1635,7 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       }
       const scoringItems = await tx.personalKpiItem.findMany({
         where: { personalKpiId, id: { in: itemIds } },
-        select: { id: true, name: true },
+        select: { id: true, scoreDirection: true },
       });
       const scoringItemById = new Map(scoringItems.map((item) => [item.id, item]));
       if (scoringItems.length !== itemIds.length) {
@@ -1638,7 +1644,7 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       for (const [index, itemId] of itemIds.entries()) {
         const scoringItem = scoringItemById.get(itemId);
         if (!scoringItem) throw new Error("评分项数据不完整，请刷新后重试");
-        const scoreValue = parseKpiItemScore(stageScores[index] ?? null, `第${index + 1}项评分`, scoringItem.name);
+        const scoreValue = parseKpiItemScore(stageScores[index] ?? null, `第${index + 1}项评分`, scoringItem.scoreDirection);
         if (editableStage === "SELF") {
           await tx.personalKpiItem.update({ where: { id: itemId }, data: { selfScore: scoreValue } });
         } else if (editableStage === "LEADER") {
@@ -1673,9 +1679,9 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
     });
 
     const scoreTotal = items.reduce<number>((sum, item) => sum + item.score, 0);
-    const selfTotal = calculateAdjustedTotal(scoreTotal, items.map((item) => item.selfScore));
-    const leaderTotal = calculateAdjustedTotal(scoreTotal, items.map((item) => item.leaderScore));
-    const managerTotal = calculateAdjustedTotal(scoreTotal, items.map((item) => item.managerScore));
+    const selfTotal = sumStageTotal(scoreTotal, items.map((item) => item.selfScore));
+    const leaderTotal = sumStageTotal(scoreTotal, items.map((item) => item.leaderScore));
+    const managerTotal = sumStageTotal(scoreTotal, items.map((item) => item.managerScore));
     const currentAttendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
       ? personalKpi.finalScore - personalKpi.managerScore
       : 0;

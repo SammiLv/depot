@@ -7,6 +7,8 @@ import { Check } from "lucide-react";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import { Badge, Button, Card } from "@/components/ui-kit";
+import { toast, ToastHost } from "@/components/toast";
+import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
 
 type EditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL" | null;
 type PendingAction = "submit" | "approve" | "reject" | null;
@@ -74,6 +76,7 @@ type Props = {
       scoringStandard: string;
       targetDetail: string;
       score: number;
+      scoreDirection: "DEDUCTION" | "BONUS";
       selfScore: number;
       leaderScore: number;
       managerScore: number;
@@ -158,16 +161,21 @@ function ScoreInput({ value }: { value: number | string }) {
   );
 }
 
-function EditableScoreInput({ name, value, onChange }: { name: string; value: string; onChange: (value: string) => void }) {
+function EditableScoreInput({ name, value, scoreDirection, onChange }: { name: string; value: string; scoreDirection: "DEDUCTION" | "BONUS"; onChange: (value: string) => void }) {
   return (
-    <input
-      name={name}
-      type="text"
-      inputMode="decimal"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-10 w-full rounded-lg border border-border bg-white px-3 text-right text-sm focus:border-ring focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-    />
+    <div className="relative">
+      <input
+        name={name}
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 w-full rounded-lg border border-border bg-white pr-10 text-right text-sm focus:border-ring focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+        {scoreDirection === "BONUS" ? "填正数" : "填负数"}
+      </span>
+    </div>
   );
 }
 
@@ -331,16 +339,14 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
         if (!Number.isFinite(value)) {
           setPendingAction(null);
           setErrorMessage(`第${index + 1}项“${item.name}”评分格式不正确`);
+          toast.error(`第${index + 1}项“${item.name}”评分格式不正确`);
           return;
         }
-        if (item.name.includes("奖励") && value < 0) {
+        const directionError = validateScoreByDirection(value, item.scoreDirection);
+        if (directionError) {
           setPendingAction(null);
-          setErrorMessage(`第${index + 1}项“${item.name}”是奖励项，只能填写 0 或正数`);
-          return;
-        }
-        if (!item.name.includes("奖励") && value > 0) {
-          setPendingAction(null);
-          setErrorMessage(`第${index + 1}项“${item.name}”只能填写 0 或负数`);
+          setErrorMessage(`第${index + 1}项“${item.name}”${directionError}`);
+          toast.error(`第${index + 1}项“${item.name}”${directionError}`);
           return;
         }
       }
@@ -397,6 +403,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
   return (
     <>
+      <ToastHost />
       <form ref={formRef} className="space-y-6 pb-24">
         <input type="hidden" name="personalKpiId" value={data.id} />
         {!canEditFinal ? <input type="hidden" name="attendanceScore" value={formatScore(data.totals.attendanceScore)} /> : null}
@@ -497,6 +504,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                             <EditableScoreInput
                               name="selfScore"
                               value={scoreValues[index]}
+                              scoreDirection={item.scoreDirection}
                               onChange={(value) => setScoreValues((current) => current.map((itemValue, itemIndex) => itemIndex === index ? value : itemValue))}
                             />
                           ) : (
@@ -508,6 +516,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                             <EditableScoreInput
                               name="leaderScore"
                               value={scoreValues[index]}
+                              scoreDirection={item.scoreDirection}
                               onChange={(value) => setScoreValues((current) => current.map((itemValue, itemIndex) => itemIndex === index ? value : itemValue))}
                             />
                           ) : (
@@ -519,6 +528,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                             <EditableScoreInput
                               name="managerScore"
                               value={scoreValues[index]}
+                              scoreDirection={item.scoreDirection}
                               onChange={(value) => setScoreValues((current) => current.map((itemValue, itemIndex) => itemIndex === index ? value : itemValue))}
                             />
                           ) : (
@@ -559,7 +569,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                       <td className="px-4 py-4 text-sm font-medium text-right whitespace-nowrap">考勤分</td>
                       <td className="px-4 py-4">
                         {canEditFinal ? (
-                          <EditableScoreInput name="attendanceScore" value={attendanceScore} onChange={setAttendanceScore} />
+                          <EditableScoreInput name="attendanceScore" value={attendanceScore} scoreDirection="DEDUCTION" onChange={setAttendanceScore} />
                         ) : (
                           <ScoreInput value={formatScore(derivedTotals.attendanceScore)} />
                         )}

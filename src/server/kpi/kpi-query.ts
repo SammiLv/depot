@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/prisma";
 import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissionCoverage, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeIdsForOrgNodes, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
-import type { KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
+import type { KpiScoreDirection, KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
 import {
   buildKpiCompletedProgressStages,
   getApprovalStepDisplayLabel,
@@ -134,6 +134,7 @@ type KpiPageData = {
       description: string | null;
       score: number;
       scoringStandard: string | null;
+      scoreDirection: KpiScoreDirection;
       sortOrder: number;
     }>;
   }>;
@@ -605,6 +606,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
         description: true,
         score: true,
         scoringStandard: true,
+        scoreDirection: true,
         target: true,
         selfScore: true,
         leaderScore: true,
@@ -674,12 +676,10 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const departmentName = departmentOrgNodeId ? (orgNodeMap.get(departmentOrgNodeId)?.name ?? "—") : "—";
   const tone = getKpiTone(personalKpi.status);
   const scoreTotal = items.reduce((sum, item) => sum + item.score, 0);
-  const selfPenaltyTotal = items.reduce((sum, item) => sum + Math.abs(Math.min(item.selfScore ?? 0, 0)), 0);
-  const leaderPenaltyTotal = items.reduce((sum, item) => sum + Math.abs(Math.min(item.leaderScore ?? 0, 0)), 0);
-  const managerPenaltyTotal = items.reduce((sum, item) => sum + Math.abs(Math.min(item.managerScore ?? 0, 0)), 0);
-  const selfTotal = scoreTotal - selfPenaltyTotal;
-  const leaderTotal = scoreTotal - leaderPenaltyTotal;
-  const managerTotal = scoreTotal - managerPenaltyTotal;
+  // 阶段汇总 = Σ(分值 + 阶段调整分)：扣分项为负向扣减，加分项为正向计入
+  const selfTotal = items.reduce((sum, item) => sum + item.score + (item.selfScore ?? 0), 0);
+  const leaderTotal = items.reduce((sum, item) => sum + item.score + (item.leaderScore ?? 0), 0);
+  const managerTotal = items.reduce((sum, item) => sum + item.score + (item.managerScore ?? 0), 0);
   const attendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
     ? personalKpi.finalScore - personalKpi.managerScore
     : 0;
@@ -787,6 +787,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       scoringStandard: item.scoringStandard || item.description || "—",
       targetDetail: item.target || "",
       score: item.score,
+      scoreDirection: item.scoreDirection,
       selfScore: item.selfScore ?? 0,
       leaderScore: editableStage === "LEADER"
         ? currentStepScoreByItemId.get(item.id) ?? item.leaderScore ?? 0
@@ -1385,6 +1386,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
             description: true,
             score: true,
             scoringStandard: true,
+            scoreDirection: true,
             sortOrder: true,
           },
         }),
@@ -1564,6 +1566,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
         description: item.description,
         score: item.score,
         scoringStandard: item.scoringStandard,
+        scoreDirection: item.scoreDirection,
         sortOrder: item.sortOrder,
       })),
     })),

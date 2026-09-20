@@ -439,6 +439,12 @@ enum CompanyFeedbackStatus {
   DEFERRED
 }
 
+// 指标项计分方向：扣分项填 ≤0（默认），加分项填 ≥0
+enum KpiScoreDirection {
+  DEDUCTION
+  BONUS
+}
+
 enum EmploymentContractOutcome {
   RENEWED
   NOT_RENEWED
@@ -1043,6 +1049,8 @@ model KpiTemplateItem {
   score           Float    @default(0)
   weight          Float
   scoringStandard String?
+  /// 计分方向：扣分项填 ≤0（默认），加分项填 ≥0；初始化 KPI 单据时冻结拷贝到 PersonalKpiItem
+  scoreDirection  KpiScoreDirection @default(DEDUCTION)
   sortOrder       Int      @default(0)
   isRequired      Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -1105,6 +1113,8 @@ model PersonalKpiItem {
   weight                 Float
   target                 String?
   scoringStandard        String?
+  /// 计分方向（初始化时从模板项冻结拷贝，模板后续修改不影响本单据）
+  scoreDirection         KpiScoreDirection @default(DEDUCTION)
   selfScore              Float?
   leaderScore            Float?
   managerScore           Float?
