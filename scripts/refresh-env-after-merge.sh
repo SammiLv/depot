@@ -46,7 +46,7 @@ fi
 
 if [[ "$NODE_ENV" == "production" || "$START_SCRIPT" == start:* ]]; then
   echo "Refusing to run refresh-env-after-merge.sh in production mode."
-  echo "This development helper uses prisma db push --accept-data-loss."
+  echo "This helper applies migrations via prisma migrate deploy (same as production)."
   echo "Use the reviewed production migration workflow instead."
   exit 1
 fi
@@ -214,8 +214,8 @@ stop_managed_service
 echo "==> Generating Prisma client"
 pnpm run prisma:generate
 
-echo "==> Syncing Prisma schema"
-pnpm exec prisma db push --config db/prisma.config.ts --accept-data-loss
+echo "==> Applying database migrations (migrate deploy, 与现网一致)"
+pnpm exec prisma migrate deploy --config db/prisma.config.ts
 
 echo "==> Building app"
 pnpm run build

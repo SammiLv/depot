@@ -5,7 +5,7 @@
 # 与 depot-prod.sh（生产 Windows 机）的区别：
 #   - 跨平台：macOS / Windows Git Bash 均可运行
 #   - 服务跑 next dev（热更新），而非 next start
-#   - 数据库用 prisma db push（开发库），不用 migrate deploy
+#   - 数据库结构与现网一致走 prisma migrate deploy（开发库同样用迁移文件，为现网提前验证）
 #   - 按「角色」分工（git config --local depot.role，init 时指定一次）:
 #       developer（同事，默认）: 从 main 拉代码 → 推到共享集成分支 depot-test，跟踪固定 origin/depot-test
 #       reviewer（审核人）:     从 depot-test 拉代码 → 验证后推到 main，跟踪固定 origin/main
@@ -512,7 +512,7 @@ cmd_init() {
   ok "依赖安装完成"
   echo ""
 
-  log "=== 5/6 初始化数据库（prisma generate + db push）==="
+  log "=== 5/6 初始化数据库（prisma generate + migrate deploy）==="
   if ! (cd "$PROJECT_DIR" && pnpm run prisma:generate); then
     err "prisma generate 失败"
     return 1
@@ -520,8 +520,8 @@ cmd_init() {
   if [ -f "$PROJECT_DIR/db/dev.db" ]; then
     ok "检测到已有本地数据库（db/dev.db），跳过数据库初始化（不动现有数据）"
   else
-    if ! (cd "$PROJECT_DIR" && pnpm exec prisma db push --config db/prisma.config.ts --accept-data-loss); then
-      err "prisma db push 失败"
+    if ! (cd "$PROJECT_DIR" && pnpm exec prisma migrate deploy --config db/prisma.config.ts); then
+      err "prisma migrate deploy 失败"
       return 1
     fi
     ok "数据库已创建（db/dev.db）"
@@ -764,15 +764,15 @@ cmd_pull() {
   fi
   echo ""
 
-  # 4. 停服务释放 SQLite 锁（db push 需要独占写库；服务在跑会 database is locked）
+  # 4. 停服务释放 SQLite 锁（migrate deploy 需要独占写库；服务在跑会 database is locked）
   log "=== 4/5 停止当前服务（释放数据库锁）==="
   cmd_stop || true
   echo ""
 
-  # 5. 同步数据库结构（开发库用 db push，幂等）并重启
+  # 5. 同步数据库结构（与现网一致走 migrate deploy，幂等）并重启
   log "=== 5/5 同步数据库结构并重启服务 ==="
-  if ! (cd "$PROJECT_DIR" && pnpm exec prisma db push --config db/prisma.config.ts --accept-data-loss); then
-    err "prisma db push 失败"
+  if ! (cd "$PROJECT_DIR" && pnpm exec prisma migrate deploy --config db/prisma.config.ts); then
+    err "prisma migrate deploy 失败"
     warn "尝试恢复服务..."
     cmd_start || err "服务恢复失败，请手动: bash scripts/depot-test.sh start"
     return 1
