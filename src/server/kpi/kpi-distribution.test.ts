@@ -25,6 +25,12 @@ test("人数不足门槛 → below_headcount", () => {
   assert.equal(result.status, "below_headcount");
 });
 
+test("尚无人终审 → no_completed_scores，不误判为分布未达标", () => {
+  const result = evaluateKpiDistribution(rule, { initialized: true, headcount: 10, completedScores: [] });
+  assert.equal(result.status, "no_completed_scores");
+  assert.equal(result.completedCount, 0);
+});
+
 test("分母含未完成考核的人：5 人部门仅 1 人终审且 <100 → 占比 20% 达标", () => {
   const result = evaluateKpiDistribution(rule, { initialized: true, headcount: 5, completedScores: [90] });
   assert.equal(result.belowCount, 1);

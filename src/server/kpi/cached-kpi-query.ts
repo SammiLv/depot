@@ -7,10 +7,11 @@ export async function getCachedKpiPageData(
   user: KpiUser,
   options?: { selectedYear?: number; selectedQuarter?: number },
 ) {
-  const year = options?.selectedYear ?? "default";
-  const quarter = options?.selectedQuarter ?? "default";
+  const now = new Date();
+  const year = options?.selectedYear ?? now.getFullYear();
+  const quarter = options?.selectedQuarter ?? Math.floor(now.getMonth() / 3) + 1;
   return unstable_cache(
-    async () => getKpiData(user, options),
+    async () => getKpiData(user, { selectedYear: year, selectedQuarter: quarter }),
     ["kpi-page-data", user.id, String(year), String(quarter)],
     { revalidate: 30 },
   )();

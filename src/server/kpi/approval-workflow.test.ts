@@ -49,6 +49,13 @@ test("progress stage completion counts finished stages instead of current stage"
     ],
   }, "LEADER"), true);
   assert.equal(hasCompletedKpiProgressStage({
+    status: "COMPLETED",
+    approvalSteps: [
+      { stageKey: "LEADER", status: "PENDING" },
+      { stageKey: "MANAGER", status: "WAITING" },
+    ],
+  }, "FINAL"), true);
+  assert.equal(hasCompletedKpiProgressStage({
     status: "PENDING_MANAGER_SCORE",
     approvalSteps: [
       { stageKey: "LEADER", status: "COMPLETED" },

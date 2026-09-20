@@ -155,9 +155,36 @@ async function ensureAdminKpiPermissions() {
   }
 }
 
-// KPI 部门绩效分布预警授权（幂等）：服务启动时补发，老库升级用
-// ADMIN 由 ensureAdminKpiPermissions 覆盖；此处补 DEPARTMENT_MANAGER 的系统模板行 + 按部门物化行
+// KPI 部门绩效分布预警授权（幂等）：服务启动时补发，老库升级用。
+// instrumentation 不会调用完整系统初始化，因此这里同时补 ADMIN 与 DEPARTMENT_MANAGER。
 export async function ensureKpiDistributionAlertGrants() {
+  const adminGrant = await prisma.orgPermissionGrant.updateMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.kpi,
+      abilityKey: kpiAbilityKeys.viewKpiDistributionAlert,
+      scopeType: "ALL",
+      subjectType: "ROLE",
+      roleType: RoleType.ADMIN,
+      userId: null,
+      orgNodeId: null,
+    },
+    data: { isActive: true },
+  });
+  if (adminGrant.count === 0) {
+    await prisma.orgPermissionGrant.create({
+      data: {
+        moduleKey: orgPermissionModuleKeys.kpi,
+        abilityKey: kpiAbilityKeys.viewKpiDistributionAlert,
+        scopeType: "ALL",
+        subjectType: "ROLE",
+        roleType: RoleType.ADMIN,
+        userId: null,
+        orgNodeId: null,
+        isActive: true,
+      },
+    });
+  }
+
   const departments = await prisma.orgNode.findMany({
     where: { nodeType: "DEPARTMENT" },
     select: { id: true },
