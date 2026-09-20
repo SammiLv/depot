@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/prisma";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 import { getCurrentYearQuarter, buildNearestDepartmentByOrgNodeId } from "@/server/notifications/kpi-initialization-scan";
 import { isWithinQuarterEndWindow } from "@/server/notifications/schedule-utils";
-import { evaluateKpiDistribution } from "@/server/kpi/kpi-distribution";
+import { evaluateKpiDistribution, resolveEffectiveKpiScore } from "@/server/kpi/kpi-distribution";
 
 // KPI 绩效分布预警扫描：距季度末 ≤ daysBefore 天时，检查各部门已发布分布规则，
 // 分差或低分占比任一不达标（红色预警）即通知部门主管。
@@ -38,9 +38,23 @@ async function evaluateDepartmentDistributions(year: number, quarter: number) {
     }),
     prisma.personalKpi.findMany({
       where: { year, quarter, deletedAt: null },
-      select: { id: true, userId: true, orgNodeId: true, status: true, finalScore: true },
+      select: { id: true, userId: true, orgNodeId: true, status: true, finalScore: true, managerScore: true },
     }),
   ]);
+
+  // 审批步骤事实：主管评完成判定依据步骤状态，不凭汇总字段推断
+  const approvalStepRows = kpis.length
+    ? await prisma.personalKpiApprovalStep.findMany({
+        where: { personalKpiId: { in: kpis.map((kpi) => kpi.id) } },
+        select: { personalKpiId: true, stageKey: true, status: true },
+      })
+    : [];
+  const approvalStepsByKpiId = new Map<string, Array<{ stageKey: string; status: string }>>();
+  for (const step of approvalStepRows) {
+    const list = approvalStepsByKpiId.get(step.personalKpiId) ?? [];
+    list.push(step);
+    approvalStepsByKpiId.set(step.personalKpiId, list);
+  }
 
   // 组织闭包：把成员/KPI 的归属节点解析到最近部门
   const departmentIds = new Set(departments.map((d) => d.id));
@@ -73,9 +87,15 @@ async function evaluateDepartmentDistributions(year: number, quarter: number) {
       if (kpiDepartment !== department.id) return false;
       return !managerUserIds.has(kpi.userId);
     });
-    const completedScores = departmentKpis
-      .filter((kpi) => kpi.status === "COMPLETED" && kpi.finalScore !== null)
-      .map((kpi) => kpi.finalScore!);
+    // 当前有效统计分：终审完成取 finalScore；主管评完成未终审取 managerScore
+    const effectiveScores = departmentKpis
+      .map((kpi) => resolveEffectiveKpiScore({
+        status: kpi.status,
+        finalScore: kpi.finalScore,
+        managerScore: kpi.managerScore,
+        approvalSteps: approvalStepsByKpiId.get(kpi.id),
+      }))
+      .filter((score): score is number => score !== null);
     const evaluation = evaluateKpiDistribution(
       {
         enabled: rule.distributionEnabled,
@@ -84,7 +104,7 @@ async function evaluateDepartmentDistributions(year: number, quarter: number) {
         belowScore: rule.distributionBelowScore,
         belowMinPercent: rule.distributionBelowMinPercent,
       },
-      { initialized: departmentKpis.length > 0, headcount: countedMembers.length, completedScores },
+      { initialized: departmentKpis.length > 0, headcount: countedMembers.length, scores: effectiveScores },
     );
     const subjectUser = countedMembers[0] ?? members[0] ?? null;
     return [{ department, rule, evaluation, subjectUser }];

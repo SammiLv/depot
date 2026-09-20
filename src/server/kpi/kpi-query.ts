@@ -13,7 +13,7 @@ import {
 } from "@/server/kpi/approval-workflow";
 import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
 import { buildKpiListScoreDisplay, type KpiListScoreDisplay } from "@/server/kpi/kpi-list-score-display";
-import { evaluateKpiDistribution, type KpiDistributionEvaluation } from "@/server/kpi/kpi-distribution";
+import { evaluateKpiDistribution, resolveEffectiveKpiScore, type KpiDistributionEvaluation } from "@/server/kpi/kpi-distribution";
 import { findUserPendingApprovalStep, canUserActOnApprovalStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 
@@ -860,8 +860,9 @@ function buildAvailableYears(nowYear: number, yearsFromData: number[]) {
 async function buildKpiDistributionAlerts(input: {
   departments: Array<{ id: string; name: string }>;
   memberOptions: Array<{ id: string; departmentOrgNodeId: string | null; roleType: RoleType }>;
-  kpis: Array<{ id: string; userId: string; status: KpiStatus; finalScore: number | null }>;
+  kpis: Array<{ id: string; userId: string; status: KpiStatus; finalScore: number | null; managerScore: number | null }>;
   rows: Array<{ id: string; departmentOrgNodeId: string | null }>;
+  approvalStepsByKpiId: Map<string, Array<{ stageKey: string; status: string }>>;
 }): Promise<KpiPageData["distributionAlerts"]> {
   const departmentIds = input.departments.map((department) => department.id);
   if (departmentIds.length === 0) return [];
@@ -908,9 +909,15 @@ async function buildKpiDistributionAlerts(input: {
       if (kpiDepartmentOrgNodeId !== department.id) return false;
       return !managerUserIds.has(kpi.userId);
     });
-    const completedScores = departmentKpis
-      .filter((kpi) => kpi.status === "COMPLETED" && kpi.finalScore !== null)
-      .map((kpi) => kpi.finalScore!);
+    // 当前有效统计分：终审完成取 finalScore；主管评完成未终审取 managerScore（以审批步骤事实为准）；其余不纳入
+    const effectiveScores = departmentKpis
+      .map((kpi) => resolveEffectiveKpiScore({
+        status: kpi.status,
+        finalScore: kpi.finalScore,
+        managerScore: kpi.managerScore,
+        approvalSteps: input.approvalStepsByKpiId.get(kpi.id),
+      }))
+      .filter((score): score is number => score !== null);
     const evaluation = evaluateKpiDistribution(
       {
         enabled: rule.distributionEnabled,
@@ -922,7 +929,7 @@ async function buildKpiDistributionAlerts(input: {
       {
         initialized: departmentKpis.length > 0,
         headcount: countedMembers.length,
-        completedScores,
+        scores: effectiveScores,
       },
     );
     return [{
@@ -1439,7 +1446,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     kpiAbilityKeys.viewKpiDistributionAlert,
   );
   const distributionAlerts = distributionAlertCoverage.hasPermission
-    ? await buildKpiDistributionAlerts({ departments, memberOptions, kpis, rows })
+    ? await buildKpiDistributionAlerts({ departments, memberOptions, kpis, rows, approvalStepsByKpiId })
     : [];
 
   return {

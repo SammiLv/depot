@@ -43,11 +43,14 @@ function formatAlertNumber(value: number) {
 function KpiDistributionAlertBanner({ alert }: { alert: DistributionAlert | null }) {
   if (!alert) return null;
   const { rule, evaluation } = alert;
-  if (evaluation.status === "no_completed_scores") {
+  if (evaluation.status === "no_scores") {
     return (
       <div className="ml-auto">
-        <span className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs leading-[18px] text-muted-foreground">
-          绩效分布待终审（已完成 0/{evaluation.headcount}）
+        <span
+          className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs leading-[18px] text-muted-foreground"
+          title="未终审人员按主管评分统计，已终审人员按最终绩效总分统计"
+        >
+          绩效分布待评分（主管评及以上 {evaluation.effectiveCount}/{evaluation.headcount}）
         </span>
       </div>
     );
@@ -66,15 +69,21 @@ function KpiDistributionAlertBanner({ alert }: { alert: DistributionAlert | null
     <div className="ml-auto flex items-center gap-2">
       <span
         className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${tagClass(evaluation.gapPass)}`}
-        title={`最高最低分差距要求 ≥ ${rule.minGap} 分${evaluation.gapPass === null ? "（终审完成不足 2 人，暂不判定）" : ""}`}
+        title={`最高最低分差距要求 ≥ ${rule.minGap} 分；未终审按主管评分、已终审按最终绩效总分${evaluation.gapPass === null ? "；有效评分不足 2 人，暂不判定" : ""}`}
       >
         最高最低分差 {evaluation.gap === null ? "—" : `${formatAlertNumber(evaluation.gap)}分`}{mark(evaluation.gapPass)}
       </span>
       <span
         className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${tagClass(evaluation.belowPass)}`}
-        title={`低于 ${rule.belowScore} 分员工占比要求 ≥ ${rule.belowMinPercent}%（分母为应考核全员${rule.excludeManager ? "、不含主管" : ""}）`}
+        title={`低于 ${rule.belowScore} 分员工占比要求 ≥ ${rule.belowMinPercent}%（分母为应考核全员${rule.excludeManager ? "、不含主管" : ""}；未终审按主管评分统计）`}
       >
         低于{rule.belowScore}分占比 {formatAlertNumber(evaluation.belowPercent)}%{mark(evaluation.belowPass)}
+      </span>
+      <span
+        className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs leading-[18px] text-muted-foreground"
+        title="未终审人员按主管评分统计，已终审人员按最终绩效总分统计"
+      >
+        主管评及以上 {evaluation.effectiveCount}/{evaluation.headcount}
       </span>
     </div>
   );
