@@ -676,10 +676,14 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const departmentName = departmentOrgNodeId ? (orgNodeMap.get(departmentOrgNodeId)?.name ?? "—") : "—";
   const tone = getKpiTone(personalKpi.status);
   const scoreTotal = items.reduce((sum, item) => sum + item.score, 0);
-  // 阶段汇总 = Σ(分值 + 阶段调整分)：扣分项为负向扣减，加分项为正向计入
-  const selfTotal = items.reduce((sum, item) => sum + item.score + (item.selfScore ?? 0), 0);
-  const leaderTotal = items.reduce((sum, item) => sum + item.score + (item.leaderScore ?? 0), 0);
-  const managerTotal = items.reduce((sum, item) => sum + item.score + (item.managerScore ?? 0), 0);
+  // 汇总口径：进行中的单据用新口径 Σ(分值+阶段分)，加分项正数计入；
+  // 已完成单据冻结历史结果，沿用旧口径（满分−|扣分|），保证历史分数不变
+  const adjust = (values: Array<number | null>) => personalKpi.status === "COMPLETED"
+    ? values.reduce<number>((sum, value) => sum + Math.abs(Math.min(value ?? 0, 0)), 0)
+    : -values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const selfTotal = scoreTotal - adjust(items.map((item) => item.selfScore));
+  const leaderTotal = scoreTotal - adjust(items.map((item) => item.leaderScore));
+  const managerTotal = scoreTotal - adjust(items.map((item) => item.managerScore));
   const attendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
     ? personalKpi.finalScore - personalKpi.managerScore
     : 0;

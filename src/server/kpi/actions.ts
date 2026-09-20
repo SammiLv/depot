@@ -23,7 +23,7 @@ import {
 } from "@/server/kpi/approval-workflow";
 import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
 import { resolveKpiRating } from "@/server/talent/decision-rule-config";
-import { sumStageTotal, validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
+import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
 import { findUserPendingApprovalStep, getMinPendingStepOrder } from "@/server/kpi/approval-step-utils";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 
@@ -1679,9 +1679,14 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
     });
 
     const scoreTotal = items.reduce<number>((sum, item) => sum + item.score, 0);
-    const selfTotal = sumStageTotal(scoreTotal, items.map((item) => item.selfScore));
-    const leaderTotal = sumStageTotal(scoreTotal, items.map((item) => item.leaderScore));
-    const managerTotal = sumStageTotal(scoreTotal, items.map((item) => item.managerScore));
+    // 与详情页查询口径一致：进行中新口径（加分计入），已完成冻结历史（满分−|扣分|）
+    const isCompletedKpi = personalKpi.status === "COMPLETED";
+    const adjustDelta = (values: Array<number | null>) => isCompletedKpi
+      ? -values.reduce<number>((sum, value) => sum + Math.abs(Math.min(value ?? 0, 0)), 0)
+      : values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+    const selfTotal = scoreTotal + adjustDelta(items.map((item) => item.selfScore));
+    const leaderTotal = scoreTotal + adjustDelta(items.map((item) => item.leaderScore));
+    const managerTotal = scoreTotal + adjustDelta(items.map((item) => item.managerScore));
     const currentAttendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
       ? personalKpi.finalScore - personalKpi.managerScore
       : 0;
