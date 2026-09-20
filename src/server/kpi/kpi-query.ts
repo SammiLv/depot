@@ -585,6 +585,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       leaderComment: true,
       managerComment: true,
       initializedAt: true,
+      submittedAt: true,
     },
   });
 
@@ -705,6 +706,13 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     : hasApprovalChain
       ? Boolean(currentApprovalStep)
       : hasStagePermission;
+  // 个人草稿可见性：自评是否已提交以 submittedAt 为准（保存不写、提交才写）；
+  // 审批阶段以步骤状态为准。未提交的分数仅本人或当前阶段审批人可见，其余人一律视为未填
+  const isKpiOwner = currentUser.id === personalKpi.userId;
+  const isSelfSubmitted = Boolean(personalKpi.submittedAt) || !isSelfReviewStatus(personalKpi.status);
+  const canSeeSelfDraft = isSelfSubmitted || isKpiOwner;
+  const canSeeLeaderDraft = isKpiOwner || editableStage === "LEADER";
+  const canSeeManagerDraft = isKpiOwner || editableStage === "MANAGER";
   const currentStepScores = currentApprovalStep
     ? await prisma.personalKpiItemStepScore.findMany({
         where: { approvalStepId: currentApprovalStep.id },
@@ -790,13 +798,17 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       targetDetail: item.target || "",
       score: item.score,
       scoreDirection: item.scoreDirection,
-      selfScore: item.selfScore ?? 0,
-      leaderScore: editableStage === "LEADER"
-        ? currentStepScoreByItemId.get(item.id) ?? item.leaderScore ?? 0
-        : item.leaderScore ?? 0,
-      managerScore: editableStage === "MANAGER"
-        ? currentStepScoreByItemId.get(item.id) ?? item.managerScore ?? 0
-        : item.managerScore ?? 0,
+      selfScore: canSeeSelfDraft ? item.selfScore ?? 0 : 0,
+      leaderScore: canSeeLeaderDraft
+        ? editableStage === "LEADER"
+          ? currentStepScoreByItemId.get(item.id) ?? item.leaderScore ?? 0
+          : item.leaderScore ?? 0
+        : 0,
+      managerScore: canSeeManagerDraft
+        ? editableStage === "MANAGER"
+          ? currentStepScoreByItemId.get(item.id) ?? item.managerScore ?? 0
+          : item.managerScore ?? 0
+        : 0,
     })),
     totals: {
       scoreTotal,
