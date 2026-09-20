@@ -1370,7 +1370,7 @@ function parseNonPositiveScore(value: FormDataEntryValue | null, fieldName: stri
   if (!text) return 0;
   const parsed = Number.parseFloat(text);
   if (!Number.isFinite(parsed) || parsed > 0) {
-    throw new Error(`${fieldName}只能填写 0 或负数`);
+    throw new Error(`${fieldName}为扣分项，只能填写 ≤0`);
   }
   return parsed;
 }

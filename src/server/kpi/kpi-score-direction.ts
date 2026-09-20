@@ -5,10 +5,10 @@ import type { KpiScoreDirection } from "@prisma/client";
 /** 输入值是否符合计分方向；不合法时返回错误提示文案，合法返回 null */
 export function validateScoreByDirection(value: number, scoreDirection: KpiScoreDirection): string | null {
   if (scoreDirection === "BONUS" && value < 0) {
-    return "为加分项，只能填写 0 或正数";
+    return "为加分项，只能填写 ≥0";
   }
   if (scoreDirection !== "BONUS" && value > 0) {
-    return "为扣分项，只能填写 0 或负数";
+    return "为扣分项，只能填写 ≤0";
   }
   return null;
 }

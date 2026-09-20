@@ -5,13 +5,13 @@ import { sumStageTotal, validateScoreByDirection } from "@/server/kpi/kpi-score-
 test("扣分项：负数与 0 通过，正数拒绝", () => {
   assert.equal(validateScoreByDirection(-5, "DEDUCTION"), null);
   assert.equal(validateScoreByDirection(0, "DEDUCTION"), null);
-  assert.equal(validateScoreByDirection(3, "DEDUCTION"), "为扣分项，只能填写 0 或负数");
+  assert.equal(validateScoreByDirection(3, "DEDUCTION"), "为扣分项，只能填写 ≤0");
 });
 
 test("加分项：正数与 0 通过，负数拒绝", () => {
   assert.equal(validateScoreByDirection(5, "BONUS"), null);
   assert.equal(validateScoreByDirection(0, "BONUS"), null);
-  assert.equal(validateScoreByDirection(-2, "BONUS"), "为加分项，只能填写 0 或正数");
+  assert.equal(validateScoreByDirection(-2, "BONUS"), "为加分项，只能填写 ≥0");
 });
 
 test("阶段汇总：扣分项负向扣减、加分项正向计入、null 按 0", () => {

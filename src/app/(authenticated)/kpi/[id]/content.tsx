@@ -162,24 +162,17 @@ function ScoreInput({ value }: { value: number | string }) {
 }
 
 function EditableScoreInput({ name, value, scoreDirection, onChange }: { name: string; value: string; scoreDirection: "DEDUCTION" | "BONUS"; onChange: (value: string) => void }) {
-  const hint = scoreDirection === "BONUS" ? "填正数" : "填负数";
+  const hint = scoreDirection === "BONUS" ? "≥0" : "≤0";
   return (
-    <div className="relative">
-      <input
-        name={name}
-        type="text"
-        inputMode="decimal"
-        value={value}
-        placeholder={hint}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full rounded-lg border border-border bg-white px-3 text-right text-sm placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
-      {value ? null : (
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-          {hint}
-        </span>
-      )}
-    </div>
+    <input
+      name={name}
+      type="text"
+      inputMode="decimal"
+      value={value}
+      placeholder={hint}
+      onChange={(event) => onChange(event.target.value)}
+      className="h-10 w-full rounded-lg border border-border bg-white px-3 text-right text-sm placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
   );
 }
 
