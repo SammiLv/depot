@@ -181,6 +181,7 @@ type TemplateImportRow = {
   score: number;
   description: string | null;
   scoringStandard: string | null;
+  scoreDirection: KpiScoreDirection;
 };
 
 type ParsedTemplateSheet = {
@@ -272,12 +273,14 @@ function buildKpiTemplateWorkbook() {
     "指标项*",
     "评分标准*",
     "分值*",
+    "计分方向",
   ];
 
   const rows = [
-    ["目标达成", "按目标完成质量评分", 40],
-    ["协作效率", "按协同质量与时效评分", 30],
-    ["过程规范", "按规范性与复盘质量评分", 30],
+    ["目标达成", "按目标完成质量评分", 40, "扣分项"],
+    ["协作效率", "按协同质量与时效评分", 30, "扣分项"],
+    ["过程规范", "按规范性与复盘质量评分", 30, "扣分项"],
+    ["指标完成奖励", "按超出目标幅度加分", 0, "加分项"],
   ];
   const sheetName = "模板名称";
 
@@ -286,6 +289,7 @@ function buildKpiTemplateWorkbook() {
     { wch: 24 },
     { wch: 36 },
     { wch: 10 },
+    { wch: 12 },
   ];
 
   const range = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:C1");
@@ -336,7 +340,9 @@ function parseTemplateImportRows(buffer: Buffer) {
     }
 
     const header = rows[0].map((cell: string | number | null) => String(cell).trim());
-    if (header.join("|") !== expectedHeader.join("|")) {
+    const isLegacyHeader = header.join("|") === expectedHeader.join("|");
+    const isNewHeader = header.join("|") === [...expectedHeader, "计分方向"].join("|");
+    if (!isLegacyHeader && !isNewHeader) {
       throw new Error(`工作表《${sheetName}》表头不正确，请先下载最新模板`);
     }
 
@@ -347,6 +353,10 @@ function parseTemplateImportRows(buffer: Buffer) {
           const itemName = String(cells[0] ?? "").trim();
           const scoringStandard = String(cells[1] ?? "").trim();
           const scoreText = String(cells[2] ?? "").trim();
+          const directionText = String(cells[3] ?? "").trim();
+          if (directionText && directionText !== "扣分项" && directionText !== "加分项") {
+            throw new Error(`工作表《${sheetName}》第${index + 2}行计分方向只能填「扣分项」或「加分项」`);
+          }
           const score = validateTemplateItemScore(
             scoreText ? Number.parseFloat(scoreText) : 0,
             `工作表《${sheetName}》第${index + 2}行分值`
@@ -360,18 +370,19 @@ function parseTemplateImportRows(buffer: Buffer) {
             score,
             description: itemName,
             scoringStandard,
-            scoreDirection: "DEDUCTION",
+            scoreDirection: directionText === "加分项" ? "BONUS" : "DEDUCTION",
             sortOrder: (index + 1) * 10,
           } satisfies TemplateItemInput;
         }),
       `工作表《${sheetName}》分值`
     );
 
-    const sheetRows = parsedRows.map(({ name, score, description, scoringStandard }) => ({
+    const sheetRows = parsedRows.map(({ name, score, description, scoringStandard, scoreDirection }) => ({
       itemName: name,
       score,
       description,
       scoringStandard,
+      scoreDirection,
     } satisfies TemplateImportRow));
 
     if (sheetRows.length === 0) {
@@ -1027,7 +1038,7 @@ export async function importKpiTemplates(formData: FormData): Promise<TemplateIm
           score: row.score,
           weight: 0,
           scoringStandard: row.scoringStandard,
-          scoreDirection: "DEDUCTION",
+          scoreDirection: row.scoreDirection,
           sortOrder: (index + 1) * 10,
         })),
       });
