@@ -340,10 +340,8 @@ function parseTemplateImportRows(buffer: Buffer) {
     }
 
     const header = rows[0].map((cell: string | number | null) => String(cell).trim());
-    const isLegacyHeader = header.join("|") === expectedHeader.join("|");
-    const isNewHeader = header.join("|") === [...expectedHeader, "计分方向"].join("|");
-    if (!isLegacyHeader && !isNewHeader) {
-      throw new Error(`工作表《${sheetName}》表头不正确，请先下载最新模板`);
+    if (header.join("|") !== [...expectedHeader, "计分方向"].join("|")) {
+      throw new Error(`工作表《${sheetName}》表头不正确，请下载最新模板（须包含「计分方向」列）`);
     }
 
     const parsedRows = validateTemplateItems(
