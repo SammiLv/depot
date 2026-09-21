@@ -733,6 +733,12 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const canSeeSelfDraft = stageCompletedFlags.SELF || latestSaveByStage.get("SELF")?.actorId === currentUser.id;
   const canSeeLeaderDraft = stageCompletedFlags.LEADER || latestSaveByStage.get("LEADER")?.actorId === currentUser.id;
   const canSeeManagerDraft = stageCompletedFlags.MANAGER || latestSaveByStage.get("MANAGER")?.actorId === currentUser.id;
+  // 终审（FINAL）草稿同规则：未提交仅保存者可见；完成（COMPLETED）后全员可见
+  const isFinalCompleted = personalKpi.status === "COMPLETED";
+  const canSeeFinalDraft = isFinalCompleted || latestSaveByStage.get("FINAL")?.actorId === currentUser.id;
+  const displayFinalScore = canSeeFinalDraft ? personalKpi.finalScore : null;
+  const displayAttendanceScore = canSeeFinalDraft ? attendanceScore : 0;
+  const displayFinalTotal = canSeeFinalDraft ? finalTotal : 0;
   // 与明细同规则：自评未提交时，汇总与个人总结仅保存者可见，其余人按未填展示
   const displaySelfTotal = canSeeSelfDraft ? selfTotal : fallback(items.map(() => null));
   const displaySelfComment = canSeeSelfDraft ? personalKpi.selfComment : null;
@@ -840,8 +846,8 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       selfTotal: displaySelfTotal,
       leaderTotal: displayLeaderTotal,
       managerTotal: displayManagerTotal,
-      attendanceScore,
-      finalTotal,
+      attendanceScore: displayAttendanceScore,
+      finalTotal: displayFinalTotal,
     },
     talentDeductionReminder,
     summary: {
