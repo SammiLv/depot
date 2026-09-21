@@ -163,6 +163,17 @@ function ScoreInput({ value }: { value: number | string }) {
 
 function EditableScoreInput({ name, value, scoreDirection, onChange }: { name: string; value: string; scoreDirection: "DEDUCTION" | "BONUS"; onChange: (value: string) => void }) {
   const hint = scoreDirection === "BONUS" ? "≥0" : "≤0";
+  // 自动补方向符号：用户只管输数字，按评分方向自动带符号（扣分项补「-」，加分项去掉负号）
+  const normalizeSign = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    const unsigned = trimmed.replace(/^[+-]/, "");
+    if (!unsigned) return trimmed; // 只输入了符号本身，保持原样等用户继续输
+    if (scoreDirection === "BONUS") {
+      return unsigned; // ≥0：去掉负号
+    }
+    return `-${unsigned}`; // ≤0：自动补负号
+  };
   return (
     <input
       name={name}
@@ -170,7 +181,7 @@ function EditableScoreInput({ name, value, scoreDirection, onChange }: { name: s
       inputMode="decimal"
       value={value}
       placeholder={hint}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={(event) => onChange(normalizeSign(event.target.value))}
       className="h-10 w-full rounded-lg border border-border bg-white px-3 text-right text-sm placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
     />
   );
