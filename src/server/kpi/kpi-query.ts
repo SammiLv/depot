@@ -6,6 +6,7 @@ import type { KpiScoreDirection, KpiStatus, OrgNodeType, OrgPermissionAbilityKey
 import {
   buildKpiCompletedProgressStages,
   getApprovalStepDisplayLabel,
+  hasCompletedKpiProgressStage,
   isSelfReviewStatus,
   resolveKpiEditableStage,
   kpiProgressStageLabels,
@@ -723,9 +724,15 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
       latestSaveByStage.set(stageKey, { actorId: log.actorId, actedAt: log.actedAt });
     }
   }
-  const canSeeSelfDraft = isSelfSubmitted || latestSaveByStage.get("SELF")?.actorId === currentUser.id;
-  const canSeeLeaderDraft = latestSaveByStage.get("LEADER")?.actorId === currentUser.id;
-  const canSeeManagerDraft = latestSaveByStage.get("MANAGER")?.actorId === currentUser.id;
+  // 阶段已完成（审批链步骤 COMPLETED 或 legacy 状态越过）→ 对所有人可见，不再按草稿判定
+  const stageCompletedFlags = {
+    SELF: isSelfSubmitted,
+    LEADER: hasCompletedKpiProgressStage({ status: personalKpi.status, approvalSteps }, "LEADER"),
+    MANAGER: hasCompletedKpiProgressStage({ status: personalKpi.status, approvalSteps }, "MANAGER"),
+  } as const;
+  const canSeeSelfDraft = stageCompletedFlags.SELF || latestSaveByStage.get("SELF")?.actorId === currentUser.id;
+  const canSeeLeaderDraft = stageCompletedFlags.LEADER || latestSaveByStage.get("LEADER")?.actorId === currentUser.id;
+  const canSeeManagerDraft = stageCompletedFlags.MANAGER || latestSaveByStage.get("MANAGER")?.actorId === currentUser.id;
   // 与明细同规则：自评未提交时，汇总与个人总结仅保存者可见，其余人按未填展示
   const displaySelfTotal = canSeeSelfDraft ? selfTotal : fallback(items.map(() => null));
   const displaySelfComment = canSeeSelfDraft ? personalKpi.selfComment : null;
