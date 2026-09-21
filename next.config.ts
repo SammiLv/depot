@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  devIndicators: false,
   allowedDevOrigins: ["depot.rj-info.com", "*.trycloudflare.com", ...devAllowedOrigins],
   async redirects() {
     return [
