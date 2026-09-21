@@ -711,6 +711,9 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const isKpiOwner = currentUser.id === personalKpi.userId;
   const isSelfSubmitted = Boolean(personalKpi.submittedAt) || !isSelfReviewStatus(personalKpi.status);
   const canSeeSelfDraft = isSelfSubmitted || isKpiOwner;
+  // 与明细同规则：自评未提交时，汇总与个人总结对非本人一律按未填展示（草稿仅本人/当前审批人可见）
+  const displaySelfTotal = canSeeSelfDraft ? selfTotal : fallback(items.map(() => null));
+  const displaySelfComment = canSeeSelfDraft ? personalKpi.selfComment : null;
   const canSeeLeaderDraft = isKpiOwner || editableStage === "LEADER";
   const canSeeManagerDraft = isKpiOwner || editableStage === "MANAGER";
   const currentStepScores = currentApprovalStep
@@ -761,7 +764,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
           approverName: null,
         }));
       })();
-  const selfSummary = parseStructuredSummary(personalKpi.selfComment, "季度工作任务总结", "季度工作能力总结");
+  const selfSummary = parseStructuredSummary(displaySelfComment, "季度工作任务总结", "季度工作能力总结");
   const leaderSummary = parseStructuredSummary(personalKpi.leaderComment, "表扬", "机会");
   const managerSummary = parseStructuredSummary(personalKpi.managerComment, "表扬", "机会");
 
@@ -812,7 +815,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     })),
     totals: {
       scoreTotal,
-      selfTotal,
+      selfTotal: displaySelfTotal,
       leaderTotal,
       managerTotal,
       attendanceScore,
