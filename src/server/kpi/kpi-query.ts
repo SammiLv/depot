@@ -681,12 +681,12 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   // 由前端用输入值现算预览。阶段字段为 null（未完成该阶段）时回退按明细推算用于草稿展示。
   const fallback = (values: Array<number | null>) => values.reduce<number>((sum, value) => sum + (value ?? 0), scoreTotal);
   const selfTotal = personalKpi.selfScore ?? fallback(items.map((item) => item.selfScore));
-  const leaderTotal = personalKpi.leaderScore ?? fallback(items.map((item) => item.leaderScore));
-  const managerTotal = personalKpi.managerScore ?? fallback(items.map((item) => item.managerScore));
+  const rawLeaderTotal = personalKpi.leaderScore ?? fallback(items.map((item) => item.leaderScore));
+  const rawManagerTotal = personalKpi.managerScore ?? fallback(items.map((item) => item.managerScore));
   const attendanceScore = personalKpi.finalScore !== null && personalKpi.managerScore !== null
     ? personalKpi.finalScore - personalKpi.managerScore
     : 0;
-  const finalTotal = personalKpi.finalScore ?? managerTotal + attendanceScore;
+  const finalTotal = personalKpi.finalScore ?? rawManagerTotal + attendanceScore;
   const hasApprovalChain = approvalSteps.length > 0;
   const currentApprovalStep = findUserPendingApprovalStep(approvalSteps, currentUser.id);
   const selfReviewActive = isSelfReviewStatus(personalKpi.status);
@@ -706,16 +706,31 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     : hasApprovalChain
       ? Boolean(currentApprovalStep)
       : hasStagePermission;
-  // 个人草稿可见性：自评是否已提交以 submittedAt 为准（保存不写、提交才写）；
-  // 审批阶段以步骤状态为准。未提交的分数仅本人或当前阶段审批人可见，其余人一律视为未填
+  // 草稿可见性（严格）：未提交阶段的分数/汇总/评语，仅「在该阶段做过保存动作的那个人」可见；
+  // 其余人（含被考核人本人、上级、下一阶段审批人）一律视为未填。提交后按阶段完成状态对下游可见。
   const isKpiOwner = currentUser.id === personalKpi.userId;
   const isSelfSubmitted = Boolean(personalKpi.submittedAt) || !isSelfReviewStatus(personalKpi.status);
-  const canSeeSelfDraft = isSelfSubmitted || isKpiOwner;
-  // 与明细同规则：自评未提交时，汇总与个人总结对非本人一律按未填展示（草稿仅本人/当前审批人可见）
+  const draftLogs = await prisma.personalKpiActionLog.findMany({
+    where: { personalKpiId: personalKpi.id, action: { endsWith: "_SAVE_DRAFT" } },
+    select: { actorId: true, action: true, actedAt: true },
+    orderBy: { actedAt: "asc" },
+  });
+  const latestSaveByStage = new Map<string, { actorId: string; actedAt: Date }>();
+  for (const log of draftLogs) {
+    const stageKey = log.action.replace(/_SAVE_DRAFT$/, "");
+    const existing = latestSaveByStage.get(stageKey);
+    if (!existing || existing.actedAt < log.actedAt) {
+      latestSaveByStage.set(stageKey, { actorId: log.actorId, actedAt: log.actedAt });
+    }
+  }
+  const canSeeSelfDraft = isSelfSubmitted || latestSaveByStage.get("SELF")?.actorId === currentUser.id;
+  const canSeeLeaderDraft = latestSaveByStage.get("LEADER")?.actorId === currentUser.id;
+  const canSeeManagerDraft = latestSaveByStage.get("MANAGER")?.actorId === currentUser.id;
+  // 与明细同规则：自评未提交时，汇总与个人总结仅保存者可见，其余人按未填展示
   const displaySelfTotal = canSeeSelfDraft ? selfTotal : fallback(items.map(() => null));
   const displaySelfComment = canSeeSelfDraft ? personalKpi.selfComment : null;
-  const canSeeLeaderDraft = isKpiOwner || editableStage === "LEADER";
-  const canSeeManagerDraft = isKpiOwner || editableStage === "MANAGER";
+  const displayLeaderTotal = canSeeLeaderDraft ? rawLeaderTotal : fallback(items.map(() => null));
+  const displayManagerTotal = canSeeManagerDraft ? rawManagerTotal : fallback(items.map(() => null));
   const currentStepScores = currentApprovalStep
     ? await prisma.personalKpiItemStepScore.findMany({
         where: { approvalStepId: currentApprovalStep.id },
@@ -765,8 +780,8 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
         }));
       })();
   const selfSummary = parseStructuredSummary(displaySelfComment, "季度工作任务总结", "季度工作能力总结");
-  const leaderSummary = parseStructuredSummary(personalKpi.leaderComment, "表扬", "机会");
-  const managerSummary = parseStructuredSummary(personalKpi.managerComment, "表扬", "机会");
+  const leaderSummary = parseStructuredSummary(canSeeLeaderDraft ? personalKpi.leaderComment : null, "表扬", "机会");
+  const managerSummary = parseStructuredSummary(canSeeManagerDraft ? personalKpi.managerComment : null, "表扬", "机会");
 
   return {
     id: personalKpi.id,
@@ -816,8 +831,8 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     totals: {
       scoreTotal,
       selfTotal: displaySelfTotal,
-      leaderTotal,
-      managerTotal,
+      leaderTotal: displayLeaderTotal,
+      managerTotal: displayManagerTotal,
       attendanceScore,
       finalTotal,
     },

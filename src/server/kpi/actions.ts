@@ -1772,14 +1772,13 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       },
     });
 
-    if (action !== "save") {
-      await createPersonalKpiActionLog(tx, {
-        personalKpiId,
-        actorId: currentUser.id,
-        action: getKpiActionLogLabel(editableStage, action),
-        remark: action === "reject" ? rejectRemark : null,
-      });
-    }
+    // 保存动作也记日志（动作用阶段+SAVE_DRAFT 标记），用于"草稿仅保存者本人可见"的判定
+    await createPersonalKpiActionLog(tx, {
+      personalKpiId,
+      actorId: currentUser.id,
+      action: action === "save" ? `${editableStage}_SAVE_DRAFT` : getKpiActionLogLabel(editableStage, action),
+      remark: action === "reject" ? rejectRemark : null,
+    });
 
     const nextApprover = nextStatus !== "COMPLETED" && !isSelfReviewStatus(nextStatus)
       ? await tx.personalKpiApprovalStep.findFirst({
