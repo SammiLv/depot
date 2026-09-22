@@ -326,6 +326,7 @@ depot-prod.sh — Depot 生产环境启动/控制程序
        bash scripts/depot-prod.sh tail
   3) 拉新代码（git pull + 重建 + 重启，一次完成）:
        bash scripts/depot-prod.sh pull
+       bash scripts/depot-prod.sh deploy               # 已手动 git pull 后全量停服/迁移/构建/重启
   4) 推当前分支到 GitHub（自动处理镜像规则）:
        bash scripts/depot-prod.sh push               # 推当前分支
        bash scripts/depot-prod.sh push --branch=dev # 推指定分支
@@ -636,6 +637,18 @@ pull_compute_plan() {
   fi
 }
 
+# deploy：不依赖 git diff，始终走停服 → generate → migrate → build → 启动
+deploy_compute_full_plan() {
+  PULL_NEED_STOP=1
+  PULL_NEED_GENERATE=1
+  PULL_NEED_MIGRATE=1
+  PULL_NEED_BUILD=1
+  PULL_NEED_INSTALL=0
+  if [ ! -d "$PROJECT_DIR/node_modules" ] || [ ! -d "$PROJECT_DIR/node_modules/next" ]; then
+    PULL_NEED_INSTALL=1
+  fi
+}
+
 pull_restore_service_if_needed() {
   local was_running="$1"
   if [ "$was_running" = "1" ]; then
@@ -644,46 +657,31 @@ pull_restore_service_if_needed() {
   fi
 }
 
-cmd_pull() {
-  local was_running=0 pull_t0 pull_elapsed
-
-  pull_t0=$(date +%s)
-
-  # 0. 工作区状态检查（有未提交改动就拒绝，避免覆盖本地修改）
+pull_preflight() {
   pull_step_begin "0/6 检查工作区状态"
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
     err "工作区有未提交的本地改动："
     git status --short | head -20
-    err "请先 commit 或 stash 再 pull"
+    err "请先 commit 或 stash 再 pull/deploy"
     return 1
   fi
   pull_step_end
   echo ""
 
-  # 0.5 确保 node/pnpm 可用（npm → pnpm 11 迁移时自动安装）
   pull_step_begin "0.5/6 检查 node/pnpm"
   if ! ensure_pnpm; then
     return 1
   fi
   pull_step_end
   echo ""
+  return 0
+}
 
-  # 1. 拉取最新代码（用项目里配置好的镜像: ghfast.top 代理 github.com）
-  pull_step_begin "1/6 拉取最新代码（git pull）"
-  if ! run_git_pull "$PROJECT_DIR"; then
-    err "git pull 失败（可能是冲突或网络问题）"
-    return 1
-  fi
-  pull_step_end
-  echo ""
-
-  # 1.5 分析变更，决定哪些步骤需要执行
-  pull_compute_plan
-  if [ -z "$(pull_changed_files)" ]; then
-    pull_elapsed=$(( $(date +%s) - pull_t0 ))
-    ok "代码已是最新，无需停服/构建/迁移（总耗时 ${pull_elapsed}s）"
-    return 0
-  fi
+# 停服 → install/generate/migrate → build → 启动（pull 与 deploy 共用）
+pull_execute_plan() {
+  local pull_t0="$1"
+  local audit_action="${2:-pull}"
+  local was_running=0 pull_elapsed
 
   log "部署计划: install=$PULL_NEED_INSTALL generate=$PULL_NEED_GENERATE migrate=$PULL_NEED_MIGRATE build=$PULL_NEED_BUILD stop=$PULL_NEED_STOP"
   if [ "$PULL_NEED_STOP" = "0" ]; then
@@ -794,21 +792,61 @@ cmd_pull() {
   echo ""
 
   pull_elapsed=$(( $(date +%s) - pull_t0 ))
-  ok "pull 完成（总耗时 ${pull_elapsed}s）"
+  ok "${audit_action} 完成（总耗时 ${pull_elapsed}s）"
 
-  # 记录部署审计日志
   log "记录部署审计日志..."
-  local git_commit=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "unknown")
-  local git_branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
-  local operator="${USER:-unknown}"
+  local git_commit git_branch operator
+  git_commit=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+  git_branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
+  operator="${USER:-unknown}"
 
   pnpm tsx scripts/log-deployment.ts \
-    --action "pull" \
+    --action "$audit_action" \
     --operator "$operator" \
     --gitCommit "$git_commit" \
     --gitBranch "$git_branch" \
     --success "true" \
-    --note "拉取代码并重启，耗时 ${pull_elapsed}s" || warn "记录审计日志失败（不影响部署）"
+    --note "${audit_action} 部署，耗时 ${pull_elapsed}s" || warn "记录审计日志失败（不影响部署）"
+}
+
+cmd_pull() {
+  local pull_t0 pull_elapsed
+
+  pull_t0=$(date +%s)
+  if ! pull_preflight; then
+    return 1
+  fi
+
+  pull_step_begin "1/6 拉取最新代码（git pull）"
+  if ! run_git_pull "$PROJECT_DIR"; then
+    err "git pull 失败（可能是冲突或网络问题）"
+    return 1
+  fi
+  pull_step_end
+  echo ""
+
+  pull_compute_plan
+  if [ -z "$(pull_changed_files)" ]; then
+    pull_elapsed=$(( $(date +%s) - pull_t0 ))
+    ok "代码已是最新，无需停服/构建/迁移（总耗时 ${pull_elapsed}s）"
+    log "若刚手动 git pull 过，请用: bash scripts/depot-prod.sh deploy"
+    return 0
+  fi
+
+  pull_execute_plan "$pull_t0" "pull"
+}
+
+cmd_deploy() {
+  local pull_t0
+
+  pull_t0=$(date +%s)
+  if ! pull_preflight; then
+    return 1
+  fi
+
+  log "deploy：全量停服 / Prisma / 迁移 / 构建 / 启动（跳过 git pull）"
+  deploy_compute_full_plan
+  pull_execute_plan "$pull_t0" "deploy"
 }
 
 cmd_tail() {
@@ -1030,6 +1068,7 @@ case "$CMD" in
   stop)     cmd_stop     ;;
   restart)  cmd_restart  ;;
   pull)     cmd_pull     ;;
+  deploy)   cmd_deploy   ;;
   push)     cmd_push     ;;
   commit)   cmd_commit   ;;
   status)   cmd_status   ;;
