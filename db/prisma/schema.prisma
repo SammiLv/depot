@@ -472,6 +472,8 @@ model User {
   updatedAt            DateTime  @updatedAt
   deletedAt            DateTime?
 
+  personalKpis         PersonalKpi[] @relation("PersonalKpis")
+
   @@index([orgNodeId])
   @@index([roleType])
 }
@@ -1091,6 +1093,10 @@ model PersonalKpi {
   updatedAt                         DateTime             @updatedAt
   deletedAt                         DateTime?
 
+  user                              User                      @relation("PersonalKpis", fields: [userId], references: [id])
+  actionLogs                        PersonalKpiActionLog[]    @relation("PersonalKpiActionLogs")
+  ratingAdjustmentLogs              KpiRatingAdjustmentLog[]  @relation("PersonalKpiRatingAdjustments")
+
   @@unique([year, quarter, userId])
   @@index([year, quarter])
   @@index([userId])
@@ -1147,13 +1153,15 @@ model PersonalKpiItemStepScore {
 }
 
 model PersonalKpiActionLog {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   personalKpiId String
   actorId       String
   action        String
   remark        String?
-  actedAt       DateTime @default(now())
-  createdAt     DateTime @default(now())
+  actedAt       DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  personalKpi   PersonalKpi @relation("PersonalKpiActionLogs", fields: [personalKpiId], references: [id])
 
   @@index([personalKpiId, actedAt])
   @@index([actorId])
@@ -1930,7 +1938,7 @@ model KpiRatingBand {
 }
 
 model KpiRatingAdjustmentLog {
-  id                   String   @id @default(cuid())
+  id                   String      @id @default(cuid())
   personalKpiId        String
   fromRuleVersionId    String?
   toRuleVersionId      String
@@ -1940,7 +1948,9 @@ model KpiRatingAdjustmentLog {
   adjustedSnapshotJson String
   reason               String
   adjustedById         String
-  adjustedAt           DateTime @default(now())
+  adjustedAt           DateTime    @default(now())
+
+  personalKpi          PersonalKpi @relation("PersonalKpiRatingAdjustments", fields: [personalKpiId], references: [id])
 
   @@index([personalKpiId, adjustedAt])
   @@index([toRuleVersionId])

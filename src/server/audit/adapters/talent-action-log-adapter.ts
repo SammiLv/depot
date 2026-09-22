@@ -51,6 +51,10 @@ export function mapTalentActionLogToAudit(
     // JSON 解析失败时保持为 null
   }
 
+  // 构造带类型前缀的对象名称
+  const typePrefix = getTalentTypePrefix(log.targetType);
+  const objectName = `[${typePrefix}] ${log.targetId}`;
+
   return {
     id: log.id,
     source: "TalentActionLog",
@@ -71,7 +75,7 @@ export function mapTalentActionLogToAudit(
     // 业务对象
     objectType: log.targetType,
     objectId: log.targetId,
-    objectName: null,
+    objectName,
 
     // 数据变化（TalentActionLog 已有 before/after）
     beforeData,
@@ -82,6 +86,23 @@ export function mapTalentActionLogToAudit(
     requestId: null,
     correlationId: null,
   };
+}
+
+/**
+ * 获取人才对象类型的中文前缀
+ */
+function getTalentTypePrefix(targetType: string): string {
+  const typePrefixMap: Record<string, string> = {
+    TalentReviewTemplateVersion: "人才盘点模板",
+    TalentRestrictionRule: "人才限制规则",
+    EmployeeTalentProfile: "人才档案",
+    PromotionRecord: "晋升记录",
+    SalaryAdjustmentRecord: "调薪记录",
+    RewardRecord: "奖励记录",
+    EmploymentContractTerm: "合同期限",
+    TalentImportBatch: "批量导入",
+  };
+  return typePrefixMap[targetType] || "人才对象";
 }
 
 /**

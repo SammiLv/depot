@@ -26,6 +26,10 @@ type OperationLogRecord = {
  * 将 OperationLog 映射为统一审计记录
  */
 export function mapOperationLogToAudit(log: OperationLogRecord): UnifiedAuditRecord {
+  // 构造带类型前缀的对象名称
+  const typePrefix = getTypePrefix(log.targetType);
+  const objectName = typePrefix ? `[${typePrefix}] ${log.targetTitle}` : log.targetTitle;
+
   return {
     id: log.id,
     source: "OperationLog",
@@ -46,7 +50,7 @@ export function mapOperationLogToAudit(log: OperationLogRecord): UnifiedAuditRec
     // 业务对象
     objectType: log.targetType,
     objectId: log.targetId,
-    objectName: log.targetTitle,
+    objectName,
 
     // 数据变化（OperationLog 不存储详细变化）
     beforeData: null,
@@ -57,6 +61,20 @@ export function mapOperationLogToAudit(log: OperationLogRecord): UnifiedAuditRec
     requestId: null,
     correlationId: null,
   };
+}
+
+/**
+ * 获取对象类型的中文前缀
+ */
+function getTypePrefix(targetType: string): string {
+  const typePrefixMap: Record<string, string> = {
+    ProductGoal: "产品目标",
+    Project: "项目",
+    MonthlyWorkPlan: "月度计划",
+    QuarterlyWork: "需求",
+    RequirementValueTrack: "价值跟踪",
+  };
+  return typePrefixMap[targetType] || "";
 }
 
 /**

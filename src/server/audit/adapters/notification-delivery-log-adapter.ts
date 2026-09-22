@@ -20,6 +20,10 @@ type NotificationDeliveryLogRecord = {
   status: string;
   error: string | null;
   createdAt: Date;
+  scenario?: {
+    id: string;
+    name: string;
+  };
 };
 
 /**
@@ -29,6 +33,12 @@ export function mapNotificationDeliveryLogToAudit(
   log: NotificationDeliveryLogRecord
 ): UnifiedAuditRecord {
   const isSuccess = log.status === "SENT";
+
+  // 构造友好的对象名称
+  let objectName = `通知场景 (${log.scenarioId})`;
+  if (log.scenario) {
+    objectName = log.scenario.name;
+  }
 
   return {
     id: log.id,
@@ -47,10 +57,10 @@ export function mapNotificationDeliveryLogToAudit(
     operatedAt: log.createdAt,
     operationNote: isSuccess ? null : log.error,
 
-    // 业务对象（通知的接收人）
+    // 业务对象（通知场景）
     objectType: "NotificationScenario",
     objectId: log.scenarioId,
-    objectName: null,
+    objectName,
 
     // 数据变化
     beforeData: null,

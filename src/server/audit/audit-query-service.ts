@@ -232,9 +232,21 @@ async function queryPersonalKpiActionLogs(
     orderBy: { actedAt: "desc" },
     skip,
     take,
+    include: {
+      personalKpi: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
   });
 
-  return logs.map(mapPersonalKpiActionLogToAudit);
+  return logs.map((log) => mapPersonalKpiActionLogToAudit(log as any));
 }
 
 /**
@@ -258,9 +270,21 @@ async function queryKpiRatingAdjustmentLogs(
     orderBy: { adjustedAt: "desc" },
     skip,
     take,
+    include: {
+      personalKpi: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
   });
 
-  return logs.map(mapKpiRatingAdjustmentLogToAudit);
+  return logs.map((log) => mapKpiRatingAdjustmentLogToAudit(log as any));
 }
 
 /**
@@ -313,9 +337,17 @@ async function queryNotificationDeliveryLogs(
     orderBy: { createdAt: "desc" },
     skip,
     take,
+    include: {
+      scenario: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
   });
 
-  return logs.map(mapNotificationDeliveryLogToAudit);
+  return logs.map((log) => mapNotificationDeliveryLogToAudit(log as any));
 }
 
 /**

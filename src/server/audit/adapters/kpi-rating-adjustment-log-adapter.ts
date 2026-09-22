@@ -23,6 +23,16 @@ type KpiRatingAdjustmentLogRecord = {
   reason: string;
   adjustedById: string;
   adjustedAt: Date;
+  personalKpi?: {
+    id: string;
+    year: number;
+    quarter: number;
+    userId: string;
+    user: {
+      id: string;
+      name: string;
+    };
+  };
 };
 
 /**
@@ -42,6 +52,13 @@ export function mapKpiRatingAdjustmentLogToAudit(
     adjustedSnapshot = JSON.parse(log.adjustedSnapshotJson);
   } catch (error) {
     // JSON 解析失败时保持为 null
+  }
+
+  // 构造友好的对象名称
+  let objectName = `个人 KPI (${log.personalKpiId})`;
+  if (log.personalKpi) {
+    const { year, quarter, user } = log.personalKpi;
+    objectName = `[KPI等级调整] ${user.name}的${year}年Q${quarter} KPI`;
   }
 
   return {
@@ -64,7 +81,7 @@ export function mapKpiRatingAdjustmentLogToAudit(
     // 业务对象
     objectType: "PersonalKpi",
     objectId: log.personalKpiId,
-    objectName: null,
+    objectName,
 
     // 数据变化（已有 before/after 快照）
     beforeData: originalSnapshot

@@ -19,6 +19,16 @@ type PersonalKpiActionLogRecord = {
   remark: string | null;
   actedAt: Date;
   createdAt: Date;
+  personalKpi?: {
+    id: string;
+    year: number;
+    quarter: number;
+    userId: string;
+    user: {
+      id: string;
+      name: string;
+    };
+  };
 };
 
 /**
@@ -27,6 +37,13 @@ type PersonalKpiActionLogRecord = {
 export function mapPersonalKpiActionLogToAudit(
   log: PersonalKpiActionLogRecord
 ): UnifiedAuditRecord {
+  // 构造友好的对象名称
+  let objectName = `个人 KPI (${log.personalKpiId})`;
+  if (log.personalKpi) {
+    const { year, quarter, user } = log.personalKpi;
+    objectName = `${user.name}的${year}年Q${quarter} KPI`;
+  }
+
   return {
     id: log.id,
     source: "PersonalKpiActionLog",
@@ -47,7 +64,7 @@ export function mapPersonalKpiActionLogToAudit(
     // 业务对象
     objectType: "PersonalKpi",
     objectId: log.personalKpiId,
-    objectName: null, // PersonalKpiActionLog 不存储对象名称
+    objectName,
 
     // 数据变化（PersonalKpiActionLog 不存储详细变化）
     beforeData: null,
