@@ -26,6 +26,22 @@ const menu: Array<{
   { to: "/logs", label: "日志中心", iconSrc: "/icons/nav-logs.png?v=2", iconActiveSrc: "/icons/nav-logs-active.png?v=2", description: "查询全平台操作日志和业务记录。" },
 ];
 
+/** 菜单权限 code → 侧栏路由（库表 path 与壳路由不一致时仍可见） */
+const menuPermissionCodeToShellPath: Record<string, string> = {
+  "logs-center": "/logs",
+  todos: "/statistics",
+};
+
+function isShellRouteAllowed(
+  shellPath: string,
+  allowedMenus: { code: string; name: string; path: string }[],
+) {
+  return allowedMenus.some(
+    (menu) =>
+      menu.path === shellPath || menuPermissionCodeToShellPath[menu.code] === shellPath,
+  );
+}
+
 export interface AppShellUser {
   name: string;
   roleLabel: string;
@@ -96,8 +112,9 @@ function UserMenu({ user }: { user: AppShellUser }) {
 export function AppShell({ children, user, allowedMenus }: { children: ReactNode; user: AppShellUser; allowedMenus?: { code: string; name: string; path: string }[] }) {
   const pathname = usePathname();
   const [activePath, setActivePath] = useState(pathname);
-  const allowedPaths = allowedMenus ? new Set(allowedMenus.map((m) => m.path)) : null;
-  const visibleMenu = allowedPaths ? menu.filter((m) => allowedPaths.has(m.to)) : menu;
+  const visibleMenu = allowedMenus
+    ? menu.filter((m) => isShellRouteAllowed(m.to, allowedMenus))
+    : menu;
   const current = visibleMenu.find((m) => pathname.startsWith(m.to)) ?? visibleMenu[0];
   const ownsPageHeader = pathname.startsWith("/quarterly-work") || pathname === "/talent";
   const hideShellHeader = pathname === "/dashboard";

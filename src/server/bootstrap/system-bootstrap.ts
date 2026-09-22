@@ -21,6 +21,7 @@ const systemMenus = [
   ["todos", "数据统计", "/statistics", 60, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
   ["notifications", "通知中心", "/notifications", 70, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER, RoleType.TEAM_LEADER, RoleType.MEMBER]],
   ["organization", "组织与权限", "/organization", 80, [RoleType.ADMIN, RoleType.DEPARTMENT_MANAGER]],
+  ["logs-center", "日志中心", "/logs", 90, [RoleType.ADMIN]],
 ] as const;
 
 export async function ensureInitialSystemBootstrap() {
