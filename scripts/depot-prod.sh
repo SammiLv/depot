@@ -795,6 +795,20 @@ cmd_pull() {
 
   pull_elapsed=$(( $(date +%s) - pull_t0 ))
   ok "pull 完成（总耗时 ${pull_elapsed}s）"
+
+  # 记录部署审计日志
+  log "记录部署审计日志..."
+  local git_commit=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+  local git_branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
+  local operator="${USER:-unknown}"
+
+  pnpm tsx scripts/log-deployment.ts \
+    --action "pull" \
+    --operator "$operator" \
+    --gitCommit "$git_commit" \
+    --gitBranch "$git_branch" \
+    --success "true" \
+    --note "拉取代码并重启，耗时 ${pull_elapsed}s" || warn "记录审计日志失败（不影响部署）"
 }
 
 cmd_tail() {

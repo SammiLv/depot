@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/server/db/prisma";
 import { clearUserSession, rememberLoginMethod, setUserSession } from "@/server/auth/session";
 import { ensureInitialSystemBootstrap } from "@/server/bootstrap/system-bootstrap";
+import { writeAuditEvent, writeAuditFailure, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 
 function hashPassword(password: string) {
   return scryptSync(password, "department-management", 64).toString("hex");
@@ -39,17 +40,43 @@ export async function loginWithPassword(formData: FormData) {
     },
     select: {
       id: true,
+      name: true,
       passwordHash: true,
       passwordLoginEnabled: true,
     },
   });
 
   if (!user || !user.passwordLoginEnabled || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
+    // 记录登录失败日志
+    await writeAuditFailure({
+      actorType: "USER",
+      actorName: normalizedLoginName,
+      module: AUDIT_MODULES.AUTH,
+      actionCode: AUDIT_ACTION_CODES.LOGIN_FAILURE,
+      actionName: "密码登录",
+      failureReason: "账号或密码错误",
+    });
+
     redirect("/login?error=%E8%B4%A6%E5%8F%B7%E6%88%96%E5%AF%86%E7%A0%81%E9%94%99%E8%AF%AF");
   }
 
   await setUserSession(user.id);
   await rememberLoginMethod("password");
+
+  // 记录登录成功日志
+  await prisma.$transaction(async (tx) => {
+    await writeAuditEvent(tx, {
+      actorId: user.id,
+      actorType: "USER",
+      actorName: user.name,
+      module: AUDIT_MODULES.AUTH,
+      actionCode: AUDIT_ACTION_CODES.LOGIN_SUCCESS,
+      actionName: "密码登录",
+      isSuccess: true,
+      operationNote: `登录名: ${normalizedLoginName}`,
+    });
+  });
+
   redirect("/dashboard");
 }
 
@@ -147,6 +174,25 @@ export async function initializeAdminPassword(formData: FormData) {
 }
 
 export async function logout() {
+  // 获取当前用户信息（在清除 session 之前）
+  const { getCurrentUser } = await import("@/server/auth/current-user");
+  const currentUser = await getCurrentUser();
+
+  // 记录登出日志
+  if (currentUser) {
+    await prisma.$transaction(async (tx) => {
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.AUTH,
+        actionCode: AUDIT_ACTION_CODES.LOGOUT,
+        actionName: "登出",
+        isSuccess: true,
+      });
+    });
+  }
+
   await clearUserSession();
   redirect("/login");
 }

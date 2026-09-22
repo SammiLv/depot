@@ -23,6 +23,7 @@ const menu: Array<{
   { to: "/statistics", label: "数据统计", iconSrc: "/icons/nav-statistics.png", iconActiveSrc: "/icons/nav-statistics-active.png", description: "数据统计模块，建设中。" },
   { to: "/notifications", label: "通知中心", iconSrc: "/icons/nav-notifications.png", iconActiveSrc: "/icons/nav-notifications-active.png", description: "查看系统通知与消息。" },
   { to: "/organization", label: "组织架构", iconSrc: "/icons/nav-org.png", iconActiveSrc: "/icons/nav-org-active.png", description: "管理组织架构、人员与权限。" },
+  { to: "/logs", label: "日志中心", iconSrc: "/icons/nav-logs.png?v=2", iconActiveSrc: "/icons/nav-logs-active.png?v=2", description: "查询全平台操作日志和业务记录。" },
 ];
 
 export interface AppShellUser {

@@ -2364,3 +2364,55 @@ model TodoItem {
   @@index([userId])
   @@index([targetType, targetId])
 }
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  // 操作者信息
+  actorId     String?
+  actorName   String?
+  actorType   String   @default("USER") // USER, SYSTEM, DEPLOYMENT_SCRIPT, DATA_MAINTENANCE
+  loginMethod String?
+  ipAddress   String?
+  userAgent   String?
+
+  // 操作信息
+  module         String
+  actionCode     String
+  actionName     String
+  isSuccess      Boolean  @default(true)
+  operatedAt     DateTime @default(now())
+  operationNote  String?
+  failureReason  String?
+
+  // 业务对象信息
+  objectType       String?
+  objectId         String?
+  objectName       String?
+  objectDepartment String?
+
+  // 数据变化（JSON 格式）
+  beforeData          String? // JSON
+  afterData           String? // JSON
+  changedFields       String? // JSON array of field names
+  batchTotalCount     Int?
+  batchSuccessCount   Int?
+  batchFailureCount   Int?
+
+  // 追溯信息
+  requestId       String?
+  correlationId   String?
+  eventKey        String?
+  gitCommit       String?
+  buildId         String?
+  releaseBatchId  String?
+  serverIdentity  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([module, actionCode, operatedAt])
+  @@index([actorId, operatedAt])
+  @@index([objectType, objectId])
+  @@index([correlationId])
+  @@index([releaseBatchId])
+  @@index([operatedAt])
+}

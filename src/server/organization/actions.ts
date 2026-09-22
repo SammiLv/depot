@@ -7,6 +7,7 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
 import { type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
+import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 import {
   annualGoalMatrixPermissionAbilityKeys,
   annualGoalPermissionScopeByAbilityRole,
@@ -273,7 +274,7 @@ export async function updateFromDingTalk() {
 }
 
 export async function createDepartment(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const name = (formData.get("name") as string | null)?.trim() ?? "";
   const managerId = ((formData.get("managerId") as string) || "").trim() || null;
 
@@ -299,6 +300,7 @@ export async function createDepartment(formData: FormData) {
   });
 
   const departmentId = randomUUID();
+  let managerName: string | null = null;
 
   await prisma.$transaction(async (tx) => {
     await ensureRootOrgNode(tx);
@@ -313,24 +315,63 @@ export async function createDepartment(formData: FormData) {
     });
 
     await rebuildOrgClosures(tx);
+
+    // 记录组织节点创建日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ORGANIZATION,
+      actionCode: AUDIT_ACTION_CODES.ORG_NODE_CREATE,
+      actionName: "创建部门",
+      isSuccess: true,
+      objectType: "Department",
+      objectId: departmentId,
+      objectName: name,
+      afterData: {
+        name,
+        nodeType: "DEPARTMENT",
+        parentId: ROOT_ORG_NODE_ID,
+      },
+    });
   });
 
   if (managerId) {
     const manager = await prisma.user.findUnique({
       where: { id: managerId },
-      select: { id: true, isActive: true, deletedAt: true, roleType: true },
+      select: { id: true, name: true, isActive: true, deletedAt: true, roleType: true },
     });
 
     if (!manager || !manager.isActive || manager.deletedAt || manager.roleType === "ADMIN") {
       throw new Error("部门主管必须是有效非管理员成员");
     }
 
-    await prisma.user.update({
-      where: { id: managerId },
-      data: {
-        orgNodeId: departmentId,
-        roleType: "DEPARTMENT_MANAGER",
-      },
+    managerName = manager.name;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: managerId },
+        data: {
+          orgNodeId: departmentId,
+          roleType: "DEPARTMENT_MANAGER",
+        },
+      });
+
+      // 记录设置部门负责人日志
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.ORGANIZATION,
+        actionCode: AUDIT_ACTION_CODES.ORG_LEADER_CHANGE,
+        actionName: "设置部门负责人",
+        isSuccess: true,
+        objectType: "Department",
+        objectId: departmentId,
+        objectName: name,
+        afterData: { managerId, managerName: manager.name },
+        operationNote: `设置为: ${manager.name}`,
+      });
     });
   }
 
@@ -355,15 +396,40 @@ export async function createUser(formData: FormData) {
   await assertDepartmentExists(departmentOrgNodeId);
   await assertTeamInDepartment(teamOrgNodeId, departmentOrgNodeId);
 
-  await prisma.user.create({
-    data: {
-      name: name.trim(),
-      email: email?.trim() || null,
-      mobile: mobile?.trim() || null,
-      roleType: requestedRole,
-      title: title?.trim() || null,
-      orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
-    },
+  await prisma.$transaction(async (tx) => {
+    const newUser = await tx.user.create({
+      data: {
+        name: name.trim(),
+        email: email?.trim() || null,
+        mobile: mobile?.trim() || null,
+        roleType: requestedRole,
+        title: title?.trim() || null,
+        orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
+      },
+    });
+
+    // 记录账号创建日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ACCOUNT,
+      actionCode: "ACCOUNT_CREATE",
+      actionName: "创建用户账号",
+      isSuccess: true,
+      objectType: "User",
+      objectId: newUser.id,
+      objectName: newUser.name,
+      afterData: {
+        name: newUser.name,
+        email: newUser.email,
+        mobile: newUser.mobile,
+        roleType: newUser.roleType,
+        title: newUser.title,
+        orgNodeId: newUser.orgNodeId,
+      },
+      operationNote: `角色: ${requestedRole}`,
+    });
   });
 
   revalidateOrganization();
@@ -399,16 +465,86 @@ export async function updateUser(formData: FormData) {
   await assertDepartmentExists(departmentOrgNodeId);
   await assertTeamInDepartment(teamOrgNodeId, departmentOrgNodeId);
 
-  await prisma.user.update({
-    where: { id },
-    data: {
+  // 记录变更前的数据
+  const beforeData = {
+    name: target.name,
+    email: target.email,
+    mobile: target.mobile,
+    roleType: target.roleType,
+    title: target.title,
+    orgNodeId: target.orgNodeId,
+  };
+
+  // 执行更新
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id },
+      data: {
+        name: name.trim(),
+        email: email?.trim() || null,
+        mobile: mobile?.trim() || null,
+        roleType: requestedRole,
+        title: title?.trim() || null,
+        orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
+      },
+    });
+
+    // 记录变更后的数据
+    const afterData = {
       name: name.trim(),
       email: email?.trim() || null,
       mobile: mobile?.trim() || null,
       roleType: requestedRole,
       title: title?.trim() || null,
       orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
-    },
+    };
+
+    // 识别变更的字段
+    const changedFields: string[] = [];
+    if (beforeData.name !== afterData.name) changedFields.push("name");
+    if (beforeData.email !== afterData.email) changedFields.push("email");
+    if (beforeData.mobile !== afterData.mobile) changedFields.push("mobile");
+    if (beforeData.roleType !== afterData.roleType) changedFields.push("roleType");
+    if (beforeData.title !== afterData.title) changedFields.push("title");
+    if (beforeData.orgNodeId !== afterData.orgNodeId) changedFields.push("orgNodeId");
+
+    // 如果角色发生变更，记录角色变更日志
+    if (beforeData.roleType !== afterData.roleType) {
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.ACCOUNT,
+        actionCode: AUDIT_ACTION_CODES.ROLE_CHANGE,
+        actionName: "变更用户角色",
+        isSuccess: true,
+        objectType: "User",
+        objectId: id,
+        objectName: target.name,
+        beforeData,
+        afterData,
+        changedFields,
+        operationNote: `${beforeData.roleType} → ${afterData.roleType}`,
+      });
+    } else if (changedFields.length > 0) {
+      // 其他字段变更，记录账号更新日志
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.ACCOUNT,
+        actionCode: "ACCOUNT_UPDATE",
+        actionName: "更新用户信息",
+        isSuccess: true,
+        objectType: "User",
+        objectId: id,
+        objectName: target.name,
+        beforeData,
+        afterData,
+        changedFields,
+        operationNote: `变更字段: ${changedFields.join(", ")}`,
+      });
+    }
   });
 
   revalidateOrganization();
@@ -428,7 +564,27 @@ export async function deleteUser(formData: FormData) {
     }
   }
 
-  await prisma.user.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
+
+    // 记录账号禁用日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ACCOUNT,
+      actionCode: AUDIT_ACTION_CODES.ACCOUNT_DISABLE,
+      actionName: "禁用用户账号",
+      isSuccess: true,
+      objectType: "User",
+      objectId: id,
+      objectName: target.name,
+      beforeData: { isActive: target.isActive },
+      afterData: { isActive: false },
+      operationNote: `原角色: ${target.roleType}`,
+    });
+  });
+
   revalidateOrganization();
 }
 
@@ -495,6 +651,12 @@ export async function updateTeam(formData: FormData) {
     throw new Error("小组缺少上级节点");
   }
 
+  // 记录变更前的数据
+  const beforeData = {
+    name: teamNode.name,
+    parentId: teamNode.parentId,
+  };
+
   await prisma.$transaction(async (tx) => {
     await tx.orgNode.update({
       where: { id: teamNode.id },
@@ -503,6 +665,37 @@ export async function updateTeam(formData: FormData) {
 
     if (nextParentOrgNodeId !== teamNode.parentId) {
       await rebuildOrgClosures(tx);
+    }
+
+    // 记录变更后的数据
+    const afterData = {
+      name: name.trim(),
+      parentId: nextParentOrgNodeId,
+    };
+
+    // 识别变更的字段
+    const changedFields: string[] = [];
+    if (beforeData.name !== afterData.name) changedFields.push("name");
+    if (beforeData.parentId !== afterData.parentId) changedFields.push("parentId");
+
+    // 记录组织节点更新日志
+    if (changedFields.length > 0) {
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.ORGANIZATION,
+        actionCode: AUDIT_ACTION_CODES.ORG_NODE_UPDATE,
+        actionName: "更新小组信息",
+        isSuccess: true,
+        objectType: "Team",
+        objectId: id,
+        objectName: teamNode.name,
+        beforeData,
+        afterData,
+        changedFields,
+        operationNote: `变更字段: ${changedFields.join(", ")}`,
+      });
     }
   });
 
@@ -540,6 +733,26 @@ export async function deleteTeam(formData: FormData) {
     await tx.orgClosure.deleteMany({ where: { OR: [{ ancestorId: teamNode.id }, { descendantId: teamNode.id }] } });
     await tx.orgNode.delete({ where: { id: teamNode.id } });
     await rebuildOrgClosures(tx);
+
+    // 记录组织节点删除日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ORGANIZATION,
+      actionCode: AUDIT_ACTION_CODES.ORG_NODE_DELETE,
+      actionName: "删除小组",
+      isSuccess: true,
+      objectType: "Team",
+      objectId: id,
+      objectName: teamNode.name,
+      beforeData: {
+        name: teamNode.name,
+        parentId: teamNode.parentId,
+        nodeType: teamNode.nodeType,
+      },
+      operationNote: `已将小组成员移至部门`,
+    });
   });
 
   revalidateOrganization();
@@ -548,7 +761,7 @@ export async function deleteTeam(formData: FormData) {
 // ── Department and menu permissions ──
 
 export async function setDepartmentManager(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const departmentOrgNodeId = formData.get("departmentOrgNodeId") as string;
   const managerId = formData.get("managerId") as string;
 
@@ -568,7 +781,7 @@ export async function setDepartmentManager(formData: FormData) {
       orgNodeId: departmentNode.id,
       id: { not: managerId },
     },
-    select: { id: true },
+    select: { id: true, name: true },
   });
 
   await prisma.$transaction(async (tx) => {
@@ -580,6 +793,25 @@ export async function setDepartmentManager(formData: FormData) {
         data: { roleType: "MEMBER" },
       });
     }
+
+    // 记录部门负责人变更日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ORGANIZATION,
+      actionCode: AUDIT_ACTION_CODES.ORG_LEADER_CHANGE,
+      actionName: "变更部门负责人",
+      isSuccess: true,
+      objectType: "Department",
+      objectId: departmentNode.id,
+      objectName: departmentNode.name,
+      beforeData: previousManager ? { managerId: previousManager.id, managerName: previousManager.name } : null,
+      afterData: { managerId: manager.id, managerName: manager.name },
+      operationNote: previousManager
+        ? `${previousManager.name} → ${manager.name}`
+        : `设置为: ${manager.name}`,
+    });
   });
 
   revalidateOrganization();
@@ -1122,6 +1354,26 @@ export async function createKpiUserPermissionGrant(formData: FormData) {
       await tx.orgPermissionGrant.createMany({
         data: grants,
       });
+
+      // 记录权限授予日志
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.PERMISSION,
+        actionCode: AUDIT_ACTION_CODES.PERMISSION_GRANT,
+        actionName: "授予 KPI 权限",
+        isSuccess: true,
+        batchTotalCount: grants.length,
+        batchSuccessCount: grants.length,
+        afterData: {
+          userCount: userIds.length,
+          abilityKeys,
+          orgNodeCount: requestedOrgNodeIds.length,
+          grantScopeType,
+        },
+        operationNote: `为 ${userIds.length} 个用户授予 ${abilityKeys.length} 个权限项，涉及 ${requestedOrgNodeIds.length} 个组织节点`,
+      });
     }
   });
 
@@ -1142,6 +1394,8 @@ export async function deleteKpiUserPermissionGrant(formData: FormData) {
     select: {
       id: true,
       moduleKey: true,
+      abilityKey: true,
+      scopeType: true,
       subjectType: true,
       orgNodeId: true,
       userId: true,
@@ -1164,7 +1418,36 @@ export async function deleteKpiUserPermissionGrant(formData: FormData) {
     throw new Error("无权删除该显式授权");
   }
 
-  await prisma.orgPermissionGrant.delete({ where: { id } });
+  // 获取用户信息用于日志记录
+  const targetUser = await prisma.user.findUnique({
+    where: { id: grant.userId },
+    select: { id: true, name: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPermissionGrant.delete({ where: { id } });
+
+    // 记录权限撤销日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.PERMISSION,
+      actionCode: AUDIT_ACTION_CODES.PERMISSION_REVOKE,
+      actionName: "撤销 KPI 权限",
+      isSuccess: true,
+      objectType: "User",
+      objectId: grant.userId,
+      objectName: targetUser?.name || "未知用户",
+      beforeData: {
+        abilityKey: grant.abilityKey,
+        scopeType: grant.scopeType,
+        orgNodeId: grant.orgNodeId,
+      },
+      operationNote: `撤销能力: ${grant.abilityKey}`,
+    });
+  });
+
   revalidateOrganization();
 }
 
