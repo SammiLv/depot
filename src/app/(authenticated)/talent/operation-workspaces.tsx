@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import type { AssessmentWorkspaceData, DecisionWorkspaceData, EmployeeProfileWorkspaceData, HistoryWorkspaceData, IncidentWorkspaceData } from "./operation-workspace-types";
 import { EmployeeProfileEditor } from "./employees/profile-content";
 import { HistoryRecordForm } from "./history/history-record-form";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { BusinessAssessmentCycleCreateForm } from "./business-assessment-cycle-create";
 
 const inputClass = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
@@ -90,7 +91,7 @@ export function BusinessAssessmentQuarterlyWorkspace({ data }: { data: Assessmen
         </div>
         <p className="mb-3 mt-1 text-xs text-muted-foreground">模板内含分数评分、等级评分和补考结果示例；填写正式数据前请先删除示例行。考核时间段取自本次业务考核，无需逐行填写。</p>
         <div className="mb-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-          统一考核时间段：{selectedCycle.assessmentStartDate?.slice(0, 10) ?? "未设置"} 至 {selectedCycle.assessmentEndDate?.slice(0, 10) ?? "未设置"}
+          统一考核时间段：{formatCalendarDate(selectedCycle.assessmentStartDate) || "未设置"} 至 {formatCalendarDate(selectedCycle.assessmentEndDate) || "未设置"}
         </div>
         <form action={importAction} className="space-y-2">
           <input type="hidden" name="cycleId" value={selectedCycle.id}/>
@@ -117,9 +118,9 @@ export function BusinessAssessmentQuarterlyWorkspace({ data }: { data: Assessmen
         </div>
         <form action={periodAction} className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-[1fr_auto_1fr_auto] sm:items-end">
           <input type="hidden" name="cycleId" value={selectedCycle.id}/>
-          <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核开始日期</span><input name="assessmentStartDate" type="date" required defaultValue={selectedCycle.assessmentStartDate?.slice(0, 10) ?? ""} className={`${inputClass} w-full`}/></label>
+          <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核开始日期</span><input name="assessmentStartDate" type="date" required defaultValue={formatCalendarDate(selectedCycle.assessmentStartDate)} className={`${inputClass} w-full`}/></label>
           <span className="hidden pb-2 text-xs text-muted-foreground sm:block">至</span>
-          <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核结束日期</span><input name="assessmentEndDate" type="date" required defaultValue={selectedCycle.assessmentEndDate?.slice(0, 10) ?? ""} className={`${inputClass} w-full`}/></label>
+          <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核结束日期</span><input name="assessmentEndDate" type="date" required defaultValue={formatCalendarDate(selectedCycle.assessmentEndDate)} className={`${inputClass} w-full`}/></label>
           <Button type="submit" variant="outline" className={actionClass} disabled={updatingPeriod}>{updatingPeriod ? "更新中" : "更新时间段"}</Button>
         </form>
         <OperationFeedback state={periodState}/>
@@ -191,9 +192,70 @@ function assessmentStatusLabel(status: string) {
   return "进行中";
 }
 
+function formatAssessmentDateTime(value: string | Date) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
 function AssessmentTable({ data, userName, onOpen }: { data: AssessmentWorkspaceData; userName: Map<string, string>; onOpen?: (kind: "import" | "view" | "edit", cycleId: string) => void }) {
-  const headers = ["业务考核", "科目与摊分", "员工结果", "状态", ...(onOpen ? ["操作"] : [])];
-  return <Card className="!p-0 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-muted/40"><tr>{headers.map((item) => <th key={item} className={`p-4 text-xs font-medium ${item === "操作" ? "text-right" : "text-left"}`}>{item}</th>)}</tr></thead><tbody className="divide-y divide-border">{data.cycles.map((cycle) => { const subjects = data.subjects.filter((row) => row.cycleId === cycle.id); const summaries = data.summaries.filter((row) => row.cycleId === cycle.id); const inProgress = cycle.status === "DRAFT"; const canMaintainScores = cycle.status !== "VOIDED"; return <tr key={cycle.id}><td className="p-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground">{cycle.year} Q{cycle.quarter} · 总分{cycle.totalKpiScore}</div></td><td className="p-4 text-xs">{subjects.length ? subjects.map((row) => `${row.name} ${row.maxScore ?? 0}分`).join("、") : "待配置"}</td><td className="p-4"><div className="space-y-1">{summaries.slice(0,5).map((row) => <div key={row.id} className="text-xs">{userName.get(row.userId) ?? "员工已停用"}：{row.earnedScore}/{row.maxScore}</div>)}{summaries.length > 5 && <div className="text-xs text-muted-foreground">共 {summaries.length} 人</div>}</div></td><td className="p-4"><Badge tone={cycle.status === "CONFIRMED" ? "success" : cycle.status === "VOIDED" ? "default" : "primary"}>{assessmentStatusLabel(cycle.status)}</Badge></td>{onOpen && <td className="p-4"><div className="flex items-center justify-end gap-3 whitespace-nowrap">{data.canManage && <button type="button" disabled={!inProgress} onClick={() => onOpen("import", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={inProgress ? "导入考核结果" : "已完成的业务考核不能再次导入"}><Upload className="h-3.5 w-3.5"/>导入考核结果</button>}<button type="button" onClick={() => onOpen("view", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary"><Eye className="h-3.5 w-3.5"/>查看</button>{data.canManage && <button type="button" disabled={!canMaintainScores} onClick={() => onOpen("edit", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={canMaintainScores ? "维护员工成绩" : "已作废的业务考核不能维护成绩"}><Pencil className="h-3.5 w-3.5"/>编辑</button>}{data.canManage && <ConfirmDeleteButton action={deleteBusinessAssessmentCycleWithState} initialState={initialAssessmentOperationState} hidden={{ cycleId: cycle.id }} title="删除业务考核" description={`确认删除“${cycle.name}”吗？此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>} triggerClassName="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-muted-foreground" disabled={!inProgress} triggerTitle={inProgress ? "删除业务考核" : "已完成的业务考核不能删除"}/>}</div></td>}</tr>; })}</tbody></table></div>{data.cycles.length === 0 && <Empty>暂无业务考核</Empty>}</Card>;
+  const headers = ["业务考核", "科目与摊分", "员工结果", "状态", "创建人", "创建时间", ...(onOpen ? ["操作"] : [])];
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1180px] text-sm">
+          <thead className="bg-muted/40">
+            <tr>
+              {headers.map((item) => (
+                <th key={item} className={`p-4 text-xs font-medium whitespace-nowrap ${item === "操作" ? "text-right" : "text-left"}`}>{item}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {data.cycles.map((cycle) => {
+              const subjects = data.subjects.filter((row) => row.cycleId === cycle.id);
+              const summaries = data.summaries.filter((row) => row.cycleId === cycle.id);
+              const inProgress = cycle.status === "DRAFT";
+              const canMaintainScores = cycle.status !== "VOIDED";
+              const createdByName = "createdByName" in cycle && typeof cycle.createdByName === "string" ? cycle.createdByName : "—";
+              return (
+                <tr key={cycle.id}>
+                  <td className="p-4 font-medium">{cycle.name}<div className="text-xs text-muted-foreground">{cycle.year} Q{cycle.quarter} · 总分{cycle.totalKpiScore}</div></td>
+                  <td className="p-4 text-xs">{subjects.length ? subjects.map((row) => `${row.name} ${row.maxScore ?? 0}分`).join("、") : "待配置"}</td>
+                  <td className="p-4">
+                    <div className="space-y-1">
+                      {summaries.slice(0, 5).map((row) => <div key={row.id} className="text-xs">{userName.get(row.userId) ?? "员工已停用"}：{row.earnedScore}/{row.maxScore}</div>)}
+                      {summaries.length > 5 && <div className="text-xs text-muted-foreground">共 {summaries.length} 人</div>}
+                    </div>
+                  </td>
+                  <td className="p-4"><Badge tone={cycle.status === "CONFIRMED" ? "success" : cycle.status === "VOIDED" ? "default" : "primary"}>{assessmentStatusLabel(cycle.status)}</Badge></td>
+                  <td className="p-4 text-sm text-muted-foreground whitespace-nowrap">{createdByName}</td>
+                  <td className="p-4 text-sm text-muted-foreground tabular-nums whitespace-nowrap">{formatAssessmentDateTime(cycle.createdAt)}</td>
+                  {onOpen ? (
+                    <td className="p-4">
+                      <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                        {data.canManage && <button type="button" disabled={!inProgress} onClick={() => onOpen("import", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={inProgress ? "导入考核结果" : "已完成的业务考核不能再次导入"}><Upload className="h-3.5 w-3.5"/>导入考核结果</button>}
+                        <button type="button" onClick={() => onOpen("view", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary"><Eye className="h-3.5 w-3.5"/>查看</button>
+                        {data.canManage && <button type="button" disabled={!canMaintainScores} onClick={() => onOpen("edit", cycle.id)} className="inline-flex items-center gap-1 text-xs text-primary disabled:cursor-not-allowed disabled:text-muted-foreground" title={canMaintainScores ? "维护员工成绩" : "已作废的业务考核不能维护成绩"}><Pencil className="h-3.5 w-3.5"/>编辑</button>}
+                        {data.canManage && <ConfirmDeleteButton action={deleteBusinessAssessmentCycleWithState} initialState={initialAssessmentOperationState} hidden={{ cycleId: cycle.id }} title="删除业务考核" description={`确认删除“${cycle.name}”吗？此操作不可恢复。`} trigger={<><Trash2 className="h-3.5 w-3.5"/>删除</>} triggerClassName="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-muted-foreground" disabled={!inProgress} triggerTitle={inProgress ? "删除业务考核" : "已完成的业务考核不能删除"}/>}
+                      </div>
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {data.cycles.length === 0 && <Empty>暂无业务考核</Empty>}
+    </Card>
+  );
 }
 
 export function WorkIncidentWorkspace({ data }: { data: IncidentWorkspaceData }) {

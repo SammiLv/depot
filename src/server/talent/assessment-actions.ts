@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import { resolveAuthorizedOrgNodeIds, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
+import { parseCalendarDateInput } from "@/lib/calendar-date";
 import {
   allocateSubjectScores,
   earnedAssessmentScore,
@@ -248,10 +249,7 @@ const resultAliases: Record<string, "INITIAL_PASS" | "RETEST_PASS" | "FINAL_FAIL
 type ImportRow = { "用户ID"?: unknown; "姓名"?: unknown; "科目名称"?: unknown; "最终值"?: unknown; "最终结果"?: unknown; "考核开始日期"?: unknown; "考核结束日期"?: unknown; "考核日期"?: unknown; "备注"?: unknown };
 
 function parseAssessmentDate(raw: unknown, label: string) {
-  if (raw == null || raw === "") return null;
-  const date = raw instanceof Date ? raw : new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(raw).trim()) ? `${String(raw).trim()}T00:00:00` : String(raw));
-  if (Number.isNaN(date.getTime())) throw new Error(`${label}无效，请使用 yyyy-mm-dd 格式`);
-  return date;
+  return parseCalendarDateInput(raw, label);
 }
 
 function validateAssessmentPeriod(startDate: Date | null, endDate: Date | null) {

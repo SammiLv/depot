@@ -53,6 +53,15 @@ export async function getBusinessAssessmentPageData(
     orderBy: [{ year: "desc" }, { quarter: "desc" }],
   });
   const cycleIds = cycles.map((row) => row.id);
+  const creatorIds = [...new Set(cycles.map((row) => row.createdById))];
+  const creatorRows = creatorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: creatorIds } }, select: { id: true, name: true } })
+    : [];
+  const creatorNameById = new Map(creatorRows.map((row) => [row.id, row.name]));
+  const cyclesWithMeta = cycles.map((cycle) => ({
+    ...cycle,
+    createdByName: creatorNameById.get(cycle.createdById) ?? "—",
+  }));
   const [subjects, results, summaries, imports] = await Promise.all([
     prisma.businessAssessmentSubject.findMany({ where: { cycleId: { in: cycleIds } }, orderBy: [{ cycleId: "asc" }, { sortOrder: "asc" }] }),
     prisma.businessAssessmentResult.findMany({ where: { cycleId: { in: cycleIds } }, orderBy: [{ cycleId: "asc" }, { userId: "asc" }, { createdAt: "asc" }] }),
@@ -69,7 +78,7 @@ export async function getBusinessAssessmentPageData(
   return {
     departments,
     teams,
-    cycles,
+    cycles: cyclesWithMeta,
     subjects,
     results,
     summaries,
