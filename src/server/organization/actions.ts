@@ -1380,14 +1380,44 @@ export async function createKpiUserPermissionGrant(formData: FormData) {
   revalidateOrganization();
 }
 
+async function resolveKpiUserPermissionGrantEditorScope(formData: FormData) {
+  const scopeType = formData.get("scopeType");
+  if (scopeType === "SYSTEM" || scopeType === "DEPARTMENT") {
+    return resolvePermissionScope(formData);
+  }
+
+  const id = ((formData.get("id") as string) || "").trim();
+  if (!id) {
+    throw new Error("缺少授权记录 ID");
+  }
+
+  const preview = await prisma.orgPermissionGrant.findUnique({
+    where: { id },
+    select: { orgNodeId: true },
+  });
+  if (!preview) {
+    throw new Error("显式授权记录不存在");
+  }
+
+  if (preview.orgNodeId) {
+    const departmentOrgNodeId = await findDepartmentOrgNodeId(preview.orgNodeId);
+    if (departmentOrgNodeId) {
+      return { scopeType: "DEPARTMENT" as const, departmentOrgNodeId };
+    }
+  }
+
+  return { scopeType: "SYSTEM" as const, departmentOrgNodeId: "" };
+}
+
 export async function deleteKpiUserPermissionGrant(formData: FormData) {
-  const scope = await resolvePermissionScope(formData);
-  const currentUser = await requirePermissionEditor(scope);
   const id = ((formData.get("id") as string) || "").trim();
 
   if (!id) {
     throw new Error("缺少授权记录 ID");
   }
+
+  const scope = await resolveKpiUserPermissionGrantEditorScope(formData);
+  const currentUser = await requirePermissionEditor(scope);
 
   const grant = await prisma.orgPermissionGrant.findUnique({
     where: { id },

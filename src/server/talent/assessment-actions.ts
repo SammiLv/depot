@@ -20,7 +20,26 @@ import {
 function required(formData: FormData, key: string) { const value = String(formData.get(key) ?? "").trim(); if (!value) throw new Error(`${key} 不能为空`); return value; }
 function numberValue(formData: FormData, key: string) { const value = Number(required(formData, key)); if (!Number.isFinite(value)) throw new Error(`${key} 必须是数字`); return value; }
 async function manager() { const user = await requireCurrentUser(); const permission = await resolvePermissionCoverage(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment); if (!permission.hasPermission) throw new Error("没有业务考核管理权限"); return user; }
-async function assertDepartment(user: Awaited<ReturnType<typeof requireCurrentUser>>, departmentOrgNodeId: string) { const ids = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment); if (ids !== null && !ids.includes(departmentOrgNodeId)) throw new Error("不能管理该部门的业务考核"); }
+async function assertDepartment(user: Awaited<ReturnType<typeof requireCurrentUser>>, departmentOrgNodeId: string) {
+  const ids = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment);
+  if (ids === null) return;
+  if (ids.includes(departmentOrgNodeId)) return;
+  const departmentOrgNodeIds = await getDescendantOrgNodeIds(departmentOrgNodeId);
+  const departmentScope = new Set(departmentOrgNodeIds);
+  if (ids.some((id) => departmentScope.has(id))) return;
+  throw new Error("不能管理该部门的业务考核");
+}
+
+async function getTeamsRequiringStandards(
+  user: Awaited<ReturnType<typeof requireCurrentUser>>,
+  departmentOrgNodeId: string,
+  validTeams: Array<{ id: string; name: string }>,
+) {
+  const ids = await resolveAuthorizedOrgNodeIds(user, orgPermissionModuleKeys.kpi, kpiAbilityKeys.manageBusinessAssessment);
+  if (ids === null || ids.includes(departmentOrgNodeId)) return validTeams;
+  const allowed = new Set(ids);
+  return validTeams.filter((team) => allowed.has(team.id));
+}
 
 type QuarterlyRuleStandardInput = {
   scopeType: "ORG_NODE" | "USER";
@@ -145,8 +164,9 @@ export async function createBusinessAssessmentCycleInlineWithState(
         if (standard.scopeType === "ORG_NODE" && !validTeamIds.has(standard.scopeId)) throw new Error(`科目“${subject.name}”所选小组不在考核部门内`);
         if (standard.scopeType === "USER" && !validUserIds.has(standard.scopeId)) throw new Error(`科目“${subject.name}”所选员工不在考核部门内`);
       }
+      const teamsRequiringStandards = await getTeamsRequiringStandards(user, departmentOrgNodeId, validTeams);
       const configuredTeamIds = new Set(subject.standards.filter((row) => row.scopeType === "ORG_NODE").map((row) => row.scopeId));
-      const missingTeams = validTeams.filter((team) => !configuredTeamIds.has(team.id));
+      const missingTeams = teamsRequiringStandards.filter((team) => !configuredTeamIds.has(team.id));
       if (missingTeams.length) throw new Error(`科目“${subject.name}”尚未配置小组及格标准：${missingTeams.map((team) => team.name).join("、")}`);
     }
 

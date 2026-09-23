@@ -561,7 +561,10 @@ cmd_stop() {
 cmd_restart() {
   cmd_stop || true
   sleep 1
-  cmd_start
+  if cmd_start; then
+    log "记录部署审计日志..."
+    record_deployment_audit "restart" "true" "生产环境 restart（含手动 build 后重启场景）"
+  fi
 }
 
 # pull 本次拉取变更的文件列表（git pull 后 ORIG_HEAD → HEAD）
@@ -675,6 +678,38 @@ pull_preflight() {
   pull_step_end
   echo ""
   return 0
+}
+
+# 写入 AuditEvent（发布部署模块）；失败不阻断运维
+record_deployment_audit() {
+  local audit_action="${1:-restart}"
+  local success="${2:-true}"
+  local note="${3:-}"
+
+  if ! ensure_pnpm; then
+    warn "记录部署审计日志跳过：pnpm 不可用"
+    return 0
+  fi
+
+  local git_commit git_branch operator
+  git_commit=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+  git_branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
+  operator="${USER:-unknown}"
+
+  if [ -z "$note" ]; then
+    note="${audit_action} 运维操作"
+  fi
+
+  (
+    cd "$PROJECT_DIR" || exit 0
+    pnpm exec tsx src/server/audit/log-deployment-cli.ts \
+      --action "$audit_action" \
+      --operator "$operator" \
+      --gitCommit "$git_commit" \
+      --gitBranch "$git_branch" \
+      --success "$success" \
+      --note "$note"
+  ) || warn "记录审计日志失败（不影响服务）"
 }
 
 # 停服 → install/generate/migrate → build → 启动（pull 与 deploy 共用）
@@ -795,18 +830,7 @@ pull_execute_plan() {
   ok "${audit_action} 完成（总耗时 ${pull_elapsed}s）"
 
   log "记录部署审计日志..."
-  local git_commit git_branch operator
-  git_commit=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "unknown")
-  git_branch=$(cd "$PROJECT_DIR" && git symbolic-ref --short HEAD 2>/dev/null || echo "unknown")
-  operator="${USER:-unknown}"
-
-  pnpm tsx scripts/log-deployment.ts \
-    --action "$audit_action" \
-    --operator "$operator" \
-    --gitCommit "$git_commit" \
-    --gitBranch "$git_branch" \
-    --success "true" \
-    --note "${audit_action} 部署，耗时 ${pull_elapsed}s" || warn "记录审计日志失败（不影响部署）"
+  record_deployment_audit "$audit_action" "true" "${audit_action} 部署，耗时 ${pull_elapsed}s"
 }
 
 cmd_pull() {

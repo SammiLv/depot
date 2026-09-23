@@ -19,7 +19,21 @@ export async function getBusinessAssessmentPageData(
   const departments = viewer.roleType === "ADMIN" || viewerDepartmentOrgNodeId === null
     ? await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true, name: true }, orderBy: { name: "asc" } })
     : await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT", id: viewerDepartmentOrgNodeId }, select: { id: true, name: true }, orderBy: { name: "asc" } });
-  if (departments.length === 0) return { departments: [], teams: [], cycles: [], subjects: [], results: [], summaries: [], users: [], imports: [], canManage: manageCoverage.hasPermission };
+  if (departments.length === 0) {
+    return {
+      departments: [],
+      teams: [],
+      cycles: [],
+      subjects: [],
+      results: [],
+      summaries: [],
+      users: [],
+      imports: [],
+      canManage: manageCoverage.hasPermission,
+      manageableTeamIds: [] as string[],
+      managesFullDepartmentTeams: false,
+    };
+  }
   const coveredOrgNodeIds = [...new Set((await Promise.all(departments.map((row) => getDescendantOrgNodeIds(row.id)))).flat())];
   const [teams, configUsers] = await Promise.all([
     prisma.orgNode.findMany({
@@ -45,5 +59,24 @@ export async function getBusinessAssessmentPageData(
     prisma.businessAssessmentSummary.findMany({ where: { cycleId: { in: cycleIds } }, orderBy: { earnedScore: "desc" } }),
     prisma.talentImportBatch.findMany({ where: { importType: "BUSINESS_ASSESSMENT", departmentOrgNodeId: { in: departments.map((row) => row.id) }, ...periodWhere, deletedAt: null }, orderBy: { createdAt: "desc" }, take: 10 }),
   ]);
-  return { departments, teams, cycles, subjects, results, summaries, users: configUsers, imports, canManage: manageCoverage.hasPermission };
+  const departmentIdSet = new Set(departments.map((row) => row.id));
+  const managesFullDepartmentTeams = manageCoverage.hasAllAccess
+    || departmentIdSet.size > 0 && [...departmentIdSet].some((id) => manageCoverage.orgNodeIds.includes(id));
+  const manageableTeamIds = managesFullDepartmentTeams
+    ? teams.map((row) => row.id)
+    : teams.filter((row) => manageCoverage.orgNodeIds.includes(row.id)).map((row) => row.id);
+
+  return {
+    departments,
+    teams,
+    cycles,
+    subjects,
+    results,
+    summaries,
+    users: configUsers,
+    imports,
+    canManage: manageCoverage.hasPermission,
+    manageableTeamIds,
+    managesFullDepartmentTeams,
+  };
 }

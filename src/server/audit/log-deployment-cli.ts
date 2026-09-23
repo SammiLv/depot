@@ -1,23 +1,15 @@
 #!/usr/bin/env node
 /**
- * 发布部署审计日志记录脚本
+ * 发布部署审计 CLI（由 scripts/depot-prod.sh 调用）
  *
- * 用法：
- *   node scripts/log-deployment.js \
- *     --action "pull" \
- *     --operator "sammilv" \
- *     --gitCommit "abc123" \
- *     --gitBranch "main" \
- *     --success true \
- *     --note "拉取代码并重启"
+ *   pnpm exec tsx src/server/audit/log-deployment-cli.ts --action pull ...
  */
 
-import { prisma } from "../src/server/db/prisma";
-import { writeAuditEvent } from "../src/server/audit";
-import { AUDIT_MODULES, AUDIT_ACTION_CODES } from "../src/server/audit";
+import { prisma } from "@/server/db/prisma";
+import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 
 interface DeploymentLogArgs {
-  action: "pull" | "start" | "stop" | "restart" | "push" | "commit";
+  action: "pull" | "deploy" | "start" | "stop" | "restart" | "push" | "commit" | "build";
   operator?: string;
   gitCommit?: string;
   gitBranch?: string;
@@ -79,6 +71,8 @@ function parseArgs(argv: string[]): DeploymentLogArgs {
 function getActionName(action: string): string {
   const names: Record<string, string> = {
     pull: "生产环境 - 拉取代码并重启",
+    deploy: "生产环境 - 全量部署（构建并重启）",
+    build: "生产环境 - 构建应用",
     start: "生产环境 - 启动服务",
     stop: "生产环境 - 停止服务",
     restart: "生产环境 - 重启服务",
@@ -91,6 +85,8 @@ function getActionName(action: string): string {
 function getActionCode(action: string): string {
   const codes: Record<string, string> = {
     pull: "GIT_PULL",
+    deploy: AUDIT_ACTION_CODES.BUILD,
+    build: AUDIT_ACTION_CODES.BUILD,
     start: AUDIT_ACTION_CODES.SERVICE_START,
     stop: AUDIT_ACTION_CODES.SERVICE_STOP,
     restart: AUDIT_ACTION_CODES.SERVICE_RESTART,
@@ -104,14 +100,12 @@ async function logDeployment(args: DeploymentLogArgs) {
   const actionName = getActionName(args.action);
   const actionCode = getActionCode(args.action);
 
-  // 构建操作备注
   const notes: string[] = [];
   if (args.operator) notes.push(`操作人: ${args.operator}`);
   if (args.gitBranch) notes.push(`分支: ${args.gitBranch}`);
   if (args.gitCommit) notes.push(`提交: ${args.gitCommit.substring(0, 8)}`);
   if (args.note) notes.push(args.note);
 
-  // 构建 afterData（包含 git 信息）
   const afterData: Record<string, unknown> = {};
   if (args.gitCommit) afterData.gitCommit = args.gitCommit;
   if (args.gitBranch) afterData.gitBranch = args.gitBranch;
@@ -119,7 +113,7 @@ async function logDeployment(args: DeploymentLogArgs) {
 
   await prisma.$transaction(async (tx) => {
     await writeAuditEvent(tx, {
-      actorId: null, // 脚本执行，无用户 ID
+      actorId: null,
       actorType: "DEPLOYMENT_SCRIPT",
       actorName: args.operator || "系统",
       module: AUDIT_MODULES.DEPLOYMENT,
@@ -135,7 +129,6 @@ async function logDeployment(args: DeploymentLogArgs) {
   console.log(`✓ 已记录部署日志: ${actionName} - ${args.success ? "成功" : "失败"}`);
 }
 
-// 主程序
 async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));

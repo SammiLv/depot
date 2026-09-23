@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
@@ -913,12 +914,34 @@ function TeamForm({
 
 // ── Delete confirm ──
 function DeleteConfirm({ message, action, onClose }: { message: string; action: () => Promise<void>; onClose: () => void }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{message}</p>
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
-        <Button variant="primary" onClick={async () => { await runServerAction(() => action()); onClose(); }} className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
+        <Button variant="outline" disabled={pending} onClick={onClose}>取消</Button>
+        <Button
+          variant="primary"
+          disabled={pending}
+          onClick={async () => {
+            setPending(true);
+            setError(null);
+            try {
+              await action();
+              onClose();
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : "删除失败，请稍后重试");
+            } finally {
+              setPending(false);
+            }
+          }}
+          className="!bg-destructive hover:!bg-destructive/90"
+        >
+          {pending ? "删除中…" : "确认删除"}
+        </Button>
       </div>
     </div>
   );
@@ -1653,6 +1676,7 @@ export function OrgContent({
   canManageRolePermissions,
   manageableRoleOptions,
 }: Props) {
+  const router = useRouter();
   const isAdmin = currentUser.roleType === "ADMIN";
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -3156,15 +3180,22 @@ export function OrgContent({
       </Dialog>
 
       <Dialog open={dialog?.type === "deleteKpiUserPermissionGrant"} onClose={() => setDialog(null)} title="删除显式授权">
-        <DeleteConfirm
-          message={`确定要删除成员 "${(dialog?.data as KpiUserPermissionGrant | undefined)?.userName ?? ""}" 的“${(dialog?.data as KpiUserPermissionGrant | undefined)?.abilityName ?? ""}”显式授权吗？`}
-          action={async () => {
-            const fd = new FormData();
-            fd.set("id", (dialog?.data as KpiUserPermissionGrant).id);
-            await runServerAction(() => deleteKpiUserPermissionGrant(fd));
-          }}
-          onClose={() => setDialog(null)}
-        />
+        {dialog?.type === "deleteKpiUserPermissionGrant" ? (
+          <DeleteConfirm
+            key={(dialog.data as KpiUserPermissionGrant).id}
+            message={`确定要删除成员 "${(dialog.data as KpiUserPermissionGrant).userName}" 的“${(dialog.data as KpiUserPermissionGrant).abilityName}”显式授权吗？`}
+            action={async () => {
+              const grant = dialog.data as KpiUserPermissionGrant;
+              const fd = new FormData();
+              fd.set("id", grant.id);
+              fd.set("scopeType", selectedScope.scopeType);
+              fd.set("departmentOrgNodeId", selectedScope.scopeType === "DEPARTMENT" ? selectedScope.departmentOrgNodeId : "");
+              await deleteKpiUserPermissionGrant(fd);
+              router.refresh();
+            }}
+            onClose={() => setDialog(null)}
+          />
+        ) : null}
       </Dialog>
 
       <Dialog
