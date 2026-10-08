@@ -88,26 +88,6 @@ export function buildKpiCompletedProgressStages(input: {
   };
 }
 
-/** 列表四列：仅当审批链含该阶段且至少一步 COMPLETED 才展示分数（无该阶段则 —，如组长本人无 LEADER 步） */
-export function hasKpiApprovalStageForListScore(
-  input: {
-    status: KpiStatus;
-    approvalSteps?: ApprovalStepProgress[];
-  },
-  stage: KpiApprovalStageKey,
-): boolean {
-  const { status, approvalSteps } = input;
-  if (approvalSteps && approvalSteps.length > 0) {
-    const stageSteps = approvalSteps.filter((step) => step.stageKey === stage);
-    if (stageSteps.length === 0) return false;
-    return stageSteps.some((step) => step.status === "COMPLETED");
-  }
-  if (status === "COMPLETED") {
-    return true;
-  }
-  return hasCompletedKpiProgressStage(input, stage);
-}
-
 export function getEditableStageFromApprovalStep(stageKey: string | null | undefined): KpiApprovalStageKey | null {
   if (stageKey === "LEADER" || stageKey === "MANAGER" || stageKey === "FINAL") {
     return stageKey;

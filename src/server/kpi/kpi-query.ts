@@ -7,7 +7,6 @@ import {
   buildKpiCompletedProgressStages,
   getApprovalStepDisplayLabel,
   hasCompletedKpiProgressStage,
-  hasKpiApprovalStageForListScore,
   isSelfReviewStatus,
   resolveKpiEditableStage,
   kpiProgressStageLabels,
@@ -1253,21 +1252,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
         leaderScore: personalKpi.leaderScore,
         managerScore: personalKpi.managerScore,
         finalScore: personalKpi.finalScore,
-        completedProgressStages: {
-          selfReview: completedProgressStages.selfReview,
-          leader: hasKpiApprovalStageForListScore(
-            { status: personalKpi.status, approvalSteps: approvalStepsByKpiId.get(personalKpi.id) },
-            "LEADER",
-          ),
-          manager: hasKpiApprovalStageForListScore(
-            { status: personalKpi.status, approvalSteps: approvalStepsByKpiId.get(personalKpi.id) },
-            "MANAGER",
-          ),
-          final: hasKpiApprovalStageForListScore(
-            { status: personalKpi.status, approvalSteps: approvalStepsByKpiId.get(personalKpi.id) },
-            "FINAL",
-          ),
-        },
+        completedProgressStages,
       }),
       rating: personalKpi.finalRatingName ?? null,
       availableActions: {
