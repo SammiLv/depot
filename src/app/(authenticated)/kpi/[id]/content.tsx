@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import { Badge, Button, Card } from "@/components/ui-kit";
 import { toast, ToastHost } from "@/components/toast";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
+import { pickKpiFilterParams } from "../kpi-sections";
 
 type EditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL" | null;
 type PendingAction = "submit" | "approve" | "reject" | null;
@@ -272,6 +273,10 @@ function ConfirmDialog({
 
 export function KpiDetailContent({ data, viewOnly = false }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // 返回列表时带回来时的筛选参数（白名单 year/quarter/dept/team/q，剔除 mode 等详情页参数）
+  const backQuery = pickKpiFilterParams(searchParams).toString();
+  const backHref = backQuery ? `/kpi?${backQuery}` : "/kpi";
   const formRef = useRef<HTMLFormElement>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -426,7 +431,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
                 {!viewOnly && data.availableActions.canSave ? "处理季度 KPI 评分并推进当前流程。" : "查看季度 KPI 单据详情、评分汇总与绩效总结。"}
               </p>
             </div>
-            <Link href="/kpi">
+            <Link href={backHref}>
               <Button className="rounded-lg" variant="outline">返回 KPI 列表</Button>
             </Link>
           </div>

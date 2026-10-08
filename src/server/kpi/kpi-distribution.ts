@@ -83,6 +83,7 @@ import type { KpiStatus } from "@prisma/client";
 /**
  * 每位员工的当前有效统计分（优先级从高到低）：
  * 1. 终审完成（status=COMPLETED）：取 finalScore（含历史无审批链数据）。
+ *    若审批链不含终审阶段（主管评即链尾），历史单据可能 finalScore 为 null，兜底取 managerScore。
  * 2. 主管评完成但未终审：取 managerScore —— 依据审批流程事实判定（MANAGER 步骤已完成），
  *    不凭汇总字段非空推断过程阶段。
  * 3. 其他：不纳入统计（返回 null）。
@@ -94,7 +95,7 @@ export function resolveEffectiveKpiScore(input: {
   approvalSteps?: Array<{ stageKey: string; status: string }>;
 }): number | null {
   if (input.status === "COMPLETED") {
-    return input.finalScore;
+    return input.finalScore ?? input.managerScore;
   }
   const managerStageCompleted = hasCompletedKpiProgressStage(
     { status: input.status, approvalSteps: input.approvalSteps },

@@ -22,12 +22,18 @@ export function resolveLegacyKpiTabRedirect(tab: string | undefined, searchParam
   return query ? `${target}?${query}` : target;
 }
 
-export function buildKpiSectionHref(sectionHref: string, searchParams: URLSearchParams) {
+export const KPI_FILTER_PARAM_KEYS = ["year", "quarter", "dept", "team", "q"] as const;
+
+export function pickKpiFilterParams(searchParams: URLSearchParams) {
   const params = new URLSearchParams();
-  const year = searchParams.get("year");
-  const quarter = searchParams.get("quarter");
-  if (year) params.set("year", year);
-  if (quarter) params.set("quarter", quarter);
-  const query = params.toString();
+  for (const key of KPI_FILTER_PARAM_KEYS) {
+    const value = searchParams.get(key);
+    if (value) params.set(key, value);
+  }
+  return params;
+}
+
+export function buildKpiSectionHref(sectionHref: string, searchParams: URLSearchParams) {
+  const query = pickKpiFilterParams(searchParams).toString();
   return query ? `${sectionHref}?${query}` : sectionHref;
 }

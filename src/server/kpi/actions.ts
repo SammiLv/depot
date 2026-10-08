@@ -1749,12 +1749,18 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       if (editableStage === "MANAGER") return { managerScore: managerTotal };
       return { finalScore };
     })();
+    // 审批链可能不含终审阶段（主管评即链尾）：完成时必须补写 finalScore，
+    // 否则「最终绩效总分」、绩效分布统计与人才决策取数都拿不到值
+    const completionSummaryData = nextStatus === "COMPLETED" && editableStage !== "FINAL"
+      ? { finalScore }
+      : {};
 
     await tx.personalKpi.update({
       where: { id: personalKpiId },
       data: {
         status: nextStatus,
         ...stageSummaryData,
+        ...completionSummaryData,
         finalRatingName: ratingSnapshot?.finalRatingName ?? null,
         ratingRuleVersionId: ratingSnapshot?.ratingRuleVersionId ?? null,
         ratingSnapshotJson: ratingSnapshot?.ratingSnapshotJson ?? null,

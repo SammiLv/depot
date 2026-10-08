@@ -8,6 +8,9 @@ export function parseIntParam(value: string | string[] | undefined) {
 export type PeriodSearchParams = {
   year?: string | string[];
   quarter?: string | string[];
+  dept?: string | string[];
+  team?: string | string[];
+  q?: string | string[];
   tab?: string | string[];
   error?: string | string[];
 };

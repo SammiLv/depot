@@ -80,6 +80,20 @@ test("终审完成：取 finalScore（含历史无审批链数据）", () => {
     }),
     100,
   );
+  // 审批链不含终审阶段的历史单据：完成时未写 finalScore，兜底取 managerScore
+  assert.equal(
+    resolveEffectiveKpiScore({
+      status: "COMPLETED",
+      finalScore: null,
+      managerScore: 92,
+      approvalSteps: [
+        { stageKey: "LEADER", status: "COMPLETED" },
+        { stageKey: "MANAGER", status: "COMPLETED" },
+      ],
+    }),
+    92,
+  );
+  assert.equal(resolveEffectiveKpiScore({ status: "COMPLETED", finalScore: null, managerScore: null }), null);
 });
 
 test("主管评完成未终审：取 managerScore", () => {

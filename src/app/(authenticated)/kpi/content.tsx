@@ -1377,8 +1377,20 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
   const [showInitDialog, setShowInitDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [templateImportResult, setTemplateImportResult] = useState<TemplateImportResult | null>(null);
-  const [departmentTab, setDepartmentTab] = useState(data.defaultDepartmentOrgNodeId);
-  const [teamTab, setTeamTab] = useState<TeamTab | null>(null);
+  const departmentTab = useMemo(() => {
+    const raw = searchParams.get("dept");
+    return raw && data.departmentOptions.some((department) => department.id === raw)
+      ? raw
+      : data.defaultDepartmentOrgNodeId;
+  }, [searchParams, data.departmentOptions, data.defaultDepartmentOrgNodeId]);
+  const urlKeyword = searchParams.get("q") ?? "";
+  const [keyword, setKeyword] = useState(urlKeyword);
+  // 渲染期同步：URL 中的 q 外部变化（如从详情页返回）时重置本地搜索词
+  const [prevUrlKeyword, setPrevUrlKeyword] = useState(urlKeyword);
+  if (prevUrlKeyword !== urlKeyword) {
+    setPrevUrlKeyword(urlKeyword);
+    setKeyword(urlKeyword);
+  }
   const sectionTab = activeSection;
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateRow | null>(null);
@@ -1438,24 +1450,60 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     return showAllTeamTab ? "all" : (teamTabs[0]?.id ?? null);
   }, [showAllTeamTab, teamTabs]);
 
+  const teamTab = useMemo<TeamTab | null>(() => {
+    if (!data.hasAnyViewPermission || teamTabs.length === 0) return null;
+    const raw = searchParams.get("team");
+    return raw && teamTabs.some((team) => team.id === raw) ? raw : defaultTeamTab;
+  }, [searchParams, data.hasAnyViewPermission, teamTabs, defaultTeamTab]);
+
+  function getDefaultTeamTabFor(departmentOrgNodeId: string): TeamTab | null {
+    if (!data.hasAnyViewPermission) return null;
+    const options = data.teamOptions.filter((team) => team.departmentOrgNodeId === departmentOrgNodeId);
+    const showAll = data.departmentAllTabOrgNodeIds.includes(departmentOrgNodeId);
+    if (!showAll && options.length === 0) return null;
+    return showAll ? "all" : (options[0]?.id ?? null);
+  }
+
+  // 筛选值与默认值一致时省略对应 URL 参数，保持链接干净（缺省 = 默认）
+  function updateListFilters(
+    overrides: { dept?: string | null; team?: string | null; q?: string | null },
+    options?: { replace?: boolean },
+  ) {
+    const params = new URLSearchParams(searchParams.toString());
+    const nextDept = overrides.dept !== undefined ? overrides.dept : departmentTab;
+    const nextTeam = overrides.team !== undefined ? overrides.team : teamTab;
+    const nextQ = overrides.q !== undefined ? overrides.q : keyword;
+
+    if (nextDept && nextDept !== data.defaultDepartmentOrgNodeId) params.set("dept", nextDept);
+    else params.delete("dept");
+
+    const nextDefaultTeam = nextDept ? getDefaultTeamTabFor(nextDept) : null;
+    if (nextTeam && nextTeam !== nextDefaultTeam) params.set("team", nextTeam);
+    else params.delete("team");
+
+    const trimmedQ = nextQ?.trim() ?? "";
+    if (trimmedQ) params.set("q", trimmedQ);
+    else params.delete("q");
+
+    const query = params.toString();
+    const href = query ? `${pathname}?${query}` : pathname;
+    if (options?.replace) router.replace(href, { scroll: false });
+    else router.push(href, { scroll: false });
+  }
+
+  // 搜索词防抖写回 URL（replace 避免历史堆积）；本地 keyword 即时驱动过滤
   useEffect(() => {
-    if (!data.hasAnyViewPermission) {
-      setTeamTab(null);
-      return;
-    }
-    if (teamTabs.length === 0) {
-      setTeamTab(null);
-      return;
-    }
-    if (!teamTab) {
-      setTeamTab(defaultTeamTab);
-      return;
-    }
-    const teamTabExists = teamTabs.some((team) => team.id === teamTab);
-    if (!teamTabExists) {
-      setTeamTab(defaultTeamTab);
-    }
-  }, [data.hasAnyViewPermission, defaultTeamTab, teamTab, teamTabs]);
+    if (keyword === urlKeyword) return;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      const trimmed = keyword.trim();
+      if (trimmed) params.set("q", trimmed);
+      else params.delete("q");
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [keyword, urlKeyword, searchParams, pathname, router]);
 
   const rows = useMemo(
     () => data.rows.filter((row) => {
@@ -1465,6 +1513,22 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     }),
     [data.rows, departmentTab, showAllTeamTab, teamTab]
   );
+  // 搜索词只过滤成员表格行，流程进度卡保持基于搜索前的 rows 不变
+  const visibleRows = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    return kw ? rows.filter((row) => row.userName.toLowerCase().includes(kw)) : rows;
+  }, [rows, keyword]);
+  // 进入详情页时携带当前筛选：年/季总是显式写入（防跨季度漂移），dept/team/q 非默认才写
+  const detailQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set("year", String(selectedYear));
+    params.set("quarter", String(selectedQuarter));
+    if (departmentTab !== data.defaultDepartmentOrgNodeId) params.set("dept", departmentTab);
+    if (teamTab && teamTab !== defaultTeamTab) params.set("team", teamTab);
+    const trimmed = keyword.trim();
+    if (trimmed) params.set("q", trimmed);
+    return params.toString();
+  }, [selectedYear, selectedQuarter, departmentTab, teamTab, defaultTeamTab, keyword, data.defaultDepartmentOrgNodeId]);
   const scopedMemberCount = useMemo(() => {
     const visibleMembers = data.memberOptions.filter((member) => {
       if (member.departmentOrgNodeId !== departmentTab) return false;
@@ -1531,12 +1595,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
               <button
                 key={department.id}
                 type="button"
-                onClick={() => {
-                  setDepartmentTab(department.id);
-                  const nextTeamOptions = data.teamOptions.filter((team) => team.departmentOrgNodeId === department.id);
-                  const nextShowAllTeamTab = data.departmentAllTabOrgNodeIds.includes(department.id);
-                  setTeamTab(nextShowAllTeamTab ? "all" : (nextTeamOptions[0]?.id ?? null));
-                }}
+                onClick={() => updateListFilters({ dept: department.id, team: null })}
                 className={`pb-3 border-b-2 transition ${
                   departmentTab === department.id
                     ? "border-primary text-primary font-medium"
@@ -1555,7 +1614,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
               <button
                 key={team.id}
                 type="button"
-                onClick={() => setTeamTab(team.id)}
+                onClick={() => updateListFilters({ team: team.id })}
                 className={`rounded-lg px-3 py-1.5 text-sm transition ${teamTab === team.id ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
               >
                 {team.name}
@@ -1695,7 +1754,12 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
               <div className="flex items-center gap-3 border-b border-border px-5 py-3">
                 <div className="relative flex-1 max-w-xs">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input placeholder="搜索成员" className="h-9 w-full rounded-lg bg-muted pl-9 pr-3 text-sm focus:outline-none" />
+                  <input
+                    placeholder="搜索成员"
+                    value={keyword}
+                    onChange={(event) => setKeyword(event.target.value)}
+                    className="h-9 w-full rounded-lg bg-muted pl-9 pr-3 text-sm focus:outline-none"
+                  />
                 </div>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span>小组：</span>
@@ -1721,8 +1785,8 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length ? (
-                    rows.map((r) => (
+                  {visibleRows.length ? (
+                    visibleRows.map((r) => (
                       <tr key={r.id} className="border-t border-border transition hover:bg-muted/30">
                         <td className="px-5 py-3">
                           <span className="text-sm font-medium">{r.userName}</span>
@@ -1737,9 +1801,9 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                         <td className="px-5 py-3 text-sm font-medium tabular-nums">{r.rating ?? "—"}</td>
                         <td className="px-5 py-3 text-right">
                           <div className="flex items-center justify-end gap-3">
-                            <Link href={`/kpi/${r.id}?mode=view`} className="text-sm text-primary hover:underline">查看</Link>
+                            <Link href={detailQuery ? `/kpi/${r.id}?mode=view&${detailQuery}` : `/kpi/${r.id}?mode=view`} className="text-sm text-primary hover:underline">查看</Link>
                             {getQuarterlyKpiActionLabel(r) ? (
-                              <Link href={`/kpi/${r.id}`} className="text-sm text-primary hover:underline">
+                              <Link href={detailQuery ? `/kpi/${r.id}?${detailQuery}` : `/kpi/${r.id}`} className="text-sm text-primary hover:underline">
                                 {getQuarterlyKpiActionLabel(r)}
                               </Link>
                             ) : null}
