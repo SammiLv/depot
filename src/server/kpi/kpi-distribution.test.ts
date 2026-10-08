@@ -66,6 +66,28 @@ test("低分占比不足 → fail（含边界：恰好等于阈值视为达标�
   assert.equal(edge.status, "pass");
 });
 
+// ---- 平均分下限（minAverage） ----
+
+test("未配置平均分下限（null）→ 不校验，averagePass 为 null 且不影响达标判定", () => {
+  const result = evaluateKpiDistribution({ ...rule, minAverage: null }, { initialized: true, headcount: 5, scores: [90, 100, 100] });
+  assert.equal(result.average, 290 / 3);
+  assert.equal(result.averagePass, null);
+  assert.equal(result.status, "pass");
+});
+
+test("平均分低于下限 → fail；达标 → pass", () => {
+  const ruleWithAverage = { ...rule, minAverage: 100 };
+  const fail = evaluateKpiDistribution(ruleWithAverage, { initialized: true, headcount: 5, scores: [90, 100, 105] });
+  assert.equal(fail.average, 295 / 3);
+  assert.equal(fail.averagePass, false);
+  assert.equal(fail.status, "fail");
+
+  const pass = evaluateKpiDistribution(ruleWithAverage, { initialized: true, headcount: 5, scores: [90, 100, 110] });
+  assert.equal(pass.average, 100);
+  assert.equal(pass.averagePass, true);
+  assert.equal(pass.status, "pass");
+});
+
 // ---- resolveEffectiveKpiScore：当前有效统计分 ----
 
 test("终审完成：取 finalScore（含历史无审批链数据）", () => {

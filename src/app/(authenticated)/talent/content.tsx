@@ -1292,6 +1292,7 @@ function KpiRuleDraftEditor({ rule, bands, departmentName, headerAction }: { rul
         <Field label="最高最低分差距 ≥（分）"><input form={formId} name="distributionMinGap" type="number" min="0" step="0.01" required defaultValue={rule.distributionMinGap} className={inputClass}/></Field>
         <Field label="低分线（分）"><input form={formId} name="distributionBelowScore" type="number" min="0" step="0.01" required defaultValue={rule.distributionBelowScore} className={inputClass}/></Field>
         <Field label="低分占比下限（%）"><input form={formId} name="distributionBelowMinPercent" type="number" min="0" max="100" step="0.01" required defaultValue={rule.distributionBelowMinPercent} className={inputClass}/></Field>
+        <Field label="平均分下限 ≥（分，留空不校验）"><input form={formId} name="distributionMinAverage" type="number" min="0" step="0.01" defaultValue={rule.distributionMinAverage ?? ""} className={inputClass}/></Field>
       </div>
       <label className="mt-3 flex items-center gap-2 text-sm"><input form={formId} name="distributionExcludeManager" type="checkbox" defaultChecked={rule.distributionExcludeManager}/>统计时排除主管（DEPARTMENT_MANAGER 角色）</label>
     </section>
@@ -1332,6 +1333,7 @@ function DistributionRuleReadonly({ rule }: { rule: TalentDecisionRuleWorkspaceD
     { label: "最高最低分差距", value: `≥ ${rule.distributionMinGap} 分` },
     { label: "低分线", value: `< ${rule.distributionBelowScore} 分` },
     { label: "低分占比下限", value: `≥ ${rule.distributionBelowMinPercent}%` },
+    { label: "平均分下限", value: rule.distributionMinAverage === null ? "不校验" : `≥ ${rule.distributionMinAverage} 分` },
     { label: "排除主管", value: rule.distributionExcludeManager ? "是" : "否" },
   ];
   return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

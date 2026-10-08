@@ -79,6 +79,14 @@ function KpiDistributionAlertBanner({ alert }: { alert: DistributionAlert | null
       >
         低于{rule.belowScore}分占比 {formatAlertNumber(evaluation.belowPercent)}%{mark(evaluation.belowPass)}
       </span>
+      {rule.minAverage !== null ? (
+        <span
+          className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${tagClass(evaluation.averagePass)}`}
+          title={`部门平均分要求 ≥ ${rule.minAverage} 分（仅统计主管评及以上的有效评分）`}
+        >
+          平均分 {evaluation.average === null ? "—" : `${formatAlertNumber(evaluation.average)}分`}{mark(evaluation.averagePass)}
+        </span>
+      ) : null}
       <span
         className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs leading-[18px] text-muted-foreground"
         title="未终审人员按主管评分统计，已终审人员按最终绩效总分统计"

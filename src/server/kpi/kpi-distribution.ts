@@ -8,6 +8,8 @@ export type KpiDistributionRuleConfig = {
   minGap: number;
   belowScore: number;
   belowMinPercent: number;
+  /** 部门季度 KPI 平均分下限；null 表示不校验平均分 */
+  minAverage?: number | null;
 };
 
 export type KpiDistributionInput = {
@@ -33,6 +35,10 @@ export type KpiDistributionEvaluation = {
   /** 低分占比（%）：belowCount / headcount */
   belowPercent: number;
   belowPass: boolean;
+  /** 有效评分的平均分；无有效评分时为 null */
+  average: number | null;
+  /** 规则未配置平均分下限（null）时不校验，averagePass 为 null */
+  averagePass: boolean | null;
 };
 
 export function evaluateKpiDistribution(
@@ -47,6 +53,8 @@ export function evaluateKpiDistribution(
     belowCount: 0,
     belowPercent: 0,
     belowPass: false,
+    average: null,
+    averagePass: null,
   } satisfies Partial<KpiDistributionEvaluation>;
 
   if (!rule.enabled) {
@@ -69,10 +77,16 @@ export function evaluateKpiDistribution(
   const belowCount = scores.filter((score) => score < rule.belowScore).length;
   const belowPercent = input.headcount > 0 ? (belowCount / input.headcount) * 100 : 0;
   const belowPass = belowPercent >= rule.belowMinPercent;
+  const average = scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
+  const averagePass = rule.minAverage === null || rule.minAverage === undefined
+    ? null
+    : average === null
+      ? null
+      : average >= rule.minAverage;
 
   // 分差在有效评分不足 2 人时暂不判定；其余任一不达标即未达标
-  const status = belowPass && gapPass !== false ? "pass" : "fail";
-  return { status, headcount: input.headcount, effectiveCount: scores.length, gap, gapPass, belowCount, belowPercent, belowPass };
+  const status = belowPass && gapPass !== false && averagePass !== false ? "pass" : "fail";
+  return { status, headcount: input.headcount, effectiveCount: scores.length, gap, gapPass, belowCount, belowPercent, belowPass, average, averagePass };
 }
 
 // ---- 当前有效统计分（实时预警用） ----

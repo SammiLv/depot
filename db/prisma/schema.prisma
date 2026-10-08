@@ -1906,6 +1906,8 @@ model KpiRatingRuleVersion {
   distributionMinGap              Float              @default(10)
   distributionBelowScore          Float              @default(100)
   distributionBelowMinPercent     Float              @default(10)
+  /// 部门季度 KPI 平均分下限；null 表示不校验平均分（存量版本默认不启用该项）
+  distributionMinAverage          Float?
   distributionExcludeManager      Boolean            @default(true)
   createdById          String
   publishedById        String?

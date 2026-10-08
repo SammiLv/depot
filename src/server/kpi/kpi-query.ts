@@ -98,6 +98,7 @@ type KpiPageData = {
       minGap: number;
       belowScore: number;
       belowMinPercent: number;
+      minAverage: number | null;
       excludeManager: boolean;
     };
     evaluation: KpiDistributionEvaluation;
@@ -971,6 +972,7 @@ async function buildKpiDistributionAlerts(input: {
         minGap: rule.distributionMinGap,
         belowScore: rule.distributionBelowScore,
         belowMinPercent: rule.distributionBelowMinPercent,
+        minAverage: rule.distributionMinAverage,
       },
       {
         initialized: departmentKpis.length > 0,
@@ -986,6 +988,7 @@ async function buildKpiDistributionAlerts(input: {
         minGap: rule.distributionMinGap,
         belowScore: rule.distributionBelowScore,
         belowMinPercent: rule.distributionBelowMinPercent,
+        minAverage: rule.distributionMinAverage,
         excludeManager: rule.distributionExcludeManager,
       },
       evaluation,

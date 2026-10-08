@@ -59,15 +59,47 @@ export async function createDefaultKpiRatingRule(_state: TalentRuleActionState, 
     const user = await manager();
     const departmentOrgNodeId = required(formData, "departmentOrgNodeId");
     await assertDepartment(user, departmentOrgNodeId);
-    validateKpiRatingBands(defaultKpiBands.map((row) => ({ ...row })));
     const name = required(formData, "name");
     const quarterlyKpiTotalScoreRaw = Number(formData.get("quarterlyKpiTotalScore") ?? "");
     if (!Number.isFinite(quarterlyKpiTotalScoreRaw) || quarterlyKpiTotalScoreRaw <= 0) throw new Error("季度KPI总分必须为正数");
     const quarterlyKpiTotalScore = quarterlyKpiTotalScoreRaw;
-    const latest = await prisma.kpiRatingRuleVersion.aggregate({ where: { departmentOrgNodeId, name, deletedAt: null }, _max: { version: true } });
+    const latest = await prisma.kpiRatingRuleVersion.findFirst({
+      where: { departmentOrgNodeId, name, deletedAt: null },
+      orderBy: { version: "desc" },
+    });
+    const latestBands = latest
+      ? await prisma.kpiRatingBand.findMany({ where: { ruleVersionId: latest.id }, orderBy: { sortOrder: "asc" } })
+      : [];
+    // 同部门同名已有版本时整体继承上一版：等级区间、业务考核计分、部门绩效分布规则。
+    // 否则新建版本的分布规则会回落到 schema 默认值（未启用），造成"发布后规则没了"
+    const inheritedBands = latestBands.length
+      ? latestBands.map((band) => ({ name: band.name, minScore: band.minScore, maxScore: band.maxScore, isUnbounded: band.isUnbounded, description: band.description, sortOrder: band.sortOrder }))
+      : defaultKpiBands.map((band) => ({ ...band }));
+    validateKpiRatingBands(inheritedBands);
     const row = await prisma.$transaction(async (tx) => {
-      const version = await tx.kpiRatingRuleVersion.create({ data: { departmentOrgNodeId, name, version: (latest._max.version ?? 0) + 1, quarterlyKpiTotalScore, createdById: user.id } });
-      await tx.kpiRatingBand.createMany({ data: defaultKpiBands.map((band) => ({ ...band, ruleVersionId: version.id })) });
+      const version = await tx.kpiRatingRuleVersion.create({
+        data: {
+          departmentOrgNodeId,
+          name,
+          version: (latest?.version ?? 0) + 1,
+          quarterlyKpiTotalScore,
+          createdById: user.id,
+          ...(latest ? {
+            businessAssessmentTotalScore: latest.businessAssessmentTotalScore,
+            baInitialPassPercent: latest.baInitialPassPercent,
+            baRetestPassPercent: latest.baRetestPassPercent,
+            baFinalFailPercent: latest.baFinalFailPercent,
+            distributionEnabled: latest.distributionEnabled,
+            distributionMinHeadcount: latest.distributionMinHeadcount,
+            distributionMinGap: latest.distributionMinGap,
+            distributionBelowScore: latest.distributionBelowScore,
+            distributionBelowMinPercent: latest.distributionBelowMinPercent,
+            distributionMinAverage: latest.distributionMinAverage,
+            distributionExcludeManager: latest.distributionExcludeManager,
+          } : {}),
+        },
+      });
+      await tx.kpiRatingBand.createMany({ data: inheritedBands.map((band) => ({ ...band, ruleVersionId: version.id })) });
       return version;
     });
     await audit("KpiRatingRuleVersion", row.id, "CREATE_DEFAULT", user.id, row); refresh();
@@ -128,15 +160,19 @@ export async function saveKpiRatingDraft(_state: TalentRuleActionState, formData
     const distributionMinGap = Number(required(formData, "distributionMinGap"));
     const distributionBelowScore = Number(required(formData, "distributionBelowScore"));
     const distributionBelowMinPercent = Number(required(formData, "distributionBelowMinPercent"));
+    // 平均分下限可留空：留空 = 不校验平均分
+    const distributionMinAverageRaw = String(formData.get("distributionMinAverage") ?? "").trim();
+    const distributionMinAverage = distributionMinAverageRaw === "" ? null : Number(distributionMinAverageRaw);
     if (!Number.isInteger(distributionMinHeadcount) || distributionMinHeadcount < 1) throw new Error("生效人数门槛必须是 ≥1 的整数");
     if (!Number.isFinite(distributionMinGap) || distributionMinGap < 0) throw new Error("最高最低分差距不能为负");
     if (!Number.isFinite(distributionBelowScore) || distributionBelowScore < 0) throw new Error("低分线不能为负");
     if (!Number.isFinite(distributionBelowMinPercent) || distributionBelowMinPercent < 0 || distributionBelowMinPercent > 100) throw new Error("低分占比下限必须在 0 至 100 之间");
+    if (distributionMinAverage !== null && (!Number.isFinite(distributionMinAverage) || distributionMinAverage < 0)) throw new Error("平均分下限不能为负");
     const row = await prisma.$transaction(async (tx) => {
       for (const band of nextBands) {
         await tx.kpiRatingBand.update({ where: { id: band.id }, data: { name: band.name, minScore: band.minScore, maxScore: band.maxScore, isUnbounded: band.isUnbounded, description: band.description } });
       }
-      return tx.kpiRatingRuleVersion.update({ where: { id }, data: { businessAssessmentTotalScore, baInitialPassPercent, baRetestPassPercent, baFinalFailPercent, distributionEnabled, distributionMinHeadcount, distributionMinGap, distributionBelowScore, distributionBelowMinPercent, distributionExcludeManager } });
+      return tx.kpiRatingRuleVersion.update({ where: { id }, data: { businessAssessmentTotalScore, baInitialPassPercent, baRetestPassPercent, baFinalFailPercent, distributionEnabled, distributionMinHeadcount, distributionMinGap, distributionBelowScore, distributionBelowMinPercent, distributionMinAverage, distributionExcludeManager } });
     });
     await audit("KpiRatingRuleVersion", id, "SAVE_DRAFT", user.id, { version: row, bands: nextBands }); refresh();
     return { status: "success", message: `“${rule.name}”V${rule.version} 草稿已保存`, id };

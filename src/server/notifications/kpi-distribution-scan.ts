@@ -103,6 +103,7 @@ async function evaluateDepartmentDistributions(year: number, quarter: number) {
         minGap: rule.distributionMinGap,
         belowScore: rule.distributionBelowScore,
         belowMinPercent: rule.distributionBelowMinPercent,
+        minAverage: rule.distributionMinAverage,
       },
       { initialized: departmentKpis.length > 0, headcount: countedMembers.length, scores: effectiveScores },
     );
@@ -138,6 +139,9 @@ export async function runKpiDistributionAlertScan(scenarioId: string, daysBefore
       evaluation.belowPass
         ? null
         : `低于 ${rule.distributionBelowScore} 分员工占比 ${formatAlertNumber(evaluation.belowPercent)}%（要求 ≥ ${rule.distributionBelowMinPercent}%）`,
+      evaluation.averagePass === false && rule.distributionMinAverage !== null
+        ? `平均分 ${formatAlertNumber(evaluation.average!)} 分（要求 ≥ ${rule.distributionMinAverage} 分）`
+        : null,
     ].filter(Boolean).join("；");
     await emitNotificationEvent("kpi.distribution.alert", {
       userId: item.subjectUser.id,
