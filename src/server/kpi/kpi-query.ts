@@ -902,7 +902,7 @@ function buildAvailableYears(nowYear: number, yearsFromData: number[]) {
 }
 
 // 部门绩效分布预警：按可见部门 + 部门已发布规则（distributionEnabled）实时计算
-// 分母 = 部门应考核全员（可选排除主管）；分差/低分统计仅取终审完成的 finalScore
+// 分母 = 部门应考核全员（可选排除主管）；有效分见 resolveEffectiveKpiScore（已终审取 finalScore，主管评完成未终审取 managerScore，其余不纳入）
 async function buildKpiDistributionAlerts(input: {
   departments: Array<{ id: string; name: string }>;
   memberOptions: Array<{ id: string; departmentOrgNodeId: string | null; roleType: RoleType }>;
