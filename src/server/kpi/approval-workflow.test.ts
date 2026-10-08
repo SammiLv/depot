@@ -6,6 +6,7 @@ import {
   getInitialApprovalStepStatus,
   getKpiStatusForApprovalStep,
   hasCompletedKpiProgressStage,
+  hasKpiApprovalStageForListScore,
   isSelfReviewStatus,
   resolveKpiEditableStage,
 } from "@/server/kpi/approval-workflow";
@@ -71,6 +72,17 @@ test("progress stage completion counts finished stages instead of current stage"
       { stageKey: "FINAL", status: "WAITING" },
     ],
   }, "MANAGER"), false);
+});
+
+test("list score: no LEADER step → do not show leader column even when COMPLETED", () => {
+  assert.equal(hasKpiApprovalStageForListScore({
+    status: "COMPLETED",
+    approvalSteps: [{ stageKey: "MANAGER", status: "COMPLETED" }],
+  }, "LEADER"), false);
+  assert.equal(hasKpiApprovalStageForListScore({
+    status: "COMPLETED",
+    approvalSteps: [{ stageKey: "MANAGER", status: "COMPLETED" }],
+  }, "MANAGER"), true);
 });
 
 test("self review status remains independent from approval steps", () => {
