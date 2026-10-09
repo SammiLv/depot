@@ -24,10 +24,11 @@ type PersonalKpiActionLogRecord = {
     year: number;
     quarter: number;
     userId: string;
+    // 关联用户可能已被删除/不可解析，允许为 null
     user: {
       id: string;
       name: string;
-    };
+    } | null;
   };
 };
 
@@ -37,9 +38,9 @@ type PersonalKpiActionLogRecord = {
 export function mapPersonalKpiActionLogToAudit(
   log: PersonalKpiActionLogRecord
 ): UnifiedAuditRecord {
-  // 构造友好的对象名称
+  // 构造友好的对象名称；关联用户不可解析（已删除等）时回退到 ID 形式，不能中断整个查询
   let objectName = `个人 KPI (${log.personalKpiId})`;
-  if (log.personalKpi) {
+  if (log.personalKpi?.user) {
     const { year, quarter, user } = log.personalKpi;
     objectName = `${user.name}的${year}年Q${quarter} KPI`;
   }

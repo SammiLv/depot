@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
+import { isMenuAllowedForUser } from "@/server/organization/menu-access";
 import { AuditCenterContent } from "./content";
 
 type PageProps = {
@@ -18,8 +19,9 @@ type PageProps = {
 export default async function AuditCenterPage({ searchParams }: PageProps) {
   const currentUser = await requireCurrentUser();
 
-  // 仅管理员可访问审计中心
-  if (currentUser.roleType !== "ADMIN") {
+  // 访问权限与侧栏菜单同一口径：权限矩阵中授予 logs-center 的角色可访问（默认仅 ADMIN）
+  const allowed = await isMenuAllowedForUser(currentUser, "logs-center");
+  if (!allowed) {
     redirect("/");
   }
 
