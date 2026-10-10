@@ -35,6 +35,7 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
       ? currentOrgNode.name
       : currentOrgNode?.name ?? "未分配",
     avatarInitial: Array.from(currentUser.name.trim())[0] ?? "",
+    avatarUrl: currentUser.avatarUrl,
   };
 
   const scopedDepartmentOrgNodeId = currentUser.roleType === "ADMIN"

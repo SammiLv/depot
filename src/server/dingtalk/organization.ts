@@ -55,6 +55,8 @@ type DingTalkUser = {
   position?: string;
   orgTitle?: string;
   jobTitle?: string;
+  /** 头像图片 URL（getDingUser 实测返回，文档未列出） */
+  avatar?: string;
   deptList?: Array<{ deptId?: string | number; deptName?: string; name?: string }>;
   depts?: Array<{ deptId?: string | number; deptName?: string; name?: string }>;
 };
@@ -426,10 +428,20 @@ async function listUserDepartments(userId: string) {
   return (data ?? []).map(normalizeDepartment).filter((dept): dept is DepartmentRecord => Boolean(dept));
 }
 
-async function getDingUser(userId: string) {
+export async function getDingUser(userId: string) {
   const data = await requestDingTalk<DingTalkUser>("getDingUser", { userId });
   if (!data?.userId || !getUserName(data)) throw new Error("钉钉用户信息无效");
   return data;
+}
+
+/** 仅取头像 URL：失败（网络/接口异常）返回 null，不影响主流程 */
+export async function getDingTalkUserAvatar(userId: string): Promise<string | null> {
+  try {
+    const user = await getDingUser(userId);
+    return user.avatar ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function syncDingTalkOrganization(currentDingTalkUserId: string | null): Promise<SyncResult> {
@@ -540,7 +552,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
       }
 
       if (!isInitialSync) {
-        if (existing && existing.dingtalkUserId === user.userId && existing.name === name) {
+        if (existing && existing.dingtalkUserId === user.userId && existing.name === name && existing.avatarUrl === (user.avatar ?? null)) {
           syncedUserIds.push(existing.id);
           continue;
         }
@@ -552,6 +564,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
               name,
               mobile: user.mobile ?? null,
               email: user.email ?? null,
+              avatarUrl: user.avatar ?? null,
               orgNodeId,
               title,
               roleType: inferredRoleType,
@@ -563,10 +576,13 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
           continue;
         }
 
-        if (existing.name !== name) {
+        const changed: { name?: string; avatarUrl?: string | null } = {};
+        if (existing.name !== name) changed.name = name;
+        if (existing.avatarUrl !== (user.avatar ?? null)) changed.avatarUrl = user.avatar ?? null;
+        if (Object.keys(changed).length > 0) {
           await tx.user.update({
             where: { id: existing.id },
-            data: { name },
+            data: changed,
           });
         }
         syncedUserIds.push(existing.id);
@@ -578,6 +594,7 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         name,
         mobile: user.mobile ?? null,
         email: user.email ?? null,
+        avatarUrl: user.avatar ?? null,
         orgNodeId,
         title,
         roleType: existing?.roleType === "ADMIN" ? "ADMIN" : inferredRoleType,

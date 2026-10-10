@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { avatarColor } from "@/lib/avatar-color";
 import { Button } from "@/components/ui-kit";
+import { UserAvatar } from "@/components/user-avatar";
 import { getRoleLabel } from "@/server/permissions/role-labels";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
@@ -14,13 +14,16 @@ type LoginUser = {
   name: string;
   roleType: RoleType;
   title: string | null;
+  avatarUrl?: string | null;
 };
 
-function Avatar({ name, size = "small" }: { name: string; size?: "small" | "large" }) {
+function Avatar({ name, avatarUrl, size = "small" }: { name: string; avatarUrl?: string | null; size?: "small" | "large" }) {
   return (
-    <div className={`${size === "small" ? "w-10 h-10 rounded-xl text-sm" : "w-28 h-28 rounded-2xl text-4xl"} flex shrink-0 items-center justify-center text-white font-medium shadow-sm ${avatarColor(name)}`}>
-      {name.slice(0, 1)}
-    </div>
+    <UserAvatar
+      name={name}
+      avatarUrl={avatarUrl}
+      className={`${size === "small" ? "w-10 h-10 rounded-xl text-sm" : "w-28 h-28 rounded-2xl text-4xl"} shadow-sm`}
+    />
   );
 }
 

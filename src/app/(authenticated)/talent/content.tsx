@@ -2,6 +2,7 @@
 
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
+import { UserAvatar } from "@/components/user-avatar";
 import {
   addTalentGradeThresholds,
   addTalentRatingOptions,
@@ -208,6 +209,7 @@ type ProfileExtras = {
 type Person = {
   id: number | string;
   name: string;
+  avatarUrl?: string | null;
   team: string;
   title: string;
   level: string;
@@ -317,15 +319,15 @@ export default function TalentPageContent({
   latestAssessmentByUserId: Record<string, { userId: string; cycleId: string; earnedScore: number; maxScore: number; isOverallPassed: boolean; cycle: { year: number; quarter: number } | null }>;
   statCards: {
     contractsExpiringSoon: number;
-    contractsExpiringSoonItems: Array<{ userId: string; name: string; endAt: string }>;
+    contractsExpiringSoonItems: Array<{ userId: string; name: string; avatarUrl: string | null; endAt: string }>;
     contractsExpiringSoonMonths: Array<{ year: number; month: number; label: string; count: number }>;
     recentPromotions: number;
     recentPromotionHalfYear: "first" | "second";
-    recentPromotionItems: Array<{ userId: string; name: string }>;
+    recentPromotionItems: Array<{ userId: string; name: string; avatarUrl: string | null }>;
     lowPromotionOpportunityCount: number;
-    lowPromotionOpportunityItems: Array<{ userId: string; name: string; remainingCount: number }>;
+    lowPromotionOpportunityItems: Array<{ userId: string; name: string; avatarUrl: string | null; remainingCount: number }>;
     currentQuarterRewards: number;
-    currentQuarterRewardNames: string[];
+    currentQuarterRewardItems: Array<{ userId: string; name: string; avatarUrl: string | null }>;
   };
   profileExtrasByUserId: Record<string, ProfileExtras>;
 }) {
@@ -375,6 +377,7 @@ export default function TalentPageContent({
     return {
       id: participant.userId,
       name: user?.name ?? "未知员工",
+      avatarUrl: user?.avatarUrl ?? null,
       team: candidate?.orgNodeName ?? fallback?.team ?? "未配置组织",
       title: user?.title ?? fallback?.title ?? "未配置岗位",
       level: jobLevel?.code ?? jobLevel?.name ?? fallback?.level ?? "未配置职级",
@@ -554,16 +557,16 @@ export default function TalentPageContent({
           >
             <div className="flex min-h-0 flex-1 flex-col">
               <div className={overviewMetricListClass}>
-              {statCards.currentQuarterRewardNames.slice(0, 3).map((name) => (
-                <div key={name} className="flex items-center gap-2 rounded-xl px-2 py-1">
-                  <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(name)}`}>{name.slice(0, 1)}</span>
+              {statCards.currentQuarterRewardItems.slice(0, 3).map((item) => (
+                <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
+                  <UserAvatar name={item.name} avatarUrl={item.avatarUrl} className="h-[42px] w-[42px] rounded-[12px] text-sm" />
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-[#181818]">{name}</div>
+                    <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
                     <div className="truncate text-xs text-[#777777]">本季奖励记录</div>
                   </div>
                 </div>
               ))}
-              {statCards.currentQuarterRewardNames.length === 0 && (
+              {statCards.currentQuarterRewardItems.length === 0 && (
                 <div className="py-6 text-center text-sm text-[#777777]">暂无本季奖励记录</div>
               )}
               </div>
@@ -1808,8 +1811,8 @@ function PromotionOverview({
   recentPromotionItems,
 }: {
   halfYearLabel: string;
-  opportunityItems: Array<{ userId: string; name: string; remainingCount: number }>;
-  recentPromotionItems: Array<{ userId: string; name: string }>;
+  opportunityItems: Array<{ userId: string; name: string; avatarUrl: string | null; remainingCount: number }>;
+  recentPromotionItems: Array<{ userId: string; name: string; avatarUrl: string | null }>;
 }) {
   const [activeTab, setActiveTab] = useState<"opportunity" | "recent">("opportunity");
 
@@ -1840,7 +1843,7 @@ function PromotionOverview({
         {activeTab === "opportunity" ? (
           opportunityItems.length > 0 ? opportunityItems.map((item) => (
             <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
-              <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+              <UserAvatar name={item.name} avatarUrl={item.avatarUrl} className="h-[42px] w-[42px] rounded-[12px] text-sm" />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
                 <div className="text-xs text-[#777777]">剩余{item.remainingCount}次</div>
@@ -1852,7 +1855,7 @@ function PromotionOverview({
         ) : (
           recentPromotionItems.length > 0 ? recentPromotionItems.map((item) => (
             <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
-              <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+              <UserAvatar name={item.name} avatarUrl={item.avatarUrl} className="h-[42px] w-[42px] rounded-[12px] text-sm" />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
                 <div className="text-xs text-[#777777]">本半年晋升</div>
@@ -1872,7 +1875,7 @@ function ContractExpiryOverview({
   items,
 }: {
   months: Array<{ year: number; month: number; label: string; count: number }>;
-  items: Array<{ userId: string; name: string; endAt: string }>;
+  items: Array<{ userId: string; name: string; avatarUrl: string | null; endAt: string }>;
 }) {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
@@ -1919,7 +1922,7 @@ function ContractExpiryOverview({
       <div className={`mt-3 ${overviewMetricListClass}`}>
         {visibleItems.length > 0 ? visibleItems.map((item) => (
           <div key={item.userId} className="flex items-center gap-2 rounded-xl px-2 py-1">
-            <span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-sm font-medium text-white ${avatarColor(item.name)}`}>{item.name.slice(0, 1)}</span>
+            <UserAvatar name={item.name} avatarUrl={item.avatarUrl} className="h-[42px] w-[42px] rounded-[12px] text-sm" />
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
               <div className="text-xs text-[#777777]">{formatContractExpiryDateLabel(new Date(item.endAt))}</div>
@@ -1969,7 +1972,7 @@ function PersonDrawer({ person, tab, setTab, onClose, onNotice }: { person: Pers
     <button aria-label="关闭员工画像" className="absolute inset-0 bg-slate-950/30 backdrop-blur-[1px]" onClick={onClose} />
     <aside className="relative w-full max-w-[720px] h-full bg-background shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
       <div className="px-6 py-5 border-b border-border bg-card flex items-start gap-4">
-        <div className={`w-14 h-14 rounded-full text-white text-lg font-semibold flex items-center justify-center ${avatarColor(person.name)}`}>{person.name[0]}</div>
+        <UserAvatar name={person.name} avatarUrl={person.avatarUrl} className="w-14 h-14 rounded-full text-lg font-semibold" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-nowrap">
             <h2 className="text-xl font-semibold shrink-0">{person.name}</h2>

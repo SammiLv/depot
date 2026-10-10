@@ -165,15 +165,17 @@ export default async function TalentPage() {
     ...currentQuarterRewardUserIds,
   ])];
   const statUsers = statUserIds.length > 0
-    ? await prisma.user.findMany({ where: { id: { in: statUserIds } }, select: { id: true, name: true } })
+    ? await prisma.user.findMany({ where: { id: { in: statUserIds } }, select: { id: true, name: true, avatarUrl: true } })
     : [];
   const userNameById = new Map(statUsers.map((row) => [row.id, row.name]));
+  const userAvatarById = new Map(statUsers.map((row) => [row.id, row.avatarUrl]));
 
   const contractsExpiringSoonItems = contractsExpiringSoonProfiles
     .filter((profile): profile is typeof profile & { currentContractEndAt: Date } => Boolean(profile.currentContractEndAt))
     .map((profile) => ({
       userId: profile.userId,
       name: userNameById.get(profile.userId) ?? profile.userId,
+      avatarUrl: userAvatarById.get(profile.userId) ?? null,
       endAt: profile.currentContractEndAt.toISOString(),
     }))
     .sort((left, right) => new Date(left.endAt).getTime() - new Date(right.endAt).getTime());
@@ -189,6 +191,7 @@ export default async function TalentPage() {
     .map((profile) => ({
       userId: profile.userId,
       name: userNameById.get(profile.userId) ?? profile.userId,
+      avatarUrl: userAvatarById.get(profile.userId) ?? null,
       remainingCount: getRemainingPromotionOpportunityCount(profile.currentContractEndAt!, now) ?? 0,
     }))
     .sort((left, right) => left.remainingCount - right.remainingCount);
@@ -196,8 +199,13 @@ export default async function TalentPage() {
   const recentPromotionItems = recentPromotionUserIds.map((userId) => ({
     userId,
     name: userNameById.get(userId) ?? userId,
+    avatarUrl: userAvatarById.get(userId) ?? null,
   }));
-  const currentQuarterRewardNames = currentQuarterRewardUserIds.map((id) => userNameById.get(id) ?? id);
+  const currentQuarterRewardItems = currentQuarterRewardUserIds.map((userId) => ({
+    userId,
+    name: userNameById.get(userId) ?? userId,
+    avatarUrl: userAvatarById.get(userId) ?? null,
+  }));
 
   const latestKpiByUserId: Record<string, (typeof latestKpis)[number]> = {};
   for (const kpi of latestKpis) {
@@ -239,7 +247,7 @@ export default async function TalentPage() {
         lowPromotionOpportunityCount,
         lowPromotionOpportunityItems,
         currentQuarterRewards: currentQuarterRewardUserIds.length,
-        currentQuarterRewardNames,
+        currentQuarterRewardItems,
       }}
       profileExtrasByUserId={profileExtrasByUserId}
     />

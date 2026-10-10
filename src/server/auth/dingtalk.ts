@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/prisma";
+import { getDingTalkUserAvatar } from "@/server/dingtalk/organization";
 
 const DINGTALK_LOGIN_GATEWAY = "https://gateway.rjmart.cn/research/orglogin/dingtalk/dtRedirect";
 const DINGTALK_USER_INFO_URL = "https://gateway.rjmart.cn/base/dt/dtcloud/home/userInfoByAppToken";
@@ -96,6 +97,9 @@ export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
     });
   }
 
+  // 登录顺带刷新头像（userInfoByAppToken 不返回头像，需额外调 getDingUser；失败不阻塞登录）
+  const avatarUrl = await getDingTalkUserAvatar(info.userId);
+
   if (existingUser) {
     return prisma.user.update({
       where: { id: existingUser.id },
@@ -104,6 +108,7 @@ export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
         name: info.name,
         mobile: info.mobile,
         email: info.email,
+        ...(avatarUrl ? { avatarUrl } : {}),
         isActive: true,
         deletedAt: null,
       },
@@ -116,6 +121,7 @@ export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
       name: info.name,
       mobile: info.mobile,
       email: info.email,
+      avatarUrl,
     },
   });
 }

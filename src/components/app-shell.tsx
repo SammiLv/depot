@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { LogOut, Sparkles } from "lucide-react";
 import { logout } from "@/server/auth/actions";
 import { runServerAction } from "@/lib/run-server-action";
-import { avatarColor } from "@/components/ui-kit";
+import { UserAvatar } from "@/components/user-avatar";
 
 const menu: Array<{
   to: string;
@@ -47,16 +47,13 @@ export interface AppShellUser {
   roleLabel: string;
   teamName: string;
   avatarInitial: string;
-}
-
-function getNameInitial(name: string) {
-  return Array.from(name.trim())[0] ?? "";
+  /** 钉钉头像 URL；为空时回退姓氏首字 */
+  avatarUrl?: string | null;
 }
 
 function UserMenu({ user }: { user: AppShellUser }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const initial = getNameInitial(user.name) || user.avatarInitial;
 
   useEffect(() => {
     if (!open) return;
@@ -75,18 +72,16 @@ function UserMenu({ user }: { user: AppShellUser }) {
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
-          className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium text-white ${avatarColor(user.name)}`}
+          className="rounded-full"
           aria-label="用户菜单"
           aria-expanded={open}
         >
-          {initial}
+          <UserAvatar name={user.name} avatarUrl={user.avatarUrl} className="h-9 w-9 rounded-full text-sm" />
         </button>
         {open ? (
           <div className="absolute bottom-[calc(100%+4px)] left-0 z-50 w-56 rounded-xl border border-[#F0F0F0] bg-white p-3 shadow-[0_6px_16px_rgba(0,0,0,0.12)]">
           <div className="flex items-center gap-3">
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium text-white ${avatarColor(user.name)}`}>
-              {initial}
-            </div>
+            <UserAvatar name={user.name} avatarUrl={user.avatarUrl} className="h-10 w-10 rounded-full text-sm" />
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-[#181818]">{user.name}</div>
               <div className="mt-0.5 truncate text-xs text-[#777777]">{user.teamName} · {user.roleLabel}</div>

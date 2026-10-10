@@ -160,7 +160,7 @@ export async function getTalentReviewCycleDetails(viewer: Viewer, cycleIds: stri
   const visibleUserIds = [...new Set(visibleParticipants.map((row) => row.userId))];
   const [users, dimensionResults, results] = await Promise.all([
     visibleUserIds.length
-      ? prisma.user.findMany({ where: { id: { in: visibleUserIds } }, select: { id: true, name: true, title: true } })
+      ? prisma.user.findMany({ where: { id: { in: visibleUserIds } }, select: { id: true, name: true, title: true, avatarUrl: true } })
       : Promise.resolve([]),
     visibleParticipantIds.length
       ? prisma.talentReviewDimensionResult.findMany({ where: { participantId: { in: visibleParticipantIds } } })
