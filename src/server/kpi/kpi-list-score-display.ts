@@ -17,6 +17,12 @@ export type KpiListScoreDisplay = {
 
 export const KPI_LIST_SCORE_EMPTY = "—";
 
+/** 最终绩效筛选只纳入已产生最终分数的单据，边界值不属于“低于”。 */
+export function isFinalScoreBelow(score: number | null | undefined, threshold: number | null): boolean {
+  if (threshold === null) return true;
+  return score !== null && score !== undefined && score < threshold;
+}
+
 /** 与详情页 formatScore 一致：整数原样，小数保留两位（去掉多余的 0） */
 export function formatKpiListStageScore(value: number | null | undefined, stageCompleted: boolean): string {
   if (!stageCompleted || value === null || value === undefined) {

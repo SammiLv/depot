@@ -68,6 +68,7 @@ type KpiPageData = {
     tone: "primary" | "warning" | "success" | "default" | "info";
     progress: number;
     scores: KpiListScoreDisplay;
+    finalScore: number | null;
     rating: string | null;
     availableActions: {
       canSelfReview: boolean;
@@ -1247,6 +1248,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
         finalScore: personalKpi.finalScore,
         completedProgressStages,
       }),
+      finalScore: completedProgressStages.final ? personalKpi.finalScore : null,
       rating: personalKpi.finalRatingName ?? null,
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),

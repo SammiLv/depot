@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import {
   buildKpiListScoreDisplay,
   formatKpiListStageScore,
+  isFinalScoreBelow,
 } from "@/server/kpi/kpi-list-score-display";
+
+test("final score below filter is strict and excludes missing scores", () => {
+  assert.equal(isFinalScoreBelow(99.99, 100), true);
+  assert.equal(isFinalScoreBelow(100, 100), false);
+  assert.equal(isFinalScoreBelow(101, 100), false);
+  assert.equal(isFinalScoreBelow(null, 100), false);
+  assert.equal(isFinalScoreBelow(undefined, 100), false);
+  assert.equal(isFinalScoreBelow(null, null), true);
+});
 
 test("stage not completed shows — regardless of stored value", () => {
   assert.equal(formatKpiListStageScore(110, false), "—");

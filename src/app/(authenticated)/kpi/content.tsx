@@ -8,6 +8,7 @@ import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, up
 import { runServerAction } from "@/lib/run-server-action";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
+import { isFinalScoreBelow } from "@/server/kpi/kpi-list-score-display";
 import { BusinessAssessmentQuarterlyWorkspace, WorkIncidentWorkspace } from "../talent/operation-workspaces";
 import type { AssessmentWorkspaceData, IncidentWorkspaceData } from "../talent/operation-workspace-types";
 import { buildKpiSectionHref, KPI_SECTION_TABS, type KpiSectionTab } from "./kpi-sections";
@@ -1393,11 +1394,18 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
   }, [searchParams, data.departmentOptions, data.defaultDepartmentOrgNodeId]);
   const urlKeyword = searchParams.get("q") ?? "";
   const [keyword, setKeyword] = useState(urlKeyword);
+  const urlFinalScoreBelow = searchParams.get("finalBelow") ?? "";
+  const [finalScoreBelow, setFinalScoreBelow] = useState(urlFinalScoreBelow);
   // 渲染期同步：URL 中的 q 外部变化（如从详情页返回）时重置本地搜索词
   const [prevUrlKeyword, setPrevUrlKeyword] = useState(urlKeyword);
   if (prevUrlKeyword !== urlKeyword) {
     setPrevUrlKeyword(urlKeyword);
     setKeyword(urlKeyword);
+  }
+  const [prevUrlFinalScoreBelow, setPrevUrlFinalScoreBelow] = useState(urlFinalScoreBelow);
+  if (prevUrlFinalScoreBelow !== urlFinalScoreBelow) {
+    setPrevUrlFinalScoreBelow(urlFinalScoreBelow);
+    setFinalScoreBelow(urlFinalScoreBelow);
   }
   const sectionTab = activeSection;
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
@@ -1474,13 +1482,14 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
 
   // 筛选值与默认值一致时省略对应 URL 参数，保持链接干净（缺省 = 默认）
   function updateListFilters(
-    overrides: { dept?: string | null; team?: string | null; q?: string | null },
+    overrides: { dept?: string | null; team?: string | null; q?: string | null; finalBelow?: string | null },
     options?: { replace?: boolean },
   ) {
     const params = new URLSearchParams(searchParams.toString());
     const nextDept = overrides.dept !== undefined ? overrides.dept : departmentTab;
     const nextTeam = overrides.team !== undefined ? overrides.team : teamTab;
     const nextQ = overrides.q !== undefined ? overrides.q : keyword;
+    const nextFinalBelow = overrides.finalBelow !== undefined ? overrides.finalBelow : finalScoreBelow;
 
     if (nextDept && nextDept !== data.defaultDepartmentOrgNodeId) params.set("dept", nextDept);
     else params.delete("dept");
@@ -1492,6 +1501,11 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     const trimmedQ = nextQ?.trim() ?? "";
     if (trimmedQ) params.set("q", trimmedQ);
     else params.delete("q");
+
+    const trimmedFinalBelow = nextFinalBelow?.trim() ?? "";
+    const parsedFinalBelow = Number(trimmedFinalBelow);
+    if (trimmedFinalBelow && Number.isFinite(parsedFinalBelow)) params.set("finalBelow", trimmedFinalBelow);
+    else params.delete("finalBelow");
 
     const query = params.toString();
     const href = query ? `${pathname}?${query}` : pathname;
@@ -1513,6 +1527,20 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     return () => clearTimeout(timer);
   }, [keyword, urlKeyword, searchParams, pathname, router]);
 
+  useEffect(() => {
+    if (finalScoreBelow === urlFinalScoreBelow) return;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      const trimmed = finalScoreBelow.trim();
+      const parsed = Number(trimmed);
+      if (trimmed && Number.isFinite(parsed)) params.set("finalBelow", trimmed);
+      else params.delete("finalBelow");
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [finalScoreBelow, urlFinalScoreBelow, searchParams, pathname, router]);
+
   const rows = useMemo(
     () => data.rows.filter((row) => {
       if (row.departmentOrgNodeId !== departmentTab) return false;
@@ -1521,11 +1549,17 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     }),
     [data.rows, departmentTab, showAllTeamTab, teamTab]
   );
-  // 搜索词只过滤成员表格行，流程进度卡保持基于搜索前的 rows 不变
+  // 搜索词与最终绩效分数只过滤成员表格行，流程进度卡保持基于搜索前的 rows 不变
   const visibleRows = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
-    return kw ? rows.filter((row) => row.userName.toLowerCase().includes(kw)) : rows;
-  }, [rows, keyword]);
+    const thresholdText = finalScoreBelow.trim();
+    const parsedThreshold = Number(thresholdText);
+    const threshold = thresholdText && Number.isFinite(parsedThreshold) ? parsedThreshold : null;
+    return rows.filter((row) =>
+      (!kw || row.userName.toLowerCase().includes(kw))
+      && isFinalScoreBelow(row.finalScore, threshold)
+    );
+  }, [rows, keyword, finalScoreBelow]);
   // 进入详情页时携带当前筛选：年/季总是显式写入（防跨季度漂移），dept/team/q 非默认才写
   const detailQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -1535,8 +1569,11 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     if (teamTab && teamTab !== defaultTeamTab) params.set("team", teamTab);
     const trimmed = keyword.trim();
     if (trimmed) params.set("q", trimmed);
+    const trimmedFinalBelow = finalScoreBelow.trim();
+    const parsedFinalBelow = Number(trimmedFinalBelow);
+    if (trimmedFinalBelow && Number.isFinite(parsedFinalBelow)) params.set("finalBelow", trimmedFinalBelow);
     return params.toString();
-  }, [selectedYear, selectedQuarter, departmentTab, teamTab, defaultTeamTab, keyword, data.defaultDepartmentOrgNodeId]);
+  }, [selectedYear, selectedQuarter, departmentTab, teamTab, defaultTeamTab, keyword, finalScoreBelow, data.defaultDepartmentOrgNodeId]);
   const scopedMemberCount = useMemo(() => {
     const visibleMembers = data.memberOptions.filter((member) => {
       if (member.departmentOrgNodeId !== departmentTab) return false;
@@ -1769,6 +1806,20 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                     className="h-9 w-full rounded-lg bg-muted pl-9 pr-3 text-sm focus:outline-none"
                   />
                 </div>
+                <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm">
+                  <span className="whitespace-nowrap text-muted-foreground">最终绩效低于</span>
+                  <input
+                    type="number"
+                    step="any"
+                    inputMode="decimal"
+                    aria-label="最终绩效评分低于"
+                    placeholder="请输入"
+                    value={finalScoreBelow}
+                    onChange={(event) => setFinalScoreBelow(event.target.value)}
+                    className="h-full w-20 bg-transparent text-foreground outline-none"
+                  />
+                  <span className="text-muted-foreground">分</span>
+                </label>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span>小组：</span>
                   <button className="rounded-md bg-primary/10 px-2 py-1 text-primary">{teamTab === "all" ? "全部" : teamTabs.find((team) => team.id === teamTab)?.name ?? "全部"}</button>
