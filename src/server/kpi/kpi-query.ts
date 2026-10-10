@@ -17,6 +17,7 @@ import { buildKpiListScoreDisplay, type KpiListScoreDisplay } from "@/server/kpi
 import { evaluateKpiDistribution, resolveEffectiveKpiScore, type KpiDistributionEvaluation } from "@/server/kpi/kpi-distribution";
 import { findUserPendingApprovalStep, canUserActOnApprovalStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
+import { resolveKpiPeriod, type KpiPeriodOptions } from "@/server/kpi/kpi-period";
 
 
 type DataScopeInput = {
@@ -54,6 +55,8 @@ type KpiPageData = {
   availableQuarters: number[];
   rows: Array<{
     id: string;
+    year: number;
+    quarter: number;
     userId: string;
     userName: string;
     departmentOrgNodeId: string | null;
@@ -888,15 +891,6 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   };
 }
 
-type KpiPeriodOptions = {
-  selectedYear?: number;
-  selectedQuarter?: number;
-};
-
-function parsePeriodValue(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function buildAvailableYears(nowYear: number, yearsFromData: number[]) {
   const uniqueYears = new Set<number>([nowYear, ...yearsFromData.filter((year) => Number.isFinite(year))]);
   return [...uniqueYears].sort((a, b) => b - a);
@@ -1009,7 +1003,6 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   ]);
   const now = new Date();
   const currentYear = now.getFullYear();
-  const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
   const availableYearsFromDb = [
     ...(await prisma.personalKpi.findMany({
       distinct: ["year"],
@@ -1031,12 +1024,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   ];
   const availableYears = buildAvailableYears(currentYear, availableYearsFromDb);
   const availableQuarters = [1, 2, 3, 4];
-  const selectedYear = parsePeriodValue(periodOptions.selectedYear) ?? currentYear;
-  const selectedQuarter = ([1, 2, 3, 4] as const).includes(periodOptions.selectedQuarter as 1 | 2 | 3 | 4)
-    ? periodOptions.selectedQuarter as number
-    : currentQuarter;
-  const year = selectedYear;
-  const quarter = selectedQuarter;
+  const { year, quarter, quarterFilter, templateQuarter, filterAllQuarters } = resolveKpiPeriod(now, periodOptions);
 
   const emptyStages = kpiProgressStageOrder.map((stageKey) => ({
     label: kpiProgressStageLabels[stageKey],
@@ -1115,14 +1103,14 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const kpis = await prisma.personalKpi.findMany({
     where: {
       year,
-      quarter,
+      ...(quarterFilter === null ? {} : { quarter: quarterFilter }),
       deletedAt: null,
       OR: [
         ...(canViewRows ? [where] : []),
         ...(assignedPersonalKpiIds.length ? [{ id: { in: assignedPersonalKpiIds } }] : []),
       ],
     },
-    orderBy: [{ createdAt: "desc" }],
+    orderBy: [{ quarter: "desc" }, { createdAt: "desc" }],
   });
 
   const kpiIds = kpis.map((k) => k.id);
@@ -1240,6 +1228,8 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
 
     return [{
       id: personalKpi.id,
+      year: personalKpi.year,
+      quarter: personalKpi.quarter,
       userId: personalKpi.userId,
       userName: user?.name ?? "历史成员",
       departmentOrgNodeId,
@@ -1349,7 +1339,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const matchedTeamOrgNodeIdsByTemplateId = new Map<string, string[]>();
 
   const getQuarterCode = (targetYear: number, targetQuarter: number) => targetYear * 10 + targetQuarter;
-  const currentQuarterCode = getQuarterCode(year, quarter);
+  const currentQuarterCode = getQuarterCode(year, templateQuarter);
 
   for (const template of candidateTemplates) {
     const assignments = candidateTemplateAssignments.filter((assignment) => assignment.templateId === template.id);
@@ -1495,7 +1485,8 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
     orgPermissionModuleKeys.kpi,
     kpiAbilityKeys.viewKpiDistributionAlert,
   );
-  const distributionAlerts = distributionAlertCoverage.hasPermission
+  // 全年视图混合多个季度，同一员工可能出现多张单据，不应用单季度分布规则。
+  const distributionAlerts = distributionAlertCoverage.hasPermission && !filterAllQuarters
     ? await buildKpiDistributionAlerts({ departments, memberOptions, kpis, rows, approvalStepsByKpiId })
     : [];
 

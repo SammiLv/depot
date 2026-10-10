@@ -1739,7 +1739,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
               </div>
               <div className="flex items-center gap-2">
                 {scopedStages.map((s, i) => {
-                  const totalCount = Math.max(scopedMemberCount, 1);
+                  const totalCount = Math.max(selectedQuarter === 0 ? rows.length : scopedMemberCount, 1);
                   return (
                     <div key={s.label} className="flex-1">
                       <div className="flex items-center gap-2">
@@ -1781,6 +1781,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                 <thead className="bg-muted/40">
                   <tr className="text-left text-sm text-muted-foreground">
                     <th className="px-5 py-3 font-medium">成员</th>
+                    {selectedQuarter === 0 ? <th className="px-5 py-3 font-medium">季度</th> : null}
                     <th className="px-5 py-3 font-medium">小组</th>
                     <th className="px-5 py-3 font-medium">阶段</th>
                     <th className="w-48 px-5 py-3 font-medium">完成度</th>
@@ -1799,6 +1800,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                         <td className="px-5 py-3">
                           <span className="text-sm font-medium">{r.userName}</span>
                         </td>
+                        {selectedQuarter === 0 ? <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">{r.year} Q{r.quarter}</td> : null}
                         <td className="px-5 py-3 text-sm text-muted-foreground">{r.teamName}</td>
                         <td className="px-5 py-3"><Badge tone={r.tone}>{r.status}</Badge></td>
                         <td className="px-5 py-3"><Progress value={r.progress} tone={r.tone === "warning" ? "warning" : r.tone === "success" ? "success" : "primary"} /></td>
@@ -1829,7 +1831,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={10} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
+                      <td colSpan={selectedQuarter === 0 ? 11 : 10} className="px-5 py-12 text-center text-sm text-muted-foreground">暂无 KPI 数据</td>
                     </tr>
                   )}
                 </tbody>
@@ -1937,7 +1939,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
       <Dialog open={showInitDialog} onClose={() => setShowInitDialog(false)} title="维护KPI">
         <InitializeForm
           year={data.year}
-          defaultQuarter={data.quarter}
+          defaultQuarter={selectedQuarter === 0 ? Math.floor(new Date().getMonth() / 3) + 1 : data.quarter}
           quarterOptions={quarterOptions}
           onClose={() => setShowInitDialog(false)}
           onComplete={() => {
