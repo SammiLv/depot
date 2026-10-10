@@ -8,7 +8,7 @@ import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, up
 import { runServerAction } from "@/lib/run-server-action";
 import { Search, Upload, X, GripVertical } from "lucide-react";
 import type { getKpiData } from "@/server/kpi/kpi-query";
-import { isFinalScoreBelow } from "@/server/kpi/kpi-list-score-display";
+import { isEffectiveScoreBelow } from "@/server/kpi/kpi-list-score-display";
 import { BusinessAssessmentQuarterlyWorkspace, WorkIncidentWorkspace } from "../talent/operation-workspaces";
 import type { AssessmentWorkspaceData, IncidentWorkspaceData } from "../talent/operation-workspace-types";
 import { buildKpiSectionHref, KPI_SECTION_TABS, type KpiSectionTab } from "./kpi-sections";
@@ -1557,7 +1557,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
     const threshold = thresholdText && Number.isFinite(parsedThreshold) ? parsedThreshold : null;
     return rows.filter((row) =>
       (!kw || row.userName.toLowerCase().includes(kw))
-      && isFinalScoreBelow(row.finalScore, threshold)
+      && isEffectiveScoreBelow(row.effectiveScore, threshold)
     );
   }, [rows, keyword, finalScoreBelow]);
   // 进入详情页时携带当前筛选：年/季总是显式写入（防跨季度漂移），dept/team/q 非默认才写
@@ -1807,7 +1807,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
                   />
                 </div>
                 <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm">
-                  <span className="whitespace-nowrap text-muted-foreground">最终绩效低于</span>
+                  <span className="whitespace-nowrap text-muted-foreground" title="已终审取最终绩效总分，未终审取主管评">最终绩效低于</span>
                   <input
                     type="number"
                     step="any"

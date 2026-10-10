@@ -17,8 +17,8 @@ export type KpiListScoreDisplay = {
 
 export const KPI_LIST_SCORE_EMPTY = "—";
 
-/** 最终绩效筛选只纳入已产生最终分数的单据，边界值不属于“低于”。 */
-export function isFinalScoreBelow(score: number | null | undefined, threshold: number | null): boolean {
+/** 低分筛选：score 为 resolveEffectiveKpiScore 口径；无有效分时排除；边界值不属于「低于」。 */
+export function isEffectiveScoreBelow(score: number | null | undefined, threshold: number | null): boolean {
   if (threshold === null) return true;
   return score !== null && score !== undefined && score < threshold;
 }

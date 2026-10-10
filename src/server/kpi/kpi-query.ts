@@ -68,7 +68,8 @@ type KpiPageData = {
     tone: "primary" | "warning" | "success" | "default" | "info";
     progress: number;
     scores: KpiListScoreDisplay;
-    finalScore: number | null;
+    /** 低分筛选用：已终审取 finalScore，主管评完成未终审取 managerScore，其余 null */
+    effectiveScore: number | null;
     rating: string | null;
     availableActions: {
       canSelfReview: boolean;
@@ -1248,7 +1249,12 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
         finalScore: personalKpi.finalScore,
         completedProgressStages,
       }),
-      finalScore: completedProgressStages.final ? personalKpi.finalScore : null,
+      effectiveScore: resolveEffectiveKpiScore({
+        status: personalKpi.status,
+        finalScore: personalKpi.finalScore,
+        managerScore: personalKpi.managerScore,
+        approvalSteps: approvalStepsByKpiId.get(personalKpi.id),
+      }),
       rating: personalKpi.finalRatingName ?? null,
       availableActions: {
         canSelfReview: canScoreSelf && personalKpi.userId === currentUser.id && isSelfReviewStatus(personalKpi.status),
