@@ -2334,13 +2334,14 @@ function ProjectTaskCard({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 whitespace-nowrap">
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#0655FE] text-[8px] font-semibold leading-[10px] text-white">
             {task.owner.slice(0, 1)}
           </span>
           <span className="text-sm font-light leading-[22px] text-[#181818]">{task.owner}</span>
         </div>
-        <div className="flex items-center gap-2">
+        {/* 周期始终跟随负责人保持在同一行，文字不断行 */}
+        <div className="flex items-center gap-2 whitespace-nowrap">
           <img
             src={tone === "red" ? "/icons/task-period-danger.png" : tone === "orange" ? "/icons/task-period-warning.png" : "/icons/project-period.png"}
             alt=""
@@ -2348,9 +2349,12 @@ function ProjectTaskCard({
             height={16}
             className="h-4 w-4"
           />
-          <span className={`text-sm font-light leading-[22px] ${periodClass}`}>{task.periodLabel}</span>
+          <span className={`whitespace-nowrap text-sm font-light leading-[22px] ${periodClass}`}>{task.periodLabel}</span>
+        </div>
+        {/* 空间不足时逾期/状态标签作为整体换到下一行，不拆字 */}
+        <div className="flex items-center gap-2 whitespace-nowrap">
           {remain ? (
-            <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-light leading-[18px] ${remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}>
+            <span className={`inline-flex h-6 items-center whitespace-nowrap rounded-full px-2 text-xs font-light leading-[18px] ${remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}>
               {remain}
             </span>
           ) : null}
@@ -2875,26 +2879,27 @@ function ProjectCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 whitespace-nowrap">
               <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#0655FE] text-[8px] font-medium leading-[10px] text-white">
                 {project.owner.slice(0, 1)}
               </span>
               <span className="text-xs font-medium leading-[18px] text-[#777777]">{project.owner}</span>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="flex items-center gap-1 text-xs font-medium leading-[18px] text-[#777777]">
-                <img src="/icons/project-period.png" alt="" width={16} height={16} className="h-4 w-4" />
-                <span>{formatCompactQuarterRange(project.startQuarter, project.endQuarter)}</span>
-              </div>
+            {/* 周期跟随负责人保持在同一行；逾期/状态标签空间不足时整体换行，均不拆字 */}
+            <div className="flex items-center gap-1 whitespace-nowrap text-xs font-medium leading-[18px] text-[#777777]">
+              <img src="/icons/project-period.png" alt="" width={16} height={16} className="h-4 w-4" />
+              <span className="whitespace-nowrap">{formatCompactQuarterRange(project.startQuarter, project.endQuarter)}</span>
+            </div>
+            <div className="flex items-center gap-1 whitespace-nowrap">
               {project.remainingWeeksLabel ? (
                 <span
-                  className={`inline-flex h-5 items-center rounded-full px-2 text-xs leading-[18px] ${project.remainingWeeksLabel.startsWith("逾期") ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}
+                  className={`inline-flex h-5 items-center whitespace-nowrap rounded-full px-2 text-xs leading-[18px] ${project.remainingWeeksLabel.startsWith("逾期") ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}
                 >
                   {project.remainingWeeksLabel}
                 </span>
               ) : null}
               <span
-                className={`inline-flex h-5 items-center rounded-[2px] px-2 text-xs leading-[18px] ${projectStatusTagClass[project.status]}`}
+                className={`inline-flex h-5 items-center whitespace-nowrap rounded-[2px] px-2 text-xs leading-[18px] ${projectStatusTagClass[project.status]}`}
               >
                 {projectTitleByStatus[project.status]}
               </span>
@@ -3030,7 +3035,7 @@ function ListStatusTag({
   className: string;
 }) {
   return (
-    <span className={`inline-flex h-6 items-center rounded px-2 text-xs leading-[18px] ${className}`}>
+    <span className={`inline-flex h-6 items-center whitespace-nowrap rounded px-2 text-xs leading-[18px] ${className}`}>
       {label}
     </span>
   );
