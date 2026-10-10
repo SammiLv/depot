@@ -552,9 +552,18 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
       }
 
       if (!isInitialSync) {
-        if (existing && existing.dingtalkUserId === user.userId && existing.name === name && existing.avatarUrl === (user.avatar ?? null)) {
-          syncedUserIds.push(existing.id);
-          continue;
+        if (existing) {
+          const unchanged = existing.dingtalkUserId === user.userId
+            && existing.name === name
+            && existing.avatarUrl === (user.avatar ?? null)
+            && existing.mobile === (user.mobile ?? null)
+            && existing.email === (user.email ?? null)
+            && existing.title === title
+            && existing.orgNodeId === orgNodeId;
+          if (unchanged) {
+            syncedUserIds.push(existing.id);
+            continue;
+          }
         }
 
         if (!existing) {
@@ -576,9 +585,15 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
           continue;
         }
 
-        const changed: { name?: string; avatarUrl?: string | null } = {};
+        // 基础信息与组织归属以钉钉为准（钉钉里调组要跟过来）；
+        // 系统角色（roleType）不在同步中变更——例如王俊秀钉钉岗位是产品经理、系统里是组长，组长角色绝不能被同步重置
+        const changed: { name?: string; avatarUrl?: string | null; mobile?: string | null; email?: string | null; title?: string | null; orgNodeId?: string } = {};
         if (existing.name !== name) changed.name = name;
         if (existing.avatarUrl !== (user.avatar ?? null)) changed.avatarUrl = user.avatar ?? null;
+        if (existing.mobile !== (user.mobile ?? null)) changed.mobile = user.mobile ?? null;
+        if (existing.email !== (user.email ?? null)) changed.email = user.email ?? null;
+        if (existing.title !== title) changed.title = title;
+        if (existing.orgNodeId !== orgNodeId) changed.orgNodeId = orgNodeId;
         if (Object.keys(changed).length > 0) {
           await tx.user.update({
             where: { id: existing.id },
@@ -597,7 +612,8 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         avatarUrl: user.avatar ?? null,
         orgNodeId,
         title,
-        roleType: existing?.roleType === "ADMIN" ? "ADMIN" : inferredRoleType,
+        // 已有用户一律保留系统内角色（含组长/主管），只有新用户才按钉钉岗位推断
+        roleType: existing?.roleType ?? inferredRoleType,
         isActive: true,
         deletedAt: null,
       };
