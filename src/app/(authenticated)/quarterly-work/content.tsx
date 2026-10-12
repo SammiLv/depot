@@ -4361,7 +4361,8 @@ function QuarterlyWorkShell({
   }, [data.projectOptions, data.projectWorkspaceItems, data.taskWorkspaceItems]);
   const valueCounts = useMemo(() => {
     const scoped = data.projectWorkspaceItems.filter(
-      (project) => !valueJudgementFilter || project.valueTrackSummary.judgement === valueJudgementFilter,
+      (project) => project.valueTrackSummary.initialized
+        && (!valueJudgementFilter || project.valueTrackSummary.judgement === valueJudgementFilter),
     );
     const counts: Record<ValueStatusFilter, number> = {
       all: scoped.length,
@@ -4380,6 +4381,7 @@ function QuarterlyWorkShell({
   const visibleValueProjects = useMemo(
     () =>
       data.projectWorkspaceItems.filter((project) => {
+        if (!project.valueTrackSummary.initialized) return false;
         if (valueStatusFilter !== "all" && project.valueTrackSummary.status !== valueStatusFilter) return false;
         if (valueJudgementFilter && project.valueTrackSummary.judgement !== valueJudgementFilter) return false;
         return true;

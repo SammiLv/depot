@@ -10,7 +10,7 @@ import {
   isValueTrackVisibleInPeriod,
   type ActivePeriod,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
-import { normalizeValueTrackStatus } from "@/server/quarterly-work/value-track-constants";
+import { isValueTrackStatus, normalizeValueTrackStatus } from "@/server/quarterly-work/value-track-constants";
 import type { OrgNodeType, ProjectStatus, RoleType, WorkStatus } from "@prisma/client";
 
 type DataScopeInput = {
@@ -224,6 +224,8 @@ type ProjectWorkspaceItem = ProjectBoardItem & {
     actualValue: string | null;
     latestTrackedAt: Date | null;
     trackCount: number;
+    // 是否已进入价值跟踪：已上线即初始化（含历史已上线但缺跟踪状态的老数据）
+    initialized: boolean;
   };
 };
 
@@ -1139,6 +1141,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         actualValue: project.actualValue,
         latestTrackedAt: latestValueTrack?.trackedAt ?? null,
         trackCount: projectValueTracks.length,
+        initialized: project.status === "LAUNCHED" || isValueTrackStatus(project.valueTrackStatus),
       },
     };
   };
