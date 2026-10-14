@@ -6,14 +6,14 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DateInput } from "@/components/date-input";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
-import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork, updateValueTrack } from "@/server/quarterly-work/actions";
+import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
+import { getValueTrackingTaskDates } from "@/server/quarterly-work/value-tracking-period";
 import {
-  VALUE_JUDGEMENT_BELOW_EXPECTATION,
   VALUE_JUDGEMENTS,
   VALUE_TRACK_STATUS_COMPLETED,
-  VALUE_TRACK_STATUS_NOT_OBSERVED,
+  VALUE_TRACK_STATUS_PENDING_OBSERVATION,
   VALUE_TRACK_STATUS_OBSERVING,
   VALUE_TRACK_STATUSES,
   isValueJudgement,
@@ -53,7 +53,10 @@ type ProjectDialogState = {
   title: string;
 } | null;
 
-type ValueTrackDialogState = Props["data"]["valueTrackItems"][number] | null;
+type ValueTrackDialogState = {
+  track: Props["data"]["valueTrackItems"][number];
+  project: ProjectWorkspaceItem | null;
+} | null;
 type ValueTrackDeleteState = Props["data"]["valueTrackItems"][number] | null;
 type ValueOverviewDialogState = Props["data"]["valueOverviewItems"][number] | null;
 type ProductGoalDialogState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
@@ -117,6 +120,17 @@ function valueJudgementTone(value: string | null | undefined) {
 
 const editableStatuses: ColumnStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 const editableProjectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"];
+/**
+ * 项目状态流转矩阵（与服务端一致）：
+ * 未启动 → 任意；进行中 → 不可回未启动；已上线 → 不可回未启动/进行中；已完成/已关闭 → 终态。
+ */
+const PROJECT_STATUS_TRANSITION_OPTIONS: Record<ProjectStatus, ProjectStatus[]> = {
+  NOT_STARTED: ["NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"],
+  IN_PROGRESS: ["IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"],
+  LAUNCHED: ["LAUNCHED", "COMPLETED", "CLOSED"],
+  COMPLETED: ["COMPLETED"],
+  CLOSED: ["CLOSED"],
+};
 const workspaceStatusTabs: Array<{ key: WorkspaceStatus; label: string }> = [
   { key: "all", label: "全部项目" },
   { key: "IN_PROGRESS", label: "进行中" },
@@ -162,7 +176,7 @@ type TaskStatusFilter = (typeof taskStatusFilters)[number]["key"];
 const valueStatusFilters = [
   { key: "all", label: "全部" },
   { key: "观测中", label: "观测中" },
-  { key: "未观测", label: "未观测" },
+  { key: "待观测", label: "待观测" },
   { key: "已完成", label: "已完成" },
 ] as const;
 type ValueStatusFilter = (typeof valueStatusFilters)[number]["key"];
@@ -187,9 +201,8 @@ const goalCardStatusClass: Record<ProjectStatus, string> = {
   CLOSED: "bg-[#FFECE8] text-[#F53F3F]",
 };
 const valueOverviewCardColumns = [
-  { key: "未观测", label: "未观测", tone: "default" as const },
+  { key: "待观测", label: "待观测", tone: "default" as const },
   { key: "观测中", label: "观测中", tone: "primary" as const },
-  { key: "未达预期", label: "未达预期", tone: "warning" as const },
   { key: "已完成", label: "已完成", tone: "success" as const },
 ] as const;
 
@@ -197,13 +210,8 @@ function matchesValueOverviewColumn(
   item: { valueTrackStatus: string; valueJudgement: string | null },
   columnKey: (typeof valueOverviewCardColumns)[number]["key"],
 ) {
-  if (columnKey === "未观测") return item.valueTrackStatus === VALUE_TRACK_STATUS_NOT_OBSERVED;
-  if (columnKey === "观测中") {
-    return item.valueTrackStatus === VALUE_TRACK_STATUS_OBSERVING && item.valueJudgement !== VALUE_JUDGEMENT_BELOW_EXPECTATION;
-  }
-  if (columnKey === "未达预期") {
-    return item.valueJudgement === VALUE_JUDGEMENT_BELOW_EXPECTATION && item.valueTrackStatus !== VALUE_TRACK_STATUS_COMPLETED;
-  }
+  if (columnKey === "待观测") return item.valueTrackStatus === VALUE_TRACK_STATUS_PENDING_OBSERVATION;
+  if (columnKey === "观测中") return item.valueTrackStatus === VALUE_TRACK_STATUS_OBSERVING;
   return item.valueTrackStatus === VALUE_TRACK_STATUS_COMPLETED;
 }
 const projectListGridClass =
@@ -742,6 +750,10 @@ function QuarterlyWorkForm({
   const [workStatus, setWorkStatus] = useState<ColumnStatus>(
     item?.status ?? (editableStatuses.includes(status) ? status : "NOT_STARTED")
   );
+  const [needsDevValue, setNeedsDevValue] = useState<string>(
+    item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""
+  );
+  const workloadRequired = workStatus === "COMPLETED" || (needsDevValue === "true" && workStatus !== "CLOSED");
   const executionSummaryRequired = workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
@@ -825,7 +837,8 @@ function QuarterlyWorkForm({
           <select
             name="needsDevelopment"
             required
-            defaultValue={item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""}
+            value={needsDevValue}
+            onChange={(event) => setNeedsDevValue(event.target.value)}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             <option value="" disabled>请选择是否需要开发</option>
@@ -852,18 +865,21 @@ function QuarterlyWorkForm({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        <FormRow label={workStatus === "COMPLETED" ? "工作量(人天) *" : "工作量(人天)"} align="center">
+        <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
           <input
             name="workloadPersonDay"
             type="number"
             step="0.1"
             min="0"
-            required={workStatus === "COMPLETED"}
+            required={workloadRequired}
             defaultValue={item?.workloadPersonDay ?? ""}
             placeholder="请输入工作量"
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
+        {needsDevValue === "true" && workStatus !== "CLOSED" ? (
+          <div className="-mt-2 text-xs text-muted-foreground">需要开发的需求必须填写工作量，用于计算首版完成度。</div>
+        ) : null}
         <FormRow label="需求状态" align="center">
           <select
             name="status"
@@ -1010,6 +1026,11 @@ function ProjectEditForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
+  const [editNeedsDev, setEditNeedsDev] = useState<string>(
+    item.needsDevelopment === false ? "false" : "true"
+  );
+  // 已上线过的项目不能再改为非开发项目
+  const needsDevLocked = Boolean(item.launchedAt);
   // 状态切换为已上线/已完成时，把新出现的必填时间字段滚动到可视区域，
   // 避免字段出现在滚动区折叠线以下导致用户看不到
   const launchedAtRowRef = useRef<HTMLDivElement>(null);
@@ -1181,19 +1202,51 @@ function ProjectEditForm({
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
+        <FormRow label="是否开发项目 *" align="center">
+          <select
+            name="needsDevelopment"
+            required
+            value={editNeedsDev}
+            onChange={(event) => {
+              const next = event.target.value;
+              setEditNeedsDev(next);
+              if (next === "false" && projectStatus === "LAUNCHED") {
+                setProjectStatus("IN_PROGRESS");
+              }
+            }}
+            disabled={needsDevLocked}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
+          >
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+          {needsDevLocked ? <input type="hidden" name="needsDevelopment" value={editNeedsDev} /> : null}
+        </FormRow>
         <FormRow label="项目状态" align="center">
           <select
             name="status"
             required
             value={projectStatus}
             onChange={(event) => setProjectStatus(event.target.value as ProjectStatus)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            disabled={item.status === "COMPLETED" || item.status === "CLOSED"}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
           >
-            {editableProjectStatuses.map((option) => (
-              <option key={option} value={option}>{projectTitleByStatus[option]}</option>
-            ))}
+            {PROJECT_STATUS_TRANSITION_OPTIONS[item.status]
+              .filter((option) => {
+                // 非开发项目没有「已上线」可选
+                if (option === "LAUNCHED" && editNeedsDev === "false") return false;
+                // 开发项目从「进行中」的下一步只能是「已上线」
+                if (item.status === "IN_PROGRESS" && editNeedsDev === "true" && option !== "IN_PROGRESS" && option !== "LAUNCHED") return false;
+                return true;
+              })
+              .map((option) => (
+                <option key={option} value={option}>{projectTitleByStatus[option]}</option>
+              ))}
           </select>
         </FormRow>
+        {item.status === "COMPLETED" || item.status === "CLOSED" ? (
+          <input type="hidden" name="status" value={item.status} />
+        ) : null}
         {projectStatus === "COMPLETED" ? (
           <div ref={completedAtRowRef}>
             <FormRow label="完成时间 *" align="center">
@@ -1259,6 +1312,7 @@ function ProjectCreateForm({
 }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [createProjectStatus, setCreateProjectStatus] = useState<ProjectStatus>(defaultStatus ?? "NOT_STARTED");
+  const [createNeedsDev, setCreateNeedsDev] = useState<string>("");
   // 状态切换为已上线/已完成时，把新出现的必填时间字段滚动到可视区域
   const launchedAtRowRef = useRef<HTMLDivElement>(null);
   const completedAtRowRef = useRef<HTMLDivElement>(null);
@@ -1274,6 +1328,10 @@ function ProjectCreateForm({
     target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [createProjectStatus]);
   const createWorkloadRequired = createProjectStatus === "LAUNCHED" || createProjectStatus === "COMPLETED";
+  // 只有明确选择「是」开发项目时才可上线；未选择或「否」都不可选「已上线」
+  const createStatusOptions = createNeedsDev === "true"
+    ? editableProjectStatuses
+    : editableProjectStatuses.filter((status) => status !== "LAUNCHED");
 
   const quarterOptions = useMemo(() => {
     const now = new Date();
@@ -1370,6 +1428,25 @@ function ProjectCreateForm({
             </select>
           </div>
         </FormRow>
+        <FormRow label="是否开发项目 *" align="center">
+          <select
+            name="needsDevelopment"
+            required
+            value={createNeedsDev}
+            onChange={(event) => {
+              const next = event.target.value;
+              setCreateNeedsDev(next);
+              if (next === "false" && createProjectStatus === "LAUNCHED") {
+                setCreateProjectStatus("NOT_STARTED");
+              }
+            }}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择</option>
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </FormRow>
         <FormRow label="项目描述 *">
           <textarea
             name="description"
@@ -1407,7 +1484,7 @@ function ProjectCreateForm({
             onChange={(event) => setCreateProjectStatus(event.target.value as ProjectStatus)}
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
-            {editableProjectStatuses.map((option) => (
+            {createStatusOptions.map((option) => (
               <option key={option} value={option}>{projectTitleByStatus[option]}</option>
             ))}
           </select>
@@ -1453,6 +1530,17 @@ function ProjectCreateForm({
       </StickyFormFooter>
     </form>
   );
+}
+
+function formatDateOnlyLabel(value: Date | string | null | undefined) {
+  if (!value) return "—";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 function formatTrackedAtLabel(value: Date | string | null | undefined) {
@@ -1654,6 +1742,335 @@ function ProductGoalCreateForm({
   );
 }
 
+function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props["data"]; defaultProjectId?: string; onClose: () => void }) {
+  const router = useRouter();
+  const launchedProjectMap = useMemo(
+    () => new Map(data.launchedProjectOptions.map((project) => [project.id, project])),
+    [data.launchedProjectOptions]
+  );
+  const projectPickerOptions = useMemo(
+    () => data.launchedProjectOptions.map((project) => ({ id: project.id, label: project.title })),
+    [data.launchedProjectOptions]
+  );
+  const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId ?? data.launchedProjectOptions[0]?.id ?? "");
+  const selectedProject = selectedProjectId ? launchedProjectMap.get(selectedProjectId) ?? null : null;
+  const [errorMessage, setErrorMessage] = useState("");
+  const [trackingSequence, setTrackingSequence] = useState<string>("");
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // 默认跟踪周期：无记录默认第 1 次，已有记录默认剩余的周期
+  useEffect(() => {
+    const project = selectedProjectId ? launchedProjectMap.get(selectedProjectId) ?? null : null;
+    const taken = project?.existingTrackingSequences ?? [];
+    const remaining = ([1, 2] as const).find((sequence) => !taken.includes(sequence));
+    setTrackingSequence(remaining ? String(remaining) : "");
+  }, [selectedProjectId, launchedProjectMap]);
+
+  const handleSubmit = async () => {
+    const form = formRef.current;
+    if (!form || !form.reportValidity()) return;
+    const formData = new FormData(form);
+    try {
+      setErrorMessage("");
+      await runServerAction(() => createValueTrack(formData));
+      router.refresh();
+      onClose();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "新增价值跟踪失败");
+    }
+  };
+
+  return (
+    <form ref={formRef} className={stickyDialogFormClassName}>
+      <StickyFormScroll>
+        <FormRow label="项目 *" align="center">
+          <ProjectPicker
+            name="projectId"
+            options={projectPickerOptions}
+            defaultValue={selectedProjectId}
+            onChange={setSelectedProjectId}
+          />
+        </FormRow>
+        <FormRow label="项目上线时间" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.launchedAt)}</div>
+        </FormRow>
+        <FormRow label="跟踪周期 *" align="center">
+          <select
+            name="trackingSequence"
+            required
+            value={trackingSequence}
+            onChange={(event) => setTrackingSequence(event.target.value)}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+
+            {selectedProject?.launchedAt ? ([1, 2] as const).map((sequence) => {
+              const dates = getValueTrackingTaskDates(new Date(selectedProject.launchedAt!), sequence);
+              const taken = selectedProject.existingTrackingSequences.includes(sequence);
+              return (
+                <option key={sequence} value={sequence} disabled={taken}>
+                  第 {sequence} 次跟踪（{formatDateOnlyLabel(dates.periodStartAt)} ~ {formatDateOnlyLabel(dates.checkpointAt)}）{taken ? "（已有记录）" : ""}
+                </option>
+              );
+            }) : null}
+          </select>
+        </FormRow>
+        <FormRow label="预期收益">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? "-"}</div>
+        </FormRow>
+        <FormRow label="工作量(首版/迭代/合计)" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+            {selectedProject
+              ? `${formatWorkload(selectedProject.firstVersionWorkloadPersonDay)} / ${formatWorkload(selectedProject.postLaunchIterationWorkloadPersonDay)} / ${formatWorkload(selectedProject.workloadPersonDay)} 人天`
+              : "-"}
+            <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计</span>
+          </div>
+        </FormRow>
+        <FormRow label="其他成本">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.otherCost ?? "-"}</div>
+        </FormRow>
+        <FormRow label="实际收益 *">
+          <div className="space-y-2">
+            <textarea
+              name="actualValue"
+              rows={2}
+              required
+              defaultValue={selectedProject?.actualValue ?? ""}
+              placeholder="请输入实际收益"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            />
+            <div className="text-xs text-muted-foreground">本次修改会覆盖上次保存的内容</div>
+          </div>
+        </FormRow>
+        <FormRow label="跟踪结果描述">
+          <textarea
+            name="trackingResult"
+            rows={3}
+            placeholder="请输入跟踪结果描述"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        <FormRow label="价值判断 *" align="center">
+          <select
+            name="valueJudgement"
+            required
+            defaultValue={isValueJudgement(selectedProject?.valueJudgement) ? selectedProject.valueJudgement : ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择价值判断</option>
+            {VALUE_JUDGEMENTS.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </FormRow>
+        <FormRow label="后续优化">
+          <textarea
+            name="followUpOptimization"
+            rows={3}
+            placeholder="请输入后续优化"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+      </StickyFormScroll>
+      <StickyFormFooter>
+        {errorMessage ? (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" className="rounded-lg" onClick={() => void handleSubmit()}>
+            <Plus className="h-4 w-4" />
+            创建
+          </Button>
+        </div>
+      </StickyFormFooter>
+    </form>
+  );
+}
+
+const VALUE_TRACK_TASK_STATE_LABELS: Record<string, string> = {
+  COMPLETED: "已完成",
+  NOT_DUE: "未到期",
+  PENDING: "待处理",
+  OVERDUE: "逾期",
+};
+
+const VALUE_TRACK_TASK_STATE_CLASS: Record<string, string> = {
+  COMPLETED: "bg-[#E8FFEA] text-[#00B42A]",
+  NOT_DUE: "bg-[#F5F5F5] text-[#777777]",
+  PENDING: "bg-[#E8F2FF] text-[#3069F9]",
+  OVERDUE: "bg-[#FFECE8] text-[#F53F3F]",
+};
+
+function formatWorkload(value: number | null | undefined) {
+  // 人天展示最多 1 位小数，避免 Float 长尾
+  if (value === null || value === undefined) return "-";
+  return String(Math.round(value * 10) / 10);
+}
+
+function formatCompletionPercent(value: number | null | undefined) {
+  // 工作量数据为空（无开发需求/缺工作量/总量为 0）时，完成度直接显示「-」
+  if (value === null || value === undefined) return "-";
+  return `${value.toFixed(1)}%`;
+}
+
+/**
+ * 价值跟踪任务填报表单（任务制）。
+ * 跟踪任务在项目上线时预生成（第 1、第 2 两次检查），本表单只填报既有任务：
+ * 指标快照由服务端计算，前端只读；第 2 次检查支持「完成跟踪」最终确认并冻结指标。
+ */
+function ValueTrackSubmitForm({
+  track,
+  project,
+  onClose,
+}: {
+  track: Props["data"]["valueTrackItems"][number];
+  project: ProjectWorkspaceItem | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const sequence = track.trackingSequence;
+  const frozen = track.isFinal;
+  const notDue = track.taskState === "NOT_DUE";
+  const canSave = !frozen;
+  const summary = project?.valueTrackSummary ?? null;
+
+  const firstWorkload = summary?.firstVersionWorkloadPersonDay ?? track.firstVersionWorkloadPersonDay;
+  const iterationWorkload = summary?.postLaunchIterationWorkloadPersonDay ?? track.postLaunchIterationWorkloadPersonDay;
+  const totalWorkload = summary?.totalWorkloadPersonDay ?? track.totalWorkloadPersonDay;
+  const completionPercent = summary?.firstVersionCompletionPercent ?? track.firstVersionCompletionPercent;
+
+  const handleSubmit = async () => {
+    const form = formRef.current;
+    if (!form || !form.reportValidity()) return;
+    const formData = new FormData(form);
+    try {
+      setErrorMessage("");
+      await runServerAction(() => submitValueTrack(formData));
+      router.refresh();
+      onClose();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "保存价值跟踪失败");
+    }
+  };
+
+  return (
+    <form ref={formRef} className={stickyDialogFormClassName}>
+      <input type="hidden" name="trackId" value={track.id} />
+      <StickyFormScroll>
+        <FormRow label="项目" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{track.projectTitle}</div>
+        </FormRow>
+        <FormRow label="首版上线时间" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(project?.launchedAt)}</div>
+        </FormRow>
+        <FormRow label="跟踪任务" align="center">
+          <div className="flex min-h-[24px] w-full items-center gap-2 px-1 py-2 text-sm text-foreground">
+            <span>{sequence ? `第 ${sequence} 次跟踪` : "手动快照"}</span>
+            <span className={`rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
+              {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
+            </span>
+          </div>
+        </FormRow>
+        <FormRow label="跟踪周期 / 截止" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+            {formatDateTimeLabel(track.periodStartAt)} ~ {formatDateTimeLabel(track.checkpointAt)} / {formatDateTimeLabel(track.deadlineAt)}
+          </div>
+        </FormRow>
+        <FormRow label="工作量(首版/迭代/合计)" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+            {formatWorkload(firstWorkload)} / {formatWorkload(iterationWorkload)} / {formatWorkload(totalWorkload)} 人天
+            <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计</span>
+          </div>
+        </FormRow>
+        <FormRow label="首版完成度" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+            {formatCompletionPercent(completionPercent)}
+          </div>
+        </FormRow>
+        <FormRow label="预期收益">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{project?.expectedOutcome ?? "-"}</div>
+        </FormRow>
+        <FormRow label="实际收益 *">
+          <textarea
+            name="actualValue"
+            rows={2}
+            required
+            defaultValue={track.actualValue ?? ""}
+            placeholder="请输入实际收益"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        <FormRow label="价值判断 *" align="center">
+          <select
+            name="valueJudgement"
+            required
+            defaultValue={isValueJudgement(track.valueJudgement) ? track.valueJudgement : ""}
+            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="" disabled>请选择价值判断</option>
+            {VALUE_JUDGEMENTS.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </FormRow>
+        <FormRow label="跟踪结果描述">
+          <textarea
+            name="trackingResult"
+            rows={3}
+            defaultValue={track.trackingResult ?? ""}
+            placeholder="请输入跟踪结果描述"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        <FormRow label="后续优化">
+          <textarea
+            name="followUpOptimization"
+            rows={3}
+            defaultValue={track.followUpOptimization ?? ""}
+            placeholder="请输入后续优化"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </FormRow>
+        {frozen ? (
+          <div className="rounded-lg border border-[#E8F2FF] bg-[#F5F9FF] px-4 py-3 text-sm text-[#3069F9]">
+            该任务已完成最终确认，指标已冻结，仅可查看。
+          </div>
+        ) : null}
+        {notDue ? (
+          <div className="rounded-lg border border-[#E8F2FF] bg-[#F5F9FF] px-4 py-3 text-sm text-[#3069F9]">
+            提醒：该跟踪周期的截止填报检查点为 {formatDateTimeLabel(track.checkpointAt)}，当前尚未到期，可提前填报。
+          </div>
+        ) : null}
+        {track.taskState === "OVERDUE" ? (
+          <div className="rounded-lg border border-[#FFECE8] bg-[#FFF9F5] px-4 py-3 text-sm text-[#F53F3F]">
+            提醒：该跟踪任务已于 {formatDateTimeLabel(track.deadlineAt)} 截止，当前已逾期，请尽快填报。
+          </div>
+        ) : null}
+      </StickyFormScroll>
+      <StickyFormFooter>
+        {errorMessage ? (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          {canSave ? (
+            <Button type="button" className="rounded-lg" onClick={() => void handleSubmit()}>
+              <Check className="h-4 w-4" />
+              保存
+            </Button>
+          ) : null}
+        </div>
+      </StickyFormFooter>
+    </form>
+  );
+}
+
 function ValueTrackStatusFields({
   defaultStatus,
   defaultJudgement,
@@ -1662,7 +2079,7 @@ function ValueTrackStatusFields({
   defaultJudgement?: string | null;
 }) {
   const [status, setStatus] = useState(defaultStatus || VALUE_TRACK_STATUS_OBSERVING);
-  const showJudgement = status !== VALUE_TRACK_STATUS_NOT_OBSERVED;
+  const showJudgement = status !== VALUE_TRACK_STATUS_PENDING_OBSERVATION;
 
   return (
     <>
@@ -1697,101 +2114,11 @@ function ValueTrackStatusFields({
   );
 }
 
-function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props["data"]; defaultProjectId?: string; onClose: () => void }) {
-  const router = useRouter();
-  const launchedProjectMap = useMemo(
-    () => new Map(data.launchedProjectOptions.map((project) => [project.id, project])),
-    [data.launchedProjectOptions]
-  );
-  const projectPickerOptions = useMemo(
-    () => data.launchedProjectOptions.map((project) => ({ id: project.id, label: project.title })),
-    [data.launchedProjectOptions]
-  );
-  const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId ?? data.launchedProjectOptions[0]?.id ?? "");
-  const selectedProject = selectedProjectId ? launchedProjectMap.get(selectedProjectId) ?? null : null;
-
-  return (
-    <form
-      className={stickyDialogFormClassName}
-      action={async (fd: FormData) => {
-      await runServerAction(() => createValueTrack(fd));
-      router.refresh();
-      onClose();
-    }}>
-      <StickyFormScroll>
-        <FormRow label="项目 *" align="center">
-          <ProjectPicker
-            name="projectId"
-            options={projectPickerOptions}
-            defaultValue={selectedProjectId}
-            onChange={setSelectedProjectId}
-          />
-        </FormRow>
-        <FormRow label="项目上线时间" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.launchedAt)}</div>
-        </FormRow>
-        <FormRow label="预期收益">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? "-"}</div>
-        </FormRow>
-        <FormRow label="工作量(人天)" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{selectedProject?.workloadPersonDay ?? "-"}</div>
-        </FormRow>
-        <FormRow label="其他成本">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.otherCost ?? "-"}</div>
-        </FormRow>
-        <FormRow label="实际收益">
-          <div className="space-y-2">
-            <textarea
-              name="actualValue"
-              rows={2}
-              defaultValue={selectedProject?.actualValue ?? ""}
-              placeholder="请输入实际收益"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-            />
-            <div className="text-xs text-muted-foreground">本次修改会覆盖上次保存的内容</div>
-          </div>
-        </FormRow>
-        <FormRow label="跟踪结果描述 *">
-          <textarea
-            name="trackingResult"
-            required
-            rows={3}
-            placeholder="请输入跟踪结果描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-          />
-        </FormRow>
-        <ValueTrackStatusFields
-          key={selectedProjectId}
-          defaultStatus={selectedProject?.valueTrackStatus === VALUE_TRACK_STATUS_COMPLETED ? VALUE_TRACK_STATUS_COMPLETED : VALUE_TRACK_STATUS_OBSERVING}
-          defaultJudgement={selectedProject?.valueJudgement}
-        />
-        <FormRow label="后续优化">
-          <textarea
-            name="followUpOptimization"
-            rows={3}
-            placeholder="请输入后续优化"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-          />
-        </FormRow>
-      </StickyFormScroll>
-      <StickyFormFooter>
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-          <Button type="submit" className="rounded-lg">
-            <Plus className="h-4 w-4" />
-            创建
-          </Button>
-        </div>
-      </StickyFormFooter>
-    </form>
-  );
-}
-
 function ValueOverviewEditForm({
   item,
   onClose,
 }: {
-  item: Props["data"]["valueOverviewItems"][number];
+  item: NonNullable<ValueOverviewDialogState>;
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
@@ -1824,17 +2151,20 @@ function ValueOverviewEditForm({
         <FormRow label="预期收益">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
         </FormRow>
-        <FormRow label="工作量(人天) *" align="center">
-          <input
-            name="workloadPersonDay"
-            type="number"
-            step="0.1"
-            min="0"
-            required
-            defaultValue={item.workloadPersonDay ?? ""}
-            placeholder="请输入工作量(人天)"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          />
+        <FormRow label="首版工作量(人天)" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.firstVersionWorkloadPersonDay ?? "—"}</div>
+        </FormRow>
+        <FormRow label="迭代工作量(人天)" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.postLaunchIterationWorkloadPersonDay ?? "—"}</div>
+        </FormRow>
+        <FormRow label="总工作量(人天)" align="center">
+          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.workloadPersonDay ?? "—"}</div>
+        </FormRow>
+        <FormRow label="首版完成度" align="center">
+          <div className="flex min-h-[24px] w-full items-center px-1 py-2 text-sm text-foreground">
+            {formatCompletionPercent(item.firstVersionCompletionPercent)}
+            <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计，不可手工编辑</span>
+          </div>
         </FormRow>
         <FormRow label="其他成本">
           <textarea
@@ -1858,81 +2188,6 @@ function ValueOverviewEditForm({
           defaultStatus={item.valueTrackStatus}
           defaultJudgement={item.valueJudgement}
         />
-      </StickyFormScroll>
-      <StickyFormFooter>
-        {errorMessage ? (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {errorMessage}
-          </div>
-        ) : null}
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
-          <Button type="submit" className="rounded-lg">
-            <Pencil className="h-4 w-4" />
-            保存
-          </Button>
-        </div>
-      </StickyFormFooter>
-    </form>
-  );
-}
-
-function ValueTrackEditForm({ item, onClose }: { item: Props["data"]["valueTrackItems"][number]; onClose: () => void }) {
-  const router = useRouter();
-  const [errorMessage, setErrorMessage] = useState("");
-
-  return (
-    <form
-      className={stickyDialogFormClassName}
-      onSubmit={async (event) => {
-      event.preventDefault();
-      const formData = new FormData(event.currentTarget);
-      try {
-        setErrorMessage("");
-        await runServerAction(() => updateValueTrack(formData));
-        router.refresh();
-        onClose();
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "保存价值跟踪失败");
-      }
-    }}>
-      <input type="hidden" name="trackId" value={item.id} />
-      <StickyFormScroll>
-        <FormRow label="项目" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.projectTitle}</div>
-        </FormRow>
-        <FormRow label="实际收益">
-          <textarea
-            name="actualValue"
-            rows={2}
-            defaultValue={item.actualValue ?? ""}
-            placeholder="请输入实际收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-          />
-        </FormRow>
-        <ValueTrackStatusFields
-          defaultStatus={item.valueTrackStatus}
-          defaultJudgement={item.valueJudgement}
-        />
-        <FormRow label="跟踪结果描述 *">
-          <textarea
-            name="trackingResult"
-            required
-            rows={3}
-            defaultValue={item.trackingResult}
-            placeholder="请输入跟踪结果描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-          />
-        </FormRow>
-        <FormRow label="后续优化">
-          <textarea
-            name="followUpOptimization"
-            rows={3}
-            defaultValue={item.followUpOptimization ?? ""}
-            placeholder="请输入后续优化"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-          />
-        </FormRow>
       </StickyFormScroll>
       <StickyFormFooter>
         {errorMessage ? (
@@ -2450,35 +2705,64 @@ function ProjectValueTrackCard({
   onDelete: () => void;
 }) {
   const followUp = formatValueTrackFollowUp(track.followUpOptimization);
+  // 未最终冻结的记录都可删除（含预生成任务，删除限制已放开）
+  const deletable = !track.isFinal;
+  const editable = canEdit && !track.isFinal;
 
   return (
     <div className="flex flex-col gap-2 rounded-xl bg-[#FAFAFA] p-4">
       <div className="flex h-[22px] items-center gap-2">
         <div className="min-w-0 flex-1 text-sm font-medium leading-[22px] text-[#181818]">{track.periodLabel}</div>
-        {canEdit ? (
+        {track.taskState !== "COMPLETED" ? (
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
+            {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
+          </span>
+        ) : null}
+        {editable ? (
           <div className="flex h-[22px] shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={onEdit}
               className="group flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[3.5px] bg-white hover:bg-[#E8F2FF]"
-              aria-label={`编辑${track.periodLabel}跟踪过程`}
+              aria-label={`填报${track.periodLabel}`}
             >
               <img src="/icons/edit-outlined.png" alt="" width={14} height={14} className="h-3.5 w-3.5 group-hover:hidden" />
               <img src="/icons/edit-outlined-blue.png" alt="" width={14} height={14} className="hidden h-3.5 w-3.5 group-hover:block" />
             </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[3.5px] bg-white hover:bg-[#FFECE8]"
-              aria-label={`删除${track.periodLabel}跟踪过程`}
-            >
-              <img src="/icons/delete-outlined.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
-            </button>
+            {deletable ? (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[3.5px] bg-white hover:bg-[#FFECE8]"
+                aria-label={`删除${track.periodLabel}跟踪过程`}
+              >
+                <img src="/icons/delete-outlined.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
+      {track.checkpointAt ? (
+        <div className="text-xs leading-[18px] text-[#999999]">
+          跟踪周期 {formatDateOnlyLabel(track.periodStartAt)} ~ {formatDateOnlyLabel(track.checkpointAt)} · 截止 {formatDateOnlyLabel(track.deadlineAt)}
+          {track.completedAt ? ` · 填报于 ${formatTrackedAtLabel(track.completedAt)}` : ""}
+        </div>
+      ) : null}
+      {track.firstVersionCompletionPercent !== null && track.firstVersionCompletionPercent !== undefined ? (
+        <div className="text-xs leading-[18px] text-[#999999]">
+          首版完成度 {formatCompletionPercent(track.firstVersionCompletionPercent)}
+
+          {track.totalWorkloadPersonDay !== null && track.totalWorkloadPersonDay !== undefined
+            ? ` · 首版 ${formatWorkload(track.firstVersionWorkloadPersonDay)} / 迭代 ${formatWorkload(track.postLaunchIterationWorkloadPersonDay)} / 共 ${formatWorkload(track.totalWorkloadPersonDay)} 人天`
+            : ""}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-2">
-        <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777]">{track.trackingResult}</p>
+        {track.trackingResult ? (
+          <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777]">{track.trackingResult}</p>
+        ) : (
+          <p className="text-sm leading-[22px] text-[#BBBBBB]">待填写跟踪结果</p>
+        )}
         {followUp ? (
           <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777]">{followUp}</p>
         ) : null}
@@ -2523,6 +2807,41 @@ function measureFilterMenuWidth(labels: string[], minWidth: number) {
 const CREATE_MENU_OFFSET_X = -16;
 const CREATE_MENU_OFFSET_Y = 4;
 
+function RequirementBreakdownList({
+  title,
+  items,
+}: {
+  title: string;
+  items: ProjectWorkspaceItem["valueTrackSummary"]["firstVersionRequirements"];
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="text-xs font-medium leading-[18px] text-[#3D3D3D]">{title}（{items.length}）</div>
+      <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {items.map((item) => (
+          <div key={item.id} className="flex items-center gap-2 rounded-lg bg-[#F5F6F8] px-2 py-1.5 text-xs leading-[18px]">
+            <span className="min-w-0 flex-1 truncate text-[#3D3D3D]" title={item.title}>{item.title}</span>
+            <span className="shrink-0 text-[#999999]">{item.completedAt ? formatTrackedAtLabel(item.completedAt) : "未完成"}</span>
+            {item.trackingPeriodLabel ? <span className="shrink-0 text-[#999999]">{item.trackingPeriodLabel}</span> : null}
+            <span className="shrink-0 text-[#999999]">{item.needsDevelopment ? "需开发" : "无需开发"}</span>
+            <span className="shrink-0 text-[#3D3D3D]">{item.workloadPersonDay ?? "缺"} 人天</span>
+            <span className={`shrink-0 rounded px-1 py-0.5 ${
+              item.status === "COMPLETED" ? "bg-[#E8FFEA] text-[#00B42A]"
+                : item.status === "IN_PROGRESS" ? "bg-[#E8F2FF] text-[#3069F9]"
+                  : item.status === "CLOSED" ? "bg-[#FFECE8] text-[#F53F3F]"
+                    : item.status === "DELAYED_COMPLETED" ? "bg-[#FFF7E8] text-[#FF7D00]"
+                      : "bg-[#F5F5F5] text-[#777777]"
+            }`}>
+              {columnTitleByStatus[item.status]}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProjectValuePanel({
   project,
   canCreateValueTrack,
@@ -2541,6 +2860,7 @@ function ProjectValuePanel({
   onEditValueOverview?: () => void;
 }) {
   const judgementTone = valueJudgementTone(project.valueTrackSummary.judgement);
+  const summary = project.valueTrackSummary;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -2548,9 +2868,15 @@ function ProjectValuePanel({
         <div className="flex h-[22px] items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="text-sm font-normal leading-[22px] text-[#3D3D3D]">跟踪状态</span>
-            <span className={`text-sm font-medium leading-[22px] ${valueTrackStatusClass(project.valueTrackSummary.status)}`}>
-              {project.valueTrackSummary.status}
+            <span className={`text-sm font-medium leading-[22px] ${valueTrackStatusClass(summary.status)}`}>
+              {summary.status}
             </span>
+            {summary.overdue ? (
+              <span className="rounded bg-[#FFECE8] px-1.5 py-0.5 text-xs text-[#F53F3F]">逾期待完成</span>
+            ) : null}
+            {summary.currentSequence ? (
+              <span className="text-xs leading-[18px] text-[#999999]">当前：第 {summary.currentSequence} 次检查</span>
+            ) : null}
           </div>
           {onEditValueOverview && canManageProjectAndValueTracking ? (
             <button
@@ -2568,13 +2894,29 @@ function ProjectValuePanel({
           <div className={`flex h-[85px] flex-col gap-1 rounded-lg px-2 py-2 ${judgementTone.box}`}>
             <div className="text-xs leading-[18px] text-[#3D3D3D]">价值判断</div>
             <div className={`text-sm font-medium leading-[22px] ${judgementTone.text}`}>
-              {valueJudgementLabel(project.valueTrackSummary.judgement)}
+              {valueJudgementLabel(summary.judgement)}
             </div>
           </div>
           <div className="flex h-[85px] flex-col gap-1 rounded-lg bg-[#F5F6F8] px-2 py-2">
             <div className="text-xs leading-[18px] text-[#3D3D3D]">实际收益</div>
             <div className="line-clamp-2 text-sm font-medium leading-[22px] text-[#3D3D3D]">
-              {emptyMetricText(project.valueTrackSummary.actualValue)}
+              {emptyMetricText(summary.actualValue)}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex h-[85px] flex-col gap-1 rounded-lg bg-[#F5F6F8] px-2 py-2">
+            <div className="text-xs leading-[18px] text-[#3D3D3D]">
+              首版完成度
+            </div>
+            <div className="text-sm font-medium leading-[22px] text-[#3D3D3D]">
+              {formatCompletionPercent(summary.firstVersionCompletionPercent)}
+            </div>
+          </div>
+          <div className="flex h-[85px] flex-col gap-1 rounded-lg bg-[#F5F6F8] px-2 py-2">
+            <div className="text-xs leading-[18px] text-[#3D3D3D]">工作量（首版 / 迭代 / 合计）</div>
+            <div className="text-sm font-medium leading-[22px] text-[#3D3D3D]">
+              {formatWorkload(summary.firstVersionWorkloadPersonDay)} / {formatWorkload(summary.postLaunchIterationWorkloadPersonDay)} / {formatWorkload(summary.totalWorkloadPersonDay)}
             </div>
           </div>
         </div>
@@ -2585,10 +2927,10 @@ function ProjectValuePanel({
           <span className="shrink-0 text-sm leading-[22px] text-[#3D3D3D]">跟踪过程</span>
           <span className="h-px min-w-0 flex-1 bg-[#F0F0F0]" />
         </div>
-        {project.valueTracks.length ? (
-          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex flex-col gap-4 pb-4">
-              {project.valueTracks.map((track) => (
+        <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex flex-col gap-4 pb-4">
+            {project.valueTracks.length ? (
+              project.valueTracks.map((track) => (
                 <ProjectValueTrackCard
                   key={track.id}
                   track={track}
@@ -2596,18 +2938,28 @@ function ProjectValuePanel({
                   onEdit={() => onEditValueTrack(track)}
                   onDelete={() => onDeleteValueTrack(track)}
                 />
-              ))}
-            </div>
+              ))
+            ) : (
+              <EmptyProjectSection
+                title="暂无跟踪过程"
+                description="项目上线后将自动生成第 1、第 2 两次检查任务。"
+                buttonLabel="去填报"
+                canCreate={canCreateValueTrack && Boolean(project.launchedAt) && project.valueTrackSummary.trackCount < 2}
+                onCreate={onCreateValueTrack}
+              />
+            )}
+            {summary.firstVersionRequirements.length + summary.postLaunchRequirements.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex h-[22px] shrink-0 items-center gap-2">
+                  <span className="shrink-0 text-sm leading-[22px] text-[#3D3D3D]">需求构成</span>
+                  <span className="h-px min-w-0 flex-1 bg-[#F0F0F0]" />
+                </div>
+                <RequirementBreakdownList title="首版需求" items={summary.firstVersionRequirements} />
+                <RequirementBreakdownList title="上线后迭代需求" items={summary.postLaunchRequirements} />
+              </div>
+            ) : null}
           </div>
-        ) : (
-          <EmptyProjectSection
-            title="暂无跟踪过程"
-            description="需求上线后，记得要记录跟踪过程！"
-            buttonLabel="去创建"
-            canCreate={canCreateValueTrack}
-            onCreate={onCreateValueTrack}
-          />
-        )}
+        </div>
       </div>
     </div>
   );
@@ -2636,7 +2988,7 @@ function ValueHomeCard({
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1 truncate text-base font-medium leading-6 text-[#181818]">{project.title}</div>
           <div className="flex h-6 shrink-0 items-center gap-2">
-            {canCreateValueTrack ? (
+            {canCreateValueTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
               <button
                 type="button"
                 aria-label={`为${project.title}新增价值跟踪`}
@@ -2681,6 +3033,7 @@ function ProjectCreateMenu({
   onCreateValueTrack,
 }: {
   canCreateTask: boolean;
+  /** 仅已上线项目可手动新增价值跟踪（未上线的开发项目上线后自动生成） */
   canCreateValueTrack: boolean;
   onCreateTask: () => void;
   onCreateValueTrack: () => void;
@@ -2846,7 +3199,7 @@ function ProjectCard({
               <div className="relative flex h-6 shrink-0 items-center gap-2">
                 <ProjectCreateMenu
                   canCreateTask={canCreateTask}
-                  canCreateValueTrack={canCreateValueTrack}
+                  canCreateValueTrack={canCreateValueTrack && Boolean(project.launchedAt) && project.valueTrackSummary.trackCount < 2}
                   onCreateTask={onCreateTask}
                   onCreateValueTrack={onCreateValueTrack}
                 />
@@ -2996,6 +3349,9 @@ function ProjectTreeCollapse({
 }) {
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(open);
+  // 展开动画期间需要 overflow-hidden 裁剪；动画结束后放开，
+  // 否则内部 sticky 列（左固定名称列/右固定操作列）会失效
+  const [settled, setSettled] = useState(open);
 
   useEffect(() => {
     if (open) {
@@ -3004,12 +3360,15 @@ function ProjectTreeCollapse({
       const frame = window.requestAnimationFrame(() => {
         innerFrame = window.requestAnimationFrame(() => setVisible(true));
       });
+      const settleTimeout = window.setTimeout(() => setSettled(true), PROJECT_TREE_COLLAPSE_MS);
       return () => {
         window.cancelAnimationFrame(frame);
         window.cancelAnimationFrame(innerFrame);
+        window.clearTimeout(settleTimeout);
       };
     }
 
+    setSettled(false);
     setVisible(false);
     const timeout = window.setTimeout(() => setMounted(false), PROJECT_TREE_COLLAPSE_MS);
     return () => window.clearTimeout(timeout);
@@ -3022,7 +3381,7 @@ function ProjectTreeCollapse({
       className="grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
       style={{ gridTemplateRows: visible ? "1fr" : "0fr" }}
     >
-      <div className={`min-h-0 overflow-hidden transition-opacity duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${visible ? "opacity-100" : "opacity-0"}`}>{children}</div>
+      <div className={`min-h-0 transition-opacity duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${settled ? "" : "overflow-hidden"} ${visible ? "opacity-100" : "opacity-0"}`}>{children}</div>
     </div>
   );
 }
@@ -3246,12 +3605,24 @@ function ProjectExpandedPanel({
               <span className={`text-sm font-medium leading-[22px] ${valueTrackStatusClass(project.valueTrackSummary.status)}`}>
                 {project.valueTrackSummary.status}
               </span>
+              {project.valueTrackSummary.overdue ? (
+                <span className="rounded bg-[#FFECE8] px-1.5 py-0.5 text-xs text-[#F53F3F]">逾期待完成</span>
+              ) : null}
             </div>
             <div className="flex items-center gap-4">
               <div className={`flex h-[38px] w-[140px] shrink-0 items-center gap-2 rounded-lg px-2 ${judgementTone.box}`}>
                 <span className="shrink-0 text-xs leading-[18px] text-[#3D3D3D]">价值判断</span>
                 <span className={`truncate text-sm font-medium leading-[22px] ${judgementTone.text}`}>
                   {valueJudgementLabel(project.valueTrackSummary.judgement)}
+                </span>
+              </div>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-xs leading-[18px] text-[#3D3D3D]">首版完成度</span>
+                <span className="truncate text-sm font-medium leading-[22px] text-[#3D3D3D]">
+                  {formatCompletionPercent(project.valueTrackSummary.firstVersionCompletionPercent)}
+                  {project.valueTrackSummary.firstVersionCompletionPercent !== null
+                    ? ""
+                    : ""}
                 </span>
               </div>
               <div className="flex min-w-0 items-center gap-2">
@@ -3272,14 +3643,14 @@ function ProjectExpandedPanel({
                 <ProjectTreeChildRow
                   key={track.id}
                   title={track.periodLabel}
-                  description={track.trackingResult}
+                  description={track.trackingResult ?? "待填写跟踪结果"}
                   extraDescription={formatValueTrackFollowUp(track.followUpOptimization)}
                   descriptionClassName="mt-1 text-sm leading-[22px] text-[#777777]"
-                  statusLabel={track.valueTrackStatus}
-                  statusClassName={valueTrackListStatusTagClass(track.valueTrackStatus)}
+                  statusLabel={track.taskState === "COMPLETED" ? "" : (VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState)}
+                  statusClassName={VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}
                   owner={track.owner || project.owner}
-                  period={shortQuarterFromPeriodLabel(track.periodLabel)}
-                  canEdit={canManageProjectAndValueTracking}
+                  period={track.checkpointAt ? `跟踪周期 ${formatDateOnlyLabel(track.periodStartAt)} ~ ${formatDateOnlyLabel(track.checkpointAt)}` : shortQuarterFromPeriodLabel(track.periodLabel)}
+                  canEdit={canManageProjectAndValueTracking && !track.isFinal}
                   onEdit={() => onEditValueTrack(track)}
                 />
               ))}
@@ -3288,9 +3659,9 @@ function ProjectExpandedPanel({
             <div className="py-6">
               <EmptyProjectSection
                 title="暂无跟踪过程"
-                description="需求上线后，记得要记录跟踪过程！"
-                buttonLabel="去创建"
-                canCreate={canCreateValueTrack}
+                description="项目上线后将自动生成第 1、第 2 两次检查任务。"
+                buttonLabel="去填报"
+                canCreate={canCreateValueTrack && Boolean(project.launchedAt) && project.valueTrackSummary.trackCount < 2}
                 onCreate={onCreateValueTrack}
               />
             </div>
@@ -3936,16 +4307,21 @@ function ValueListTable({
   canCreateTrack,
   onEdit,
   onCreateTrack,
+  onEditTrack,
+  onDeleteTrack,
 }: {
   projects: ProjectWorkspaceItem[];
   canManage: boolean;
   canCreateTrack: boolean;
   onEdit: (project: ProjectWorkspaceItem) => void;
   onCreateTrack: (project: ProjectWorkspaceItem) => void;
+  onEditTrack: (track: ProjectWorkspaceValueTrackItem) => void;
+  onDeleteTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pingLeft, setPingLeft] = useState(false);
   const [pingRight, setPingRight] = useState(false);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -3970,8 +4346,8 @@ function ValueListTable({
       <div className={`${valueListRowClass} sticky top-0 z-20 h-11 min-w-[1360px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
         <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>项目名称</div>
         <div>负责人</div>
-        <div>工作量(人天)</div>
-        <div>其他成本</div>
+        <div>首版完成度</div>
+        <div className="flex flex-col whitespace-nowrap leading-[18px]"><span>开发工作量</span><span className="text-xs text-[#999999]">（首版/迭代/合计）</span></div>
         <div>预期收益</div>
         <div>实际收益</div>
         <div>跟踪状态</div>
@@ -3984,16 +4360,46 @@ function ValueListTable({
         {projects.map((project) => {
           const judgement = project.valueTrackSummary.judgement;
           const judgementClass = valueJudgementTagClass(judgement);
+          const summary = project.valueTrackSummary;
+          const expanded = expandedProjectId === project.id;
           return (
-            <div key={project.id} className={`${valueListRowClass} items-center border-b border-[#F2F3F5] bg-white py-3`}>
-              <div className={`break-words text-sm font-medium leading-[22px] text-[#181818] ${goalStickyNameClass} ${pingLeft ? goalStickyNameShadow : ""}`}>{project.title}</div>
+            <div key={project.id} className="border-b border-[#F2F3F5]">
+            <div className={`${valueListRowClass} items-center py-3 transition-colors duration-300 ${expanded ? "bg-[#F7FAFF]" : "bg-white"}`}>
+              <div className={`flex items-center gap-1 break-words text-sm font-medium leading-[22px] text-[#181818] ${goalStickyNameClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingLeft ? goalStickyNameShadow : ""}`}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedProjectId(expanded ? null : project.id)}
+                  className="flex h-4 w-4 shrink-0 items-center justify-center"
+                  aria-expanded={expanded}
+                  aria-label={expanded ? `收起${project.title}的跟踪快照` : `展开${project.title}的跟踪快照`}
+                >
+                  <img
+                    src={expanded ? "/icons/caret-down-blue.png" : "/icons/caret-down-gray.png"}
+                    alt=""
+                    width={16}
+                    height={16}
+                    className={`h-4 w-4 transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${expanded ? "rotate-0" : "-rotate-90"}`}
+                  />
+                </button>
+                <span className="min-w-0 break-words">{project.title}</span>
+              </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.owner}</div>
-              <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{project.workloadPersonDay ?? "-"}</div>
-              <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(project.otherCost)}</div>
+              <div className="text-sm leading-[22px] text-[#4B4B4B]">
+                {formatCompletionPercent(summary.firstVersionCompletionPercent)}
+
+              </div>
+              <div className="text-sm leading-[22px] text-[#4B4B4B]">
+                {summary.totalWorkloadPersonDay !== null
+                  ? `${formatWorkload(summary.firstVersionWorkloadPersonDay)}/${formatWorkload(summary.postLaunchIterationWorkloadPersonDay)}/${formatWorkload(summary.totalWorkloadPersonDay)}`
+                  : "-"}
+              </div>
               <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(project.expectedOutcome)}</div>
               <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(project.valueTrackSummary.actualValue)}</div>
-              <div>
+              <div className="flex flex-wrap items-center gap-1">
                 <ListStatusTag label={project.valueTrackSummary.status} className={valueTrackListStatusTagClass(project.valueTrackSummary.status)} />
+                {summary.overdue ? (
+                  <ListStatusTag label="逾期待完成" className="bg-[#FFECE8] text-[#F53F3F]" />
+                ) : null}
               </div>
               <div>
                 {judgementClass ? (
@@ -4006,8 +4412,8 @@ function ValueListTable({
                 <ListStatusTag label={projectTitleByStatus[project.status]} className={projectStatusTagClass[project.status]} />
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.launchedAt)}</div>
-              <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`}>
-                {canCreateTrack ? (
+              <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingRight ? goalStickyActionShadow : ""}`}>
+                {canCreateTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
                   <button
                     type="button"
                     onClick={() => onCreateTrack(project)}
@@ -4030,6 +4436,63 @@ function ValueListTable({
                   </button>
                 ) : null}
               </div>
+            </div>
+            <ProjectTreeCollapse open={expanded}>
+              <div className="bg-white">
+                {project.valueTracks.length ? (
+                  project.valueTracks.map((track) => (
+                    <div key={track.id} className={`${valueListRowClass} items-center border-b border-[#F0F0F0] py-2 text-sm last:border-0`}>
+                      <div className="sticky left-0 z-10 flex items-center gap-2 self-stretch bg-white pl-10">
+                        <span className="font-medium text-[#3D3D3D]">{track.periodLabel}</span>
+                        {track.taskState !== "COMPLETED" ? (
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
+                            {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div></div>
+                      <div className="text-[#4B4B4B]">{formatCompletionPercent(track.firstVersionCompletionPercent)}</div>
+                      <div className="text-[#4B4B4B]">
+                        {formatWorkload(track.firstVersionWorkloadPersonDay)}/{formatWorkload(track.postLaunchIterationWorkloadPersonDay)}/{formatWorkload(track.totalWorkloadPersonDay)}
+                      </div>
+                      <div></div>
+                      <div className="truncate text-[#4B4B4B]" title={track.actualValue ?? ""}>{track.actualValue ?? "-"}</div>
+                      <div></div>
+                      <div className="text-[#4B4B4B]">{track.valueJudgement ?? "-"}</div>
+                      <div></div>
+                      <div className="text-xs text-[#999999]" title="填报时间">{formatTrackedAtLabel(track.trackedAt)}</div>
+                      <div className="sticky right-0 z-10 flex items-center justify-end gap-3 self-stretch bg-white pr-4">
+                        {canManage ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => onEditTrack(track)}
+                              className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+                              aria-label={`编辑${track.periodLabel}`}
+                            >
+                              <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
+                              <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
+                            </button>
+                            {!track.isFinal ? (
+                              <button
+                                type="button"
+                                onClick={() => onDeleteTrack(track)}
+                                className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#FFECE8]"
+                                aria-label={`删除${track.periodLabel}`}
+                              >
+                                <img src="/icons/delete-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
+                              </button>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-3 pl-10 text-xs text-[#999999]">暂无跟踪快照，点击右侧「+」新增。</div>
+                )}
+              </div>
+            </ProjectTreeCollapse>
             </div>
           );
         })}
@@ -4367,7 +4830,7 @@ function QuarterlyWorkShell({
     const counts: Record<ValueStatusFilter, number> = {
       all: scoped.length,
       观测中: 0,
-      未观测: 0,
+      待观测: 0,
       已完成: 0,
     };
     for (const project of scoped) {
@@ -4907,15 +5370,17 @@ function QuarterlyWorkShell({
                   canCreateTrack={canCreateValueTrack}
                   onEdit={onEditValueOverview}
                   onCreateTrack={(project) => onCreateValueTrack(project.id)}
+                  onEditTrack={onEditValueTrack}
+                  onDeleteTrack={onDeleteValueTrack}
                 />
               )
             ) : (
               <div className="flex h-full min-h-0 flex-col rounded-2xl bg-white">
                 <EmptyProjectSection
                   title="暂无价值跟踪"
-                  description="调整筛选条件，或在项目上记录跟踪过程。"
-                  buttonLabel="新建价值跟踪"
-                  canCreate={canCreateValueTrack}
+                  description="调整筛选条件，或等项目上线后进入价值跟踪。"
+                  buttonLabel="填报价值跟踪"
+                  canCreate={canCreateValueTrack && Boolean(activeProjectId)}
                   onCreate={() => onCreateValueTrack(activeProjectId || undefined)}
                 />
               </div>
@@ -5153,8 +5618,9 @@ export function QuarterlyWorkContent({ data }: Props) {
     setTabSearchInput("");
     setTabSearchQuery("");
   };
-  const openValueTrackCreateDialog = (projectId: string) => {
-    setCreateValueTrackProjectId(projectId);
+  // 「新增价值跟踪」：为项目新增一条跟踪快照记录（填报预生成检查任务走各任务的填报入口）
+  const openValueTrackCreateDialog = (projectId?: string | null) => {
+    setCreateValueTrackProjectId(projectId ?? null);
     setCreateValueTrackDialog(true);
   };
   const focusValueTrackLogs = (projectTitle: string) => {
@@ -5316,10 +5782,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                   <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增需求</Button>
                 ) : null}
                 {canCreateValueTrack ? (
-                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => {
-                    setCreateValueTrackProjectId(null);
-                    setCreateValueTrackDialog(true);
-                  }}><Plus className="h-4 w-4" />新增价值跟踪</Button>
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => openValueTrackCreateDialog(null)}><Plus className="h-4 w-4" />新增价值跟踪</Button>
                 ) : null}
               </div>
             )}
@@ -6079,7 +6542,10 @@ export function QuarterlyWorkContent({ data }: Props) {
                               <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-sm">
                                 <button
                                   type="button"
-                                  onClick={() => setValueTrackDialog(item)}
+                                  onClick={() => setValueTrackDialog({
+                                    track: item,
+                                    project: null,
+                                  })}
                                   className="text-primary hover:underline"
                                   aria-label={`编辑${item.projectTitle}的价值跟踪`}
                                 >
@@ -6174,7 +6640,10 @@ export function QuarterlyWorkContent({ data }: Props) {
           onDeleteProject={(item) => setProjectDeleteDialog(item)}
           onEditTask={(item) => setEditDialog({ item, title: columnTitleByStatus[item.status] })}
           onDeleteTask={(item) => setBoardDeleteDialog(item)}
-          onEditValueTrack={(item) => setValueTrackDialog(item)}
+          onEditValueTrack={(item) => setValueTrackDialog({
+            track: item,
+            project: data.projectWorkspaceItems.find((row) => row.id === item.projectId) ?? null,
+          })}
           onDeleteValueTrack={(item) => setValueTrackDeleteDialog(item)}
           onEditValueOverview={(item) => {
             const overview = data.valueOverviewItems.find((row) => row.id === item.id);
@@ -6189,7 +6658,7 @@ export function QuarterlyWorkContent({ data }: Props) {
               owner: item.owner,
               departmentOrgNodeId: item.departmentOrgNodeId,
               teamOrgNodeId: item.teamOrgNodeId,
-              workloadPersonDay: item.workloadPersonDay,
+              workloadPersonDay: item.valueTrackSummary.totalWorkloadPersonDay ?? item.workloadPersonDay,
               otherCost: item.otherCost,
               expectedOutcome: item.expectedOutcome,
               actualValue: item.actualValue,
@@ -6197,6 +6666,14 @@ export function QuarterlyWorkContent({ data }: Props) {
               valueTrackStatus: item.valueTrackStatus,
               status: item.status,
               launchedAt: item.launchedAt,
+              firstVersionWorkloadPersonDay: item.valueTrackSummary.firstVersionWorkloadPersonDay,
+              postLaunchIterationWorkloadPersonDay: item.valueTrackSummary.postLaunchIterationWorkloadPersonDay,
+              firstVersionCompletionPercent: item.valueTrackSummary.firstVersionCompletionPercent,
+              completionIsFinal: item.valueTrackSummary.completionIsFinal,
+              includedRequirementCount: item.valueTrackSummary.includedRequirementCount,
+              missingWorkloadRequirementCount: item.valueTrackSummary.missingWorkloadRequirementCount,
+              valueTrackOverdue: item.valueTrackSummary.overdue,
+              currentTrackingSequence: item.valueTrackSummary.currentSequence,
             });
           }}
           onOpenOperationLogs={() => setOperationLogDialog({ targetTitle: "全部操作日志" })}
@@ -6289,6 +6766,15 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
+      <Dialog open={!!valueOverviewDialog} onClose={() => setValueOverviewDialog(null)} title="编辑项目价值" stickyLayout>
+        {valueOverviewDialog ? (
+          <ValueOverviewEditForm
+            item={valueOverviewDialog}
+            onClose={() => setValueOverviewDialog(null)}
+          />
+        ) : null}
+      </Dialog>
+
       <Dialog open={createValueTrackDialog} onClose={() => {
         setCreateValueTrackDialog(false);
         setCreateValueTrackProjectId(null);
@@ -6305,19 +6791,11 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
-      <Dialog open={!!valueOverviewDialog} onClose={() => setValueOverviewDialog(null)} title="编辑项目价值" stickyLayout>
-        {valueOverviewDialog ? (
-          <ValueOverviewEditForm
-            item={valueOverviewDialog}
-            onClose={() => setValueOverviewDialog(null)}
-          />
-        ) : null}
-      </Dialog>
-
       <Dialog open={!!valueTrackDialog} onClose={() => setValueTrackDialog(null)} title="编辑价值跟踪" stickyLayout>
         {valueTrackDialog ? (
-          <ValueTrackEditForm
-            item={valueTrackDialog}
+          <ValueTrackSubmitForm
+            track={valueTrackDialog.track}
+            project={valueTrackDialog.project}
             onClose={() => setValueTrackDialog(null)}
           />
         ) : null}

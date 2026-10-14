@@ -34,17 +34,59 @@ import {
 import type { ProjectStatus, WorkStatus } from "@prisma/client";
 import {
   VALUE_JUDGEMENTS,
-  VALUE_TRACK_STATUS_NOT_OBSERVED,
+  VALUE_TRACK_STATUS_PENDING_OBSERVATION,
   VALUE_TRACK_STATUS_OBSERVING,
   VALUE_TRACK_STATUSES,
   type ValueJudgement,
   type ValueTrackStatus,
 } from "@/server/quarterly-work/value-track-constants";
+import {
+  getValueTrackingTaskDates,
+  toBusinessDate,
+} from "@/server/quarterly-work/value-tracking-period";
+import { calculateFirstVersionCompletion } from "@/server/quarterly-work/first-version-completion";
+import { recalcProjectWorkloadSnapshot } from "@/server/quarterly-work/value-tracking-snapshot";
 
 type ScopeUser = Awaited<ReturnType<typeof requireCurrentUser>>;
 const creatableStatuses: WorkStatus[] = ["NOT_STARTED", "IN_PROGRESS", "DELAYED_COMPLETED", "COMPLETED", "CLOSED"];
 const manuallyEditableStatuses: WorkStatus[] = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CLOSED"];
 const projectStatuses: ProjectStatus[] = ["NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"];
+
+/**
+ * 项目状态流转矩阵：
+ * - 未启动 → 任意其他状态；
+ * - 进行中 → 不可回退未启动；
+ * - 已上线 → 不可回退未启动/进行中；
+ * - 已完成、已关闭 → 终态，不可再变更。
+ */
+const PROJECT_STATUS_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
+  NOT_STARTED: ["IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"],
+  IN_PROGRESS: ["LAUNCHED", "COMPLETED", "CLOSED"],
+  LAUNCHED: ["COMPLETED", "CLOSED"],
+  COMPLETED: [],
+  CLOSED: [],
+};
+
+function formatBusinessDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function assertProjectStatusTransition(from: ProjectStatus, to: ProjectStatus, needsDevelopment: boolean) {
+  if (from === to) return;
+  if (!needsDevelopment && to === "LAUNCHED") {
+    throw new Error("非开发项目没有「已上线」状态");
+  }
+  if (from === "IN_PROGRESS" && needsDevelopment && to !== "LAUNCHED") {
+    throw new Error("开发项目从「进行中」的下一步必须是「已上线」");
+  }
+  if (!PROJECT_STATUS_TRANSITIONS[from].includes(to)) {
+    throw new Error(
+      `项目状态不能从『${PROJECT_STATUS_LABELS[from] ?? from}』变更为『${PROJECT_STATUS_LABELS[to] ?? to}』`,
+    );
+  }
+}
 
 function revalidateQuarterlyWork() {
   revalidatePath("/quarterly-work");
@@ -317,20 +359,78 @@ function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkSta
 
 function getProjectLaunchedAtByStatus(status: ProjectStatus, existingLaunchedAt: Date | null) {
   if (status === "LAUNCHED") return existingLaunchedAt ?? startOfToday();
-  // 已完成/已关闭属于已上线之后的终态，保留上线时间作为历史
-  if (status === "COMPLETED" || status === "CLOSED") return existingLaunchedAt;
-  // 回退到未开始/进行中时清空上线时间
-  return null;
+  // 状态流转矩阵已禁止已上线后的回退；无论如何都保留上线时间作为首版完成度分界
+  return existingLaunchedAt;
 }
 
 function getValueTrackInitForLaunchedStatus(status: ProjectStatus, previousStatus?: ProjectStatus | null) {
   if (status === "LAUNCHED" && previousStatus !== "LAUNCHED") {
     return {
-      valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED,
+      valueTrackStatus: VALUE_TRACK_STATUS_PENDING_OBSERVATION,
       valueJudgement: null,
     };
   }
   return undefined;
+}
+
+type ValueTrackingTx = {
+  quarterlyWork: {
+    findMany: typeof prisma.quarterlyWork.findMany;
+  };
+  requirementValueTrack: {
+    findMany: typeof prisma.requirementValueTrack.findMany;
+    create: typeof prisma.requirementValueTrack.create;
+  };
+};
+
+/** 上线前校验：首版开发需求均已填写工作量 */
+async function assertFirstVersionWorkloadComplete(tx: ValueTrackingTx, projectId: string, launchedAt: Date) {
+  const launchDay = toBusinessDate(launchedAt);
+  const requirements = await tx.quarterlyWork.findMany({
+    where: { projectId, deletedAt: null, needsDevelopment: true, status: { not: "CLOSED" } },
+    select: { title: true, completedAt: true, workloadPersonDay: true },
+  });
+  const missing = requirements.filter(
+    (requirement) =>
+      requirement.completedAt
+      && toBusinessDate(requirement.completedAt) <= launchDay
+      && (requirement.workloadPersonDay === null || requirement.workloadPersonDay === undefined),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `上线前请先填写首版开发需求的工作量：${missing.map((requirement) => `「${requirement.title}」`).join("、")}`,
+    );
+  }
+}
+
+/** 项目首次上线时一次性预生成第 1、第 2 两条价值跟踪任务（幂等） */
+async function initializeValueTrackingTasks(tx: ValueTrackingTx, projectId: string, launchedAt: Date) {
+  const existing = await tx.requirementValueTrack.findMany({
+    where: { projectId, deletedAt: null, trackingSequence: { in: [1, 2] } },
+    select: { trackingSequence: true },
+  });
+  const existingSequences = new Set(existing.map((item) => item.trackingSequence));
+  for (const sequence of [1, 2] as const) {
+    if (existingSequences.has(sequence)) continue;
+    const dates = getValueTrackingTaskDates(launchedAt, sequence);
+    await tx.requirementValueTrack.create({
+      data: {
+        projectId,
+        trackingSequence: sequence,
+        periodStartAt: dates.periodStartAt,
+        checkpointAt: dates.checkpointAt,
+        deadlineAt: dates.deadlineAt,
+      },
+    });
+  }
+}
+
+/** 项目首次进入已上线：校验工作量完整性、预生成两条跟踪任务 */
+async function handleProjectFirstLaunch(tx: ValueTrackingTx, params: { projectId: string; previousStatus: ProjectStatus | null; status: ProjectStatus; launchedAt: Date | null }) {
+  if (params.status !== "LAUNCHED" || params.previousStatus === "LAUNCHED") return;
+  if (!params.launchedAt) throw new Error("项目状态为已上线时，上线时间为必填项");
+  await assertFirstVersionWorkloadComplete(tx, params.projectId, params.launchedAt);
+  await initializeValueTrackingTasks(tx, params.projectId, params.launchedAt);
 }
 
 function parseValueTrackStatus(value: FormDataEntryValue | null, fallback?: ValueTrackStatus) {
@@ -343,7 +443,7 @@ function parseValueTrackStatus(value: FormDataEntryValue | null, fallback?: Valu
 
 function parseValueJudgement(value: FormDataEntryValue | null, status: ValueTrackStatus) {
   const text = (value as string | null)?.trim() || null;
-  if (status === VALUE_TRACK_STATUS_NOT_OBSERVED) {
+  if (status === VALUE_TRACK_STATUS_PENDING_OBSERVATION) {
     return null;
   }
   if (!text || !(VALUE_JUDGEMENTS as readonly string[]).includes(text)) {
@@ -452,6 +552,7 @@ async function ensureProjectForWork(params: {
   expectedOutcome: string;
   owner: Awaited<ReturnType<typeof findEditableOwner>>;
   workStatus: WorkStatus;
+  needsDevelopment: boolean;
 }) {
   if (params.projectId) {
     return findEditableProject(params.currentUser, params.projectId);
@@ -467,10 +568,11 @@ async function ensureProjectForWork(params: {
       ownerId: params.owner.id,
       orgNodeId: params.owner.orgNodeId,
       status: projectStatus,
+      needsDevelopment: params.needsDevelopment,
       createdById: params.currentUser.id,
       completedAt: getProjectCompletedAtByStatus(projectStatus),
       ...(projectStatus === "COMPLETED"
-        ? { valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED, valueJudgement: null }
+        ? { valueTrackStatus: VALUE_TRACK_STATUS_PENDING_OBSERVATION, valueJudgement: null }
         : {}),
     },
     select: { id: true, status: true },
@@ -480,13 +582,10 @@ async function ensureProjectForWork(params: {
 async function syncProjectStatusFromWork(projectId: string, status: WorkStatus) {
   if (status !== "IN_PROGRESS") return;
 
-  await prisma.project.update({
-    where: { id: projectId },
-    data: {
-      status: "IN_PROGRESS",
-      launchedAt: null,
-      completedAt: null,
-    },
+  // 只能把「未启动」推进为「进行中」，不得把已上线/已完成/已关闭的项目回退，也不得清空上线时间
+  await prisma.project.updateMany({
+    where: { id: projectId, status: "NOT_STARTED" },
+    data: { status: "IN_PROGRESS" },
   });
 }
 
@@ -513,6 +612,10 @@ export async function createQuarterlyWork(formData: FormData) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
   }
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
+  // 开发需求必须填写工作量，否则首版完成度无法准确计算
+  if (needsDevelopment && workloadPersonDay === null && status !== "CLOSED") {
+    throw new Error("需要开发的需求请填写工作量(人天)");
+  }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -528,6 +631,7 @@ export async function createQuarterlyWork(formData: FormData) {
     expectedOutcome,
     owner,
     workStatus: status,
+    needsDevelopment,
   });
 
   const work = await prisma.quarterlyWork.create({
@@ -558,6 +662,7 @@ export async function createQuarterlyWork(formData: FormData) {
 
   await syncProjectStatusFromWork(project.id, status);
   await syncProjectWorkloadFromTasks(project.id);
+  await recalcProjectWorkloadSnapshot(project.id);
   await emitQuarterlyWorkAssigned(work.id);
 
   await writeOperationLog(prisma, {
@@ -591,6 +696,10 @@ export async function updateQuarterlyWork(formData: FormData) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
   }
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
+  // 开发需求必须填写工作量，否则首版完成度无法准确计算
+  if (needsDevelopment && workloadPersonDay === null && status !== "CLOSED") {
+    throw new Error("需要开发的需求请填写工作量(人天)");
+  }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
@@ -637,6 +746,7 @@ export async function updateQuarterlyWork(formData: FormData) {
     expectedOutcome,
     owner,
     workStatus: status,
+    needsDevelopment,
   });
   // 周期：优先用表单日期；未传则沿用已有日期；老数据再退到 年+月份 推导
   const fallbackStart = existingWork.startDate
@@ -684,8 +794,10 @@ export async function updateQuarterlyWork(formData: FormData) {
     await syncProjectStatusFromWork(previousProjectId, status);
   }
   await syncProjectWorkloadFromTasks(project.id);
+  await recalcProjectWorkloadSnapshot(project.id);
   if (previousProjectId !== project.id) {
     await syncProjectWorkloadFromTasks(previousProjectId);
+    await recalcProjectWorkloadSnapshot(previousProjectId);
   }
 
   const userNameById = await resolveUserNames([existingWork.ownerId, owner.id]);
@@ -749,10 +861,12 @@ export async function updateProjectStatus(formData: FormData) {
       id: projectId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, status: true, title: true, launchedAt: true, workloadPersonDay: true },
+    select: { id: true, status: true, title: true, launchedAt: true, workloadPersonDay: true, needsDevelopment: true },
   });
 
   if (!project) throw new Error("项目不存在或无权限编辑");
+
+  assertProjectStatusTransition(project.status, status, project.needsDevelopment !== false);
 
   const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
@@ -766,15 +880,24 @@ export async function updateProjectStatus(formData: FormData) {
     throw new Error("项目变更为已上线前，请先编辑项目填写工作量(人天)");
   }
 
+  const nextLaunchedAt = getProjectLaunchedAtByStatus(status, project.launchedAt);
+
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
       where: { id: project.id },
       data: {
         status,
-        launchedAt: getProjectLaunchedAtByStatus(status, project.launchedAt),
+        launchedAt: nextLaunchedAt,
         completedAt: getProjectCompletedAtByStatus(status),
         ...(valueTrackInit ?? {}),
       },
+    });
+
+    await handleProjectFirstLaunch(tx, {
+      projectId: project.id,
+      previousStatus: project.status,
+      status,
+      launchedAt: nextLaunchedAt,
     });
 
     if (status === "COMPLETED" || status === "CLOSED") {
@@ -788,6 +911,9 @@ export async function updateProjectStatus(formData: FormData) {
     }
   });
 
+  // 上线时间/状态变更后重算首版完成度快照
+  await recalcProjectWorkloadSnapshot(project.id);
+
   if (becameLaunched) {
     await emitProjectLaunched(project.id);
   }
@@ -796,13 +922,16 @@ export async function updateProjectStatus(formData: FormData) {
   }
 
   if (project.status !== status) {
+    const launchSuffix = becameLaunched && nextLaunchedAt
+      ? `；上线时间：${formatBusinessDate(nextLaunchedAt)}，已生成第 1、第 2 两次价值跟踪任务`
+      : "";
     await writeOperationLog(prisma, {
       targetType: "PROJECT",
       targetId: project.id,
       targetTitle: project.title,
       action: OPERATION_LOG_ACTION_UPDATE,
       operatorId: currentUser.id,
-      remark: `项目状态从『${PROJECT_STATUS_LABELS[project.status] ?? project.status}』改为『${PROJECT_STATUS_LABELS[status] ?? status}』`,
+      remark: `项目状态从『${PROJECT_STATUS_LABELS[project.status] ?? project.status}』改为『${PROJECT_STATUS_LABELS[status] ?? status}』${launchSuffix}`,
     });
   }
 
@@ -818,6 +947,10 @@ export async function createProject(formData: FormData) {
   const description = requiredString(formData.get("description"), "项目描述");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "预期收益");
   const status = parseProjectStatus(formData.get("status") ?? "NOT_STARTED");
+  const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否开发项目");
+  if (status === "LAUNCHED" && !needsDevelopment) {
+    throw new Error("非开发项目没有「已上线」状态");
+  }
   const startQuarter = parseRequiredQuarter(formData.get("startQuarter"), "起始季度");
   const endQuarter = parseRequiredQuarter(formData.get("endQuarter"), "结束季度");
   assertQuarterRange(startQuarter, endQuarter);
@@ -847,19 +980,27 @@ export async function createProject(formData: FormData) {
         ownerId: owner.id,
         orgNodeId: owner.orgNodeId,
         status,
+        needsDevelopment,
         workloadPersonDay,
         createdById: currentUser.id,
         launchedAt: status === "LAUNCHED" ? parseLaunchedAtInput(formData.get("launchedAt")) : null,
         completedAt: resolveProjectCompletedAtByStatus(status, formData.get("completedAt")),
         ...(status === "LAUNCHED"
-          ? { valueTrackStatus: VALUE_TRACK_STATUS_NOT_OBSERVED, valueJudgement: null }
+          ? { valueTrackStatus: VALUE_TRACK_STATUS_PENDING_OBSERVATION, valueJudgement: null }
           : {}),
       },
     });
     await replaceProjectProductGoals(tx, project.id, productGoalIds);
+    await handleProjectFirstLaunch(tx, {
+      projectId: project.id,
+      previousStatus: null,
+      status,
+      launchedAt: project.launchedAt,
+    });
     return project;
   });
 
+  await recalcProjectWorkloadSnapshot(created.id);
   await emitProjectAssigned(created.id);
   if (created.status === "LAUNCHED") {
     await emitProjectLaunched(created.id);
@@ -874,7 +1015,7 @@ export async function createProject(formData: FormData) {
     targetTitle: title,
     action: OPERATION_LOG_ACTION_CREATE,
     operatorId: currentUser.id,
-    remark: `新增项目「${title}」`,
+    remark: `新增项目「${title}」${created.status === "LAUNCHED" && created.launchedAt ? `；上线时间：${formatBusinessDate(created.launchedAt)}，已生成第 1、第 2 两次价值跟踪任务` : ""}`,
   });
 
   revalidateQuarterlyWork();
@@ -978,38 +1119,82 @@ export async function updateProductGoal(formData: FormData) {
   revalidateQuarterlyWork();
 }
 
+function parseOptionalValueJudgement(value: FormDataEntryValue | null): ValueJudgement | null {
+  const text = (value as string | null)?.trim() || null;
+  if (text && !(VALUE_JUDGEMENTS as readonly string[]).includes(text)) {
+    throw new Error("价值判断不正确");
+  }
+  return text as ValueJudgement | null;
+}
+
+/**
+ * 新增价值跟踪快照（手工记录）。
+ *
+ * 不限于预生成的两次检查任务，可自由新增；
+ * 每次新增按当前需求实况自动计算首版/迭代/总工作量与首版完成度快照（不可手工编辑）。
+ */
 export async function createValueTrack(formData: FormData) {
   const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
-  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
-  const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
-  const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"), VALUE_TRACK_STATUS_OBSERVING);
-  const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
-  const trackingResult = requiredString(formData.get("trackingResult"), "跟踪结果描述");
+  const valueJudgement = parseOptionalValueJudgement(formData.get("valueJudgement"));
+  const trackingResult = (formData.get("trackingResult") as string | null)?.trim() || null;
   const followUpOptimization = (formData.get("followUpOptimization") as string | null)?.trim() || null;
+  // 与编辑弹窗同一套逻辑：实际收益、价值判断必填
+  if (!actualValue) throw new Error("实际收益为必填项");
+  if (!valueJudgement) throw new Error("价值判断为必填项");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      status: "LAUNCHED",
-      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+      // 开发项目创建即进入价值跟踪；或项目已有上线时间
+      AND: [
+        getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+        { OR: [{ launchedAt: { not: null } }, { needsDevelopment: true }] },
+      ],
     },
-    select: { id: true, title: true, valueJudgement: true, valueTrackStatus: true, workloadPersonDay: true, otherCost: true, actualValue: true },
+    select: { id: true, title: true, launchedAt: true, valueJudgement: true, valueTrackStatus: true, actualValue: true },
   });
 
-  if (!project) throw new Error("项目不存在、未上线或无权限选择");
+  if (!project) throw new Error("项目不存在、非开发项目或无权限选择");
+
+  // 每个项目最多两条价值跟踪记录
+  const existingTrackCount = await prisma.requirementValueTrack.count({
+    where: { projectId: project.id, deletedAt: null },
+  });
+  if (existingTrackCount >= 2) {
+    throw new Error("该项目已有两条价值跟踪记录，不能继续新增");
+  }
+
+  // 跟踪周期必选：第 1/2 次跟踪按该周期检查点统计快照；同一周期已有记录则不可重复创建
+  const trackingSequenceInput = (formData.get("trackingSequence") as string | null)?.trim();
+  const trackingSequence = trackingSequenceInput === "1" ? 1 : trackingSequenceInput === "2" ? 2 : null;
+  if (trackingSequence === null) throw new Error("请选择跟踪周期");
+  const duplicateSequence = await prisma.requirementValueTrack.findFirst({
+    where: { projectId: project.id, deletedAt: null, trackingSequence },
+    select: { id: true },
+  });
+  if (duplicateSequence) throw new Error(`第 ${trackingSequence} 次跟踪已存在记录，不能重复创建`);
+  const taskDates = trackingSequence && project.launchedAt ? getValueTrackingTaskDates(project.launchedAt, trackingSequence) : null;
+
+  // 快照统计截止：补录历史周期按该周期检查点，手动快照按当前实况
+  const requirements = await prisma.quarterlyWork.findMany({
+    where: { projectId: project.id },
+    select: { title: true, needsDevelopment: true, workloadPersonDay: true, completedAt: true, status: true, deletedAt: true },
+  });
+  const snapshot = calculateFirstVersionCompletion(project.launchedAt, requirements, taskDates?.checkpointAt ?? new Date());
+  const now = new Date();
+  // 保存即完成该条记录的填报；项目跟踪状态进入观测中
+  const nextValueTrackStatus = VALUE_TRACK_STATUS_OBSERVING;
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
       where: { id: project.id },
       data: {
-        workloadPersonDay,
-        otherCost,
         actualValue,
         valueJudgement,
-        valueTrackStatus,
+        valueTrackStatus: nextValueTrackStatus,
       },
     });
 
@@ -1018,6 +1203,20 @@ export async function createValueTrack(formData: FormData) {
         projectId: project.id,
         trackingResult,
         followUpOptimization,
+        trackedAt: now,
+        completedAt: now,
+        completedById: currentUser.id,
+        trackingSequence,
+        periodStartAt: taskDates?.periodStartAt ?? null,
+        checkpointAt: taskDates?.checkpointAt ?? null,
+        deadlineAt: taskDates?.deadlineAt ?? null,
+        valueJudgement,
+        actualValue,
+        firstVersionWorkloadPersonDay: snapshot.firstVersionWorkloadPersonDay,
+        postLaunchIterationWorkloadPersonDay: snapshot.postLaunchIterationWorkloadPersonDay,
+        totalWorkloadPersonDay: snapshot.totalWorkloadPersonDay,
+        firstVersionCompletionPercent: snapshot.firstVersionCompletionPercent,
+        workloadComplete: snapshot.workloadComplete,
       },
     });
   });
@@ -1030,10 +1229,8 @@ export async function createValueTrack(formData: FormData) {
   const createTrackRemark = [
     "新增价值跟踪记录",
     buildFieldChangeRemark([
-      { label: "工作量(人天)", previous: project.workloadPersonDay, next: workloadPersonDay },
-      { label: "其他成本", previous: project.otherCost, next: otherCost },
       { label: "实际收益", previous: project.actualValue, next: actualValue },
-      { label: "跟踪状态", previous: project.valueTrackStatus, next: valueTrackStatus },
+      { label: "跟踪状态", previous: project.valueTrackStatus, next: nextValueTrackStatus },
       { label: "价值判断", previous: project.valueJudgement, next: valueJudgement },
     ]),
   ].filter(Boolean).join("：");
@@ -1050,77 +1247,138 @@ export async function createValueTrack(formData: FormData) {
   revalidatePath("/value-tracking");
 }
 
-export async function updateValueTrack(formData: FormData) {
+/**
+ * 填报价值跟踪任务（新模型）。
+ *
+ * 跟踪任务在项目首次上线时已预生成（第 1、第 2 两条），填报只允许更新既有任务：
+ * - 项目必须有有效上线时间，不限制项目当前状态（已完成项目仍可跟踪）；
+ * - 检查点前未到填写时间，禁止提交；截止后逾期仍允许补录；
+ * - 第 1 次检查提交后项目进入「观测中」；第 2 次检查区分「保存（草稿）」与「完成跟踪（最终确认）」；
+ * - 指标快照全部由服务端计算，不信任客户端提交；最终确认后冻结。
+ */
+export async function submitValueTrack(formData: FormData) {
   const { currentUser } = await requireManageProjectAndValueTracking();
-  const trackId = requiredString(formData.get("trackId"), "价值跟踪");
-  const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
-  const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"), VALUE_TRACK_STATUS_OBSERVING);
-  const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
-  const trackingResult = requiredString(formData.get("trackingResult"), "跟踪结果描述");
+  const trackId = requiredString(formData.get("trackId"), "价值跟踪任务");
+  const trackingResult = (formData.get("trackingResult") as string | null)?.trim() || null;
   const followUpOptimization = (formData.get("followUpOptimization") as string | null)?.trim() || null;
+  const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
+  const valueJudgementInput = parseOptionalValueJudgement(formData.get("valueJudgement"));
+  if (!actualValue) throw new Error("实际收益为必填项");
+  if (!valueJudgementInput) throw new Error("价值判断为必填项");
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
+  const scopedProjects = await prisma.project.findMany({
+    where: getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+    select: { id: true },
+  });
   const track = await prisma.requirementValueTrack.findFirst({
-    where: {
-      id: trackId,
-      deletedAt: null,
-      projectId: {
-        in: (await prisma.project.findMany({
-          where: { ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds), status: "LAUNCHED" },
-          select: { id: true },
-        })).map((project) => project.id),
-      },
+    where: { id: trackId, deletedAt: null, projectId: { in: scopedProjects.map((project) => project.id) } },
+    select: {
+      id: true,
+      projectId: true,
+      trackingSequence: true,
+      checkpointAt: true,
+      deadlineAt: true,
+      completedAt: true,
+      completedById: true,
+      isFinal: true,
+      trackingResult: true,
+      firstVersionWorkloadPersonDay: true,
+      postLaunchIterationWorkloadPersonDay: true,
+      totalWorkloadPersonDay: true,
+      firstVersionCompletionPercent: true,
     },
-    select: { id: true, projectId: true, trackingResult: true },
   });
+  if (!track) throw new Error("价值跟踪任务不存在或无权限编辑");
+  if (track.isFinal) throw new Error("该任务已完成最终确认，指标已冻结，不能再修改");
 
-  if (!track) throw new Error("价值跟踪不存在或无权限编辑");
-
-  const existingProject = await prisma.project.findFirst({
+  const project = await prisma.project.findFirst({
     where: { id: track.projectId },
-    select: { title: true, actualValue: true, valueJudgement: true, valueTrackStatus: true },
+    select: {
+      id: true,
+      title: true,
+      launchedAt: true,
+      actualValue: true,
+      valueJudgement: true,
+      valueTrackStatus: true,
+    },
   });
+  if (!project) throw new Error("项目不存在");
+  if (!project.launchedAt) throw new Error("项目缺少上线时间，无法进行价值跟踪");
+  if (track.trackingSequence !== 1 && track.trackingSequence !== 2) {
+    throw new Error("该跟踪记录缺少检查点信息，请先由管理员处理历史数据");
+  }
+  const sequence = track.trackingSequence;
+
+  // 检查点/截止日期只用于到期与逾期提醒，不拦截填报
+
+  // 价值判断与实际收益已在入口统一必填校验
+
+  const requirements = await prisma.quarterlyWork.findMany({
+    where: { projectId: project.id },
+    select: { title: true, needsDevelopment: true, workloadPersonDay: true, completedAt: true, status: true, deletedAt: true },
+  });
+  // 快照按填报时刻的需求实况重算（与项目表快照同源，写入后不可手工编辑）
+  const snapshot = calculateFirstVersionCompletion(project.launchedAt, requirements, new Date());
+
+  const now = new Date();
+  const nextJudgement = valueJudgementInput ?? project.valueJudgement;
+  // 保存即完成该条记录的填报；项目跟踪状态进入观测中（「已完成」由编辑项目价值手动维护）
+  const nextValueTrackStatus = VALUE_TRACK_STATUS_OBSERVING;
 
   await prisma.$transaction(async (tx) => {
-    await tx.project.update({
-      where: { id: track.projectId },
-      data: {
-        actualValue,
-        valueJudgement,
-        valueTrackStatus,
-      },
-    });
-
     await tx.requirementValueTrack.update({
       where: { id: track.id },
       data: {
         trackingResult,
         followUpOptimization,
+        trackedAt: now,
+        valueJudgement: nextJudgement,
+        actualValue,
+        firstVersionWorkloadPersonDay: snapshot.firstVersionWorkloadPersonDay,
+        postLaunchIterationWorkloadPersonDay: snapshot.postLaunchIterationWorkloadPersonDay,
+        totalWorkloadPersonDay: snapshot.totalWorkloadPersonDay,
+        firstVersionCompletionPercent: snapshot.firstVersionCompletionPercent,
+        workloadComplete: snapshot.workloadComplete,
+        completedAt: track.completedAt ?? now,
+        completedById: track.completedById ?? currentUser.id,
+      },
+    });
+    await tx.project.update({
+      where: { id: project.id },
+      data: {
+        actualValue,
+        valueJudgement: nextJudgement,
+        valueTrackStatus: nextValueTrackStatus,
       },
     });
   });
 
-  await emitProjectValueChanged(track.projectId, {
-    valueJudgement: existingProject?.valueJudgement,
-    valueTrackStatus: existingProject?.valueTrackStatus,
+  await emitProjectValueChanged(project.id, {
+    valueJudgement: project.valueJudgement,
+    valueTrackStatus: project.valueTrackStatus,
   });
 
-  const updateTrackRemark = [
-    "编辑价值跟踪记录",
+  const formatPercent = (value: number | null) => (value === null ? "数据不完整" : `${value.toFixed(1)}%`);
+  const submitRemark = [
+    `保存第 ${sequence} 次价值跟踪`,
     buildFieldChangeRemark([
       { label: "跟踪结果描述", previous: track.trackingResult, next: trackingResult },
-      { label: "实际收益", previous: existingProject?.actualValue, next: actualValue },
-      { label: "跟踪状态", previous: existingProject?.valueTrackStatus, next: valueTrackStatus },
-      { label: "价值判断", previous: existingProject?.valueJudgement, next: valueJudgement },
+      { label: "实际收益", previous: project.actualValue, next: actualValue },
+      { label: "价值判断", previous: project.valueJudgement, next: nextJudgement },
+      { label: "跟踪状态", previous: project.valueTrackStatus, next: nextValueTrackStatus },
+      { label: "首版工作量(人天)", previous: track.firstVersionWorkloadPersonDay, next: snapshot.firstVersionWorkloadPersonDay },
+      { label: "上线后迭代工作量(人天)", previous: track.postLaunchIterationWorkloadPersonDay, next: snapshot.postLaunchIterationWorkloadPersonDay },
+      { label: "首版完成度", previous: formatPercent(track.firstVersionCompletionPercent), next: formatPercent(snapshot.firstVersionCompletionPercent) },
     ]),
   ].filter(Boolean).join("：");
   await writeOperationLog(prisma, {
     targetType: "PROJECT",
-    targetId: track.projectId,
-    targetTitle: existingProject?.title ?? "",
+    targetId: project.id,
+    targetTitle: project.title,
     action: OPERATION_LOG_ACTION_UPDATE,
     operatorId: currentUser.id,
-    remark: updateTrackRemark,
+    remark: submitRemark,
   });
 
   revalidateQuarterlyWork();
@@ -1130,32 +1388,41 @@ export async function updateValueTrack(formData: FormData) {
 export async function updateProjectValue(formData: FormData) {
   const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
-  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  // 首版/迭代/总工作量为服务端自动维护的快照，此入口不可编辑
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
   const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"));
   const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
-  if (workloadPersonDay === null) {
-    throw new Error("工作量(人天)为必填项");
-  }
-
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
-      status: "LAUNCHED",
-      ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+      // 开发项目（含未上线）或已上线项目均可维护价值信息
+      AND: [
+        getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
+        { OR: [{ launchedAt: { not: null } }, { needsDevelopment: true }] },
+      ],
     },
-    select: { id: true, title: true, valueJudgement: true, valueTrackStatus: true, workloadPersonDay: true, otherCost: true, actualValue: true },
+    select: {
+      id: true,
+      title: true,
+      launchedAt: true,
+      valueJudgement: true,
+      valueTrackStatus: true,
+      workloadPersonDay: true,
+      firstVersionWorkloadPersonDay: true,
+      postLaunchIterationWorkloadPersonDay: true,
+      otherCost: true,
+      actualValue: true,
+    },
   });
 
-  if (!project) throw new Error("项目不存在、未上线或无权限编辑");
+  if (!project) throw new Error("项目不存在、非开发项目或无权限编辑");
 
   await prisma.project.update({
     where: { id: project.id },
     data: {
-      workloadPersonDay,
       otherCost,
       actualValue,
       valueJudgement,
@@ -1169,7 +1436,6 @@ export async function updateProjectValue(formData: FormData) {
   });
 
   const valueUpdateRemark = buildFieldChangeRemark([
-    { label: "工作量(人天)", previous: project.workloadPersonDay, next: workloadPersonDay },
     { label: "其他成本", previous: project.otherCost, next: otherCost },
     { label: "实际收益", previous: project.actualValue, next: actualValue },
     { label: "跟踪状态", previous: project.valueTrackStatus, next: valueTrackStatus },
@@ -1206,10 +1472,11 @@ export async function deleteValueTrack(formData: FormData) {
         })).map((project) => project.id),
       },
     },
-    select: { id: true, projectId: true },
+    select: { id: true, projectId: true, trackingSequence: true, isFinal: true },
   });
 
   if (!track) throw new Error("价值跟踪不存在或无权限删除");
+  if (track.isFinal) throw new Error("已完成最终确认的价值跟踪不可删除");
 
   await prisma.requirementValueTrack.update({
     where: { id: track.id },
@@ -1253,6 +1520,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
     data: { deletedAt: new Date() },
   });
   await syncProjectWorkloadFromTasks(work.projectId);
+  await recalcProjectWorkloadSnapshot(work.projectId);
 
   await writeOperationLog(prisma, {
     targetType: "QUARTERLY_WORK",
@@ -1355,6 +1623,7 @@ export async function updateProject(formData: FormData) {
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const status = parseProjectStatus(formData.get("status"));
+  const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否开发项目");
   const description = (formData.get("description") as string)?.trim() || null;
   const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
@@ -1379,9 +1648,17 @@ export async function updateProject(formData: FormData) {
       endQuarter: true,
       workloadPersonDay: true,
       otherCost: true,
+      needsDevelopment: true,
     },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
+
+  // 已上线过的项目不能改为非开发项目（会抹掉首版完成度分界）
+  if (project.launchedAt && !needsDevelopment) {
+    throw new Error("项目已上线，不能再改为非开发项目");
+  }
+
+  assertProjectStatusTransition(project.status, status, needsDevelopment);
 
   const taskCount = await countProjectTasks(project.id);
   const resolvedWorkloadPersonDay = taskCount > 0
@@ -1411,6 +1688,31 @@ export async function updateProject(formData: FormData) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
   }
 
+  // 上线时间是首版完成度的核心分界点，修改受保护：
+  // - 已有最终冻结快照：禁止修改，需走管理员数据修正流程；
+  // - 已有价值跟踪记录：仅管理员可修改，并重算未冻结任务的检查点/截止日期；
+  const launchedAtChanged = Boolean(
+    nextLaunchedAt
+    && project.launchedAt
+    && toBusinessDate(nextLaunchedAt).getTime() !== toBusinessDate(project.launchedAt).getTime(),
+  );
+  if (launchedAtChanged) {
+    const finalizedTrack = await prisma.requirementValueTrack.findFirst({
+      where: { projectId: project.id, deletedAt: null, isFinal: true },
+      select: { id: true },
+    });
+    if (finalizedTrack) {
+      throw new Error("项目已完成最终价值确认，禁止修改上线时间；如需更正请走管理员数据修正流程");
+    }
+    const existingTrack = await prisma.requirementValueTrack.findFirst({
+      where: { projectId: project.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (existingTrack && currentUser.roleType !== "ADMIN") {
+      throw new Error("项目已存在价值跟踪记录，仅管理员可修改上线时间");
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
       where: { id: project.id },
@@ -1423,6 +1725,7 @@ export async function updateProject(formData: FormData) {
         startQuarter,
         endQuarter,
         status,
+        needsDevelopment,
         ownerId: owner.id,
         orgNodeId: owner.orgNodeId,
         launchedAt: nextLaunchedAt,
@@ -1435,6 +1738,33 @@ export async function updateProject(formData: FormData) {
       await syncProjectWorkloadFromTasks(project.id, tx);
     }
 
+    await handleProjectFirstLaunch(tx, {
+      projectId: project.id,
+      previousStatus: project.status,
+      status,
+      launchedAt: nextLaunchedAt,
+    });
+
+    if (launchedAtChanged && nextLaunchedAt) {
+      // 重算未冻结任务的检查点/截止日期；已填报的记录保留原快照，仅同步时间轴
+      const pendingTasks = await tx.requirementValueTrack.findMany({
+        where: { projectId: project.id, deletedAt: null, isFinal: false, trackingSequence: { in: [1, 2] } },
+        select: { id: true, trackingSequence: true },
+      });
+      for (const task of pendingTasks) {
+        if (task.trackingSequence !== 1 && task.trackingSequence !== 2) continue;
+        const dates = getValueTrackingTaskDates(nextLaunchedAt, task.trackingSequence);
+        await tx.requirementValueTrack.update({
+          where: { id: task.id },
+          data: {
+            periodStartAt: dates.periodStartAt,
+            checkpointAt: dates.checkpointAt,
+            deadlineAt: dates.deadlineAt,
+          },
+        });
+      }
+    }
+
     if (status === "COMPLETED" || status === "CLOSED") {
       await tx.quarterlyWork.updateMany({
         where: { projectId: project.id, deletedAt: null },
@@ -1445,6 +1775,9 @@ export async function updateProject(formData: FormData) {
       });
     }
   });
+
+  // 上线时间变更后重算首版完成度快照
+  await recalcProjectWorkloadSnapshot(project.id);
 
   if (project.ownerId !== owner.id) {
     await emitProjectAssigned(project.id);
@@ -1459,8 +1792,18 @@ export async function updateProject(formData: FormData) {
   const projectOwnerNameById = await resolveUserNames([project.ownerId, owner.id]);
   const projectUpdateRemark = buildFieldChangeRemark([
     { label: "项目名称", previous: project.title, next: title },
+    {
+      label: "是否开发项目",
+      previous: project.needsDevelopment === null || project.needsDevelopment === undefined ? null : (project.needsDevelopment ? "是" : "否"),
+      next: needsDevelopment ? "是" : "否",
+    },
     { label: "负责人", previous: projectOwnerNameById.get(project.ownerId), next: projectOwnerNameById.get(owner.id) },
     { label: "项目状态", previous: PROJECT_STATUS_LABELS[project.status], next: PROJECT_STATUS_LABELS[status] },
+    {
+      label: "上线时间",
+      previous: project.launchedAt ? formatBusinessDate(project.launchedAt) : null,
+      next: nextLaunchedAt ? formatBusinessDate(nextLaunchedAt) : null,
+    },
     {
       label: "规划周期",
       previous: project.startQuarter ? `${project.startQuarter}~${project.endQuarter ?? project.startQuarter}` : null,

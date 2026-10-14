@@ -27,7 +27,7 @@ test("isLaunchedProjectVisibleInPeriod filters by launchedAt year and quarter", 
   assert.equal(isLaunchedProjectVisibleInPeriod(launchedProject, period, true), false);
 });
 
-test("isValueTrackVisibleInPeriod filters by trackedAt year and quarter", () => {
+test("isValueTrackVisibleInPeriod filters by trackedAt year and quarter (legacy records)", () => {
   const period = { year: 2026, quarter: 3 as const };
   const track = { trackedAt: new Date(2026, 8, 3, 17, 7) };
 
@@ -35,6 +35,21 @@ test("isValueTrackVisibleInPeriod filters by trackedAt year and quarter", () => 
   assert.equal(isValueTrackVisibleInPeriod(track, { year: 2026, quarter: 2 }), false);
   assert.equal(isValueTrackVisibleInPeriod(track, { year: 2025, quarter: 3 }), false);
   assert.equal(isValueTrackVisibleInPeriod(track, { year: 2026, quarter: "all" }), true);
+});
+
+test("isValueTrackVisibleInPeriod 按任务跟踪周期与所选季度相交判断", () => {
+  // 2026-06-30 上线：第 1 周期 6-30 ~ 10-07，第 2 周期 9-30 ~ 2027-01-06
+  const track1 = { trackedAt: new Date(2026, 5, 30), periodStartAt: new Date(2026, 5, 30), deadlineAt: new Date(2026, 9, 7) };
+  const track2 = { trackedAt: new Date(2026, 5, 30), periodStartAt: new Date(2026, 8, 30), deadlineAt: new Date(2027, 0, 6) };
+
+  assert.equal(isValueTrackVisibleInPeriod(track1, { year: 2026, quarter: 2 }), true);
+  assert.equal(isValueTrackVisibleInPeriod(track1, { year: 2026, quarter: 3 }), true);
+  assert.equal(isValueTrackVisibleInPeriod(track1, { year: 2026, quarter: 4 }), true);
+  assert.equal(isValueTrackVisibleInPeriod(track1, { year: 2027, quarter: 1 }), false);
+  assert.equal(isValueTrackVisibleInPeriod(track2, { year: 2026, quarter: 3 }), true);
+  assert.equal(isValueTrackVisibleInPeriod(track2, { year: 2027, quarter: 1 }), true);
+  assert.equal(isValueTrackVisibleInPeriod(track2, { year: 2027, quarter: "all" }), true);
+  assert.equal(isValueTrackVisibleInPeriod(track2, { year: 2025, quarter: "all" }), false);
 });
 
 test("matchesDepartmentAndTeamScope respects department and team tabs", () => {

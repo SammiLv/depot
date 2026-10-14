@@ -69,10 +69,15 @@ export function DateRangePicker({
   const [endIso, setEndIso] = useState(() => toIsoDate(defaultEnd));
   const [panelMonth, setPanelMonth] = useState(() => fromIsoDate(toIsoDate(defaultStart)) ?? new Date());
 
+  // 依赖 ISO 字符串而非 Date 对象：父组件每次渲染都会新建 Date，
+  // 按对象引用比较会导致任意重渲染都重置已选日期
+  const defaultStartIso = toIsoDate(defaultStart);
+  const defaultEndIso = toIsoDate(defaultEnd);
+
   useEffect(() => {
-    setStartIso(toIsoDate(defaultStart));
-    setEndIso(toIsoDate(defaultEnd));
-  }, [defaultStart, defaultEnd]);
+    setStartIso(defaultStartIso);
+    setEndIso(defaultEndIso);
+  }, [defaultStartIso, defaultEndIso]);
 
   useEffect(() => {
     if (!open) return;

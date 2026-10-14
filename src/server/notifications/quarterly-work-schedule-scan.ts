@@ -9,7 +9,7 @@ import {
   getWorkOverdueDays,
   parseQuarterCode,
 } from "@/server/quarterly-work/overdue-utils";
-import { VALUE_TRACK_STATUS_COMPLETED, VALUE_TRACK_STATUS_NOT_OBSERVED } from "@/server/quarterly-work/value-track-constants";
+import { VALUE_TRACK_STATUS_COMPLETED, VALUE_TRACK_STATUS_PENDING_OBSERVATION } from "@/server/quarterly-work/value-track-constants";
 
 export function daysUntil(endDate: Date, now: Date) {
   const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -266,7 +266,7 @@ export async function runProjectValueTrackPendingScan(scenarioId: string, daysBe
       userId: project.ownerId,
       subjectUserId: project.ownerId,
       userName: nameById.get(project.ownerId) ?? "",
-      valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
+      valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_PENDING_OBSERVATION,
       valueJudgement: project.valueJudgement,
       daysUntilQuarterEnd: remainingDays,
       year,

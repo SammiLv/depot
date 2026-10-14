@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/prisma";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 import type { NotificationEventPayload } from "@/server/notifications/types";
 import { findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
-import { VALUE_TRACK_STATUS_NOT_OBSERVED } from "@/server/quarterly-work/value-track-constants";
+import { VALUE_TRACK_STATUS_PENDING_OBSERVATION } from "@/server/quarterly-work/value-track-constants";
 
 const workStatusLabels: Record<string, string> = {
   NOT_STARTED: "未启动",
@@ -147,7 +147,7 @@ export async function emitProjectLaunched(projectId: string) {
     ...(await buildOwnerPayload(project.ownerId)),
     title: project.title,
     endQuarter: project.endQuarter,
-    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
+    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_PENDING_OBSERVATION,
     year: launchedAt.getFullYear(),
     quarter: Math.floor(launchedAt.getMonth() / 3) + 1,
     targetType: "Project",
@@ -175,7 +175,7 @@ export async function emitProjectCompleted(projectId: string) {
     ...(await buildOwnerPayload(project.ownerId)),
     title: project.title,
     endQuarter: project.endQuarter,
-    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
+    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_PENDING_OBSERVATION,
     year: completedAt.getFullYear(),
     quarter: Math.floor(completedAt.getMonth() / 3) + 1,
     targetType: "Project",
@@ -206,8 +206,8 @@ export async function emitProjectValueChanged(
     title: project.title,
     valueJudgement: project.valueJudgement,
     previousValueJudgement: previous.valueJudgement ?? "",
-    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
-    previousValueTrackStatus: previous.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
+    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_PENDING_OBSERVATION,
+    previousValueTrackStatus: previous.valueTrackStatus ?? VALUE_TRACK_STATUS_PENDING_OBSERVATION,
     targetType: "Project",
     targetId: project.id,
     eventAt: new Date().toISOString(),

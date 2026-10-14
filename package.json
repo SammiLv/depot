@@ -19,6 +19,7 @@
     "test:permissions:integration": "bash scripts/test-permission-matrix-sync.sh",
     "test:permissions:all": "pnpm run test:permissions && pnpm run test:permissions:integration",
     "test:kpi": "node --import tsx --test src/server/kpi/*.test.ts",
+    "test:quarterly-work": "node --import tsx --test src/server/quarterly-work/*.test.ts",
     "test:talent": "node --import tsx --test src/server/talent/*.test.ts",
     "postinstall": "prisma generate --schema db/prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema db/prisma/schema.prisma",

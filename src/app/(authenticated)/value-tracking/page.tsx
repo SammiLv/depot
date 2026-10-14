@@ -2,6 +2,8 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { getOwnerWhereByScope } from "@/server/permissions/data-scope";
 import { Badge, Card, PageHeader } from "@/components/ui-kit";
+import { calculateFirstVersionCompletion } from "@/server/quarterly-work/first-version-completion";
+import { getValueTrackingWindow } from "@/server/quarterly-work/value-tracking-period";
 
 function calculateRoi(expected: string | null, actual: string | null): { roi: number; tone: "primary" | "success" | "warning" } {
   const extractNum = (s: string | null) => {
@@ -41,7 +43,7 @@ export default async function ValueTrackingPage() {
         })).map((project) => project.id),
       },
     },
-    orderBy: { trackedAt: "desc" },
+    orderBy: [{ trackingSequence: "asc" }, { trackedAt: "desc" }],
   });
 
   const projectIds = [...new Set(tracks.map((track) => track.projectId))];
@@ -54,7 +56,6 @@ export default async function ValueTrackingPage() {
       expectedOutcome: true,
       actualValue: true,
       otherCost: true,
-      workloadPersonDay: true,
       valueJudgement: true,
       valueTrackStatus: true,
       launchedAt: true,
@@ -62,12 +63,64 @@ export default async function ValueTrackingPage() {
   });
   const projectMap = new Map(projects.map((project) => [project.id, project]));
 
+  const allRequirements = await prisma.quarterlyWork.findMany({
+    where: { projectId: { in: projectIds }, deletedAt: null },
+    select: {
+      projectId: true,
+      needsDevelopment: true,
+      workloadPersonDay: true,
+      completedAt: true,
+      status: true,
+      deletedAt: true,
+    },
+  });
+  const requirementsByProject = new Map<string, typeof allRequirements>();
+  for (const requirement of allRequirements) {
+    const list = requirementsByProject.get(requirement.projectId) ?? [];
+    list.push(requirement);
+    requirementsByProject.set(requirement.projectId, list);
+  }
+
   const ownerIds = [...new Set(projects.map((project) => project.ownerId))];
   const owners = await prisma.user.findMany({
     where: { id: { in: ownerIds } },
     select: { id: true, name: true },
   });
   const ownerMap = new Map(owners.map((owner) => [owner.id, owner.name]));
+
+  // 实时口径：统计截止取 min(今天, 第 2 检查点)；已有最终快照时以冻结值为准
+  const now = new Date();
+  type ProjectValueMetricsView = {
+    firstVersionCompletionPercent: number | null;
+    totalWorkloadPersonDay: number | null;
+    isFinal: boolean;
+  } | null;
+  const metricsByProject = new Map<string, ProjectValueMetricsView>(
+    projects.map((project) => {
+      if (!project.launchedAt) return [project.id, null] as const;
+      const projectTracks = tracks.filter((track) => track.projectId === project.id);
+      const finalTrack = projectTracks.find((track) => track.isFinal);
+      if (finalTrack) {
+        return [project.id, {
+          firstVersionCompletionPercent: finalTrack.firstVersionCompletionPercent,
+          totalWorkloadPersonDay: finalTrack.totalWorkloadPersonDay,
+          isFinal: true,
+        }] as const;
+      }
+      const window = getValueTrackingWindow(project.launchedAt);
+      const cutoff = now < window.end ? now : window.end;
+      const metrics = calculateFirstVersionCompletion(
+        project.launchedAt,
+        requirementsByProject.get(project.id) ?? [],
+        cutoff,
+      );
+      return [project.id, {
+        firstVersionCompletionPercent: metrics.firstVersionCompletionPercent,
+        totalWorkloadPersonDay: metrics.totalWorkloadPersonDay,
+        isFinal: false,
+      }] as const;
+    }),
+  );
 
   return (
     <>
@@ -77,6 +130,7 @@ export default async function ValueTrackingPage() {
           tracks.map((track) => {
             const project = projectMap.get(track.projectId);
             const meta = calculateRoi(project?.expectedOutcome ?? null, project?.actualValue ?? null);
+            const metrics = metricsByProject.get(track.projectId) ?? null;
             return (
               <Card key={track.id}>
                 <div className="mb-3 flex items-start justify-between">
@@ -84,6 +138,8 @@ export default async function ValueTrackingPage() {
                     <div className="font-semibold">{project?.title ?? "—"}</div>
                     <div className="mt-0.5 text-xs text-muted-foreground">
                       负责人：{project ? ownerMap.get(project.ownerId) ?? "—" : "—"} · 上线时间：{formatDateLabel(project?.launchedAt ?? null)}
+                      {track.trackingSequence ? ` · 第 ${track.trackingSequence} 次检查` : ""}
+                      {track.checkpointAt ? `（检查点 ${formatDateLabel(track.checkpointAt)}）` : ""}
                     </div>
                   </div>
                   <Badge tone={meta.tone}>ROI {meta.roi}%</Badge>
@@ -95,25 +151,33 @@ export default async function ValueTrackingPage() {
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">实际收益</div>
-                    <div className="mt-0.5 font-medium">{project?.actualValue ?? "—"}</div>
+                    <div className="mt-0.5 font-medium">{track.actualValue ?? project?.actualValue ?? "—"}</div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
-                    <div className="text-xs text-muted-foreground">工作量(人天)</div>
-                    <div className="mt-0.5 font-medium">{project?.workloadPersonDay ?? "—"}</div>
+                    <div className="text-xs text-muted-foreground">项目总工作量(人天)</div>
+                    <div className="mt-0.5 font-medium">{metrics?.totalWorkloadPersonDay ?? "—"}</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <div className="text-xs text-muted-foreground">首版完成度</div>
+                    <div className="mt-0.5 font-medium">
+                      {metrics?.firstVersionCompletionPercent !== null && metrics?.firstVersionCompletionPercent !== undefined
+                        ? `${metrics.firstVersionCompletionPercent.toFixed(1)}%`
+                        : "-"}
+                    </div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">跟踪状态</div>
-                    <div className="mt-0.5 font-medium">{project?.valueTrackStatus ?? "未观测"}</div>
+                    <div className="mt-0.5 font-medium">{project?.valueTrackStatus ?? "待观测"}</div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground">价值判断</div>
-                    <div className="mt-0.5 font-medium">{project?.valueJudgement ?? "—"}</div>
+                    <div className="mt-0.5 font-medium">{track.valueJudgement ?? project?.valueJudgement ?? "—"}</div>
                   </div>
                 </div>
                 <div className="mt-3 space-y-3 text-sm">
                   <div>
                     <div className="text-xs text-muted-foreground">跟踪结果描述</div>
-                    <div className="mt-1 whitespace-pre-wrap break-words">{track.trackingResult}</div>
+                    <div className="mt-1 whitespace-pre-wrap break-words">{track.trackingResult ?? "待填写"}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">后续优化</div>

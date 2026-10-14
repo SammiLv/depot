@@ -7,7 +7,7 @@ import {
   getWorkOverdueDays,
   parseQuarterCode,
 } from "@/server/quarterly-work/overdue-utils";
-import { VALUE_JUDGEMENT_BELOW_EXPECTATION, VALUE_TRACK_STATUS_NOT_OBSERVED } from "@/server/quarterly-work/value-track-constants";
+import { VALUE_JUDGEMENT_BELOW_EXPECTATION, VALUE_TRACK_STATUS_PENDING_OBSERVATION } from "@/server/quarterly-work/value-track-constants";
 
 type TestPayloadBase = {
   appUrl: string;
@@ -175,7 +175,7 @@ function buildProjectPayload(
     quarter: parsed?.quarter ?? base.quarter,
     valueJudgement: project.valueJudgement ?? VALUE_JUDGEMENT_BELOW_EXPECTATION,
     previousValueJudgement: "已达预期",
-    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_NOT_OBSERVED,
+    valueTrackStatus: project.valueTrackStatus ?? VALUE_TRACK_STATUS_PENDING_OBSERVATION,
     targetType: "Project",
     targetId: project.id,
     ...extra,

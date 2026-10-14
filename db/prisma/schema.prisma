@@ -781,6 +781,13 @@ model Project {
   launchedAt        DateTime?
   completedAt       DateTime?
   workloadPersonDay Float?
+  // 是否开发项目：开发项目的进行中只能流转到已上线；非开发项目没有已上线状态
+  needsDevelopment Boolean?
+  // 首版完成度统计快照（只读，服务端随需求增删改/上线时间变更自动重算，不可手工编辑）
+  // 首版工作量 = 上线日（含）前创建的开发需求工作量合计；迭代工作量 = 上线后创建的合计；总工作量 = 两者之和
+  firstVersionWorkloadPersonDay Float?
+  postLaunchIterationWorkloadPersonDay Float?
+  totalWorkloadPersonDay        Float?
   otherCost         String?
   actualValue       String?
   valueJudgement    String?
@@ -906,17 +913,34 @@ model WeeklyWorkUpdate {
 }
 
 model RequirementValueTrack {
-  id                   String    @id @default(cuid())
-  projectId            String
-  trackingResult       String
-  followUpOptimization String?
-  trackedAt            DateTime  @default(now())
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  deletedAt            DateTime?
+  id                                   String    @id @default(cuid())
+  projectId                            String
+  trackingResult                       String?
+  followUpOptimization                 String?
+  trackedAt                            DateTime  @default(now())
+  trackingSequence                     Int?
+  periodStartAt                        DateTime?
+  checkpointAt                         DateTime?
+  deadlineAt                           DateTime?
+  firstVersionWorkloadPersonDay        Float?
+  postLaunchIterationWorkloadPersonDay Float?
+  totalWorkloadPersonDay               Float?
+  firstVersionCompletionPercent        Float?
+  workloadComplete                     Boolean?
+  // 填报时快照：当次提交的价值判断与实际收益（历史行展示当时填报值，不随项目当前值变化）
+  valueJudgement                       String?
+  actualValue                          String?
+  isFinal                              Boolean   @default(false)
+  completedById                        String?
+  completedAt                          DateTime?
+  finalizedAt                          DateTime?
+  createdAt                            DateTime  @default(now())
+  updatedAt                            DateTime  @updatedAt
+  deletedAt                            DateTime?
 
   @@index([projectId])
   @@index([trackedAt])
+  @@index([projectId, trackingSequence])
 }
 
 model OperationLog {

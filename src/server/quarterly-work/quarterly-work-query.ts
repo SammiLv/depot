@@ -10,7 +10,16 @@ import {
   isValueTrackVisibleInPeriod,
   type ActivePeriod,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
-import { isValueTrackStatus, normalizeValueTrackStatus } from "@/server/quarterly-work/value-track-constants";
+import { normalizeValueTrackStatus } from "@/server/quarterly-work/value-track-constants";
+import {
+  doesCalendarQuarterOverlapTrackingWindow,
+  doesYearOverlapTrackingWindow,
+  getValueTrackingTaskDates,
+  getValueTrackTaskState,
+  isValueTrackingOverdue,
+  toBusinessDate,
+  type ValueTrackTaskState,
+} from "@/server/quarterly-work/value-tracking-period";
 import type { OrgNodeType, ProjectStatus, RoleType, WorkStatus } from "@prisma/client";
 
 type DataScopeInput = {
@@ -111,6 +120,7 @@ type ProjectBoardItem = {
   description: string | null;
   expectedOutcome: string | null;
   workloadPersonDay: number | null;
+  needsDevelopment: boolean | null;
   otherCost: string | null;
   actualValue: string | null;
   valueJudgement: string | null;
@@ -154,6 +164,7 @@ type ValueOverviewItem = {
   owner: string;
   departmentOrgNodeId: string | null;
   teamOrgNodeId: string | null;
+  /** 项目总工作量 = 首版工作量 + 上线后迭代工作量（需求汇总口径，只读） */
   workloadPersonDay: number | null;
   otherCost: string | null;
   expectedOutcome: string | null;
@@ -162,6 +173,19 @@ type ValueOverviewItem = {
   valueTrackStatus: string;
   status: ProjectStatus;
   launchedAt: Date | null;
+  firstVersionWorkloadPersonDay: number | null;
+  postLaunchIterationWorkloadPersonDay: number | null;
+  /** 首版完成度（0~100）；数据不完整为 null */
+  firstVersionCompletionPercent: number | null;
+  /** 最终值已冻结 */
+  completionIsFinal: boolean;
+  /** 已填写工作量需求数 / 纳入统计的开发需求数 */
+  includedRequirementCount: number;
+  missingWorkloadRequirementCount: number;
+  /** 超过最终填报截止日期仍未完成最终确认 */
+  valueTrackOverdue: boolean;
+  /** 当前待处理检查点：1 或 2；全部完成为 null */
+  currentTrackingSequence: number | null;
 };
 
 type ValueTrackItem = {
@@ -173,8 +197,20 @@ type ValueTrackItem = {
   departmentOrgNodeId: string | null;
   teamOrgNodeId: string | null;
   trackedAt: Date;
-  trackingResult: string;
+  trackingSequence: number | null;
+  periodStartAt: Date | null;
+  checkpointAt: Date | null;
+  deadlineAt: Date | null;
+  completedAt: Date | null;
+  isFinal: boolean;
+  taskState: ValueTrackTaskState;
+  trackingResult: string | null;
   followUpOptimization: string | null;
+  firstVersionWorkloadPersonDay: number | null;
+  postLaunchIterationWorkloadPersonDay: number | null;
+  totalWorkloadPersonDay: number | null;
+  firstVersionCompletionPercent: number | null;
+  workloadComplete: boolean | null;
   actualValue: string | null;
   valueJudgement: string | null;
   valueTrackStatus: string;
@@ -208,6 +244,18 @@ type ProjectWorkspaceValueTrackItem = ValueTrackItem & {
   periodLabel: string;
 };
 
+type ValueTrackingRequirementItem = {
+  id: string;
+  title: string;
+  createdAt: Date;
+  completedAt: Date | null;
+  needsDevelopment: boolean | null;
+  workloadPersonDay: number | null;
+  status: WorkStatus;
+  /** 仅上线后迭代需求使用：第 1 / 第 2 跟踪周期 */
+  trackingPeriodLabel: string | null;
+};
+
 type ProjectWorkspaceItem = ProjectBoardItem & {
   productGoals: Array<{
     id: string;
@@ -224,8 +272,24 @@ type ProjectWorkspaceItem = ProjectBoardItem & {
     actualValue: string | null;
     latestTrackedAt: Date | null;
     trackCount: number;
-    // 是否已进入价值跟踪：已上线即初始化（含历史已上线但缺跟踪状态的老数据）
+    // 是否已进入价值跟踪：存在有效上线时间即进入（不再依赖项目当前状态）
     initialized: boolean;
+    // 逾期待完成：超过最终填报截止日期仍未完成最终确认
+    overdue: boolean;
+    // 当前待处理检查点：1 或 2；全部完成为 null
+    currentSequence: number | null;
+    firstVersionWorkloadPersonDay: number | null;
+    postLaunchIterationWorkloadPersonDay: number | null;
+    totalWorkloadPersonDay: number | null;
+    // 首版完成度（0~100）；数据不完整为 null；completionIsFinal 标识最终冻结值
+    firstVersionCompletionPercent: number | null;
+    completionIsFinal: boolean;
+    workloadComplete: boolean;
+    includedRequirementCount: number;
+    missingWorkloadRequirementCount: number;
+    // 需求构成明细（供价值详情核查指标来源）
+    firstVersionRequirements: ValueTrackingRequirementItem[];
+    postLaunchRequirements: ValueTrackingRequirementItem[];
   };
 };
 
@@ -682,12 +746,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         deletedAt: null,
         projectId: {
           in: (await prisma.project.findMany({
-            where: { ...ownerWhere, status: "LAUNCHED" },
+            // 不再按项目当前状态限定：已上线后转已完成/关闭的项目仍在 6 个月跟踪窗口内
+            where: { ...ownerWhere, launchedAt: { not: null } },
             select: { id: true },
           })).map((project) => project.id),
         },
       },
-      orderBy: { trackedAt: "desc" },
+      orderBy: [{ trackingSequence: "asc" }, { trackedAt: "desc" }],
     }),
   ]);
 
@@ -854,6 +919,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       description: project.description,
       expectedOutcome: project.expectedOutcome,
       workloadPersonDay: projectWorks.length > 0 ? taskWorkloadPersonDay : project.workloadPersonDay,
+      needsDevelopment: project.needsDevelopment,
       otherCost: project.otherCost,
       actualValue: project.actualValue,
       valueJudgement: project.valueJudgement,
@@ -897,6 +963,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
 
   const toValueOverviewItem = (project: (typeof projects)[number]): ValueOverviewItem => {
     const { teamOrgNodeId, departmentOrgNodeId } = getProjectOrgAffiliation(project);
+    const metrics = getProjectValueMetrics(project);
 
     return {
       id: project.id,
@@ -905,7 +972,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       owner: ownerMap.get(project.ownerId) ?? "—",
       departmentOrgNodeId,
       teamOrgNodeId,
-      workloadPersonDay: project.workloadPersonDay,
+      // 项目总工作量改为需求工作量汇总口径（只读）
+      workloadPersonDay: metrics?.totalWorkloadPersonDay ?? null,
       otherCost: project.otherCost,
       expectedOutcome: project.expectedOutcome,
       actualValue: project.actualValue,
@@ -913,6 +981,14 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
       status: project.status,
       launchedAt: project.launchedAt,
+      firstVersionWorkloadPersonDay: metrics?.firstVersionWorkloadPersonDay ?? null,
+      postLaunchIterationWorkloadPersonDay: metrics?.postLaunchIterationWorkloadPersonDay ?? null,
+      firstVersionCompletionPercent: metrics?.firstVersionCompletionPercent ?? null,
+      completionIsFinal: metrics?.completionIsFinal ?? false,
+      includedRequirementCount: metrics?.includedRequirementCount ?? 0,
+      missingWorkloadRequirementCount: metrics?.missingWorkloadRequirementCount ?? 0,
+      valueTrackOverdue: isProjectValueTrackOverdue(project),
+      currentTrackingSequence: getCurrentTrackingSequence(project.id),
     };
   };
 
@@ -1038,36 +1114,181 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     activeWorksByProject.set(work.projectId, list);
   }
 
+  const mapValueTrackItem = (track: (typeof valueTracks)[number]): ValueTrackItem => {
+    const project = projects.find((item) => item.id === track.projectId) ?? null;
+    const { teamOrgNodeId, departmentOrgNodeId } = project
+      ? getProjectOrgAffiliation(project)
+      : { teamOrgNodeId: null, departmentOrgNodeId: null };
+
+    return {
+      id: track.id,
+      projectId: track.projectId,
+      projectTitle: project?.title ?? "—",
+      ownerId: project?.ownerId ?? "",
+      owner: project ? ownerMap.get(project.ownerId) ?? "—" : "—",
+      departmentOrgNodeId,
+      teamOrgNodeId,
+      trackedAt: track.trackedAt,
+      trackingSequence: track.trackingSequence,
+      periodStartAt: track.periodStartAt,
+      checkpointAt: track.checkpointAt,
+      deadlineAt: track.deadlineAt,
+      completedAt: track.completedAt,
+      isFinal: track.isFinal,
+      // 无检查点序号的历史/手动记录：已有填报内容视为已完成，否则按时间轴派生
+      taskState: track.trackingSequence !== null
+        ? getValueTrackTaskState(track, now)
+        : (track.completedAt ?? track.trackingResult) ? "COMPLETED" : getValueTrackTaskState(track, now),
+      trackingResult: track.trackingResult,
+      followUpOptimization: track.followUpOptimization,
+      firstVersionWorkloadPersonDay: track.firstVersionWorkloadPersonDay,
+      postLaunchIterationWorkloadPersonDay: track.postLaunchIterationWorkloadPersonDay,
+      totalWorkloadPersonDay: track.totalWorkloadPersonDay,
+      firstVersionCompletionPercent: track.firstVersionCompletionPercent,
+      workloadComplete: track.workloadComplete,
+      // 价值判断/实际收益读记录自身的填报快照，不随项目当前值变化
+      actualValue: track.actualValue ?? null,
+      valueJudgement: track.valueJudgement ?? null,
+      valueTrackStatus: normalizeValueTrackStatus(project?.valueTrackStatus),
+    };
+  };
+
+  // 扁平列表按所选季度过滤（任务周期与季度相交）；项目面板展示全周期任务
   const valueTrackItems = valueTracks
     .filter((track) => isValueTrackVisibleInPeriod(track, activePeriod))
-    .map((track): ValueTrackItem => {
-      const project = projects.find((item) => item.id === track.projectId) ?? null;
-      const { teamOrgNodeId, departmentOrgNodeId } = project
-        ? getProjectOrgAffiliation(project)
-        : { teamOrgNodeId: null, departmentOrgNodeId: null };
-
-      return {
-        id: track.id,
-        projectId: track.projectId,
-        projectTitle: project?.title ?? "—",
-        ownerId: project?.ownerId ?? "",
-        owner: project ? ownerMap.get(project.ownerId) ?? "—" : "—",
-        departmentOrgNodeId,
-        teamOrgNodeId,
-        trackedAt: track.trackedAt,
-        trackingResult: track.trackingResult,
-        followUpOptimization: track.followUpOptimization,
-        actualValue: project?.actualValue ?? null,
-        valueJudgement: project?.valueJudgement ?? null,
-        valueTrackStatus: normalizeValueTrackStatus(project?.valueTrackStatus),
-      };
-    });
+    .map(mapValueTrackItem);
   const valueTracksByProject = new Map<string, ValueTrackItem[]>();
   for (const track of valueTrackItems) {
     const list = valueTracksByProject.get(track.projectId) ?? [];
     list.push(track);
     valueTracksByProject.set(track.projectId, list);
   }
+
+  // 项目全周期跟踪任务（不按所选季度过滤），用于项目面板展示、最终确认/逾期/当前检查点判断
+  const allValueTracksByProject = new Map<string, typeof valueTracks>();
+  for (const track of valueTracks) {
+    const list = allValueTracksByProject.get(track.projectId) ?? [];
+    list.push(track);
+    allValueTracksByProject.set(track.projectId, list);
+  }
+  const allValueTrackItemsByProject = new Map<string, ValueTrackItem[]>();
+  for (const track of valueTracks) {
+    const list = allValueTrackItemsByProject.get(track.projectId) ?? [];
+    list.push(mapValueTrackItem(track));
+    allValueTrackItemsByProject.set(track.projectId, list);
+  }
+
+  // 首版完成度：唯一数据源是 Project 表的服务端自动快照；已冻结项目以最终快照为准
+  // 开发项目创建即进入统计，未上线时全部需求计入首版
+  const getProjectValueMetrics = (project: (typeof projects)[number]) => {
+    if (project.needsDevelopment !== true && !project.launchedAt) return null;
+    // 工作量完整度按当前全部开发需求统计
+    let includedRequirementCount = 0;
+    let missingWorkloadRequirementCount = 0;
+    for (const work of worksByProject.get(project.id) ?? []) {
+      if (work.needsDevelopment !== true || work.status === "CLOSED") continue;
+      includedRequirementCount += 1;
+      if (work.workloadPersonDay === null || work.workloadPersonDay === undefined) missingWorkloadRequirementCount += 1;
+    }
+    const finalTrack = (allValueTracksByProject.get(project.id) ?? []).find((track) => track.isFinal);
+    if (finalTrack) {
+      return {
+        firstVersionWorkloadPersonDay: finalTrack.firstVersionWorkloadPersonDay,
+        postLaunchIterationWorkloadPersonDay: finalTrack.postLaunchIterationWorkloadPersonDay,
+        totalWorkloadPersonDay: finalTrack.totalWorkloadPersonDay,
+        firstVersionCompletionPercent: finalTrack.firstVersionCompletionPercent,
+        completionIsFinal: true,
+        workloadComplete: finalTrack.workloadComplete ?? false,
+        includedRequirementCount,
+        missingWorkloadRequirementCount,
+      };
+    }
+    const firstVersionWorkload = project.firstVersionWorkloadPersonDay;
+    const iterationWorkload = project.postLaunchIterationWorkloadPersonDay;
+    const totalWorkload = project.totalWorkloadPersonDay
+      ?? ((firstVersionWorkload ?? 0) + (iterationWorkload ?? 0));
+    // 任一纳入需求缺工作量、无开发需求或总量为 0 时，完成度不可计算（缺数据不按 0 处理）
+    const calculable = firstVersionWorkload !== null
+      && includedRequirementCount > 0
+      && missingWorkloadRequirementCount === 0
+      && totalWorkload > 0;
+    return {
+      firstVersionWorkloadPersonDay: firstVersionWorkload,
+      postLaunchIterationWorkloadPersonDay: iterationWorkload,
+      totalWorkloadPersonDay: totalWorkload,
+      firstVersionCompletionPercent: calculable ? (firstVersionWorkload / totalWorkload) * 100 : null,
+      completionIsFinal: false,
+      workloadComplete: includedRequirementCount > 0 && missingWorkloadRequirementCount === 0,
+      includedRequirementCount,
+      missingWorkloadRequirementCount,
+    };
+  };
+
+  const isProjectValueTrackOverdue = (project: (typeof projects)[number]) => {
+    const hasFinalCompletion = (allValueTracksByProject.get(project.id) ?? []).some((track) => track.isFinal);
+    return isValueTrackingOverdue(project, hasFinalCompletion, now);
+  };
+
+  // 价值跟踪范围：开发项目按规划周期纳入（未上线也可跟踪）；
+  // 已上线项目看跟踪窗口与所选自然季度是否相交，或超期未完成
+  const isInValueTrackingScope = (project: (typeof projects)[number]) => {
+    if (!project.launchedAt) {
+      if (project.needsDevelopment !== true) return false;
+      // 从未上线的已完成/已关闭项目不进入价值跟踪
+      if (project.status === "COMPLETED" || project.status === "CLOSED") return false;
+      return allQuarterSelected
+        ? projectRangeOverlapsYear(project, activeYear)
+        : projectRangeHasQuarter(project, activeYear, activeQuarter as number);
+    }
+    if (isProjectValueTrackOverdue(project)) return true;
+    return allQuarterSelected
+      ? doesYearOverlapTrackingWindow(project.launchedAt, activeYear)
+      : doesCalendarQuarterOverlapTrackingWindow(project.launchedAt, activeYear, activeQuarter as number);
+  };
+
+  const getCurrentTrackingSequence = (projectId: string): number | null => {
+    const projectTracks = allValueTracksByProject.get(projectId) ?? [];
+    const pending = projectTracks
+      .filter((track) => (track.trackingSequence === 1 || track.trackingSequence === 2) && !track.completedAt && !track.isFinal)
+      .map((track) => track.trackingSequence as number)
+      .sort((left, right) => left - right);
+    return pending[0] ?? null;
+  };
+
+  const toRequirementItem = (
+    work: (typeof works)[number],
+    trackingPeriodLabel: string | null,
+  ): ValueTrackingRequirementItem => ({
+    id: work.id,
+    title: work.title,
+    createdAt: work.createdAt,
+    completedAt: work.completedAt,
+    needsDevelopment: work.needsDevelopment,
+    workloadPersonDay: work.workloadPersonDay,
+    status: work.status,
+    trackingPeriodLabel,
+  });
+
+  // 需求构成明细：首版（完成日 <= 上线日）与上线后迭代（上线后完成或尚未完成），供价值详情核查指标来源
+  const getRequirementBreakdown = (project: (typeof projects)[number]) => {
+    // 未上线时全部需求计入首版
+    const launchDay = project.launchedAt ? toBusinessDate(project.launchedAt) : null;
+    const checkpoint1 = project.launchedAt ? getValueTrackingTaskDates(project.launchedAt, 1).checkpointAt : null;
+    const firstVersion: ValueTrackingRequirementItem[] = [];
+    const postLaunch: ValueTrackingRequirementItem[] = [];
+    for (const work of (worksByProject.get(project.id) ?? [])) {
+      if (work.deletedAt) continue;
+      const completedDay = work.completedAt ? toBusinessDate(work.completedAt) : null;
+      if (!launchDay || (completedDay && completedDay <= launchDay)) {
+        firstVersion.push(toRequirementItem(work, null));
+      } else {
+        postLaunch.push(toRequirementItem(work, checkpoint1 && completedDay && completedDay < toBusinessDate(checkpoint1) ? "第 1 跟踪周期" : "第 2 跟踪周期"));
+      }
+    }
+    firstVersion.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+    postLaunch.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+    return { firstVersionRequirements: firstVersion, postLaunchRequirements: postLaunch };
+  };
 
   const workspaceStatus = normalizeWorkspaceStatusFilter(options?.status);
   const workspaceView = normalizeWorkspaceViewMode(options?.view);
@@ -1121,9 +1342,12 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         const rightEnd = right.endMonth ?? right.startMonth ?? 13;
         return leftEnd - rightEnd || right.createdAt.getTime() - left.createdAt.getTime();
       });
-    const projectValueTracks = valueTracksByProject.get(project.id) ?? [];
-    const latestValueTrack = projectValueTracks[0] ?? null;
+    const projectValueTracks = [...(allValueTrackItemsByProject.get(project.id) ?? [])]
+      .sort((left, right) => (left.trackingSequence ?? 99) - (right.trackingSequence ?? 99));
+    const latestValueTrack = projectValueTracks.filter((track) => track.completedAt).at(-1) ?? projectValueTracks[0] ?? null;
     const isOverdue = isProjectOverdue(project);
+    const valueMetrics = getProjectValueMetrics(project);
+    const requirementBreakdown = getRequirementBreakdown(project);
 
     return {
       ...base,
@@ -1133,7 +1357,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       tasks,
       valueTracks: projectValueTracks.map((track) => ({
         ...track,
-        periodLabel: `${track.trackedAt.getFullYear()}年Q${getQuarterByDate(track.trackedAt) ?? ""}`,
+        periodLabel: track.trackingSequence
+          ? `第 ${track.trackingSequence} 次跟踪`
+          : `${track.trackedAt.getFullYear()}年Q${getQuarterByDate(track.trackedAt) ?? ""}`,
       })),
       valueTrackSummary: {
         status: normalizeValueTrackStatus(project.valueTrackStatus),
@@ -1141,7 +1367,21 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         actualValue: project.actualValue,
         latestTrackedAt: latestValueTrack?.trackedAt ?? null,
         trackCount: projectValueTracks.length,
-        initialized: project.status === "LAUNCHED" || isValueTrackStatus(project.valueTrackStatus),
+        // 开发项目或有上线时间的项目进入跟踪；但从未上线的已完成/已关闭项目不进入
+        initialized: !(Boolean(!project.launchedAt) && (project.status === "COMPLETED" || project.status === "CLOSED"))
+          && (project.needsDevelopment === true || Boolean(project.launchedAt)),
+        overdue: isProjectValueTrackOverdue(project),
+        currentSequence: getCurrentTrackingSequence(project.id),
+        firstVersionWorkloadPersonDay: valueMetrics?.firstVersionWorkloadPersonDay ?? null,
+        postLaunchIterationWorkloadPersonDay: valueMetrics?.postLaunchIterationWorkloadPersonDay ?? null,
+        totalWorkloadPersonDay: valueMetrics?.totalWorkloadPersonDay ?? null,
+        firstVersionCompletionPercent: valueMetrics?.firstVersionCompletionPercent ?? null,
+        completionIsFinal: valueMetrics?.completionIsFinal ?? false,
+        workloadComplete: valueMetrics?.workloadComplete ?? false,
+        includedRequirementCount: valueMetrics?.includedRequirementCount ?? 0,
+        missingWorkloadRequirementCount: valueMetrics?.missingWorkloadRequirementCount ?? 0,
+        firstVersionRequirements: requirementBreakdown.firstVersionRequirements,
+        postLaunchRequirements: requirementBreakdown.postLaunchRequirements,
       },
     };
   };
@@ -1152,7 +1392,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     const projectPeriodMatched = allQuarterSelected
       ? projectRangeOverlapsYear(project, activeYear)
       : projectRangeHasQuarter(project, activeYear, activeQuarter as number);
-    return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks;
+    return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks || isInValueTrackingScope(project);
   };
 
   const projectWorkspaceSourceItems = projects
@@ -1393,7 +1633,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       };
     }),
     valueOverviewItems: projects
-      .filter(isLaunchedProjectInActivePeriod)
+      .filter(isInValueTrackingScope)
       .sort((left, right) => (right.launchedAt?.getTime() ?? 0) - (left.launchedAt?.getTime() ?? 0))
       .map(toValueOverviewItem),
     valueTrackItems,
@@ -1420,18 +1660,25 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       year: goal.year,
     })),
     launchedProjectOptions: projects
-      .filter((project) => project.status === "LAUNCHED")
+      // 新增价值跟踪快照可选项目：有有效上线时间即可（已完成项目仍可跟踪）
+      .filter((project) => Boolean(project.launchedAt))
       .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
       .map((project) => ({
         id: project.id,
         title: project.title,
         launchedAt: project.launchedAt,
         expectedOutcome: project.expectedOutcome,
-        workloadPersonDay: project.workloadPersonDay,
+        workloadPersonDay: project.totalWorkloadPersonDay ?? project.workloadPersonDay,
+        firstVersionWorkloadPersonDay: project.firstVersionWorkloadPersonDay,
+        postLaunchIterationWorkloadPersonDay: project.postLaunchIterationWorkloadPersonDay,
         otherCost: project.otherCost,
         actualValue: project.actualValue,
         valueJudgement: project.valueJudgement,
         valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
+        // 该项目已存在的跟踪周期序号（新增弹窗中对应选项禁用）
+        existingTrackingSequences: (allValueTracksByProject.get(project.id) ?? [])
+          .map((track) => track.trackingSequence)
+          .filter((sequence): sequence is number => sequence !== null),
       })),
     projectOptions: projects
       .filter((project) => project.status !== "COMPLETED" && project.status !== "CLOSED")

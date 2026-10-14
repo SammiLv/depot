@@ -1,7 +1,7 @@
-export const VALUE_TRACK_STATUSES = ["未观测", "观测中", "已完成"] as const;
+export const VALUE_TRACK_STATUSES = ["待观测", "观测中", "已完成"] as const;
 export type ValueTrackStatus = (typeof VALUE_TRACK_STATUSES)[number];
 
-export const VALUE_TRACK_STATUS_NOT_OBSERVED = "未观测";
+export const VALUE_TRACK_STATUS_PENDING_OBSERVATION = "待观测";
 export const VALUE_TRACK_STATUS_OBSERVING = "观测中";
 export const VALUE_TRACK_STATUS_COMPLETED = "已完成";
 
@@ -11,7 +11,7 @@ export type ValueJudgement = (typeof VALUE_JUDGEMENTS)[number];
 export const VALUE_JUDGEMENT_BELOW_EXPECTATION = "未达预期";
 
 export const VALUE_TRACK_STATUS_TONES = {
-  未观测: "default",
+  待观测: "default",
   观测中: "primary",
   已完成: "success",
 } as const;
@@ -31,5 +31,5 @@ export function isValueJudgement(value: string | null | undefined): value is Val
 }
 
 export function normalizeValueTrackStatus(value: string | null | undefined): ValueTrackStatus {
-  return isValueTrackStatus(value) ? value : VALUE_TRACK_STATUS_NOT_OBSERVED;
+  return isValueTrackStatus(value) ? value : VALUE_TRACK_STATUS_PENDING_OBSERVATION;
 }

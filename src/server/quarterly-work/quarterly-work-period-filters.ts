@@ -10,6 +10,14 @@ export function getQuarterByDate(date: Date | null | undefined) {
   return Math.floor(date.getMonth() / 3) + 1;
 }
 
+function getPeriodRange(period: ActivePeriod): { start: Date; end: Date } {
+  if (period.quarter === "all") {
+    return { start: new Date(period.year, 0, 1), end: new Date(period.year + 1, 0, 1) };
+  }
+  const start = new Date(period.year, (period.quarter - 1) * 3, 1);
+  return { start, end: new Date(period.year, period.quarter * 3, 1) };
+}
+
 export function isLaunchedProjectVisibleInPeriod(
   project: { status: string; launchedAt: Date | null },
   period: ActivePeriod,
@@ -25,10 +33,19 @@ export function isLaunchedProjectVisibleInPeriod(
     && (project.launchedAt?.getFullYear() ?? period.year) === period.year;
 }
 
+/**
+ * 跟踪任务是否在所选自然季度可见：
+ * 任务的跟踪周期（periodStartAt ~ deadlineAt）与所选季度有交集即可见；
+ * 历史记录缺少周期字段时回退为按填报时间所在季度判断。
+ */
 export function isValueTrackVisibleInPeriod(
-  track: { trackedAt: Date },
+  track: { trackedAt: Date; periodStartAt?: Date | null; deadlineAt?: Date | null },
   period: ActivePeriod,
 ) {
+  const { start, end } = getPeriodRange(period);
+  if (track.periodStartAt && track.deadlineAt) {
+    return track.periodStartAt < end && track.deadlineAt >= start;
+  }
   if (period.quarter === "all") {
     return track.trackedAt.getFullYear() === period.year;
   }
