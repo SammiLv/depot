@@ -7,6 +7,8 @@ import {
 } from "@/server/quarterly-work/permission";
 import {
   isLaunchedProjectVisibleInPeriod,
+  isProjectVisibleInPeriod,
+  isQuarterlyWorkVisibleInPeriod,
   isValueTrackVisibleInPeriod,
   type ActivePeriod,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
@@ -355,10 +357,6 @@ function parseQuarterCode(value: string | null | undefined) {
   };
 }
 
-function compareQuarterCode(left: { year: number; quarter: number }, right: { year: number; quarter: number }) {
-  return left.year === right.year ? left.quarter - right.quarter : left.year - right.year;
-}
-
 function getQuarterEndDate(value: string | null | undefined) {
   const parsed = parseQuarterCode(value);
   if (!parsed) {
@@ -366,32 +364,6 @@ function getQuarterEndDate(value: string | null | undefined) {
   }
   // 季度末取当季最后一天的 23:59:59（月末结束），而非当天零点
   return new Date(parsed.year, parsed.quarter * 3, 0, 23, 59, 59, 999);
-}
-
-function projectRangeHasQuarter(project: { startQuarter: string | null; endQuarter: string | null }, year: number, quarter: number) {
-  const start = parseQuarterCode(project.startQuarter);
-  const end = parseQuarterCode(project.endQuarter ?? project.startQuarter);
-  if (!start || !end) {
-    return true;
-  }
-  const target = { year, quarter };
-  return compareQuarterCode(start, target) <= 0 && compareQuarterCode(target, end) <= 0;
-}
-
-function projectRangeOverlapsYear(project: { startQuarter: string | null; endQuarter: string | null }, year: number) {
-  const start = parseQuarterCode(project.startQuarter);
-  const end = parseQuarterCode(project.endQuarter ?? project.startQuarter);
-  if (!start || !end) {
-    return true;
-  }
-  return start.year <= year && year <= end.year;
-}
-
-function getQuarterByMonth(month: number | null | undefined) {
-  if (!month) {
-    return null;
-  }
-  return Math.floor((month - 1) / 3) + 1;
 }
 
 function getQuarterByDate(date: Date | null | undefined) {
@@ -787,21 +759,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       ? selectedQuarter!
       : (availableQuarters.includes(fallbackQuarter) ? fallbackQuarter : availableQuarters[0]);
   const isWorkOverdue = (work: (typeof works)[number]) => formatTaskRemainLabel(work)?.startsWith("逾期") ?? false;
-  const getWorkQuarterForFilter = (work: (typeof works)[number]) => getQuarterByMonth(work.startMonth ?? work.endMonth) ?? work.quarter;
-  const getCompletedOverdueQuarter = (work: (typeof works)[number]) => getQuarterByDate(work.completedAt) ?? getWorkQuarterForFilter(work);
+  const activePeriod: ActivePeriod = { year: activeYear, quarter: activeQuarter };
 
-  const activeWorks = allQuarterSelected
-    ? works.filter((work) => work.year === activeYear)
-    : works.filter((work) => {
-        if (work.year !== activeYear) return false;
-        if (work.status === "COMPLETED" && isWorkOverdue(work)) {
-          return getCompletedOverdueQuarter(work) === activeQuarter;
-        }
-        if (work.status !== "COMPLETED" && isWorkOverdue(work)) {
-          return true;
-        }
-        return getWorkQuarterForFilter(work) === activeQuarter;
-      });
+  const activeWorks = works.filter((work) => isQuarterlyWorkVisibleInPeriod(work, activePeriod, now));
 
   const workIds = activeWorks.map((work) => work.id);
   const allMonthlyPlans = workIds.length
@@ -1014,8 +974,6 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
 
   // 以「已完成」为状态分割点判断是否延期，与项目逾期标签口径一致（已上线不算完成，按当前时间衡量）
   const isProjectOverdue = (project: (typeof projects)[number]) => formatProjectRemainLabel(project)?.startsWith("逾期") ?? false;
-  const getProjectDoneOverdueQuarter = (project: (typeof projects)[number]) => getQuarterByDate(project.launchedAt ?? project.completedAt) ?? parseQuarterCode(project.endQuarter ?? project.startQuarter)?.quarter ?? null;
-  const activePeriod: ActivePeriod = { year: activeYear, quarter: activeQuarter };
   const isLaunchedProjectInActivePeriod = (project: (typeof projects)[number]) =>
     isLaunchedProjectVisibleInPeriod(project, activePeriod, isProjectOverdue(project));
   const delayedProjects = projects.filter((project) => isProjectOverdue(project));
@@ -1026,32 +984,21 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       title: "未启动",
       tone: "default",
       status: "NOT_STARTED",
-      items: projects.filter((project) => project.status === "NOT_STARTED" && !isProjectOverdue(project) && (allQuarterSelected ? projectRangeOverlapsYear(project, activeYear) : projectRangeHasQuarter(project, activeYear, activeQuarter as number))).map(toProjectBoardItem),
+      items: projects.filter((project) => project.status === "NOT_STARTED" && !isProjectOverdue(project) && isProjectVisibleInPeriod(project, activePeriod, now)).map(toProjectBoardItem),
     },
     {
       key: "project_in_progress",
       title: "进行中",
       tone: "primary",
       status: "IN_PROGRESS",
-      items: projects.filter((project) => project.status === "IN_PROGRESS" && !isProjectOverdue(project) && (allQuarterSelected ? projectRangeOverlapsYear(project, activeYear) : projectRangeHasQuarter(project, activeYear, activeQuarter as number))).map(toProjectBoardItem),
+      items: projects.filter((project) => project.status === "IN_PROGRESS" && !isProjectOverdue(project) && isProjectVisibleInPeriod(project, activePeriod, now)).map(toProjectBoardItem),
     },
     {
       key: "project_delayed",
       title: "延期",
       tone: "warning",
       status: "IN_PROGRESS",
-      items: delayedProjects.filter((project) => {
-        if (allQuarterSelected) {
-          if (project.status === "LAUNCHED") {
-            return (project.launchedAt?.getFullYear() ?? activeYear) === activeYear;
-          }
-          return project.status === "COMPLETED" ? (project.completedAt?.getFullYear() ?? activeYear) === activeYear : projectRangeOverlapsYear(project, activeYear);
-        }
-        if (project.status === "LAUNCHED" || project.status === "COMPLETED") {
-          return getProjectDoneOverdueQuarter(project) === activeQuarter && ((project.launchedAt ?? project.completedAt)?.getFullYear() ?? activeYear) === activeYear;
-        }
-        return activeQuarter === Math.floor(now.getMonth() / 3) + 1;
-      }).map(toProjectBoardItem),
+      items: delayedProjects.filter((project) => isProjectVisibleInPeriod(project, activePeriod, now)).map(toProjectBoardItem),
     },
     {
       key: "project_launched",
@@ -1236,9 +1183,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       if (project.needsDevelopment !== true) return false;
       // 从未上线的已完成/已关闭项目不进入价值跟踪
       if (project.status === "COMPLETED" || project.status === "CLOSED") return false;
-      return allQuarterSelected
-        ? projectRangeOverlapsYear(project, activeYear)
-        : projectRangeHasQuarter(project, activeYear, activeQuarter as number);
+      return isProjectVisibleInPeriod(project, activePeriod, now);
     }
     if (isProjectValueTrackOverdue(project)) return true;
     return allQuarterSelected
@@ -1389,9 +1334,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   const projectMatchesActivePeriod = (project: (typeof projects)[number]) => {
     const hasActiveTasks = Boolean(activeWorksByProject.get(project.id)?.length);
     const hasActiveValueTracks = Boolean(valueTracksByProject.get(project.id)?.length);
-    const projectPeriodMatched = allQuarterSelected
-      ? projectRangeOverlapsYear(project, activeYear)
-      : projectRangeHasQuarter(project, activeYear, activeQuarter as number);
+    const projectPeriodMatched = isProjectVisibleInPeriod(project, activePeriod, now);
     return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks || isInValueTrackingScope(project);
   };
 
