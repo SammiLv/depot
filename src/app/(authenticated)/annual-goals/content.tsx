@@ -13,7 +13,7 @@ type Plan = Data["plans"][number];
 type ScopeItem = Data["scopeItems"][number];
 type Metric = Plan["metrics"][number];
 type SourceMetric = Metric["sources"][number];
-type PlanDetailView = Pick<Plan, "ownerType" | "metrics" | "permissions" | "totalWeight">;
+type PlanDetailView = Pick<Plan, "ownerType" | "year" | "metrics" | "permissions" | "totalWeight">;
 type PlanTab = "metrics" | "sources" | "quarters";
 type Props = { data: Data };
 
@@ -29,6 +29,23 @@ function renderRequiredLabel(label: string) {
 
 function getYearLabel(year: number) {
   return `${year} 年`;
+}
+
+function getCalendarYearAndQuarter(date = new Date()) {
+  return { year: date.getFullYear(), quarter: Math.floor(date.getMonth() / 3) + 1 };
+}
+
+/** 列表「本周新增」与周更新表单一致：仅展示当前自然季度、当前年度方案上的 weeklyIncrement */
+function getDisplayWeeklyIncrement(
+  planYear: number,
+  quarterTargets: { quarter: number; weeklyIncrement: number }[],
+  now = new Date(),
+) {
+  const { year, quarter } = getCalendarYearAndQuarter(now);
+  if (planYear !== year) {
+    return null;
+  }
+  return quarterTargets.find((target) => target.quarter === quarter)?.weeklyIncrement ?? 0;
 }
 
 function getScopeItemKey(item: ScopeItem) {
@@ -153,9 +170,10 @@ function formatActor(user: { name: string; title: string | null } | null) {
   return user.title ? `${user.name} · ${user.title}` : user.name;
 }
 
-function buildEmptyPlanDetailView(activeItem: ScopeItem): PlanDetailView {
+function buildEmptyPlanDetailView(activeItem: ScopeItem, year: number): PlanDetailView {
   return {
     ownerType: activeItem.type === "DEPARTMENT" ? "DEPARTMENT" : "TEAM",
+    year,
     metrics: [],
     totalWeight: 0,
     permissions: {
@@ -1513,7 +1531,12 @@ function PlanDetailTabs({ plan, tab, setTab, onCreateMetric, onEditMetric, onSou
                         </div>
                       );
                     })}
-                    <div className="text-xs text-muted-foreground font-medium">{formatValue(row.subject.quarterTargets.reduce((sum, target) => sum + target.weeklyIncrement, 0))}{row.subject.unit}</div>
+                    <div className="text-xs text-muted-foreground font-medium">
+                      {(() => {
+                        const weeklyIncrement = getDisplayWeeklyIncrement(plan.year, row.subject.quarterTargets);
+                        return weeklyIncrement === null ? "-" : `${formatValue(weeklyIncrement)}${row.subject.unit}`;
+                      })()}
+                    </div>
                     <div className="text-xs text-muted-foreground">{formatActor(time?.createdBy ?? null)}</div>
                     <div className="text-xs text-muted-foreground">{time ? formatDateTime(time.createdAt) : "-"}</div>
                     <div className="text-xs text-muted-foreground">{formatActor(time?.updatedBy ?? null)}</div>
@@ -1572,7 +1595,7 @@ export function AnnualGoalsContent({ data }: Props) {
     ?? filteredScopeItems[0]
     ?? null;
   const activePlan = activeItem?.plan ?? null;
-  const activePlanDetailView = activePlan ?? (activeItem ? buildEmptyPlanDetailView(activeItem) : null);
+  const activePlanDetailView = activePlan ?? (activeItem ? buildEmptyPlanDetailView(activeItem, data.selectedYear) : null);
   const activePlanTabs: { key: PlanTab; label: string }[] = activePlanDetailView?.ownerType === "DEPARTMENT"
     ? [
         { key: "metrics", label: "部门指标" },
@@ -1638,6 +1661,7 @@ export function AnnualGoalsContent({ data }: Props) {
 
   const emptyDepartmentPlanDetailView: PlanDetailView = {
     ownerType: "DEPARTMENT",
+    year: data.selectedYear,
     metrics: [],
     totalWeight: 0,
     permissions: {
