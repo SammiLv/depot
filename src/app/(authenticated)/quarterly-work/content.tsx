@@ -3830,10 +3830,7 @@ function ProjectTreeTable({
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.owner}</div>
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.workloadPersonDay ?? "-"}</div>
                 <div>
-                  <ListStatusTag
-                    label={delayed ? "延期" : projectTitleByStatus[project.status]}
-                    className={delayed ? "bg-[#FFF7E8] text-[#FF7D00]" : projectStatusTagClass[project.status]}
-                  />
+                  <ListStatusTag label={projectTitleByStatus[project.status]} className={projectStatusTagClass[project.status]} />
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
                   <span>{formatListQuarterRange(project.startQuarter, project.endQuarter)}</span>
