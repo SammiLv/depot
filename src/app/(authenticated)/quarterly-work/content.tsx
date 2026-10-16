@@ -4393,7 +4393,10 @@ function ValueListTable({
                   ? `${formatWorkload(summary.firstVersionWorkloadPersonDay)}/${formatWorkload(summary.postLaunchIterationWorkloadPersonDay)}/${formatWorkload(summary.totalWorkloadPersonDay)}`
                   : "-"}
               </div>
-              <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(project.expectedOutcome)}</div>
+              <div
+                className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
+                title={project.expectedOutcome ?? undefined}
+              >{emptyMetricText(project.expectedOutcome)}</div>
               <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(project.valueTrackSummary.actualValue)}</div>
               <div className="flex flex-wrap items-center gap-1">
                 <ListStatusTag label={project.valueTrackSummary.status} className={valueTrackListStatusTagClass(project.valueTrackSummary.status)} />
@@ -4562,7 +4565,10 @@ function TaskListTable({
                   <span className="text-sm leading-[22px] text-[#4B4B4B]">-</span>
                 )}
               </div>
-              <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.expectedOutcome || task.description)}</div>
+              <div
+                className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
+                title={task.expectedOutcome || task.description || undefined}
+              >{emptyMetricText(task.expectedOutcome || task.description)}</div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{task.owner}</div>
               <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
               <div>
