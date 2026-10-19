@@ -834,17 +834,22 @@ function QuarterlyWorkForm({
           />
         </FormRow>
         <FormRow label="是否需要开发 *" align="center">
-          <select
-            name="needsDevelopment"
-            required
-            value={needsDevValue}
-            onChange={(event) => setNeedsDevValue(event.target.value)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="" disabled>请选择是否需要开发</option>
-            <option value="true">是</option>
-            <option value="false">否</option>
-          </select>
+          <div className="w-full space-y-1">
+            <select
+              name="needsDevelopment"
+              required
+              value={needsDevValue}
+              onChange={(event) => setNeedsDevValue(event.target.value)}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            >
+              <option value="" disabled>请选择是否需要开发</option>
+              <option value="true">是</option>
+              <option value="false">否</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              注意：开发需求必须选择「是」，以纳入首版完成度统计，否则将影响首版完成度统计的准确度。
+            </p>
+          </div>
         </FormRow>
         <FormRow label="需求描述">
           <textarea
@@ -3646,7 +3651,7 @@ function ProjectExpandedPanel({
                   description={track.trackingResult ?? "待填写跟踪结果"}
                   extraDescription={formatValueTrackFollowUp(track.followUpOptimization)}
                   descriptionClassName="mt-1 text-sm leading-[22px] text-[#777777]"
-                  statusLabel={track.taskState === "COMPLETED" ? "" : (VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState)}
+                  statusLabel={VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
                   statusClassName={VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}
                   owner={track.owner || project.owner}
                   period={track.checkpointAt ? `跟踪周期 ${formatDateOnlyLabel(track.periodStartAt)} ~ ${formatDateOnlyLabel(track.checkpointAt)}` : shortQuarterFromPeriodLabel(track.periodLabel)}
@@ -4394,7 +4399,10 @@ function ValueListTable({
                 className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
                 title={project.expectedOutcome ?? undefined}
               >{emptyMetricText(project.expectedOutcome)}</div>
-              <div className="whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(project.valueTrackSummary.actualValue)}</div>
+              <div
+                className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
+                title={project.valueTrackSummary.actualValue?.trim() ? project.valueTrackSummary.actualValue : undefined}
+              >{emptyMetricText(project.valueTrackSummary.actualValue)}</div>
               <div className="flex flex-wrap items-center gap-1">
                 <ListStatusTag label={project.valueTrackSummary.status} className={valueTrackListStatusTagClass(project.valueTrackSummary.status)} />
                 {summary.overdue ? (
@@ -4456,7 +4464,10 @@ function ValueListTable({
                         {formatWorkload(track.firstVersionWorkloadPersonDay)}/{formatWorkload(track.postLaunchIterationWorkloadPersonDay)}/{formatWorkload(track.totalWorkloadPersonDay)}
                       </div>
                       <div></div>
-                      <div className="truncate text-[#4B4B4B]" title={track.actualValue ?? ""}>{track.actualValue ?? "-"}</div>
+                      <div
+                        className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
+                        title={track.actualValue?.trim() ? track.actualValue : undefined}
+                      >{emptyMetricText(track.actualValue)}</div>
                       <div></div>
                       <div className="text-[#4B4B4B]">{track.valueJudgement ?? "-"}</div>
                       <div></div>
