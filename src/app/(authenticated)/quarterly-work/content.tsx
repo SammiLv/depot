@@ -754,7 +754,6 @@ function QuarterlyWorkForm({
     item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""
   );
   const workloadRequired = workStatus === "COMPLETED" || (needsDevValue === "true" && workStatus !== "CLOSED");
-  const executionSummaryRequired = workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
@@ -916,11 +915,10 @@ function QuarterlyWorkForm({
             />
           </FormRow>
         ) : null}
-        <FormRow label={executionSummaryRequired ? "需求执行概况 *" : "需求执行概况"}>
+        <FormRow label="需求执行概况">
           <textarea
             name="executionSummary"
             rows={3}
-            required={executionSummaryRequired}
             defaultValue={item?.executionSummary ?? ""}
             placeholder="请输入需求最终执行情况的描述"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
@@ -4489,7 +4487,7 @@ function ValueListTable({
                     </div>
                   ))
                 ) : (
-                  <div className="py-3 pl-10 text-xs text-[#999999]">暂无跟踪快照，点击右侧「+」新增。</div>
+                  <div className="py-3 pl-10 text-xs text-[#999999]">暂无跟踪快照，待项目上线后开始跟踪。</div>
                 )}
               </div>
             </ProjectTreeCollapse>

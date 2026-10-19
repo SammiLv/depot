@@ -349,12 +349,8 @@ function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
   return text || null;
 }
 
-function parseExecutionSummary(value: FormDataEntryValue | null, status: WorkStatus) {
-  const text = (value as string | null)?.trim() || null;
-  if (status === "COMPLETED" && !text) {
-    throw new Error("需求状态为已完成时，需求执行概况为必填项");
-  }
-  return text;
+function parseExecutionSummary(value: FormDataEntryValue | null) {
+  return (value as string | null)?.trim() || null;
 }
 
 function getProjectLaunchedAtByStatus(status: ProjectStatus, existingLaunchedAt: Date | null) {
@@ -602,7 +598,7 @@ export async function createQuarterlyWork(formData: FormData) {
   const period = derivePeriodFields(startDate, endDate);
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
-  const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
+  const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   if (status === "COMPLETED" && workloadPersonDay === null) {
@@ -686,7 +682,7 @@ export async function updateQuarterlyWork(formData: FormData) {
   const inputEndDate = parsePeriodEndDate(formData.get("endDate"));
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
-  const executionSummary = parseExecutionSummary(formData.get("executionSummary"), status);
+  const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   if (status === "COMPLETED" && workloadPersonDay === null) {
