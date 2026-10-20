@@ -1654,16 +1654,22 @@ export async function updateProject(formData: FormData) {
     throw new Error("项目已上线，不能再改为非开发项目");
   }
   if (!needsDevelopment) {
-    const devRequirementCount = await prisma.quarterlyWork.count({
+    const devRequirements = await prisma.quarterlyWork.findMany({
       where: {
         projectId: project.id,
         deletedAt: null,
         needsDevelopment: true,
         status: { not: "CLOSED" },
       },
+      select: { title: true },
+      orderBy: { title: "asc" },
+      take: 8,
     });
-    if (devRequirementCount > 0) {
-      throw new Error("项目下仍有标记为「需开发」的需求，请先将对应需求改为「否」或关闭后，再将项目设为非开发项目");
+    if (devRequirements.length > 0) {
+      const listed = devRequirements.map((row) => `「${row.title}」`).join("、");
+      throw new Error(
+        `项目下仍有需开发的需求，不能改为非开发项目。请先将以下需求改为「否」或关闭：${listed}`,
+      );
     }
   }
 
