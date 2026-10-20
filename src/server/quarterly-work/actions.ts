@@ -601,16 +601,14 @@ export async function createQuarterlyWork(formData: FormData) {
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
-  if (status === "COMPLETED" && workloadPersonDay === null) {
-    throw new Error("需求状态为已完成时，工作量(人天)为必填项");
+  const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
+  const workloadRequiredForDevWork = needsDevelopment
+    && (status === "COMPLETED" || status === "DELAYED_COMPLETED");
+  if (workloadRequiredForDevWork && workloadPersonDay === null) {
+    throw new Error("需要开发且已完成的需求请填写工作量(人天)");
   }
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
-  }
-  const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
-  // 开发需求必须填写工作量，否则首版完成度无法准确计算
-  if (needsDevelopment && workloadPersonDay === null && status !== "CLOSED") {
-    throw new Error("需要开发的需求请填写工作量(人天)");
   }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
@@ -685,16 +683,14 @@ export async function updateQuarterlyWork(formData: FormData) {
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
-  if (status === "COMPLETED" && workloadPersonDay === null) {
-    throw new Error("需求状态为已完成时，工作量(人天)为必填项");
+  const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
+  const workloadRequiredForDevWork = needsDevelopment
+    && (status === "COMPLETED" || status === "DELAYED_COMPLETED");
+  if (workloadRequiredForDevWork && workloadPersonDay === null) {
+    throw new Error("需要开发且已完成的需求请填写工作量(人天)");
   }
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
-  }
-  const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
-  // 开发需求必须填写工作量，否则首版完成度无法准确计算
-  if (needsDevelopment && workloadPersonDay === null && status !== "CLOSED") {
-    throw new Error("需要开发的需求请填写工作量(人天)");
   }
   const description = requiredString(formData.get("description"), "本季度工作目标");
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");

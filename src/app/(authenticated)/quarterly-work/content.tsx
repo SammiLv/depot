@@ -753,7 +753,7 @@ function QuarterlyWorkForm({
   const [needsDevValue, setNeedsDevValue] = useState<string>(
     item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""
   );
-  const workloadRequired = workStatus === "COMPLETED" || (needsDevValue === "true" && workStatus !== "CLOSED");
+  const workloadRequired = needsDevValue === "true" && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
@@ -881,8 +881,12 @@ function QuarterlyWorkForm({
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        {needsDevValue === "true" && workStatus !== "CLOSED" ? (
-          <div className="-mt-2 text-xs text-muted-foreground">需要开发的需求必须填写工作量，用于计算首版完成度。</div>
+        {needsDevValue === "true" ? (
+          <div className="-mt-2 text-xs text-muted-foreground">
+            {workloadRequired
+              ? "需要开发且已完成的需求必须填写工作量，用于计算首版完成度。"
+              : "进行中的开发需求可在完成后填写工作量。"}
+          </div>
         ) : null}
         <FormRow label="需求状态" align="center">
           <select
