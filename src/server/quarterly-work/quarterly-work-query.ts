@@ -42,7 +42,7 @@ type QuarterlyWorkQueryOptions = {
   view?: WorkspaceViewMode;
   projectPanel?: ProjectPanelMode;
   panel?: WorkspacePanel;
-  status?: WorkspaceStatusFilter;
+  status?: WorkspaceStatusFilter[];
   orgNodeId?: string | null;
   teamId?: string | "all" | null;
   ownerId?: string | null;
@@ -484,23 +484,19 @@ function textMatchesSearchQuery(query: string, ...values: Array<string | number 
   return values.some((value) => String(value ?? "").toLowerCase().includes(query));
 }
 
-function normalizeWorkspaceStatusFilter(value: WorkspaceStatusFilter | null | undefined): WorkspaceStatusFilter {
-  if (
-    value === "all"
-    || value === "DELAYED"
-    || value === "NOT_STARTED"
-    || value === "IN_PROGRESS"
-    || value === "LAUNCHED"
-    || value === "COMPLETED"
-    || value === "CLOSED"
-  ) {
-    return value;
-  }
-  return "all";
+function normalizeWorkspaceStatusFilters(values: WorkspaceStatusFilter[] | null | undefined): WorkspaceStatusFilter[] {
+  const allowed: WorkspaceStatusFilter[] = ["DELAYED", "NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"];
+  if (!values?.length) return [];
+  return [...new Set(values.filter((value): value is Exclude<WorkspaceStatusFilter, "all"> => allowed.includes(value)))];
 }
 
 function normalizeWorkspaceViewMode(value: WorkspaceViewMode | null | undefined): WorkspaceViewMode {
   return value === "list" ? "list" : "card";
+}
+
+/** 系统管理员、主管进入产品管理默认列表模式，便于总览；其余角色默认卡片 */
+function defaultWorkspaceViewByRole(roleType: RoleType): WorkspaceViewMode {
+  return roleType === "ADMIN" || roleType === "DEPARTMENT_MANAGER" ? "list" : "card";
 }
 
 function normalizeProjectPanelMode(value: ProjectPanelMode | null | undefined): ProjectPanelMode {
@@ -1235,8 +1231,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     return { firstVersionRequirements: firstVersion, postLaunchRequirements: postLaunch };
   };
 
-  const workspaceStatus = normalizeWorkspaceStatusFilter(options?.status);
-  const workspaceView = normalizeWorkspaceViewMode(options?.view);
+  const workspaceStatuses = normalizeWorkspaceStatusFilters(options?.status);
+  const workspaceView = options?.view ? normalizeWorkspaceViewMode(options.view) : defaultWorkspaceViewByRole(currentUser.roleType);
   const workspaceProjectPanel = normalizeProjectPanelMode(options?.projectPanel);
   const workspaceSearchQuery = normalizeSearchQuery(options?.query);
   const selectedGoalId = options?.goalId && options.goalId !== "all" ? options.goalId : null;
@@ -1354,7 +1350,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     if (selectedGoalId && !item.productGoalIds.includes(selectedGoalId)) {
       return false;
     }
-    if (!ignoreStatus && workspaceStatus !== "all" && item.statusFilterKey !== workspaceStatus) {
+    if (!ignoreStatus && workspaceStatuses.length > 0 && !workspaceStatuses.includes(item.statusFilterKey)) {
       return false;
     }
     if (selectedTeamId && item.teamOrgNodeId !== selectedTeamId) {
@@ -1445,7 +1441,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   };
 
   const goalNavigationScopeItems = projectWorkspaceSourceItems.filter((item) => {
-    if (workspaceStatus !== "all" && item.statusFilterKey !== workspaceStatus) {
+    if (workspaceStatuses.length > 0 && !workspaceStatuses.includes(item.statusFilterKey)) {
       return false;
     }
     if (selectedTeamId && item.teamOrgNodeId !== selectedTeamId) {
@@ -1589,7 +1585,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       view: workspaceView,
       projectPanel: workspaceProjectPanel,
       panel: workspacePanel,
-      status: workspaceStatus,
+      status: workspaceStatuses,
       orgNodeId: selectedOrgNodeId,
       teamId: selectedTeamId ?? "all",
       ownerId: selectedOwnerId,

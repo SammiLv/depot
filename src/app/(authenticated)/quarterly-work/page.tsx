@@ -19,11 +19,11 @@ function parseIntParam(value: string | string[] | undefined) {
 
 const workspaceStatuses = ["all", "DELAYED", "NOT_STARTED", "IN_PROGRESS", "LAUNCHED", "COMPLETED", "CLOSED"] as const;
 
-function parseStatusParam(value: string | string[] | undefined) {
-  const raw = readParam(value);
-  return workspaceStatuses.includes(raw as (typeof workspaceStatuses)[number])
-    ? (raw as (typeof workspaceStatuses)[number])
-    : undefined;
+function parseStatusesParam(value: string | string[] | undefined) {
+  const raw = Array.isArray(value) ? value : value ? [value] : [];
+  return raw.filter((item): item is (typeof workspaceStatuses)[number] =>
+    (workspaceStatuses as readonly string[]).includes(item),
+  );
 }
 
 function parsePanelParam(value: string | string[] | undefined) {
@@ -49,7 +49,7 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
     view: viewRaw === "list" ? "list" : undefined,
     projectPanel: projectPanelRaw === "value" ? "value" : undefined,
     panel: parsePanelParam(params?.panel),
-    status: parseStatusParam(params?.status),
+    status: parseStatusesParam(params?.status),
     orgNodeId: readParam(params?.orgNodeId) ?? null,
     teamId: readParam(params?.teamId) ?? null,
     ownerId: readParam(params?.ownerId) ?? null,

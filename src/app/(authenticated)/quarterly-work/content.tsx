@@ -26,7 +26,7 @@ import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
 type BoardTab = "goal" | "project" | "board" | "value" | "log";
 type ViewMode = "card" | "list";
-type WorkspaceStatus = Props["data"]["workspaceFilters"]["status"];
+type WorkspaceStatus = "all" | "DELAYED" | "NOT_STARTED" | "IN_PROGRESS" | "LAUNCHED" | "COMPLETED" | "CLOSED";
 type ColumnStatus = Props["data"]["columns"][number]["status"];
 type ProjectStatus = Props["data"]["projectColumns"][number]["status"];
 type BoardItem = Props["data"]["columns"][number]["items"][number];
@@ -99,6 +99,19 @@ function emptyMetricText(value: string | null | undefined) {
   return value?.trim() ? value : "-";
 }
 
+/** 状态多选：点击切换选中态 */
+function toggleFilterKey<T>(list: readonly T[], key: T): T[] {
+  return list.includes(key) ? list.filter((item) => item !== key) : [...list, key];
+}
+
+/**
+ * 状态 pill 点击语义：普通点击单选（再点一次取消）；Ctrl/⌘+点击多选（追加/移除）。
+ */
+function nextStatusSelection<T>(current: readonly T[], key: T, multi: boolean): T[] {
+  if (multi) return toggleFilterKey(current, key);
+  return current.length === 1 && current[0] === key ? [] : [key];
+}
+
 function valueJudgementLabel(value: string | null | undefined) {
   if (!value?.trim()) return "-";
   if (value === "超出预期") return "超预期";
@@ -155,6 +168,7 @@ const goalStatusFilters = [
   { key: "CLOSED", label: "关闭" },
 ] as const;
 type GoalStatusFilter = (typeof goalStatusFilters)[number]["key"];
+type GoalStatusKey = Exclude<GoalStatusFilter, "all">;
 const projectStatusFilters = [
   { key: "all", label: "全部" },
   { key: "IN_PROGRESS", label: "进行中" },
@@ -173,6 +187,7 @@ const taskStatusFilters = [
   { key: "CLOSED", label: "关闭" },
 ] as const;
 type TaskStatusFilter = (typeof taskStatusFilters)[number]["key"];
+type TaskStatusKey = Exclude<TaskStatusFilter, "all">;
 const valueStatusFilters = [
   { key: "all", label: "全部" },
   { key: "观测中", label: "观测中" },
@@ -180,6 +195,7 @@ const valueStatusFilters = [
   { key: "已完成", label: "已完成" },
 ] as const;
 type ValueStatusFilter = (typeof valueStatusFilters)[number]["key"];
+type ValueStatusKey = Exclude<ValueStatusFilter, "all">;
 const valueJudgementFilterOptions = [
   { value: "", label: "价值判断" },
   { value: "超出预期", label: "超预期" },
@@ -2436,15 +2452,18 @@ function CountdownTag({ label, overdue }: { label: string | null; overdue: boole
   );
 }
 
-function taskMatchesStatusFilter(task: ProjectWorkspaceTaskItem, filter: TaskStatusFilter): boolean {
-  if (filter === "all") return true;
-  // 延期：未完成且已超过计划结束时间（含未启动、进行中）
-  if (filter === "DELAYED") return task.isOverdue;
-  if (filter === "COMPLETED") return task.status === "COMPLETED";
-  if (filter === "CLOSED") return task.status === "CLOSED";
-  if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS" && !task.isOverdue;
-  if (filter === "NOT_STARTED") return task.status === "NOT_STARTED" && !task.isOverdue;
-  return false;
+/** 需求状态多选匹配：命中任一已选状态即保留；未选任何状态（空数组）视为全部 */
+function taskMatchesStatusFilters(task: ProjectWorkspaceTaskItem, filters: readonly TaskStatusKey[]): boolean {
+  if (filters.length === 0) return true;
+  return filters.some((filter) => {
+    // 延期：未完成且已超过计划结束时间（含未启动、进行中）
+    if (filter === "DELAYED") return task.isOverdue;
+    if (filter === "COMPLETED") return task.status === "COMPLETED";
+    if (filter === "CLOSED") return task.status === "CLOSED";
+    if (filter === "IN_PROGRESS") return task.status === "IN_PROGRESS" && !task.isOverdue;
+    if (filter === "NOT_STARTED") return task.status === "NOT_STARTED" && !task.isOverdue;
+    return false;
+  });
 }
 
 function getRemainingWeeks(task: ProjectWorkspaceTaskItem) {
@@ -4927,6 +4946,7 @@ function QuarterlyWorkShell({
   canManageProjectAndValueTracking,
   canManageProductTask,
   onUpdateFilters,
+  onUpdateStatusFilters,
   onCreateGoal,
   onCreateProject,
   onCreateTask,
@@ -4950,6 +4970,7 @@ function QuarterlyWorkShell({
   canManageProjectAndValueTracking: boolean;
   canManageProductTask: boolean;
   onUpdateFilters: (updates: Record<string, string | number | null>) => void;
+  onUpdateStatusFilters: (statuses: readonly string[]) => void;
   onCreateGoal: () => void;
   onCreateProject: (status: ProjectStatus) => void;
   onCreateTask: (projectId?: string) => void;
@@ -4968,19 +4989,20 @@ function QuarterlyWorkShell({
   const activeGoalId = data.workspaceFilters.goalId ?? "all";
   const [expandedGoalId, setExpandedGoalId] = useState(activeGoalId);
   const [entityTab, setEntityTab] = useState<WorkspaceEntityTab>(data.workspaceFilters.panel ?? "project");
-  const [goalStatusFilter, setGoalStatusFilter] = useState<GoalStatusFilter>("all");
+  const [goalStatusFilter, setGoalStatusFilter] = useState<GoalStatusKey[]>([]);
   const activeView = data.workspaceFilters.view === "list" ? "list" : "card";
   const [viewMode, setViewMode] = useState<"card" | "list">(activeView);
   const activeProjectPanel = data.workspaceFilters.projectPanel;
-  const activeStatus = data.workspaceFilters.status ?? "all";
+  const activeStatuses = data.workspaceFilters.status;
+  const activeStatus = activeStatuses.length > 0 ? activeStatuses[0] : "all";
   const isGoalHome = entityTab === "goal";
   const isProjectHome = entityTab === "project";
   const isTaskHome = entityTab === "task";
   const isValueHome = entityTab === "value";
   const bleedCardList = (isGoalHome || isTaskHome) && activeView === "card";
-  const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusFilter>("all");
+  const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusKey[]>([]);
   const [needsDevOnly, setNeedsDevOnly] = useState(false);
-  const [valueStatusFilter, setValueStatusFilter] = useState<ValueStatusFilter>("all");
+  const [valueStatusFilter, setValueStatusFilter] = useState<ValueStatusKey[]>([]);
   const [valueJudgementFilter, setValueJudgementFilter] = useState("");
   const projectStatusCounts = data.workspaceSummary.projectStatusCounts;
   const activeProjectId = data.workspaceFilters.projectId ?? "";
@@ -5036,13 +5058,13 @@ function QuarterlyWorkShell({
     };
     for (const task of scopedTaskItems) {
       for (const { key } of taskStatusFilters) {
-        if (key !== "all" && taskMatchesStatusFilter(task, key)) counts[key] += 1;
+        if (key !== "all" && taskMatchesStatusFilters(task, [key])) counts[key] += 1;
       }
     }
     return counts;
   }, [scopedTaskItems]);
   const visibleTasks = useMemo(
-    () => scopedTaskItems.filter((task) => taskMatchesStatusFilter(task, taskStatusFilter)),
+    () => scopedTaskItems.filter((task) => taskMatchesStatusFilters(task, taskStatusFilter)),
     [scopedTaskItems, taskStatusFilter],
   );
   const projectFilterOptions = useMemo(() => {
@@ -5084,7 +5106,7 @@ function QuarterlyWorkShell({
     () =>
       data.projectWorkspaceItems.filter((project) => {
         if (!project.valueTrackSummary.initialized) return false;
-        if (valueStatusFilter !== "all" && project.valueTrackSummary.status !== valueStatusFilter) return false;
+        if (valueStatusFilter.length > 0 && !valueStatusFilter.includes(project.valueTrackSummary.status as ValueStatusKey)) return false;
         if (valueJudgementFilter && project.valueTrackSummary.judgement !== valueJudgementFilter) return false;
         return true;
       }),
@@ -5115,7 +5137,7 @@ function QuarterlyWorkShell({
     const teamId = data.workspaceFilters.teamId && data.workspaceFilters.teamId !== "all" ? data.workspaceFilters.teamId : null;
     const orgNodeId = data.workspaceFilters.orgNodeId ?? null;
     return goalItems.filter((goal) => {
-      if (goalStatusFilter !== "all" && goal.status !== goalStatusFilter) return false;
+      if (goalStatusFilter.length > 0 && !goalStatusFilter.includes(goal.status as GoalStatusKey)) return false;
       if (orgNodeId && goal.departmentOrgNodeId !== orgNodeId && goal.teamOrgNodeId !== orgNodeId) return false;
       if (teamId && goal.teamOrgNodeId !== teamId) return false;
       if (ownerId && goal.ownerId !== ownerId) return false;
@@ -5235,14 +5257,14 @@ function QuarterlyWorkShell({
               const nextTab = value as WorkspaceEntityTab;
               setEntityTab(nextTab);
               if (nextTab === "task") {
-                setTaskStatusFilter("all");
+                setTaskStatusFilter([]);
                 setNeedsDevOnly(false);
-                if (activeStatus !== "all") onUpdateFilters({ status: null });
+                if (activeStatuses.length > 0) onUpdateFilters({ status: null });
               }
               if (nextTab === "value") {
-                setValueStatusFilter("all");
+                setValueStatusFilter([]);
                 setValueJudgementFilter("");
-                if (activeStatus !== "all") onUpdateFilters({ status: null });
+                if (activeStatuses.length > 0) onUpdateFilters({ status: null });
               }
             }}
           />
@@ -5268,7 +5290,7 @@ function QuarterlyWorkShell({
                   type="button"
                   onClick={() => {
                     setViewMode(item.key);
-                    onUpdateFilters({ view: item.key === "card" ? null : item.key });
+                    onUpdateFilters({ view: item.key });
                   }}
                   className={`relative z-10 px-4 text-sm leading-6 transition-colors duration-200 ${
                     viewMode === item.key ? "text-[#3069F9]" : "text-[#181818] hover:text-[#3069F9]"
@@ -5425,13 +5447,13 @@ function QuarterlyWorkShell({
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-4 pb-4 pt-0">
             {isGoalHome ? (
               goalStatusFilters.map((item) => {
-                const active = goalStatusFilter === item.key;
+                const active = item.key === "all" ? goalStatusFilter.length === 0 : goalStatusFilter.includes(item.key);
                 const count = goalCounts[item.key];
                 return (
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => setGoalStatusFilter(item.key)}
+                    onClick={(event) => setGoalStatusFilter(item.key === "all" ? [] : nextStatusSelection(goalStatusFilter, item.key, event.metaKey || event.ctrlKey))}
                     className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
@@ -5444,13 +5466,13 @@ function QuarterlyWorkShell({
               })
             ) : isProjectHome ? (
               projectStatusFilters.map((item) => {
-                const active = activeStatus === item.key;
+                const active = item.key === "all" ? activeStatuses.length === 0 : activeStatuses.includes(item.key as Exclude<WorkspaceStatus, "all">);
                 const count = projectStatusCounts[item.key];
                 return (
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => onUpdateFilters({ status: item.key === "all" ? null : item.key })}
+                    onClick={(event) => onUpdateStatusFilters(item.key === "all" ? [] : nextStatusSelection(activeStatuses, item.key, event.metaKey || event.ctrlKey))}
                     className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
@@ -5463,13 +5485,13 @@ function QuarterlyWorkShell({
               })
             ) : isTaskHome ? (
               taskStatusFilters.map((item) => {
-                const active = taskStatusFilter === item.key;
+                const active = item.key === "all" ? taskStatusFilter.length === 0 : taskStatusFilter.includes(item.key);
                 const count = taskCounts[item.key];
                 return (
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => setTaskStatusFilter(item.key)}
+                    onClick={(event) => setTaskStatusFilter(item.key === "all" ? [] : nextStatusSelection(taskStatusFilter, item.key, event.metaKey || event.ctrlKey))}
                     className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
@@ -5482,13 +5504,13 @@ function QuarterlyWorkShell({
               })
             ) : isValueHome ? (
               valueStatusFilters.map((item) => {
-                const active = valueStatusFilter === item.key;
+                const active = item.key === "all" ? valueStatusFilter.length === 0 : valueStatusFilter.includes(item.key);
                 const count = valueCounts[item.key];
                 return (
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => setValueStatusFilter(item.key)}
+                    onClick={(event) => setValueStatusFilter(item.key === "all" ? [] : nextStatusSelection(valueStatusFilter, item.key, event.metaKey || event.ctrlKey))}
                     className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
@@ -5764,6 +5786,16 @@ export function QuarterlyWorkContent({ data }: Props) {
       } else {
         params.set(key, String(value));
       }
+    }
+    const nextQuery = params.toString();
+    router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  };
+  /** 项目状态多选：写多个 status 参数；空数组表示全部 */
+  const updateStatusFilters = (nextStatuses: readonly string[]) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("status");
+    for (const status of nextStatuses) {
+      params.append("status", status);
     }
     const nextQuery = params.toString();
     router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname);
@@ -6866,6 +6898,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           canManageProjectAndValueTracking={canManageProjectAndValueTracking}
           canManageProductTask={canManageProductTask}
           onUpdateFilters={updateWorkspaceFilters}
+          onUpdateStatusFilters={updateStatusFilters}
           onCreateGoal={() => setCreateProductGoalDialog(true)}
           onCreateProject={(status) => setCreateProjectDialog(status)}
           onCreateTask={(projectId) => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId })}
