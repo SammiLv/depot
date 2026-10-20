@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DateInput } from "@/components/date-input";
@@ -21,7 +21,7 @@ import {
 import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
-import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
 type BoardTab = "goal" | "project" | "board" | "value" | "log";
@@ -3403,6 +3403,130 @@ function ListStatusTag({
   );
 }
 
+// ============ 列表表头排序（项目/需求/价值跟踪三表共用） ============
+type SortDir = "asc" | "desc";
+type SortState = { field: string; dir: SortDir } | null;
+
+/** 排序状态：点一次升序 → 再点降序 → 第三次清除，恢复列表默认顺序；仅本次会话有效 */
+function useListSort() {
+  const [sort, setSort] = useState<SortState>(null);
+  const toggleSort = useCallback((field: string) => {
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, dir: "asc" };
+      if (prev.dir === "asc") return { field, dir: "desc" };
+      return null;
+    });
+  }, []);
+  return { sort, toggleSort };
+}
+
+function applySortDir(cmp: number, dir: SortDir) {
+  return dir === "asc" ? cmp : -cmp;
+}
+
+/** 字符串排序；空值恒排最后 */
+function compareSortStrings(a: string | null | undefined, b: string | null | undefined, dir: SortDir) {
+  const aText = a?.trim() ?? "";
+  const bText = b?.trim() ?? "";
+  if (!aText && !bText) return 0;
+  if (!aText) return 1;
+  if (!bText) return -1;
+  return applySortDir(aText.localeCompare(bText, "zh-Hans-CN"), dir);
+}
+
+/** 数值排序；空值恒排最后 */
+function compareSortNumbers(a: number | null | undefined, b: number | null | undefined, dir: SortDir) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return applySortDir(a - b, dir);
+}
+
+/** 日期排序；空值恒排最后 */
+function compareSortDates(a: Date | null | undefined, b: Date | null | undefined, dir: SortDir) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return applySortDir(a.getTime() - b.getTime(), dir);
+}
+
+/** 枚举排序：rank 表内按序号，表外/空值恒排最后 */
+function compareSortRanks(a: string | null | undefined, b: string | null | undefined, rank: Record<string, number>, dir: SortDir) {
+  const rankOf = (value: string | null | undefined) => {
+    if (!value?.trim()) return Number.MAX_SAFE_INTEGER;
+    return rank[value] ?? Number.MAX_SAFE_INTEGER - 1;
+  };
+  return applySortDir(rankOf(a) - rankOf(b), dir);
+}
+
+/** 季度编码转月份序号（2026-Q3 → 2026*12+6），用于周期排序 */
+function quarterStartMonthIndex(quarter: string | null | undefined) {
+  const matched = quarter?.match(/^(\d{4})-Q([1-4])$/);
+  if (!matched) return null;
+  return Number(matched[1]) * 12 + (Number(matched[2]) - 1) * 3;
+}
+
+const projectStatusSortRank: Record<string, number> = {
+  NOT_STARTED: 0,
+  IN_PROGRESS: 1,
+  LAUNCHED: 2,
+  COMPLETED: 3,
+  CLOSED: 4,
+};
+const workStatusSortRank: Record<string, number> = {
+  NOT_STARTED: 0,
+  IN_PROGRESS: 1,
+  COMPLETED: 2,
+  DELAYED_COMPLETED: 3,
+  CLOSED: 4,
+};
+const trackStatusSortRank: Record<string, number> = {
+  [VALUE_TRACK_STATUS_PENDING_OBSERVATION]: 0,
+  [VALUE_TRACK_STATUS_OBSERVING]: 1,
+  [VALUE_TRACK_STATUS_COMPLETED]: 2,
+};
+const valueJudgementSortRank: Record<string, number> = {
+  "已达预期": 0,
+  "超出预期": 1,
+  "未达预期": 2,
+};
+const taskResultSortRank: Record<string, number> = Object.fromEntries(TASK_RESULTS.map((result, index) => [result, index]));
+
+function SortableHeader({
+  field,
+  label,
+  sort,
+  onToggle,
+  className,
+}: {
+  field: string;
+  label: ReactNode;
+  sort: SortState;
+  onToggle: (field: string) => void;
+  className?: string;
+}) {
+  const active = sort?.field === field;
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(field)}
+      className={`inline-flex items-center gap-1 whitespace-nowrap text-sm leading-[22px] transition-colors ${active ? "font-medium text-[#3069F9]" : "text-[#4B4B4B] hover:text-[#3069F9]"} ${className ?? ""}`}
+      aria-label={`按${typeof label === "string" ? label : field}排序`}
+    >
+      {label}
+      {active ? (
+        sort.dir === "asc" ? (
+          <ChevronUp className="h-3 w-3" />
+        ) : (
+          <ChevronDown className="h-3 w-3" />
+        )
+      ) : (
+        <ChevronsUpDown className="h-3 w-3 text-[#C9CDD4]" />
+      )}
+    </button>
+  );
+}
+
 function formatValueTrackFollowUp(value: string | null | undefined) {
   if (!value?.trim()) return null;
   return value.startsWith("后续优化") ? value : `后续优化：${value}`;
@@ -3761,22 +3885,49 @@ function ProjectTreeTable({
   onDeleteTask: (task: ProjectWorkspaceTaskItem) => void;
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
+  const { sort, toggleSort } = useListSort();
+  const sortedProjects = useMemo(() => {
+    if (!sort) return projects;
+    const compare = (a: ProjectWorkspaceItem, b: ProjectWorkspaceItem): number => {
+      switch (sort.field) {
+        case "title":
+          return compareSortStrings(a.title, b.title, sort.dir);
+        case "goal":
+          return compareSortStrings(a.productGoals[0]?.title, b.productGoals[0]?.title, sort.dir);
+        case "owner":
+          return compareSortStrings(a.owner, b.owner, sort.dir);
+        case "workload":
+          return compareSortNumbers(a.workloadPersonDay, b.workloadPersonDay, sort.dir);
+        case "status":
+          return compareSortRanks(a.status, b.status, projectStatusSortRank, sort.dir);
+        case "period": {
+          const byStart = compareSortNumbers(quarterStartMonthIndex(a.startQuarter), quarterStartMonthIndex(b.startQuarter), sort.dir);
+          if (byStart !== 0) return byStart;
+          return compareSortNumbers(quarterStartMonthIndex(a.endQuarter), quarterStartMonthIndex(b.endQuarter), sort.dir);
+        }
+        case "completedAt":
+          return compareSortDates(a.completedAt, b.completedAt, sort.dir);
+        default:
+          return 0;
+      }
+    };
+    return [...projects].sort(compare);
+  }, [projects, sort]);
   return (
     <div className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
       <div className={`${projectTreeRowClass} sticky top-0 z-10 h-11 items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
-        <div>名称</div>
-        <div className="whitespace-nowrap">所属目标</div>
-        <div>负责人</div>
-        <div className="whitespace-nowrap">工作量(人天)</div>
-        <div>状态</div>
-        <div>周期</div>
-        <div>完成时间</div>
+        <div><SortableHeader field="title" label="名称" sort={sort} onToggle={toggleSort} /></div>
+        <div className="whitespace-nowrap"><SortableHeader field="goal" label="所属目标" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="owner" label="负责人" sort={sort} onToggle={toggleSort} /></div>
+        <div className="whitespace-nowrap"><SortableHeader field="workload" label="工作量(人天)" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="status" label="状态" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="period" label="周期" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="completedAt" label="完成时间" sort={sort} onToggle={toggleSort} /></div>
         <div className="text-right">操作</div>
       </div>
       <div>
-        {projects.map((project) => {
+        {sortedProjects.map((project) => {
           const expanded = project.id === expandedProjectId;
-          const delayed = project.isOverdue && project.status !== "COMPLETED" && project.status !== "CLOSED";
           return (
             <div key={project.id}>
               <div className={`${projectTreeRowClass} items-center border-b border-[#F0F0F0] py-3 transition-colors duration-300 ${expanded ? "bg-[#F7FAFF]" : "bg-white"}`}>
@@ -4318,6 +4469,37 @@ function ValueListTable({
   onEditTrack: (track: ProjectWorkspaceValueTrackItem) => void;
   onDeleteTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
+  const { sort, toggleSort } = useListSort();
+  const sortedProjects = useMemo(() => {
+    if (!sort) return projects;
+    const compare = (a: ProjectWorkspaceItem, b: ProjectWorkspaceItem): number => {
+      switch (sort.field) {
+        case "title":
+          return compareSortStrings(a.title, b.title, sort.dir);
+        case "owner":
+          return compareSortStrings(a.owner, b.owner, sort.dir);
+        case "completion":
+          return compareSortNumbers(a.valueTrackSummary.firstVersionCompletionPercent, b.valueTrackSummary.firstVersionCompletionPercent, sort.dir);
+        case "workload":
+          return compareSortNumbers(a.valueTrackSummary.totalWorkloadPersonDay, b.valueTrackSummary.totalWorkloadPersonDay, sort.dir);
+        case "expectedOutcome":
+          return compareSortStrings(a.expectedOutcome, b.expectedOutcome, sort.dir);
+        case "actualValue":
+          return compareSortStrings(a.valueTrackSummary.actualValue, b.valueTrackSummary.actualValue, sort.dir);
+        case "trackStatus":
+          return compareSortRanks(a.valueTrackSummary.status, b.valueTrackSummary.status, trackStatusSortRank, sort.dir);
+        case "judgement":
+          return compareSortRanks(a.valueTrackSummary.judgement, b.valueTrackSummary.judgement, valueJudgementSortRank, sort.dir);
+        case "status":
+          return compareSortRanks(a.status, b.status, projectStatusSortRank, sort.dir);
+        case "launchedAt":
+          return compareSortDates(a.launchedAt, b.launchedAt, sort.dir);
+        default:
+          return 0;
+      }
+    };
+    return [...projects].sort(compare);
+  }, [projects, sort]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pingLeft, setPingLeft] = useState(false);
   const [pingRight, setPingRight] = useState(false);
@@ -4344,20 +4526,29 @@ function ValueListTable({
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
       <div className={`${valueListRowClass} sticky top-0 z-20 h-11 min-w-[1360px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
-        <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>项目名称</div>
-        <div>负责人</div>
-        <div>首版完成度</div>
-        <div className="flex flex-col whitespace-nowrap leading-[18px]"><span>开发工作量</span><span className="text-xs text-[#999999]">（首版/迭代/合计）</span></div>
-        <div>预期收益</div>
-        <div>实际收益</div>
-        <div>跟踪状态</div>
-        <div>价值判断</div>
-        <div>项目状态</div>
-        <div>上线时间</div>
+        <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>
+          <SortableHeader field="title" label="项目名称" sort={sort} onToggle={toggleSort} />
+        </div>
+        <div><SortableHeader field="owner" label="负责人" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="completion" label="首版完成度" sort={sort} onToggle={toggleSort} /></div>
+        <div className="flex flex-col whitespace-nowrap leading-[18px]">
+          <SortableHeader
+            field="workload"
+            label={<span className="flex flex-col"><span>开发工作量</span><span className="text-xs text-[#999999]">（首版/迭代/合计）</span></span>}
+            sort={sort}
+            onToggle={toggleSort}
+          />
+        </div>
+        <div><SortableHeader field="expectedOutcome" label="预期收益" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="actualValue" label="实际收益" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="trackStatus" label="跟踪状态" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="judgement" label="价值判断" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="status" label="项目状态" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="launchedAt" label="上线时间" sort={sort} onToggle={toggleSort} /></div>
         <div className={`sticky right-0 top-0 z-30 flex h-11 items-center justify-end overflow-visible border-b border-[#F0F0F0] bg-white pr-4 text-right ${pingRight ? goalStickyActionShadow : ""}`}>操作</div>
       </div>
       <div className="min-w-[1360px]">
-        {projects.map((project) => {
+        {sortedProjects.map((project) => {
           const judgement = project.valueTrackSummary.judgement;
           const judgementClass = valueJudgementTagClass(judgement);
           const summary = project.valueTrackSummary;
@@ -4521,6 +4712,38 @@ function TaskListTable({
   onEdit: (task: ProjectWorkspaceTaskItem) => void;
   onDelete: (task: ProjectWorkspaceTaskItem) => void;
 }) {
+  const { sort, toggleSort } = useListSort();
+  const sortedTasks = useMemo(() => {
+    if (!sort) return tasks;
+    const compare = (a: ProjectWorkspaceTaskItem, b: ProjectWorkspaceTaskItem): number => {
+      switch (sort.field) {
+        case "title":
+          return compareSortStrings(a.title, b.title, sort.dir);
+        case "project":
+          return compareSortStrings(a.projectTitle, b.projectTitle, sort.dir);
+        case "description":
+          return compareSortStrings(a.expectedOutcome || a.description, b.expectedOutcome || b.description, sort.dir);
+        case "owner":
+          return compareSortStrings(a.owner, b.owner, sort.dir);
+        case "workload":
+          return compareSortNumbers(a.workloadPersonDay, b.workloadPersonDay, sort.dir);
+        case "status":
+          return compareSortRanks(a.status, b.status, workStatusSortRank, sort.dir);
+        case "taskResult":
+          return compareSortRanks(a.taskResult, b.taskResult, taskResultSortRank, sort.dir);
+        case "period": {
+          const byStart = compareSortDates(a.startDate, b.startDate, sort.dir);
+          if (byStart !== 0) return byStart;
+          return compareSortDates(a.endDate, b.endDate, sort.dir);
+        }
+        case "completedAt":
+          return compareSortDates(a.completedAt, b.completedAt, sort.dir);
+        default:
+          return 0;
+      }
+    };
+    return [...tasks].sort(compare);
+  }, [tasks, sort]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pingLeft, setPingLeft] = useState(false);
   const [pingRight, setPingRight] = useState(false);
@@ -4546,19 +4769,23 @@ function TaskListTable({
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
       <div className={`${taskListRowClass} sticky top-0 z-20 h-11 min-w-[1304px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
-        <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>名称</div>
-        <div>所属项目</div>
-        <div>需求目标</div>
-        <div>负责人</div>
-        <div className="whitespace-nowrap text-right">工作量(人天)</div>
-        <div>需求状态</div>
-        <div>需求结果</div>
-        <div>周期</div>
-        <div>完成时间</div>
+        <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>
+          <SortableHeader field="title" label="名称" sort={sort} onToggle={toggleSort} />
+        </div>
+        <div><SortableHeader field="project" label="所属项目" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="description" label="需求目标" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="owner" label="负责人" sort={sort} onToggle={toggleSort} /></div>
+        <div className="whitespace-nowrap text-right">
+          <SortableHeader field="workload" label="工作量(人天)" sort={sort} onToggle={toggleSort} />
+        </div>
+        <div><SortableHeader field="status" label="需求状态" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="taskResult" label="需求结果" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="period" label="周期" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="completedAt" label="完成时间" sort={sort} onToggle={toggleSort} /></div>
         <div className={`sticky right-0 top-0 z-30 flex h-11 items-center justify-end overflow-visible border-b border-[#F0F0F0] bg-white pr-4 text-right ${pingRight ? goalStickyActionShadow : ""}`}>操作</div>
       </div>
       <div className="min-w-[1304px]">
-        {tasks.map((task) => {
+        {sortedTasks.map((task) => {
           const remain = task.remainingWeeksLabel;
           const remainOverdue = Boolean(remain?.startsWith("逾期"));
           return (
