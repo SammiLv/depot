@@ -5182,7 +5182,8 @@ function QuarterlyWorkShell({
   useEffect(() => {
     setViewMode(activeView);
   }, [activeView]);
-  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(data.projectWorkspaceItems[0]?.id ?? null);
+  // 项目列表默认全部收起，点击行首箭头展开需求/价值跟踪
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const normalizedExpandedProjectId = data.projectWorkspaceItems.some((project) => project.id === expandedProjectId)
     ? expandedProjectId
     : null;
