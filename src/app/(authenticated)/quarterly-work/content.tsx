@@ -769,7 +769,7 @@ function QuarterlyWorkForm({
   const [needsDevValue, setNeedsDevValue] = useState<string>(
     item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""
   );
-  const workloadRequired = workStatus === "COMPLETED" || (needsDevValue === "true" && workStatus !== "CLOSED");
+  const workloadRequired = needsDevValue === "true" && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
@@ -897,8 +897,12 @@ function QuarterlyWorkForm({
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
-        {needsDevValue === "true" && workStatus !== "CLOSED" ? (
-          <div className="-mt-2 text-xs text-muted-foreground">需要开发的需求必须填写工作量，用于计算首版完成度。</div>
+        {needsDevValue === "true" ? (
+          <div className="-mt-2 text-xs text-muted-foreground">
+            {workloadRequired
+              ? "需要开发且已完成的需求必须填写工作量，用于计算首版完成度。"
+              : "进行中的开发需求可在完成后填写工作量。"}
+          </div>
         ) : null}
         <FormRow label="需求状态" align="center">
           <select
@@ -1085,6 +1089,21 @@ function ProjectEditForm({
     }
     return Math.round(sum * 10) / 10;
   }, [data.columns, data.taskWorkspaceItems, hasTasks, item.id]);
+  const activeDevRequirementTitles = useMemo(() => {
+    const titles = new Set<string>();
+    const consider = (task: { id: string; projectId: string; title: string; needsDevelopment?: boolean | null; status: string }) => {
+      if (task.projectId !== item.id || task.needsDevelopment !== true || task.status === "CLOSED") return;
+      titles.add(task.title);
+    };
+    for (const task of data.taskWorkspaceItems) consider(task);
+    for (const column of data.columns) {
+      for (const work of column.items) consider(work);
+    }
+    return [...titles].sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [data.columns, data.taskWorkspaceItems, item.id]);
+  const nonDevProjectBlockedMessage = activeDevRequirementTitles.length > 0
+    ? `项目下仍有需开发的需求，不能改为非开发项目。请先将以下需求改为「否」或关闭：${activeDevRequirementTitles.map((title) => `「${title}」`).join("、")}`
+    : null;
   const [workloadPersonDay, setWorkloadPersonDay] = useState<string>(() => {
     if (hasTasks) {
       const computed = taskWorkloadSum ?? item.workloadPersonDay;
@@ -1115,6 +1134,10 @@ function ProjectEditForm({
         const formData = new FormData(event.currentTarget);
         try {
           setErrorMessage("");
+          if (editNeedsDev === "false" && nonDevProjectBlockedMessage) {
+            setErrorMessage(nonDevProjectBlockedMessage);
+            return;
+          }
           validateSelectedProductGoalIds(formData);
           await runServerAction(() => updateProject(formData));
           onClose();
@@ -1222,24 +1245,29 @@ function ProjectEditForm({
           />
         </FormRow>
         <FormRow label="是否开发项目 *" align="center">
-          <select
-            name="needsDevelopment"
-            required
-            value={editNeedsDev}
-            onChange={(event) => {
-              const next = event.target.value;
-              setEditNeedsDev(next);
-              if (next === "false" && projectStatus === "LAUNCHED") {
-                setProjectStatus("IN_PROGRESS");
-              }
-            }}
-            disabled={needsDevLocked}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
-          >
-            <option value="true">是</option>
-            <option value="false">否</option>
-          </select>
-          {needsDevLocked ? <input type="hidden" name="needsDevelopment" value={editNeedsDev} /> : null}
+          <div className="w-full space-y-1">
+            <select
+              name="needsDevelopment"
+              required
+              value={editNeedsDev}
+              onChange={(event) => {
+                const next = event.target.value;
+                setEditNeedsDev(next);
+                if (next === "false" && projectStatus === "LAUNCHED") {
+                  setProjectStatus("IN_PROGRESS");
+                }
+              }}
+              disabled={needsDevLocked}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
+            >
+              <option value="true">是</option>
+              <option value="false">否</option>
+            </select>
+            {needsDevLocked ? <input type="hidden" name="needsDevelopment" value={editNeedsDev} /> : null}
+            {editNeedsDev === "false" && nonDevProjectBlockedMessage ? (
+              <p className="text-xs text-destructive">{nonDevProjectBlockedMessage}</p>
+            ) : null}
+          </div>
         </FormRow>
         <FormRow label="项目状态" align="center">
           <select
