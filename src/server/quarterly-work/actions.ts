@@ -1653,6 +1653,19 @@ export async function updateProject(formData: FormData) {
   if (project.launchedAt && !needsDevelopment) {
     throw new Error("项目已上线，不能再改为非开发项目");
   }
+  if (!needsDevelopment) {
+    const devRequirementCount = await prisma.quarterlyWork.count({
+      where: {
+        projectId: project.id,
+        deletedAt: null,
+        needsDevelopment: true,
+        status: { not: "CLOSED" },
+      },
+    });
+    if (devRequirementCount > 0) {
+      throw new Error("项目下仍有标记为「需开发」的需求，请先将对应需求改为「否」或关闭后，再将项目设为非开发项目");
+    }
+  }
 
   assertProjectStatusTransition(project.status, status, needsDevelopment);
 

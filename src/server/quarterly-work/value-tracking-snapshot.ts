@@ -41,9 +41,9 @@ export async function recalcProjectWorkloadSnapshot(
     }
   }
 
-  // 项目是否开发 = 存在开发需求（未删、非关闭）或 已上线；
-  // 最后一个开发需求被删除/关闭时自动转为非开发项目，并退出价值跟踪列表
-  const nextNeedsDevelopment = requirements.length > 0 || Boolean(project.launchedAt);
+  // 仅在没有开发需求且未上线时，自动将项目标记为非开发（如最后一个开发需求被删/关）；
+  // 不在此处把 needsDevelopment 改回 true，避免覆盖用户在编辑项目时的明确选择。
+  const shouldAutoMarkNonDevelopment = requirements.length === 0 && !project.launchedAt;
 
   // 人天保留 1 位小数，避免 Float 求和长尾
   const round1 = (value: number) => Math.round(value * 10) / 10;
@@ -53,7 +53,7 @@ export async function recalcProjectWorkloadSnapshot(
       firstVersionWorkloadPersonDay: round1(firstVersionWorkload),
       postLaunchIterationWorkloadPersonDay: round1(postLaunchIterationWorkload),
       totalWorkloadPersonDay: round1(firstVersionWorkload + postLaunchIterationWorkload),
-      ...(project.needsDevelopment !== nextNeedsDevelopment ? { needsDevelopment: nextNeedsDevelopment } : {}),
+      ...(shouldAutoMarkNonDevelopment && project.needsDevelopment ? { needsDevelopment: false } : {}),
     },
   });
 }
