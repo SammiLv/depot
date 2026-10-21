@@ -19,6 +19,7 @@ import {
   isValueJudgement,
 } from "@/server/quarterly-work/value-track-constants";
 import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
+import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_INTERNAL } from "@/server/quarterly-work/development-source-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
@@ -866,6 +867,19 @@ function QuarterlyWorkForm({
             </p>
           </div>
         </FormRow>
+        {needsDevValue === "true" ? (
+          <FormRow label="开发方 *" align="center">
+            <select
+              name="developmentSource"
+              required
+              defaultValue={item?.developmentSource ?? DEVELOPMENT_SOURCE_EXTERNAL}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            >
+              <option value={DEVELOPMENT_SOURCE_EXTERNAL}>外部开发</option>
+              <option value={DEVELOPMENT_SOURCE_INTERNAL}>内部自研</option>
+            </select>
+          </FormRow>
+        ) : null}
         <FormRow label="需求描述">
           <textarea
             name="taskDescription"
@@ -3593,6 +3607,7 @@ function ProjectTreeChildRow({
   indent = true,
   statusLabel,
   statusClassName,
+  statusExtra,
   owner,
   workload,
   period,
@@ -3612,6 +3627,7 @@ function ProjectTreeChildRow({
   indent?: boolean;
   statusLabel: string;
   statusClassName: string;
+  statusExtra?: ReactNode;
   owner: string;
   workload?: number | null;
   period: string;
@@ -3639,6 +3655,7 @@ function ProjectTreeChildRow({
       <div className="text-sm leading-[22px] text-[#4B4B4B]">{workload ?? "-"}</div>
       <div>
         <ListStatusTag label={statusLabel} className={statusClassName} />
+        {statusExtra ? <span className="ml-1">{statusExtra}</span> : null}
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
         <span>{period}</span>
@@ -3746,6 +3763,9 @@ function ProjectExpandedPanel({
                   description={task.taskDescription || task.description || task.expectedOutcome}
                   statusLabel={columnTitleByStatus[task.status]}
                   statusClassName={taskListStatusTagClass(task)}
+                  statusExtra={task.developmentSource === DEVELOPMENT_SOURCE_INTERNAL ? (
+                    <span className="rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">内部自研</span>
+                  ) : null}
                   owner={task.owner}
                   workload={task.workloadPersonDay}
                   period={task.periodLabel}
@@ -4853,6 +4873,9 @@ function TaskListTable({
               <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
               <div>
                 <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
+                {task.developmentSource === DEVELOPMENT_SOURCE_INTERNAL ? (
+                  <span className="ml-1 rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">内部自研</span>
+                ) : null}
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</div>
               <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">

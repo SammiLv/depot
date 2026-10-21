@@ -45,6 +45,7 @@ import {
   toBusinessDate,
 } from "@/server/quarterly-work/value-tracking-period";
 import { calculateFirstVersionCompletion } from "@/server/quarterly-work/first-version-completion";
+import { DEVELOPMENT_SOURCES, developmentSourceLabel } from "@/server/quarterly-work/development-source-constants";
 import { recalcProjectWorkloadSnapshot } from "@/server/quarterly-work/value-tracking-snapshot";
 
 type ScopeUser = Awaited<ReturnType<typeof requireCurrentUser>>;
@@ -148,6 +149,16 @@ function parseRequiredBoolean(value: FormDataEntryValue | null, fieldName: strin
   if (text === "true") return true;
   if (text === "false") return false;
   throw new Error(`${fieldName}为必填项`);
+}
+
+/** 开发方：仅开发需求必填；非开发需求一律清空 */
+function parseDevelopmentSource(value: FormDataEntryValue | null, needsDevelopment: boolean) {
+  const text = (value as string | null)?.trim();
+  if (!needsDevelopment) return null;
+  if (!text || !(DEVELOPMENT_SOURCES as readonly string[]).includes(text)) {
+    throw new Error("开发需求请选择开发方（内部自研/外部开发）");
+  }
+  return text;
 }
 
 function parseRequiredProductGoalIds(formData: FormData) {
@@ -602,6 +613,7 @@ export async function createQuarterlyWork(formData: FormData) {
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
+  const developmentSource = parseDevelopmentSource(formData.get("developmentSource"), needsDevelopment);
   const workloadRequiredForDevWork = needsDevelopment
     && (status === "COMPLETED" || status === "DELAYED_COMPLETED");
   if (workloadRequiredForDevWork && workloadPersonDay === null) {
@@ -646,6 +658,7 @@ export async function createQuarterlyWork(formData: FormData) {
       executionSummary,
       workloadPersonDay,
       needsDevelopment,
+      developmentSource,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       createdById: currentUser.id,
@@ -684,6 +697,7 @@ export async function updateQuarterlyWork(formData: FormData) {
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
+  const developmentSource = parseDevelopmentSource(formData.get("developmentSource"), needsDevelopment);
   const workloadRequiredForDevWork = needsDevelopment
     && (status === "COMPLETED" || status === "DELAYED_COMPLETED");
   if (workloadRequiredForDevWork && workloadPersonDay === null) {
@@ -721,6 +735,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       executionSummary: true,
       workloadPersonDay: true,
       needsDevelopment: true,
+      developmentSource: true,
     },
   });
 
@@ -775,6 +790,7 @@ export async function updateQuarterlyWork(formData: FormData) {
       executionSummary,
       workloadPersonDay,
       needsDevelopment,
+      developmentSource,
       ownerId: owner.id,
       orgNodeId: owner.orgNodeId,
       completedAt: resolveCompletedAtByStatus(status, formData.get("completedAt"), existingWork.completedAt),
@@ -820,6 +836,13 @@ export async function updateQuarterlyWork(formData: FormData) {
       previous: existingWork.needsDevelopment === null ? null : (existingWork.needsDevelopment ? "是" : "否"),
       next: needsDevelopment ? "是" : "否",
     },
+    ...(needsDevelopment
+      ? [{
+          label: "开发方",
+          previous: developmentSourceLabel(existingWork.developmentSource),
+          next: developmentSourceLabel(developmentSource),
+        }]
+      : []),
   ]);
   if (updateRemark) {
     await writeOperationLog(prisma, {

@@ -867,6 +867,8 @@ model QuarterlyWork {
   taskDescription String?
   workloadPersonDay Float?
   needsDevelopment Boolean?
+  // 开发方：INTERNAL=产品部内部自研，EXTERNAL=外部开发；仅 needsDevelopment=true 时有值
+  developmentSource String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
