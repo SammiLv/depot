@@ -1724,7 +1724,7 @@ export async function updateProject(formData: FormData) {
 
   // 上线时间是首版完成度的核心分界点，修改受保护：
   // - 已有最终冻结快照：禁止修改，需走管理员数据修正流程；
-  // - 已有价值跟踪记录：仅管理员可修改，并重算未冻结任务的检查点/截止日期；
+  // - 已有价值跟踪记录：允许产品管理权限修改，并重算未冻结任务的检查点/截止日期；
   const launchedAtChanged = Boolean(
     nextLaunchedAt
     && project.launchedAt
@@ -1737,13 +1737,6 @@ export async function updateProject(formData: FormData) {
     });
     if (finalizedTrack) {
       throw new Error("项目已完成最终价值确认，禁止修改上线时间；如需更正请走管理员数据修正流程");
-    }
-    const existingTrack = await prisma.requirementValueTrack.findFirst({
-      where: { projectId: project.id, deletedAt: null },
-      select: { id: true },
-    });
-    if (existingTrack && currentUser.roleType !== "ADMIN") {
-      throw new Error("项目已存在价值跟踪记录，仅管理员可修改上线时间");
     }
   }
 

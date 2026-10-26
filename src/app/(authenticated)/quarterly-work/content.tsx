@@ -22,6 +22,7 @@ import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
 import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_INTERNAL } from "@/server/quarterly-work/development-source-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
+import { getServerActionErrorMessage } from "@/lib/server-action-error";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
@@ -1192,7 +1193,10 @@ function ProjectEditForm({
           await runServerAction(() => updateProject(formData));
           onClose();
         } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "保存项目失败");
+          setErrorMessage(getServerActionErrorMessage(
+            error,
+            "保存项目失败。若项目已完成价值最终确认，则不可修改上线时间。",
+          ));
         }
       }}
     >
