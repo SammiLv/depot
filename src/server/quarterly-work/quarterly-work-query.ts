@@ -10,6 +10,7 @@ import {
   isProjectVisibleInPeriod,
   isQuarterlyWorkVisibleInPeriod,
   isValueTrackVisibleInPeriod,
+  resolveProjectWorkspaceStatusFilterKey,
   type ActivePeriod,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
 import { normalizeValueTrackStatus } from "@/server/quarterly-work/value-track-constants";
@@ -1295,7 +1296,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     return {
       ...base,
       productGoals: projectGoals,
-      statusFilterKey: isOverdue ? "DELAYED" : project.status,
+      statusFilterKey: resolveProjectWorkspaceStatusFilterKey(project.status, isOverdue),
       isOverdue,
       tasks,
       valueTracks: projectValueTracks.map((track) => ({

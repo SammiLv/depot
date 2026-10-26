@@ -244,6 +244,20 @@ export function isValueTrackVisibleInPeriod(
     && track.trackedAt.getFullYear() === period.year;
 }
 
+/** 工作区侧栏状态筛选：进行中/未启动等逾期归入「延期」；已完成/已关闭以库内状态为准（逾期完成仍算已完成） */
+export function resolveProjectWorkspaceStatusFilterKey(
+  status: string,
+  isOverdue: boolean,
+): "DELAYED" | "NOT_STARTED" | "IN_PROGRESS" | "LAUNCHED" | "COMPLETED" | "CLOSED" {
+  if (status === "COMPLETED" || status === "CLOSED") {
+    return status;
+  }
+  if (isOverdue) {
+    return "DELAYED";
+  }
+  return status as "NOT_STARTED" | "IN_PROGRESS" | "LAUNCHED";
+}
+
 export function matchesDepartmentAndTeamScope(
   item: { teamOrgNodeId: string | null; departmentOrgNodeId: string | null },
   departmentTab: string,
