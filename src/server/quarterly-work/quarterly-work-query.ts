@@ -1621,6 +1621,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
           .map((track) => track.trackingSequence)
           .filter((sequence): sequence is number => sequence !== null),
       })),
+    // 新增需求「所属项目」：排除已完成/已关闭（与 findEditableProject 一致）
     projectOptions: projects
       .filter((project) => project.status !== "COMPLETED" && project.status !== "CLOSED")
       .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
