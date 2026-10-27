@@ -22,6 +22,7 @@ import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
 import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_INTERNAL } from "@/server/quarterly-work/development-source-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
+import { getServerActionErrorMessage } from "@/lib/server-action-error";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
@@ -612,6 +613,46 @@ function MemberPicker({
   );
 }
 
+/** 与 findEditableProject 一致：已完成/已关闭项目不可再挂需求 */
+function projectAllowsNewRequirement(status: ProjectStatus): boolean {
+  return status !== "COMPLETED" && status !== "CLOSED";
+}
+
+function buildRequirementProjectOptions(data: Props["data"]) {
+  const projectOptionById = new Map<
+    string,
+    { id: string; title: string; ownerId: string; expectedOutcome: string | null }
+  >();
+  for (const project of data.projectOptions) {
+    projectOptionById.set(project.id, project);
+  }
+  for (const project of data.projectWorkspaceItems) {
+    if (!projectAllowsNewRequirement(project.status) || projectOptionById.has(project.id)) {
+      continue;
+    }
+    projectOptionById.set(project.id, {
+      id: project.id,
+      title: project.title,
+      ownerId: project.ownerId,
+      expectedOutcome: project.expectedOutcome,
+    });
+  }
+  const orderedIds = new Set<string>();
+  const projectPickerOptions: Array<{ id: string; label: string }> = [];
+  for (const project of data.projectOptions) {
+    orderedIds.add(project.id);
+    projectPickerOptions.push({ id: project.id, label: project.title });
+  }
+  for (const project of data.projectWorkspaceItems) {
+    if (!projectAllowsNewRequirement(project.status) || orderedIds.has(project.id)) {
+      continue;
+    }
+    orderedIds.add(project.id);
+    projectPickerOptions.push({ id: project.id, label: project.title });
+  }
+  return { projectOptionById, projectPickerOptions };
+}
+
 function ProjectPicker({
   name,
   options,
@@ -667,7 +708,7 @@ function ProjectPicker({
     };
   }, [open]);
 
-  const selectedOption = options.find((option) => option.id === selectedId) ?? options[0] ?? null;
+  const selectedOption = options.find((option) => option.id === selectedId) ?? null;
   const filteredOptions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return options;
@@ -676,14 +717,14 @@ function ProjectPicker({
 
   return (
     <div ref={wrapperRef} className="relative">
-      <input type="hidden" name={name} value={selectedOption?.id ?? ""} />
+      <input type="hidden" name={name} value={selectedId} />
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
       >
-        <span className={`truncate text-left ${selectedOption ? "text-foreground" : "text-muted-foreground"}`}>
-          {selectedOption?.label ?? "请选择项目"}
+        <span className={`truncate text-left ${selectedOption || selectedId ? "text-foreground" : "text-muted-foreground"}`}>
+          {selectedOption?.label ?? (selectedId ? "所选项目不在可选列表，请刷新页面" : "请选择项目")}
         </span>
         <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
       </button>
@@ -753,15 +794,11 @@ function QuarterlyWorkForm({
   stickyLayout?: boolean;
 }) {
   const statusOptions = useMemo(() => editableStatuses, []);
-  const projectOptionById = useMemo(
-    () => new Map(data.projectOptions.map((project) => [project.id, project])),
-    [data.projectOptions]
+  const { projectOptionById, projectPickerOptions } = useMemo(
+    () => buildRequirementProjectOptions(data),
+    [data]
   );
-  const projectPickerOptions = useMemo(
-    () => data.projectOptions.map((project) => ({ id: project.id, label: project.title })),
-    [data.projectOptions]
-  );
-  const initialProjectId = item?.projectId ?? defaultProjectId ?? data.projectOptions[0]?.id ?? "";
+  const initialProjectId = item?.projectId ?? defaultProjectId ?? projectPickerOptions[0]?.id ?? "";
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const selectedProject = selectedProjectId ? projectOptionById.get(selectedProjectId) ?? null : null;
   const [workStatus, setWorkStatus] = useState<ColumnStatus>(
@@ -1156,7 +1193,10 @@ function ProjectEditForm({
           await runServerAction(() => updateProject(formData));
           onClose();
         } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "保存项目失败");
+          setErrorMessage(getServerActionErrorMessage(
+            error,
+            "保存项目失败。若项目已完成价值最终确认，则不可修改上线时间。",
+          ));
         }
       }}
     >
@@ -1371,6 +1411,7 @@ function ProjectCreateForm({
   defaultProductGoalIds?: string[];
   onClose: () => void;
 }) {
+  const router = useRouter();
   const [errorMessage, setErrorMessage] = useState("");
   const [createProjectStatus, setCreateProjectStatus] = useState<ProjectStatus>(defaultStatus ?? "NOT_STARTED");
   const [createNeedsDev, setCreateNeedsDev] = useState<string>("");
@@ -1436,6 +1477,7 @@ function ProjectCreateForm({
         validateQuarterRange(formData);
         validateSelectedProductGoalIds(formData);
         await runServerAction(() => createProject(formData));
+        router.refresh();
         onClose();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "创建项目失败");
@@ -4066,14 +4108,17 @@ function ProjectTreeTable({
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.completedAt)}</div>
                 <div className="flex items-center justify-end">
                   <ProjectListActionButtons
-                    canCreate={canCreateTask || canCreateValueTrack}
+                    canCreate={
+                      (canCreateTask && projectAllowsNewRequirement(project.status))
+                      || canCreateValueTrack
+                    }
                     canManage={canManageProjectAndValueTracking}
                     onCreate={() => {
                       if (activePanel === "value" && canCreateValueTrack) {
                         onCreateValueTrack(project.id);
                         return;
                       }
-                      if (canCreateTask) {
+                      if (canCreateTask && projectAllowsNewRequirement(project.status)) {
                         onCreateTask(project.id);
                         return;
                       }
@@ -4088,7 +4133,7 @@ function ProjectTreeTable({
                 <ProjectExpandedPanel
                   project={project}
                   activePanel={activePanel}
-                  canCreateTask={canCreateTask}
+                  canCreateTask={canCreateTask && projectAllowsNewRequirement(project.status)}
                   canCreateValueTrack={canCreateValueTrack}
                   canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                   canManageProductTask={canManageProductTask}
@@ -5706,7 +5751,7 @@ function QuarterlyWorkShell({
                   <ProjectCard
                     key={project.id}
                     project={project}
-                    canCreateTask={canCreateTask}
+                    canCreateTask={canCreateTask && projectAllowsNewRequirement(project.status)}
                     canCreateValueTrack={canCreateValueTrack}
                     canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                     canManageProductTask={canManageProductTask}
@@ -6366,7 +6411,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                               >
                                 <ScrollText className="h-4 w-4" />
                               </button>
-                              {canCreateTask ? (
+                              {canCreateTask && projectAllowsNewRequirement(item.status) ? (
                                 <button
                                   type="button"
                                   onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: item.id })}

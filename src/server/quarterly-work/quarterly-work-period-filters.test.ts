@@ -9,8 +9,16 @@ import {
   isQuarterlyWorkVisibleInYearAllView,
   isValueTrackVisibleInPeriod,
   matchesDepartmentAndTeamScope,
+  resolveProjectWorkspaceStatusFilterKey,
   workPeriodIncludesQuarter,
 } from "@/server/quarterly-work/quarterly-work-period-filters";
+
+test("resolveProjectWorkspaceStatusFilterKey keeps completed/closed out of delayed bucket", () => {
+  assert.equal(resolveProjectWorkspaceStatusFilterKey("COMPLETED", true), "COMPLETED");
+  assert.equal(resolveProjectWorkspaceStatusFilterKey("CLOSED", true), "CLOSED");
+  assert.equal(resolveProjectWorkspaceStatusFilterKey("IN_PROGRESS", true), "DELAYED");
+  assert.equal(resolveProjectWorkspaceStatusFilterKey("IN_PROGRESS", false), "IN_PROGRESS");
+});
 
 test("getQuarterByDate returns calendar quarter", () => {
   assert.equal(getQuarterByDate(new Date(2026, 7, 3)), 3);
