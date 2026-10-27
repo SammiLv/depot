@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台 Demo · 部门工作总览</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #F5F7F9;
+    color: #181818;
+    min-height: 100vh;
+  }
+  .page { max-width: 1600px; margin: 0 auto; padding: 16px 24px 24px; }
+
+  /* ===== 顶部欢迎条 ===== */
+  .welcome { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .welcome h1 { font-size: 22px; font-weight: 600; }
+  .welcome .meta { font-size: 13px; color: #777; }
+
+  /* ===== 卡片条 ===== */
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 14px 16px;
+    cursor: pointer; transition: box-shadow .15s ease, transform .15s ease;
+    border: 1px solid transparent;
+  }
+  .card:hover { box-shadow: 0 6px 16px rgba(47,107,255,.12); transform: translateY(-1px); }
+  .card .title { font-size: 13px; color: #777; margin-bottom: 6px; }
+  .card .value { font-size: 26px; font-weight: 600; line-height: 1.2; }
+  .card .value small { font-size: 13px; font-weight: 400; color: #777; margin-left: 4px; }
+  .card .desc { font-size: 12px; color: #999; margin-top: 6px; }
+  .card.warn .value { color: #F53F3F; }
+  .card.primary .value { color: #181818; }
+  .card .desc .sub { display: block; margin-top: 2px; }
+  .card .desc .sub b { font-weight: 500; }
+  .card .desc .sub .score { color: #FF7D00; }
+  .card .desc .sub .self { color: #3069F9; }
+  .card .desc .sub .track { color: #00B42A; }
+
+  /* ===== 主体两栏 ===== */
+  .main { display: grid; grid-template-columns: 1fr 340px; gap: 14px; }
+
+  .panel { background: #fff; border-radius: 12px; }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px 0;
+  }
+  .panel-head h3 { font-size: 15px; font-weight: 600; }
+  .panel-head .link { font-size: 12px; color: #3069F9; cursor: pointer; text-decoration: none; }
+
+  /* 模块分区（铺平） */
+  .module-section { padding: 10px 16px 12px; border-bottom: 1px solid #F0F0F0; }
+  .module-section:last-child { border-bottom: none; }
+  .module-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
+  .module-title .link { font-size: 12px; color: #3069F9; cursor: pointer; font-weight: 400; margin-left: auto; }
+
+  /* KPI + 人才发展 并排 */
+  .module-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: stretch; }
+  .module-duo > div { display: flex; flex-direction: column; }
+  .module-duo > div > .mini-panel, .module-duo > div > .talent-grid { flex: 1; }
+  .module-duo .mini-panel {
+    background: #F7F8FA; border-radius: 10px; padding: 12px 14px;
+    display: flex; flex-direction: column;
+  }
+  .module-duo .mini-panel .stage-row { flex: 1; }
+  .module-duo .stage { background: #fff; }
+
+  /* 产品工作：2×2 */
+  .product-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .product-grid .mini-panel {
+    background: #F7F8FA; border-radius: 10px; padding: 12px 14px;
+  }
+  .product-grid .mini-panel h4 { margin-bottom: 10px; }
+  .product-grid .overdue-item { border-bottom-color: #ECEDEF; }
+  .mini-panel h4 { font-size: 13px; color: #181818; font-weight: 600; margin-bottom: 10px; }
+  .mini-panel h4 .hint, .tlabel .hint { font-weight: 400; color: #999; font-size: 12px; margin-left: 4px; }
+  .mini-panel h4 + h4 { margin-top: 14px; }
+
+  /* 状态分布条 */
+  .dist-row { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
+  .dist-row span { display: block; height: 100%; }
+  .dist-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: #4B4B4B; margin-bottom: 12px; }
+  .dist-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+  .dist-legend b { font-weight: 600; }
+
+  /* 逾期清单 */
+  .overdue-list { display: flex; flex-direction: column; }
+  .overdue-item {
+    display: grid; grid-template-columns: minmax(0,1fr) 64px 76px; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid #F5F5F5; font-size: 13px;
+  }
+  .overdue-item:last-child { border-bottom: none; }
+  .overdue-item .name { color: #181818; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overdue-item .owner { color: #777; font-size: 12px; text-align: right; }
+  .overdue-item .weeks { color: #F53F3F; font-size: 12px; text-align: right; }
+  .empty-tip { font-size: 12px; color: #999; padding: 12px 0; text-align: center; }
+
+  /* 价值跟踪概况 */
+  .track-stats { display: flex; gap: 8px; margin-bottom: 12px; }
+  .track-stat {
+    flex: 1; background: #fff; border-radius: 8px; padding: 10px 8px; text-align: center;
+  }
+  .track-stat .num { font-size: 20px; font-weight: 600; }
+  .track-stat .lbl { font-size: 12px; color: #777; margin-top: 2px; }
+  .track-alert {
+    background: #FFECE8; color: #F53F3F; font-size: 12px;
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+  }
+  .track-fv { font-size: 13px; color: #4B4B4B; }
+  .track-fv .pct { font-size: 20px; font-weight: 600; color: #181818; }
+  .track-fv .explain { display: block; font-size: 12px; color: #999; margin-top: 4px; line-height: 1.5; }
+
+  /* 小组对比 */
+  .team-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 13px; }
+  .team-row .tname { width: 88px; flex-shrink: 0; color: #181818; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .team-row .bar { flex: 1; height: 8px; background: #F0F0F0; border-radius: 4px; overflow: hidden; }
+  .team-row .bar i { display: block; height: 100%; background: #3069F9; border-radius: 4px; }
+  .team-row .tnum { width: 96px; text-align: right; color: #777; font-size: 12px; flex-shrink: 0; }
+  .team-row .tnum b { color: #F53F3F; font-weight: 500; }
+
+  /* KPI 模块 */
+  .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .goal-row { padding: 8px 0; border-bottom: 1px solid #F5F5F5; }
+  .goal-row:last-child { border-bottom: none; }
+  .goal-row .ghead { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+  .goal-row .ghead .risk { color: #F53F3F; font-size: 12px; }
+  .goal-row .gbar { height: 8px; background: #F0F0F0; border-radius: 4px; overflow: hidden; }
+  .goal-row .gbar i { display: block; height: 100%; border-radius: 4px; }
+  .stage-row { display: flex; gap: 8px; }
+  .stage {
+    flex: 1; border: 1px solid #F0F0F0; border-radius: 8px; padding: 8px 4px; text-align: center;
+  }
+  .stage .num { font-size: 18px; font-weight: 600; }
+  .stage .lbl { font-size: 12px; color: #777; margin-top: 2px; }
+  .stage .tag { display: inline-block; font-size: 11px; margin-top: 4px; padding: 1px 6px; border-radius: 4px; }
+
+  /* 人才发展 */
+  .talent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .talent-item { background: #F7F8FA; border-radius: 8px; padding: 12px; }
+  .talent-item .tlabel { font-size: 12px; color: #777; margin-bottom: 6px; }
+  .talent-item .tvalue { font-size: 22px; font-weight: 600; }
+  .talent-item .tvalue small { font-size: 12px; font-weight: 400; color: #777; }
+  .talent-item .tdesc { font-size: 12px; color: #999; margin-top: 4px; }
+
+  /* 右栏 */
+  .right-col { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+  .right-col .panel:last-child { flex: 1; display: flex; flex-direction: column; }
+  .right-col .panel:last-child > div:last-child { flex: 1; }
+  .todo-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid #F5F5F5; font-size: 13px; }
+  .todo-item:last-child { border-bottom: none; }
+  .todo-item .dot { width: 6px; height: 6px; border-radius: 50%; background: #3069F9; margin-top: 7px; flex-shrink: 0; }
+  .todo-item .dot.red { background: #F53F3F; }
+  .todo-item .dot.green { background: #00B42A; }
+  .todo-item .ttext { flex: 1; color: #181818; }
+  .todo-item .ttime { font-size: 12px; color: #999; flex-shrink: 0; }
+  .feed-item { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px solid #F5F5F5; font-size: 13px; }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-item .avatar {
+    width: 24px; height: 24px; border-radius: 50%; background: #E8F2FF; color: #3069F9;
+    font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .feed-item .ftext { flex: 1; color: #4B4B4B; line-height: 1.5; }
+  .feed-item .ftext b { color: #181818; font-weight: 500; }
+  .feed-item .ftime { font-size: 12px; color: #999; margin-top: 2px; }
+
+  .foot { margin-top: 12px; text-align: center; font-size: 12px; color: #AAA; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- 顶部欢迎条 -->
+  <div class="welcome">
+    <h1>欢迎回来，吕夏苗</h1>
+    <span class="meta">当前身份：部门主管 · 数据范围：本部门全部数据</span>
+  </div>
+
+  <!-- 卡片条 -->
+  <div class="cards">
+    <div class="card primary">
+      <div class="title">年度指标完成度</div>
+      <div class="value">30<small>%</small></div>
+      <div class="desc">1 个计划 · 5 项指标 · <b style="color:#F53F3F">2 项有风险</b></div>
+    </div>
+    <div class="card primary">
+      <div class="title">首版完成度</div>
+      <div class="value">78.5<small>%</small></div>
+      <div class="desc">上线前完成的首版工作量占比 · 1 个项目不可计算</div>
+    </div>
+    <div class="card warn">
+      <div class="title">项目 · 逾期</div>
+      <div class="value">4<small>个</small></div>
+      <div class="desc">最长逾期 16 周</div>
+    </div>
+    <div class="card warn">
+      <div class="title">需求 · 逾期</div>
+      <div class="value">12<small>个</small></div>
+      <div class="desc">本周新增 3 个逾期</div>
+    </div>
+    <div class="card">
+      <div class="title">待我处理</div>
+      <div class="value">6</div>
+      <div class="desc">
+        <span class="sub"><b class="score">4</b> 项待评分 · <b class="self">1</b> 项待自评 · <b class="track">1</b> 项待填报跟踪</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主体 -->
+  <div class="main">
+    <!-- 左：模块分区（铺平） -->
+    <div class="panel">
+      <!-- 产品工作 -->
+      <div class="module-section">
+        <div class="module-title">产品工作<a class="link">进入产品管理</a></div>
+        <div class="product-grid">
+          <div class="mini-panel">
+            <h4>项目状态分布</h4>
+            <div class="dist-row">
+              <span style="width:13%;background:#86909C"></span>
+              <span style="width:63%;background:#3069F9"></span>
+              <span style="width:8%;background:#00B42A"></span>
+              <span style="width:2%;background:#165DFF"></span>
+              <span style="width:14%;background:#F53F3F"></span>
+            </div>
+            <div class="dist-legend">
+              <span><i style="background:#86909C"></i>未启动 <b>6</b></span>
+              <span><i style="background:#3069F9"></i>进行中 <b>30</b></span>
+              <span><i style="background:#00B42A"></i>已上线 <b>4</b></span>
+              <span><i style="background:#165DFF"></i>已完成 <b>1</b></span>
+              <span><i style="background:#F53F3F"></i>延期 <b>7</b></span>
+            </div>
+          </div>
+
+          <div class="mini-panel">
+            <h4>价值跟踪概况</h4>
+            <div class="track-stats">
+              <div class="track-stat"><div class="num">2</div><div class="lbl">待观测</div></div>
+              <div class="track-stat"><div class="num">3</div><div class="lbl">观测中</div></div>
+              <div class="track-stat"><div class="num">1</div><div class="lbl">已完成</div></div>
+            </div>
+            <div class="track-alert">⚠ 1 个项目逾期待完成（超过最终填报截止）</div>
+          </div>
+
+          <div class="mini-panel">
+            <h4>逾期项目 Top 5</h4>
+            <div class="overdue-list">
+              <div class="overdue-item"><span class="name">宣传物料优化</span><span class="owner">陈小艳</span><span class="weeks">逾期16周</span></div>
+              <div class="overdue-item"><span class="name">采购人中心改版</span><span class="owner">王铭灏</span><span class="weeks">逾期11周</span></div>
+              <div class="overdue-item"><span class="name">BioGDP 积分逻辑优化</span><span class="owner">梁益双</span><span class="weeks">逾期2.8周</span></div>
+              <div class="overdue-item"><span class="name">商家移动端店铺</span><span class="owner">毛博雅</span><span class="weeks">逾期2周</span></div>
+              <div class="overdue-item"><span class="name">已上线需求数据跟踪与优化迭代</span><span class="owner">王铭灏</span><span class="weeks">逾期1周</span></div>
+            </div>
+          </div>
+
+          <div class="mini-panel">
+            <h4>需求完成率 / 逾期</h4>
+            <div class="team-row"><span class="tname">B端业务组</span><span class="bar"><i style="width:82%"></i></span><span class="tnum">82% · 逾期<b>2</b></span></div>
+            <div class="team-row"><span class="tname">C端产品组</span><span class="bar"><i style="width:64%"></i></span><span class="tnum">64% · 逾期<b>5</b></span></div>
+            <div class="team-row"><span class="tname">平台技术组</span><span class="bar"><i style="width:91%"></i></span><span class="tnum">91% · 逾期<b>1</b></span></div>
+            <div class="team-row"><span class="tname">数据运营组</span><span class="bar"><i style="width:45%"></i></span><span class="tnum">45% · 逾期<b>4</b></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI + 人才发展（并排一行） -->
+      <div class="module-section" style="border-bottom:none;">
+        <div class="module-duo">
+          <div>
+            <div class="module-title">KPI<a class="link">进入 KPI 管理</a></div>
+            <div class="mini-panel">
+              <h4>KPI 流程状态分布<span class="hint">2026 Q4</span></h4>
+              <div class="stage-row">
+                <div class="stage"><div class="num">0</div><div class="lbl">初始化</div><span class="tag" style="background:#F5F5F5;color:#4B4B4B">初始化</span></div>
+                <div class="stage"><div class="num">1</div><div class="lbl">自评</div><span class="tag" style="background:#E8F2FF;color:#3069F9">自评</span></div>
+                <div class="stage"><div class="num">0</div><div class="lbl">组长评</div><span class="tag" style="background:#FFF7E8;color:#FF7D00">组长评</span></div>
+                <div class="stage"><div class="num">4</div><div class="lbl">主管评</div><span class="tag" style="background:#E8F2FF;color:#3069F9">主管评</span></div>
+                <div class="stage"><div class="num">4</div><div class="lbl">已完成</div><span class="tag" style="background:#E8FFEA;color:#00B42A">已完成</span></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="module-title">人才发展<a class="link">进入人才发展</a></div>
+            <div class="talent-grid" style="grid-template-columns: repeat(3, 1fr); gap: 10px;">
+              <div class="talent-item">
+                <div class="tlabel">待决策</div>
+                <div class="tvalue">2<small> 项</small></div>
+                <div class="tdesc">人才决策待处理</div>
+              </div>
+              <div class="talent-item">
+                <div class="tlabel">2026 下半年盘点</div>
+                <div class="tvalue">65<small>%</small></div>
+                <div class="tdesc">已评 13 / 应评 20 人</div>
+              </div>
+              <div class="talent-item">
+                <div class="tlabel">合同续签到期</div>
+                <div class="tvalue">3<small> 人</small></div>
+                <div class="tdesc">90 天内合同到期</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏 -->
+    <div class="right-col">
+      <div class="panel">
+        <div class="panel-head"><h3>我的待办</h3><a class="link">全部</a></div>
+        <div style="padding: 6px 16px 12px;">
+          <div class="todo-item"><span class="dot red"></span><span class="ttext">4 项 KPI 评分待处理（主管评）</span><span class="ttime">今天</span></div>
+          <div class="todo-item"><span class="dot"></span><span class="ttext">完成 Q3 KPI 自评并提交</span><span class="ttime">明天截止</span></div>
+          <div class="todo-item"><span class="dot green"></span><span class="ttext">填报「文献头条」第 2 次价值跟踪</span><span class="ttime">10-25 截止</span></div>
+          <div class="todo-item"><span class="dot red"></span><span class="ttext">你负责的「RDS交互优化」已逾期 5 天</span><span class="ttime">逾期</span></div>
+          <div class="todo-item"><span class="dot"></span><span class="ttext">查看 5 条未读通知</span><span class="ttime">10-12</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>最新动态</h3><a class="link">全部</a></div>
+        <div style="padding: 6px 16px 12px;">
+          <div class="feed-item"><span class="avatar">毛</span><div><div class="ftext"><b>毛博雅</b> 将项目「文献头条」标记为 <b>已上线</b></div><div class="ftime">10 分钟前</div></div></div>
+          <div class="feed-item"><span class="avatar" style="background:#E8FFEA;color:#00B42A">晋</span><div><div class="ftext"><b>王俊秀</b> 晋升 为高级产品经理</div><div class="ftime">40 分钟前</div></div></div>
+          <div class="feed-item"><span class="avatar">陈</span><div><div class="ftext"><b>陈小艳</b> 完成需求「宣传册封底产品更新」</div><div class="ftime">1 小时前</div></div></div>
+          <div class="feed-item"><span class="avatar">吕</span><div><div class="ftext"><b>吕夏苗</b> 提交「王铭灏」的 Q3 KPI 主管评分</div><div class="ftime">2 小时前</div></div></div>
+          <div class="feed-item"><span class="avatar" style="background:#FFF7E8;color:#FF7D00">奖</span><div><div class="ftext"><b>吕夏苗</b> 为「张永翔」 记录奖励 ：季度之星</div><div class="ftime">3 小时前</div></div></div>
+          <div class="feed-item"><span class="avatar">张</span><div><div class="ftext"><b>张永翔</b> 新建需求「钉消息通知接入」并关联项目「测试项目」</div><div class="ftime">昨天 18:32</div></div></div>
+          <div class="feed-item"><span class="avatar">梁</span><div><div class="ftext"><b>梁益双</b> 填报「C 端产品运营推广工作」第 1 次价值跟踪</div><div class="ftime">昨天 15:07</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">Demo · 数据均为示例 · 所有数字块在正式版中可点击跳转到对应模块</div>
+</div>
+</body>
+</html>
