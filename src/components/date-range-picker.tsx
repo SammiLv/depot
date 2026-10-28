@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 // 公司设计规范（MasterGo: TimePicker时间选择框 / DatePicker）:
 //   主色 #3069F9 / 悬停底色 #E8F2FF / 边框 #D9D9D9 / 占位 #BDBDBD
@@ -17,6 +18,10 @@ type DateRangePickerProps = {
 };
 
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+const PANEL_GAP = 4;
+const PANEL_WIDTH = 496;
+const PANEL_ESTIMATED_HEIGHT = 300;
+const VIEWPORT_MARGIN = 8;
 
 function pad2(value: number) {
   return String(value).padStart(2, "0");
@@ -64,7 +69,9 @@ export function DateRangePicker({
   className = "",
 }: DateRangePickerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<{ top: number; left: number } | null>(null);
   const [startIso, setStartIso] = useState(() => toIsoDate(defaultStart));
   const [endIso, setEndIso] = useState(() => toIsoDate(defaultEnd));
   const [panelMonth, setPanelMonth] = useState(() => fromIsoDate(toIsoDate(defaultStart)) ?? new Date());
@@ -80,9 +87,40 @@ export function DateRangePicker({
   }, [defaultStartIso, defaultEndIso]);
 
   useEffect(() => {
+    if (!open) {
+      const timer = window.setTimeout(() => setPanelPosition(null), 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    const updatePosition = () => {
+      const trigger = rootRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.bottom + PANEL_GAP;
+      const maxLeft = window.innerWidth - VIEWPORT_MARGIN - PANEL_WIDTH;
+      left = Math.max(VIEWPORT_MARGIN, Math.min(left, maxLeft));
+      if (top + PANEL_ESTIMATED_HEIGHT > window.innerHeight - VIEWPORT_MARGIN) {
+        top = Math.max(VIEWPORT_MARGIN, rect.top - PANEL_ESTIMATED_HEIGHT - PANEL_GAP);
+      }
+      setPanelPosition({ top, left });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, panelMonth]);
+
+  useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
@@ -165,68 +203,76 @@ export function DateRangePicker({
         </svg>
       </button>
 
-      {open ? (
-        <div className="absolute left-0 top-full z-50 mt-1 flex gap-4 rounded-lg border border-[#F0F0F0] bg-white p-3 shadow-[0_3px_6px_-4px_rgba(0,0,0,0.12),0_6px_16px_0_rgba(0,0,0,0.08),0_9px_28px_8px_rgba(0,0,0,0.05)]">
-          {months.map((month, index) => (
-            <div key={`${month.getFullYear()}-${month.getMonth()}`} className="w-[232px]">
-              <div className="mb-2 flex h-6 items-center justify-between px-1">
-                {index === 0 ? (
-                  <button
-                    type="button"
-                    aria-label="上一月"
-                    onClick={() => setPanelMonth((current) => addMonths(current, -1))}
-                    className="flex h-5 w-5 items-center justify-center rounded text-[#4B4B4B] hover:bg-[#F5F5F5]"
-                  >
-                    ‹
-                  </button>
-                ) : (
-                  <span className="w-5" />
-                )}
-                <span className="text-sm font-medium text-[rgba(0,0,0,0.88)]">
-                  {month.getFullYear()}年 {month.getMonth() + 1}月
-                </span>
-                {index === 1 ? (
-                  <button
-                    type="button"
-                    aria-label="下一月"
-                    onClick={() => setPanelMonth((current) => addMonths(current, 1))}
-                    className="flex h-5 w-5 items-center justify-center rounded text-[#4B4B4B] hover:bg-[#F5F5F5]"
-                  >
-                    ›
-                  </button>
-                ) : (
-                  <span className="w-5" />
-                )}
-              </div>
-              <div className="grid grid-cols-7 text-center text-xs leading-6 text-[#4B4B4B]">
-                {WEEKDAY_LABELS.map((label) => (
-                  <span key={label}>{label}</span>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-y-0.5 text-center">
-                {buildMonthCells(month).map((day, cellIndex) =>
-                  day ? (
-                    <button
-                      key={cellIndex}
-                      type="button"
-                      onClick={() => pickDay(day)}
-                      className={`mx-auto flex h-6 w-6 items-center justify-center rounded text-xs leading-6 ${cellClass(day)} ${
-                        toIsoDate(day) === todayIso && toIsoDate(day) !== startIso && toIsoDate(day) !== endIso
-                          ? "ring-1 ring-inset ring-[#3069F9]"
-                          : ""
-                      }`}
-                    >
-                      {day.getDate()}
-                    </button>
-                  ) : (
-                    <span key={cellIndex} className="h-6" />
-                  ),
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      {open && panelPosition && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={panelRef}
+              style={{ top: panelPosition.top, left: panelPosition.left, width: PANEL_WIDTH }}
+              className="fixed z-[100] flex gap-4 rounded-lg border border-[#F0F0F0] bg-white p-3 shadow-[0_3px_6px_-4px_rgba(0,0,0,0.12),0_6px_16px_0_rgba(0,0,0,0.08),0_9px_28px_8px_rgba(0,0,0,0.05)]"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {months.map((month, index) => (
+                <div key={`${month.getFullYear()}-${month.getMonth()}`} className="w-[232px] shrink-0">
+                  <div className="mb-2 flex h-6 items-center justify-between px-1">
+                    {index === 0 ? (
+                      <button
+                        type="button"
+                        aria-label="上一月"
+                        onClick={() => setPanelMonth((current) => addMonths(current, -1))}
+                        className="flex h-5 w-5 items-center justify-center rounded text-[#4B4B4B] hover:bg-[#F5F5F5]"
+                      >
+                        ‹
+                      </button>
+                    ) : (
+                      <span className="w-5" />
+                    )}
+                    <span className="text-sm font-medium text-[rgba(0,0,0,0.88)]">
+                      {month.getFullYear()}年 {month.getMonth() + 1}月
+                    </span>
+                    {index === 1 ? (
+                      <button
+                        type="button"
+                        aria-label="下一月"
+                        onClick={() => setPanelMonth((current) => addMonths(current, 1))}
+                        className="flex h-5 w-5 items-center justify-center rounded text-[#4B4B4B] hover:bg-[#F5F5F5]"
+                      >
+                        ›
+                      </button>
+                    ) : (
+                      <span className="w-5" />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-7 text-center text-xs leading-6 text-[#4B4B4B]">
+                    {WEEKDAY_LABELS.map((label) => (
+                      <span key={label}>{label}</span>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-y-0.5 text-center">
+                    {buildMonthCells(month).map((day, cellIndex) =>
+                      day ? (
+                        <button
+                          key={cellIndex}
+                          type="button"
+                          onClick={() => pickDay(day)}
+                          className={`mx-auto flex h-6 w-6 items-center justify-center rounded text-xs leading-6 ${cellClass(day)} ${
+                            toIsoDate(day) === todayIso && toIsoDate(day) !== startIso && toIsoDate(day) !== endIso
+                              ? "ring-1 ring-inset ring-[#3069F9]"
+                              : ""
+                          }`}
+                        >
+                          {day.getDate()}
+                        </button>
+                      ) : (
+                        <span key={cellIndex} className="h-6" />
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
