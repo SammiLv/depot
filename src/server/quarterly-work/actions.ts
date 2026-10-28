@@ -775,6 +775,11 @@ export async function updateQuarterlyWork(formData: FormData) {
 
   if (!existingWork) throw new Error("季度工作不存在或无权限编辑");
 
+  // 已终态需求不可编辑（历史数据修正走管理员数据修正）
+  if (existingWork.status === "COMPLETED" || existingWork.status === "DELAYED_COMPLETED" || existingWork.status === "CLOSED") {
+    throw new Error("已完成或已关闭的需求不能编辑");
+  }
+
   assertEditableStatus(existingWork.status);
   assertEditableStatus(status);
 
@@ -1683,10 +1688,14 @@ export async function deleteQuarterlyWork(formData: FormData) {
       id: workId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, title: true, projectId: true },
+    select: { id: true, title: true, projectId: true, status: true },
   });
 
   if (!work) throw new Error("需求不存在或无权限删除");
+  // 已终态需求不可删除（保留历史数据与统计口径）
+  if (work.status === "COMPLETED" || work.status === "DELAYED_COMPLETED" || work.status === "CLOSED") {
+    throw new Error("已完成或已关闭的需求不能删除");
+  }
 
   await prisma.quarterlyWork.update({
     where: { id: work.id },
@@ -1717,10 +1726,14 @@ export async function deleteProject(formData: FormData) {
       id: projectId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, title: true },
+    select: { id: true, title: true, status: true },
   });
 
   if (!project) throw new Error("项目不存在或无权限删除");
+  // 已终态项目不可删除（保留历史数据与审计链）
+  if (project.status === "COMPLETED" || project.status === "CLOSED") {
+    throw new Error("已完成或已关闭的项目不能删除");
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.requirementValueTrack.updateMany({
@@ -1825,6 +1838,10 @@ export async function updateProject(formData: FormData) {
     },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
+  // 已终态项目内容不可再编辑（历史数据修正走补录需求/管理员数据修正）
+  if (project.status === "COMPLETED" || project.status === "CLOSED") {
+    throw new Error("已完成或已关闭的项目不能编辑");
+  }
 
   // 已上线过的项目不能改为非开发项目（会抹掉首版完成度分界）
   if (project.launchedAt && !needsDevelopment) {
@@ -1873,7 +1890,8 @@ export async function updateProject(formData: FormData) {
 
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
-  const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
+  // 上方已拦截终态项目，走到这里 project.status 必非已完成
+  const becameCompleted = status === "COMPLETED";
   const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
   const nextLaunchedAt = status === "LAUNCHED"
     ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt)

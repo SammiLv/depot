@@ -623,6 +623,11 @@ function projectAllowsNewRequirement(status: ProjectStatus): boolean {
   return status !== "COMPLETED" && status !== "CLOSED";
 }
 
+/** 与 updateQuarterlyWork/deleteQuarterlyWork 守卫一致：已终态需求不可编辑/删除 */
+function workAllowsEdit(status: ProjectWorkspaceTaskItem["status"]): boolean {
+  return status === "NOT_STARTED" || status === "IN_PROGRESS";
+}
+
 function buildRequirementProjectOptions(data: Props["data"]) {
   const projectOptionById = new Map<
     string,
@@ -2856,11 +2861,14 @@ function useWorkspaceCardColumnCount() {
 function TaskMasonryGrid({
   tasks,
   canEdit,
+  canManageTask,
   onEditTask,
   onDeleteTask,
 }: {
   tasks: ProjectWorkspaceTaskItem[];
   canEdit: boolean;
+  /** 按需求状态过滤编辑/删除入口（已终态需求关闭） */
+  canManageTask?: (task: ProjectWorkspaceTaskItem) => boolean;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
   onDeleteTask: (task: ProjectWorkspaceTaskItem) => void;
 }) {
@@ -2875,7 +2883,7 @@ function TaskMasonryGrid({
             <ProjectTaskCard
               key={task.id}
               task={task}
-              canEdit={canEdit}
+              canEdit={canEdit && (canManageTask ? canManageTask(task) : true)}
               onEdit={() => onEditTask(task)}
               onDelete={() => onDeleteTask(task)}
               unstartedClass="bg-white"
@@ -3399,23 +3407,27 @@ function ProjectCard({
                 />
                 {canManageProjectAndValueTracking ? (
                   <>
-                    <button
-                      type="button"
-                      aria-label="编辑项目"
-                      onClick={onEditProject}
-                      className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#E8F2FF]"
-                    >
-                      <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
-                      <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="删除项目"
-                      onClick={onDeleteProject}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#FFECE8]"
-                    >
-                      <img src="/icons/delete-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
-                    </button>
+                    {projectAllowsNewRequirement(project.status) ? (
+                      <button
+                        type="button"
+                        aria-label="编辑项目"
+                        onClick={onEditProject}
+                        className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#E8F2FF]"
+                      >
+                        <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
+                        <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
+                      </button>
+                    ) : null}
+                    {projectAllowsNewRequirement(project.status) ? (
+                      <button
+                        type="button"
+                        aria-label="删除项目"
+                        onClick={onDeleteProject}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#FFECE8]"
+                      >
+                        <img src="/icons/delete-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
+                      </button>
+                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -3500,7 +3512,7 @@ function ProjectCard({
                   <ProjectTaskCard
                     key={task.id}
                     task={task}
-                    canEdit={canManageProductTask}
+                    canEdit={canManageProductTask && workAllowsEdit(task.status)}
                     onEdit={() => onEditTask(task)}
                     onDelete={() => onDeleteTask(task)}
                   />
@@ -3902,9 +3914,9 @@ function ProjectExpandedPanel({
                   remainLabel={remain}
                   remainClassName={remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}
                   completedAt={task.completedAt}
-                  canEdit={canManageProductTask}
+                  canEdit={canManageProductTask && workAllowsEdit(task.status)}
                   onEdit={() => onEditTask(task)}
-                  canDelete={canManageProductTask}
+                  canDelete={canManageProductTask && workAllowsEdit(task.status)}
                   onDelete={() => onDeleteTask(task)}
                 />
               );
@@ -3999,6 +4011,7 @@ function ProjectExpandedPanel({
 function ProjectListActionButtons({
   canCreate,
   canManage,
+  canEdit,
   onCreate,
   onBackfill,
   onEdit,
@@ -4006,11 +4019,14 @@ function ProjectListActionButtons({
 }: {
   canCreate: boolean;
   canManage: boolean;
+  /** 编辑入口独立开关：已终态项目关闭编辑，但保留删除 */
+  canEdit?: boolean;
   onCreate: () => void;
   onBackfill?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const editAllowed = canEdit ?? canManage;
   return (
     <div className="flex items-center justify-end gap-3">
       {canCreate ? (
@@ -4035,8 +4051,7 @@ function ProjectListActionButtons({
           <ScrollText className="h-4 w-4 text-[#FF7D00]" />
         </button>
       ) : null}
-      {canManage ? (
-        <>
+      {editAllowed ? (
           <button
             type="button"
             onClick={onEdit}
@@ -4046,6 +4061,8 @@ function ProjectListActionButtons({
             <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
             <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
           </button>
+      ) : null}
+      {canManage ? (
           <button
             type="button"
             onClick={onDelete}
@@ -4054,7 +4071,6 @@ function ProjectListActionButtons({
           >
             <img src="/icons/delete-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
           </button>
-        </>
       ) : null}
     </div>
   );
@@ -4217,7 +4233,8 @@ function ProjectTreeTable({
                       (canCreateTask && projectAllowsNewRequirement(project.status))
                       || canCreateValueTrack
                     }
-                    canManage={canManageProjectAndValueTracking}
+                    canManage={canManageProjectAndValueTracking && projectAllowsNewRequirement(project.status)}
+                    canEdit={canManageProjectAndValueTracking && projectAllowsNewRequirement(project.status)}
                     onCreate={() => {
                       if (activePanel === "value" && canCreateValueTrack) {
                         onCreateValueTrack(project.id);
@@ -5043,7 +5060,7 @@ function TaskListTable({
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.completedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`}>
-                {canManage ? (
+                {canManage && workAllowsEdit(task.status) ? (
                   <>
                     <button
                       type="button"
@@ -5792,6 +5809,7 @@ function QuarterlyWorkShell({
                     <TaskMasonryGrid
                       tasks={visibleTasks}
                       canEdit={canManageProductTask}
+                      canManageTask={(task) => canManageProductTask && workAllowsEdit(task.status)}
                       onEditTask={onEditTask}
                       onDeleteTask={onDeleteTask}
                     />
@@ -6800,7 +6818,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                             >
                               日志
                             </button>
-                            {canManageProductTask ? (
+                            {canManageProductTask && workAllowsEdit(item.status) ? (
                               <>
                                 <button
                                   type="button"
