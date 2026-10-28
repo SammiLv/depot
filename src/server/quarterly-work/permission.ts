@@ -39,6 +39,11 @@ export async function canManageProductTask(user?: ScopeUser) {
   return canManageProductManagementAbility(productManagementAbilityKeys.manageProductTask, user);
 }
 
+/** 已终态开发项目的需求补录权限（数据修正类，仅管理员/部门主管默认授予） */
+export async function canBackfillProjectRequirement(user?: ScopeUser) {
+  return canManageProductManagementAbility(productManagementAbilityKeys.backfillProjectRequirement, user);
+}
+
 export async function requireProductManagementAbility(
   abilityKey: OrgPermissionAbilityKey,
   errorMessage: string,
@@ -73,5 +78,12 @@ export async function requireManageProductTask() {
   return requireProductManagementAbility(
     productManagementAbilityKeys.manageProductTask,
     "当前角色不能管理需求",
+  );
+}
+
+export async function requireCanBackfillProjectRequirement() {
+  return requireProductManagementAbility(
+    productManagementAbilityKeys.backfillProjectRequirement,
+    "当前角色不能补录项目需求",
   );
 }

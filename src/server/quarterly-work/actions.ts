@@ -5,6 +5,7 @@ import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import {
+  requireCanBackfillProjectRequirement,
   requireManageProductGoal,
   requireManageProductTask,
   requireManageProjectAndValueTracking,
@@ -85,6 +86,39 @@ function assertProjectStatusTransition(from: ProjectStatus, to: ProjectStatus, n
   if (!PROJECT_STATUS_TRANSITIONS[from].includes(to)) {
     throw new Error(
       `项目状态不能从『${PROJECT_STATUS_LABELS[from] ?? from}』变更为『${PROJECT_STATUS_LABELS[to] ?? to}』`,
+    );
+  }
+}
+
+/**
+ * 开发项目完成前校验（handoff 方案 5.1）：needsDevelopment 项目首次变为 COMPLETED 时，
+ * 项目下须至少一条计入统计的需开发需求（未删除、非关闭），且至少一条已填工作量，
+ * 否则首版完成度无法计算。非开发项目不校验。
+ */
+async function assertDevProjectRequirementsBeforeCompletion(
+  project: { id: string; status: ProjectStatus; needsDevelopment: boolean | null },
+  nextStatus: ProjectStatus,
+) {
+  if (nextStatus !== "COMPLETED") return;
+  if (project.status === "COMPLETED") return;
+  if (project.needsDevelopment !== true) return;
+
+  const requirements = await prisma.quarterlyWork.findMany({
+    where: {
+      projectId: project.id,
+      deletedAt: null,
+      needsDevelopment: true,
+      status: { not: "CLOSED" },
+    },
+    select: { title: true, workloadPersonDay: true },
+  });
+  if (requirements.length === 0) {
+    throw new Error("开发项目标记为已完成前，须登记至少一条需开发需求（含工作量）");
+  }
+  const missingWorkload = requirements.filter((row) => row.workloadPersonDay === null || row.workloadPersonDay === undefined);
+  if (missingWorkload.length === requirements.length) {
+    throw new Error(
+      `开发项目标记为已完成前，需开发需求须至少一条填写工作量(人天)，否则首版完成度无法计算。缺工作量：${missingWorkload.map((row) => `「${row.title}」`).join("、")}`,
     );
   }
 }
@@ -865,6 +899,123 @@ export async function updateQuarterlyWork(formData: FormData) {
   revalidateQuarterlyWork();
 }
 
+/**
+ * 已终态开发项目的需求补录（存量数据修正，见 handoff 方案 2026-10-27）。
+ * 与日常新增的差异：独立权限、仅开发项目+COMPLETED、固定需开发、绕过 findEditableProject 终态限制、
+ * 不改变项目状态、isFinal 项目禁止、双份审计日志带「补录」标识。
+ */
+export async function backfillQuarterlyWork(formData: FormData) {
+  const { currentUser } = await requireCanBackfillProjectRequirement();
+  const projectId = requiredString(formData.get("projectId"), "所属项目");
+  const title = requiredString(formData.get("title"), "需求名称");
+  const ownerId = requiredString(formData.get("ownerId"), "负责人");
+  const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
+  const inputStartDate = parsePeriodStartDate(formData.get("startDate"));
+  const inputEndDate = parsePeriodEndDate(formData.get("endDate"));
+  const fallbackStart = startOfToday();
+  const startDate = inputStartDate ?? fallbackStart;
+  const endDate = inputEndDate
+    ?? new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 23, 59, 59, 999);
+  if (startDate.getTime() > endDate.getTime()) {
+    throw new Error("开始时间不能晚于结束时间");
+  }
+  const period = derivePeriodFields(startDate, endDate);
+  // 补录固定语义：开发需求
+  const needsDevelopment = true;
+  const developmentSource = parseDevelopmentSource(formData.get("developmentSource"), needsDevelopment);
+  const status = parseStatus(formData.get("status"));
+  if (status !== "COMPLETED" && status !== "DELAYED_COMPLETED") {
+    throw new Error("补录需求状态仅支持已完成或延期完成");
+  }
+  const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
+  if (workloadPersonDay === null) {
+    throw new Error("补录需求必须填写工作量(人天)");
+  }
+  const completedAt = parseDateTimeInput(formData.get("completedAt"));
+  if (!completedAt) {
+    throw new Error("补录需求必须填写完成时间");
+  }
+  const taskResult = parseTaskResult(formData.get("taskResult"), status);
+  const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
+  const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
+  const description = requiredString(formData.get("description"), "需求目标");
+  const expectedOutcome = (formData.get("expectedOutcome") as string | null)?.trim() || null;
+
+  // 项目校验：保留数据范围校验，但绕过终态限制（补录专用路径）
+  const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
+  const project = await prisma.project.findFirst({
+    where: {
+      id: projectId,
+      ...getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds),
+    },
+    select: { id: true, title: true, status: true, needsDevelopment: true, expectedOutcome: true },
+  });
+  if (!project) throw new Error("项目不存在或无权限");
+  if (project.needsDevelopment !== true) {
+    throw new Error("非开发项目不提供需求补录");
+  }
+  if (project.status !== "COMPLETED") {
+    throw new Error("仅已完成项目可补录需求");
+  }
+  const finalTrack = await prisma.requirementValueTrack.findFirst({
+    where: { projectId: project.id, deletedAt: null, isFinal: true },
+    select: { id: true },
+  });
+  if (finalTrack) {
+    throw new Error("项目已完成最终价值确认，不可补录需求；如需更正走管理员数据修正");
+  }
+
+  const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
+
+  const work = await prisma.quarterlyWork.create({
+    data: {
+      projectId: project.id,
+      year: period.year,
+      quarter: period.quarter,
+      startMonth: period.startMonth,
+      endMonth: period.endMonth,
+      startDate,
+      endDate,
+      title,
+      description,
+      taskDescription,
+      expectedOutcome: expectedOutcome || project.expectedOutcome,
+      status,
+      taskResult,
+      executionSummary,
+      workloadPersonDay,
+      needsDevelopment,
+      developmentSource,
+      ownerId: owner.id,
+      orgNodeId: owner.orgNodeId,
+      createdById: currentUser.id,
+      completedAt,
+    },
+    select: { id: true },
+  });
+
+  await recalcProjectWorkloadSnapshot(project.id);
+
+  await writeOperationLog(prisma, {
+    targetType: "QUARTERLY_WORK",
+    targetId: work.id,
+    targetTitle: title,
+    action: OPERATION_LOG_ACTION_CREATE,
+    operatorId: currentUser.id,
+    remark: `补录需求「${title}」（所属项目「${project.title}」）`,
+  });
+  await writeOperationLog(prisma, {
+    targetType: "PROJECT",
+    targetId: project.id,
+    targetTitle: project.title,
+    action: OPERATION_LOG_ACTION_UPDATE,
+    operatorId: currentUser.id,
+    remark: `补录需求「${title}」`,
+  });
+
+  revalidateQuarterlyWork();
+}
+
 export async function updateProjectStatus(formData: FormData) {
   const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
@@ -882,6 +1033,7 @@ export async function updateProjectStatus(formData: FormData) {
   if (!project) throw new Error("项目不存在或无权限编辑");
 
   assertProjectStatusTransition(project.status, status, project.needsDevelopment !== false);
+  await assertDevProjectRequirementsBeforeCompletion(project, status);
 
   const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
@@ -896,6 +1048,7 @@ export async function updateProjectStatus(formData: FormData) {
   }
 
   const nextLaunchedAt = getProjectLaunchedAtByStatus(status, project.launchedAt);
+  const nextCompletedAt = getProjectCompletedAtByStatus(status);
 
   await prisma.$transaction(async (tx) => {
     await tx.project.update({
@@ -903,7 +1056,7 @@ export async function updateProjectStatus(formData: FormData) {
       data: {
         status,
         launchedAt: nextLaunchedAt,
-        completedAt: getProjectCompletedAtByStatus(status),
+        completedAt: nextCompletedAt,
         ...(valueTrackInit ?? {}),
       },
     });
@@ -920,7 +1073,8 @@ export async function updateProjectStatus(formData: FormData) {
         where: { projectId: project.id, deletedAt: null },
         data: {
           status,
-          completedAt: status === "COMPLETED" ? startOfToday() : null,
+          // 需求完成时间与项目完成时间保持一致（当前时间）
+          completedAt: status === "COMPLETED" ? nextCompletedAt : null,
         },
       });
     }
@@ -978,6 +1132,10 @@ export async function createProject(formData: FormData) {
   }
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("项目状态为已完成时，完成时间为必填项");
+  }
+  // 完成前校验：新建即已完成的项目没有需求可校验，开发项目须先以未完成状态创建、登记需求后再完成
+  if (status === "COMPLETED" && needsDevelopment) {
+    throw new Error("开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成");
   }
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -1693,6 +1851,8 @@ export async function updateProject(formData: FormData) {
   }
 
   assertProjectStatusTransition(project.status, status, needsDevelopment);
+  // 同一次保存可能同时切换「是否开发项目」，完成前校验以表单新值为准
+  await assertDevProjectRequirementsBeforeCompletion({ ...project, needsDevelopment }, status);
 
   const taskCount = await countProjectTasks(project.id);
   const resolvedWorkloadPersonDay = taskCount > 0
@@ -1718,6 +1878,8 @@ export async function updateProject(formData: FormData) {
   const nextLaunchedAt = status === "LAUNCHED"
     ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt)
     : getProjectLaunchedAtByStatus(status, project.launchedAt);
+  // 需求级联完成时间与项目完成时间保持一致
+  const nextCompletedAt = resolveProjectCompletedAtByStatus(status, formData.get("completedAt"), project.completedAt);
   if (status === "LAUNCHED" && !nextLaunchedAt) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
   }
@@ -1756,7 +1918,7 @@ export async function updateProject(formData: FormData) {
         ownerId: owner.id,
         orgNodeId: owner.orgNodeId,
         launchedAt: nextLaunchedAt,
-        completedAt: resolveProjectCompletedAtByStatus(status, formData.get("completedAt"), project.completedAt),
+        completedAt: nextCompletedAt,
         ...(valueTrackInit ?? {}),
       },
     });
@@ -1797,7 +1959,8 @@ export async function updateProject(formData: FormData) {
         where: { projectId: project.id, deletedAt: null },
         data: {
           status,
-          completedAt: status === "COMPLETED" ? startOfToday() : null,
+          // 需求完成时间与项目完成时间保持一致（用户填写的项目完成时间）
+          completedAt: status === "COMPLETED" ? nextCompletedAt : null,
         },
       });
     }

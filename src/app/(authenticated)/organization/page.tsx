@@ -415,6 +415,10 @@ export default async function OrgPage({
       name: "管理任务",
       description: "允许创建、编辑与删除季度任务及任务看板内容。",
     },
+    BACKFILL_PROJECT_REQUIREMENT: {
+      name: "项目需求补录",
+      description: "允许对已完成开发项目补录历史需求（存量数据修正），补录记录带审计标识。默认仅管理员与部门主管。",
+    },
   } as const;
 
   const productManagementPermissionMap = new Map(productManagementPermissionGrants

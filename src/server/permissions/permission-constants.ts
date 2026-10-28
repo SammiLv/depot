@@ -46,7 +46,10 @@ export const productManagementAbilityKeys = {
   manageProductGoal: "MANAGE_PRODUCT_GOAL",
   manageProjectAndValueTracking: "MANAGE_PROJECT_AND_VALUE_TRACKING",
   manageProductTask: "MANAGE_PRODUCT_TASK",
+  backfillProjectRequirement: "BACKFILL_PROJECT_REQUIREMENT",
 } satisfies Record<string, OrgPermissionAbilityKey>;
+
+export type ProductManagementAbilityKey = (typeof productManagementAbilityKeys)[keyof typeof productManagementAbilityKeys];
 
 export const annualGoalAbilityKeys = {
   viewDepartmentPlans: "VIEW_ANNUAL_GOAL_DEPARTMENT_PLANS",
@@ -278,6 +281,7 @@ export const productManagementOrdinaryPermissionAbilityKeys: OrgPermissionAbilit
   productManagementAbilityKeys.manageProductGoal,
   productManagementAbilityKeys.manageProjectAndValueTracking,
   productManagementAbilityKeys.manageProductTask,
+  productManagementAbilityKeys.backfillProjectRequirement,
 ];
 
 type DefaultPermissionGrant = {
@@ -335,40 +339,24 @@ export const talentDefaultPermissionGrants: DefaultPermissionGrant[] = [
   })),
 ];
 
-export const productManagementDefaultPermissionGrants: DefaultPermissionGrant[] = productManagementOrdinaryPermissionAbilityKeys.flatMap((abilityKey) => ([
-  {
+// 产品管理默认矩阵：常规管理能力四项角色全授；需求补录为数据修正类权限，仅默认授予管理员与部门主管
+const productManagementDefaultEnabledRoles: Record<ProductManagementAbilityKey, RoleType[]> = {
+  [productManagementAbilityKeys.manageProductGoal]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+  [productManagementAbilityKeys.manageProjectAndValueTracking]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+  [productManagementAbilityKeys.manageProductTask]: ["ADMIN", "DEPARTMENT_MANAGER", "TEAM_LEADER", "MEMBER"],
+  [productManagementAbilityKeys.backfillProjectRequirement]: ["ADMIN", "DEPARTMENT_MANAGER"],
+};
+
+export const productManagementDefaultPermissionGrants: DefaultPermissionGrant[] = productManagementOrdinaryPermissionAbilityKeys.flatMap((abilityKey) =>
+  productManagementDefaultEnabledRoles[abilityKey as ProductManagementAbilityKey].map((roleType) => ({
     moduleKey: orgPermissionModuleKeys.productManagement,
     abilityKey,
-    scopeType: "ALL" as const,
+    scopeType: (roleType === "ADMIN" ? "ALL" : roleType === "DEPARTMENT_MANAGER" ? "SUBTREE" : roleType === "TEAM_LEADER" ? "NODE" : "SELF") as "ALL" | "SUBTREE" | "NODE" | "SELF",
     subjectType: "ROLE" as const,
-    roleType: "ADMIN" as const,
-    orgNodeSeedKey: null,
-  },
-  {
-    moduleKey: orgPermissionModuleKeys.productManagement,
-    abilityKey,
-    scopeType: "SUBTREE" as const,
-    subjectType: "ROLE" as const,
-    roleType: "DEPARTMENT_MANAGER" as const,
-    orgNodeSeedKey: "DEPARTMENT" as const,
-  },
-  {
-    moduleKey: orgPermissionModuleKeys.productManagement,
-    abilityKey,
-    scopeType: "NODE" as const,
-    subjectType: "ROLE" as const,
-    roleType: "TEAM_LEADER" as const,
-    orgNodeSeedKey: "TEAM" as const,
-  },
-  {
-    moduleKey: orgPermissionModuleKeys.productManagement,
-    abilityKey,
-    scopeType: "SELF" as const,
-    subjectType: "ROLE" as const,
-    roleType: "MEMBER" as const,
-    orgNodeSeedKey: "TEAM" as const,
-  },
-]));
+    roleType,
+    orgNodeSeedKey: (roleType === "ADMIN" ? null : roleType === "DEPARTMENT_MANAGER" ? "DEPARTMENT" : "TEAM") as "ROOT" | "DEPARTMENT" | "TEAM" | null,
+  })),
+);
 
 /** 场景全系统共享：有能力即可配置，默认给管理角色 ALL 作用域。 */
 export const notificationDefaultPermissionGrants: DefaultPermissionGrant[] = (

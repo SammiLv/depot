@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DateInput } from "@/components/date-input";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
-import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
+import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
 import { getValueTrackingTaskDates } from "@/server/quarterly-work/value-tracking-period";
@@ -331,12 +331,15 @@ function Dialog({
   title,
   children,
   stickyLayout = false,
+  size = "lg",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
   stickyLayout?: boolean;
+  /** sm=紧凑确认框；lg=表单等大内容（默认） */
+  size?: "sm" | "lg";
 }) {
   if (!open) return null;
 
@@ -344,7 +347,7 @@ function Dialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className={`relative w-full max-w-2xl rounded-2xl border border-border bg-card shadow-xl ${
+        className={`relative w-full ${size === "sm" ? "max-w-md" : "max-w-2xl"} rounded-2xl border border-border bg-card shadow-xl ${
           stickyLayout
             ? "grid h-[min(90vh,max-content)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden"
             : "max-h-[90vh] overflow-y-auto"
@@ -354,10 +357,12 @@ function Dialog({
           className={`flex shrink-0 items-center justify-between ${
             stickyLayout
               ? "border-b border-border px-6 py-4"
-              : "sticky top-0 z-10 rounded-t-2xl bg-card px-6 pt-6 pb-5"
+              : size === "sm"
+                ? "sticky top-0 z-10 rounded-t-2xl bg-card px-5 pt-5 pb-2"
+                : "sticky top-0 z-10 rounded-t-2xl bg-card px-6 pt-6 pb-5"
           }`}
         >
-          <h2 className="text-lg font-semibold">{title}</h2>
+          <h2 className={size === "sm" ? "text-base font-semibold" : "text-lg font-semibold"}>{title}</h2>
           <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted">
             <X className="h-4 w-4" />
           </button>
@@ -365,7 +370,7 @@ function Dialog({
         {stickyLayout ? (
           <div className="min-h-0 overflow-hidden px-6 pb-6 pt-4">{children}</div>
         ) : (
-          <div className="px-6 pb-6">{children}</div>
+          <div className={size === "sm" ? "" : "px-6 pb-6"}>{children}</div>
         )}
       </div>
     </div>
@@ -776,6 +781,7 @@ function QuarterlyWorkForm({
   status,
   item,
   defaultProjectId,
+  fixedProject,
   departmentOrgNodeId,
   memberOptions,
   onClose,
@@ -783,31 +789,46 @@ function QuarterlyWorkForm({
   stickyLayout = false,
 }: {
   data: Props["data"];
-  mode: "create" | "edit";
+  mode: "create" | "edit" | "backfill";
   status: ColumnStatus;
   item?: BoardItem;
   defaultProjectId?: string;
+  /** backfill 模式：项目固定为当前已完成的开发项目，只读不可改 */
+  fixedProject?: ProjectWorkspaceItem;
   departmentOrgNodeId: string;
   memberOptions: MemberPickerOption[];
   onClose: () => void;
   onSuccess: FormSuccessHandler;
   stickyLayout?: boolean;
 }) {
-  const statusOptions = useMemo(() => editableStatuses, []);
+  const statusOptions = useMemo(
+    () => (mode === "backfill"
+      ? (["COMPLETED", "DELAYED_COMPLETED"] as ColumnStatus[])
+      : editableStatuses),
+    [mode],
+  );
   const { projectOptionById, projectPickerOptions } = useMemo(
     () => buildRequirementProjectOptions(data),
     [data]
   );
   const initialProjectId = item?.projectId ?? defaultProjectId ?? projectPickerOptions[0]?.id ?? "";
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
-  const selectedProject = selectedProjectId ? projectOptionById.get(selectedProjectId) ?? null : null;
+  const selectedProject = mode === "backfill"
+    ? fixedProject ?? null
+    : selectedProjectId ? projectOptionById.get(selectedProjectId) ?? null : null;
   const [workStatus, setWorkStatus] = useState<ColumnStatus>(
-    item?.status ?? (editableStatuses.includes(status) ? status : "NOT_STARTED")
+    mode === "backfill"
+      ? "COMPLETED"
+      : item?.status ?? (editableStatuses.includes(status) ? status : "NOT_STARTED")
   );
   const [needsDevValue, setNeedsDevValue] = useState<string>(
-    item?.needsDevelopment === true ? "true" : item?.needsDevelopment === false ? "false" : ""
+    mode === "backfill" || item?.needsDevelopment === true
+      ? "true"
+      : item?.needsDevelopment === false
+        ? "false"
+        : ""
   );
-  const workloadRequired = needsDevValue === "true" && workStatus === "COMPLETED";
+  const workloadRequired = (mode === "backfill" || needsDevValue === "true") && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
@@ -825,6 +846,8 @@ function QuarterlyWorkForm({
     );
     if (mode === "edit") {
       await runServerAction(() => updateQuarterlyWork(fd));
+    } else if (mode === "backfill") {
+      await runServerAction(() => backfillQuarterlyWork(fd));
     } else {
       await runServerAction(() => createQuarterlyWork(fd));
     }
@@ -835,12 +858,21 @@ function QuarterlyWorkForm({
   const formFields = (
     <>
         <FormRow label="所属项目" align="center">
-          <ProjectPicker
-            name="projectId"
-            options={projectPickerOptions}
-            defaultValue={selectedProjectId}
-            onChange={setSelectedProjectId}
-          />
+          {mode === "backfill" ? (
+            <>
+              <input type="hidden" name="projectId" value={fixedProject?.id ?? ""} />
+              <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+                <div className="whitespace-pre-wrap break-words">{fixedProject?.title ?? "-"}</div>
+              </div>
+            </>
+          ) : (
+            <ProjectPicker
+              name="projectId"
+              options={projectPickerOptions}
+              defaultValue={selectedProjectId}
+              onChange={setSelectedProjectId}
+            />
+          )}
         </FormRow>
         <FormRow label="项目预期收益 *">
           <input type="hidden" name="expectedOutcome" value={selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? ""} />
@@ -888,20 +920,29 @@ function QuarterlyWorkForm({
         </FormRow>
         <FormRow label="是否需要开发 *" align="center">
           <div className="w-full space-y-1">
-            <select
-              name="needsDevelopment"
-              required
-              value={needsDevValue}
-              onChange={(event) => setNeedsDevValue(event.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              <option value="" disabled>请选择是否需要开发</option>
-              <option value="true">是</option>
-              <option value="false">否</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              注意：开发需求必须选择「是」，以纳入首版完成度统计，否则将影响首版完成度统计的准确度。
-            </p>
+            {mode === "backfill" ? (
+              <>
+                <input type="hidden" name="needsDevelopment" value="true" />
+                <div className="flex h-10 w-full items-center rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground">是</div>
+              </>
+            ) : (
+              <select
+                name="needsDevelopment"
+                required
+                value={needsDevValue}
+                onChange={(event) => setNeedsDevValue(event.target.value)}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              >
+                <option value="" disabled>请选择是否需要开发</option>
+                <option value="true">是</option>
+                <option value="false">否</option>
+              </select>
+            )}
+            {mode !== "backfill" ? (
+              <p className="text-xs text-muted-foreground">
+                注意：开发需求必须选择「是」，以纳入首版完成度统计，否则将影响首版完成度统计的准确度。
+              </p>
+            ) : null}
           </div>
         </FormRow>
         {needsDevValue === "true" ? (
@@ -964,7 +1005,9 @@ function QuarterlyWorkForm({
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           >
             {statusOptions.map((option) => (
-              <option key={option} value={option}>{columnTitleByStatus[option]}</option>
+              <option key={option} value={option}>
+                {mode === "backfill" && option === "DELAYED_COMPLETED" ? "延期完成" : columnTitleByStatus[option]}
+              </option>
             ))}
           </select>
         </FormRow>
@@ -981,7 +1024,7 @@ function QuarterlyWorkForm({
             ))}
           </select>
         </FormRow>
-        {workStatus === "COMPLETED" ? (
+        {workStatus === "COMPLETED" || mode === "backfill" ? (
           <FormRow label="完成时间 *" align="center">
             <DateInput
               name="completedAt"
@@ -1007,8 +1050,8 @@ function QuarterlyWorkForm({
     <div className="flex justify-end gap-3">
       <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
       <Button type="submit" className="rounded-lg">
-        {mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-        {mode === "edit" ? "保存" : "创建"}
+        {mode === "backfill" ? <ScrollText className="h-4 w-4" /> : mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+        {mode === "backfill" ? "补录" : mode === "edit" ? "保存" : "创建"}
       </Button>
     </div>
   );
@@ -1099,6 +1142,8 @@ function ProjectEditForm({
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
+  // 级联完成二次确认：项目置为终态时先弹项目内确认框，确认后才真正提交
+  const [pendingCascadeSubmit, setPendingCascadeSubmit] = useState<FormData | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
   const [editNeedsDev, setEditNeedsDev] = useState<string>(
     item.needsDevelopment === false ? "false" : "true"
@@ -1121,6 +1166,8 @@ function ProjectEditForm({
     target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [projectStatus]);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
+  // 级联完成提醒：项目置为终态时，其下所有未完成需求会被同时置为同状态，完成时间记为当前时间
+  const cascadesCompletion = (projectStatus === "COMPLETED" || projectStatus === "CLOSED") && projectStatus !== item.status;
   const hasTasks = item.workCount > 0;
   const taskWorkloadSum = useMemo(() => {
     if (!hasTasks) return null;
@@ -1177,34 +1224,42 @@ function ProjectEditForm({
     return quarters;
   }, []);
 
+  const submitProjectForm = async (formData: FormData) => {
+    try {
+      setErrorMessage("");
+      if (editNeedsDev === "false" && nonDevProjectBlockedMessage) {
+        setErrorMessage(nonDevProjectBlockedMessage);
+        return;
+      }
+      validateSelectedProductGoalIds(formData);
+      await runServerAction(() => updateProject(formData));
+      onClose();
+    } catch (error) {
+      setErrorMessage(getServerActionErrorMessage(
+        error,
+        "保存项目失败。若项目已完成价值最终确认，则不可修改上线时间。",
+      ));
+    }
+  };
+
   return (
+    <>
     <form
       className={stickyDialogFormClassName}
       onSubmit={async (event) => {
         event.preventDefault();
         const formData = new FormData(event.currentTarget);
-        try {
-          setErrorMessage("");
-          if (editNeedsDev === "false" && nonDevProjectBlockedMessage) {
-            setErrorMessage(nonDevProjectBlockedMessage);
-            return;
-          }
-          validateSelectedProductGoalIds(formData);
-          await runServerAction(() => updateProject(formData));
-          onClose();
-        } catch (error) {
-          setErrorMessage(getServerActionErrorMessage(
-            error,
-            "保存项目失败。若项目已完成价值最终确认，则不可修改上线时间。",
-          ));
+        if (cascadesCompletion) {
+          setPendingCascadeSubmit(formData);
+          return;
         }
+        await submitProjectForm(formData);
       }}
     >
       <input type="hidden" name="projectId" value={item.id} />
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <StickyFormScroll>
-        <FormRow label="项目名称 *" align="center">
-          <input
+        <FormRow label="项目名称 *" align="center">          <input
             name="title"
             required
             defaultValue={item.title}
@@ -1345,6 +1400,12 @@ function ProjectEditForm({
               ))}
           </select>
         </FormRow>
+        {cascadesCompletion ? (
+          <div className="-mt-1 mb-2 flex items-start gap-2 rounded-lg bg-[#FFF7E8] px-3 py-2 text-xs leading-[18px] text-[#FF7D00]">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>项目下所有未完成的需求都将被同时标记为「{projectStatus === "COMPLETED" ? "已完成" : "已关闭"}」，完成时间统一记为当前项目的完成时间。</span>
+          </div>
+        ) : null}
         {item.status === "COMPLETED" || item.status === "CLOSED" ? (
           <input type="hidden" name="status" value={item.status} />
         ) : null}
@@ -1390,7 +1451,34 @@ function ProjectEditForm({
           </Button>
         </div>
       </StickyFormFooter>
-    </form>
+      </form>
+      <Dialog
+        open={!!pendingCascadeSubmit}
+        onClose={() => setPendingCascadeSubmit(null)}
+        title="确认完成项目"
+        size="sm"
+      >
+        <div className="px-5 pb-1 text-sm leading-6 text-foreground">
+          项目下所有未完成的需求都将被同时标记为「{projectStatus === "COMPLETED" ? "已完成" : "已关闭"}」，完成时间统一记为当前项目的完成时间。是否继续？
+        </div>
+        <div className="flex justify-end gap-3 px-5 pb-4">
+          <Button type="button" variant="outline" className="rounded-lg" onClick={() => setPendingCascadeSubmit(null)}>
+            取消
+          </Button>
+          <Button
+            type="button"
+            className="rounded-lg"
+            onClick={() => {
+              const formData = pendingCascadeSubmit;
+              setPendingCascadeSubmit(null);
+              if (formData) void submitProjectForm(formData);
+            }}
+          >
+            确认
+          </Button>
+        </div>
+      </Dialog>
+    </>
   );
 }
 
@@ -3912,12 +4000,14 @@ function ProjectListActionButtons({
   canCreate,
   canManage,
   onCreate,
+  onBackfill,
   onEdit,
   onDelete,
 }: {
   canCreate: boolean;
   canManage: boolean;
   onCreate: () => void;
+  onBackfill?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -3932,6 +4022,17 @@ function ProjectListActionButtons({
         >
           <img src="/icons/plus-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
           <img src="/icons/plus-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
+        </button>
+      ) : null}
+      {onBackfill ? (
+        <button
+          type="button"
+          onClick={onBackfill}
+          title="补录需求"
+          aria-label="补录需求"
+          className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#FFF7E8]"
+        >
+          <ScrollText className="h-4 w-4 text-[#FF7D00]" />
         </button>
       ) : null}
       {canManage ? (
@@ -3967,10 +4068,12 @@ function ProjectTreeTable({
   canCreateValueTrack,
   canManageProjectAndValueTracking,
   canManageProductTask,
+  canBackfill,
   onToggleExpand,
   onSwitchPanel,
   onCreateTask,
   onCreateValueTrack,
+  onBackfill,
   onEditProject,
   onDeleteProject,
   onEditTask,
@@ -3984,10 +4087,12 @@ function ProjectTreeTable({
   canCreateValueTrack: boolean;
   canManageProjectAndValueTracking: boolean;
   canManageProductTask: boolean;
+  canBackfill: boolean;
   onToggleExpand: (projectId: string) => void;
   onSwitchPanel: (panel: Props["data"]["workspaceFilters"]["projectPanel"]) => void;
   onCreateTask: (projectId: string) => void;
   onCreateValueTrack: (projectId: string) => void;
+  onBackfill: (project: ProjectWorkspaceItem) => void;
   onEditProject: (project: ProjectWorkspaceItem) => void;
   onDeleteProject: (project: ProjectWorkspaceItem) => void;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
@@ -4126,6 +4231,11 @@ function ProjectTreeTable({
                     }}
                     onEdit={() => onEditProject(project)}
                     onDelete={() => onDeleteProject(project)}
+                    onBackfill={
+                      canBackfill && project.needsDevelopment === true && project.status === "COMPLETED"
+                        ? () => onBackfill(project)
+                        : undefined
+                    }
                   />
                 </div>
               </div>
@@ -5041,12 +5151,14 @@ function QuarterlyWorkShell({
   canCreateValueTrack,
   canManageProjectAndValueTracking,
   canManageProductTask,
+  canBackfillProjectRequirement,
   onUpdateFilters,
   onUpdateStatusFilters,
   onCreateGoal,
   onCreateProject,
   onCreateTask,
   onCreateValueTrack,
+  onBackfill,
   onEditGoal,
   onDeleteGoal,
   onEditProject,
@@ -5065,12 +5177,14 @@ function QuarterlyWorkShell({
   canCreateValueTrack: boolean;
   canManageProjectAndValueTracking: boolean;
   canManageProductTask: boolean;
+  canBackfillProjectRequirement: boolean;
   onUpdateFilters: (updates: Record<string, string | number | null>) => void;
   onUpdateStatusFilters: (statuses: readonly string[]) => void;
   onCreateGoal: () => void;
   onCreateProject: (status: ProjectStatus) => void;
   onCreateTask: (projectId?: string) => void;
   onCreateValueTrack: (projectId?: string) => void;
+  onBackfill: (project: ProjectWorkspaceItem) => void;
   onEditGoal: (item: Props["data"]["productGoalColumns"][number]["items"][number]) => void;
   onDeleteGoal: (item: Props["data"]["productGoalColumns"][number]["items"][number]) => void;
   onEditProject: (item: ProjectWorkspaceItem) => void;
@@ -5778,10 +5892,12 @@ function QuarterlyWorkShell({
                 canCreateValueTrack={canCreateValueTrack}
                 canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                 canManageProductTask={canManageProductTask}
+                canBackfill={canBackfillProjectRequirement}
                 onToggleExpand={(projectId) => setExpandedProjectId((current) => current === projectId ? null : projectId)}
                 onSwitchPanel={(panel) => onUpdateFilters({ projectPanel: panel === "task" ? null : panel })}
                 onCreateTask={onCreateTask}
                 onCreateValueTrack={onCreateValueTrack}
+                onBackfill={onBackfill}
                 onEditProject={onEditProject}
                 onDeleteProject={onDeleteProject}
                 onEditTask={onEditTask}
@@ -5818,6 +5934,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [teamTab, setTeamTab] = useState<TeamTab>("all");
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
   const [editDialog, setEditDialog] = useState<EditDialogState>(null);
+  const [backfillDialog, setBackfillDialog] = useState<{ project: ProjectWorkspaceItem } | null>(null);
   const [projectDialog, setProjectDialog] = useState<ProjectDialogState>(null);
   const [createProductGoalDialog, setCreateProductGoalDialog] = useState(false);
   const [createValueTrackDialog, setCreateValueTrackDialog] = useState(false);
@@ -6994,6 +7111,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           canCreateValueTrack={canCreateValueTrack}
           canManageProjectAndValueTracking={canManageProjectAndValueTracking}
           canManageProductTask={canManageProductTask}
+          canBackfillProjectRequirement={data.permissions.canBackfillProjectRequirement}
           onUpdateFilters={updateWorkspaceFilters}
           onUpdateStatusFilters={updateStatusFilters}
           onCreateGoal={() => setCreateProductGoalDialog(true)}
@@ -7003,6 +7121,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             setCreateValueTrackProjectId(projectId ?? null);
             setCreateValueTrackDialog(true);
           }}
+          onBackfill={(project) => setBackfillDialog({ project })}
           onEditGoal={(item) => setProductGoalDialog(item)}
           onDeleteGoal={(item) => setProductGoalDeleteDialog(item)}
           onEditProject={(item) => setProjectDialog({ item, title: projectTitleByStatus[item.status] })}
@@ -7075,6 +7194,22 @@ export function QuarterlyWorkContent({ data }: Props) {
             departmentOrgNodeId={departmentTab}
             memberOptions={getMemberOptionsForForm(editDialog.item.ownerId)}
             onClose={() => setEditDialog(null)}
+            onSuccess={handleFormSuccess}
+            stickyLayout
+          />
+        )}
+      </Dialog>
+
+      <Dialog open={!!backfillDialog} onClose={() => setBackfillDialog(null)} title="补录需求" stickyLayout>
+        {backfillDialog && (
+          <QuarterlyWorkForm
+            data={data}
+            mode="backfill"
+            status="COMPLETED"
+            fixedProject={backfillDialog.project}
+            departmentOrgNodeId={departmentTab}
+            memberOptions={getMemberOptionsForForm(backfillDialog.project.ownerId)}
+            onClose={() => setBackfillDialog(null)}
             onSuccess={handleFormSuccess}
             stickyLayout
           />

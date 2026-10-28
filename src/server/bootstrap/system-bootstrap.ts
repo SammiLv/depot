@@ -5,6 +5,7 @@ import {
   kpiAbilityKeys,
   notificationAbilityKeys,
   orgPermissionModuleKeys,
+  productManagementAbilityKeys,
   talentAbilityKeys,
   talentOrdinaryPermissionAbilityKeys,
 } from "@/server/permissions/permission-constants";
@@ -28,6 +29,7 @@ export async function ensureInitialSystemBootstrap() {
   await removePermissionMatrixIntegrationTestArtifacts();
   await ensureSystemMenus();
   await ensureAnnualGoalPermissionGrants();
+  await ensureBackfillProjectRequirementPermissions();
   await ensureAdminKpiPermissions();
   await ensureKpiDistributionAlertGrants();
   await ensureDefaultTalentPermissions();
@@ -121,6 +123,50 @@ export async function ensureAnnualGoalPermissionGrants() {
     for (const orgNodeId of orgNodeIds) {
       await ensureAnnualGoalRoleGrant(grant.roleType, grant.scopeType, orgNodeId, grant.abilityKey);
     }
+  }
+}
+
+// 需求补录默认授权（幂等）：仅管理员（ALL 系统模板行）与部门主管（各部门 SUBTREE 行）。
+// 存量库由服务启动引导补发，可重复执行。
+async function ensureBackfillRoleGrant(
+  roleType: RoleType,
+  scopeType: "ALL" | "SUBTREE",
+  orgNodeId: string | null,
+) {
+  const abilityKey = productManagementAbilityKeys.backfillProjectRequirement;
+  const result = await prisma.orgPermissionGrant.updateMany({
+    where: {
+      moduleKey: orgPermissionModuleKeys.productManagement,
+      abilityKey,
+      scopeType,
+      subjectType: "ROLE",
+      roleType,
+      userId: null,
+      orgNodeId,
+    },
+    data: { isActive: true },
+  });
+  if (result.count === 0) {
+    await prisma.orgPermissionGrant.create({
+      data: {
+        moduleKey: orgPermissionModuleKeys.productManagement,
+        abilityKey,
+        scopeType,
+        subjectType: "ROLE",
+        roleType,
+        userId: null,
+        orgNodeId,
+        isActive: true,
+      },
+    });
+  }
+}
+
+export async function ensureBackfillProjectRequirementPermissions() {
+  await ensureBackfillRoleGrant("ADMIN", "ALL", null);
+  const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+  for (const department of departments) {
+    await ensureBackfillRoleGrant("DEPARTMENT_MANAGER", "SUBTREE", department.id);
   }
 }
 
