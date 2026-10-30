@@ -26,6 +26,36 @@ import { resolveKpiRating } from "@/server/talent/decision-rule-config";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
 import { findUserPendingApprovalStep, getMinPendingStepOrder } from "@/server/kpi/approval-step-utils";
 import { emitNotificationEvent } from "@/server/notifications/emit";
+import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
+
+/**
+ * KPI 模板配置变更审计：模块 KPI，日志中心「业务操作」视图可见。
+ */
+async function writeKpiTemplateAudit(
+  tx: Prisma.TransactionClient,
+  currentUser: { id: string; name: string },
+  input: {
+    actionCode: string;
+    actionName: string;
+    objectId: string;
+    objectName: string;
+    operationNote?: string;
+  },
+) {
+  await writeAuditEvent(tx, {
+    actorId: currentUser.id,
+    actorType: "USER",
+    actorName: currentUser.name,
+    module: AUDIT_MODULES.KPI,
+    actionCode: input.actionCode,
+    actionName: input.actionName,
+    isSuccess: true,
+    objectType: "KpiTemplate",
+    objectId: input.objectId,
+    objectName: input.objectName,
+    operationNote: input.operationNote,
+  });
+}
 
 const assignmentPriority: Record<"USER" | "ORG_NODE" | "ROLE", number> = {
   USER: 3,
@@ -1125,6 +1155,14 @@ export async function createKpiTemplate(formData: FormData): Promise<TemplateCre
       })),
     });
 
+    await writeKpiTemplateAudit(tx, context.currentUser, {
+      actionCode: AUDIT_ACTION_CODES.CREATE,
+      actionName: "新建KPI模板",
+      objectId: template.id,
+      objectName: templateName,
+      operationNote: `指标项 ${items.length} 项；适用对象 ${scopeTargets.length} 个`,
+    });
+
     return template;
   });
 
@@ -1224,6 +1262,14 @@ export async function updateKpiTemplate(formData: FormData): Promise<TemplateUpd
         isActive: true,
       })),
     });
+
+    await writeKpiTemplateAudit(tx, context.currentUser, {
+      actionCode: AUDIT_ACTION_CODES.UPDATE,
+      actionName: "编辑KPI模板",
+      objectId: template.id,
+      objectName: templateName,
+      operationNote: `指标项 ${items.length} 项；适用对象 ${scopeTargets.length} 个`,
+    });
   });
 
   revalidatePath("/kpi");
@@ -1248,10 +1294,23 @@ export async function toggleKpiTemplateActive(templateId: string): Promise<{ tem
   if (allowedDepartmentIds !== null && !allowedDepartmentIds.includes(template.departmentOrgNodeId)) {
     throw new Error("无权限操作该模板");
   }
-  const updated = await prisma.kpiTemplate.update({
+  const templateName = await prisma.kpiTemplate.findFirst({
     where: { id: templateId },
-    data: { isActive: !template.isActive },
-    select: { id: true, isActive: true },
+    select: { name: true },
+  });
+  const updated = await prisma.$transaction(async (tx) => {
+    const updatedTemplate = await tx.kpiTemplate.update({
+      where: { id: templateId },
+      data: { isActive: !template.isActive },
+      select: { id: true, isActive: true },
+    });
+    await writeKpiTemplateAudit(tx, context.currentUser, {
+      actionCode: AUDIT_ACTION_CODES.UPDATE,
+      actionName: template.isActive ? "停用KPI模板" : "启用KPI模板",
+      objectId: templateId,
+      objectName: templateName?.name ?? templateId,
+    });
+    return updatedTemplate;
   });
   revalidatePath("/kpi");
   revalidatePath("/dashboard");
@@ -1262,7 +1321,7 @@ export async function deleteKpiTemplate(templateId: string): Promise<TemplateDel
   const context = await requireKpiTemplateEditor();
   const template = await prisma.kpiTemplate.findFirst({
     where: { id: templateId, deletedAt: null },
-    select: { id: true, departmentOrgNodeId: true },
+    select: { id: true, departmentOrgNodeId: true, name: true },
   });
   if (!template) throw new Error("模板不存在或已删除");
 
@@ -1288,6 +1347,12 @@ export async function deleteKpiTemplate(templateId: string): Promise<TemplateDel
         isLatest: false,
         updatedById: context.currentUser.id,
       },
+    });
+    await writeKpiTemplateAudit(tx, context.currentUser, {
+      actionCode: AUDIT_ACTION_CODES.DELETE,
+      actionName: "删除KPI模板",
+      objectId: templateId,
+      objectName: template.name,
     });
   });
 

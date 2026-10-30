@@ -35,8 +35,18 @@ async function manageableCycle(user: Awaited<ReturnType<typeof requireCurrentUse
 export async function calculateTalentDecisionCycle(formData: FormData) {
   const user = await manager();
   const cycleId = required(formData, "cycleId");
-  await manageableCycle(user, cycleId);
+  const cycle = await manageableCycle(user, cycleId);
   await calculateDecisionCycleEvidence(cycleId, user.id);
+  await prisma.talentActionLog.create({
+    data: {
+      targetType: "TalentDecisionCycle",
+      targetId: cycleId,
+      action: "CALCULATE",
+      actorId: user.id,
+      afterJson: JSON.stringify({ status: "PENDING_CONFIRMATION" }),
+      remark: `计算候选池证据：${cycle.name}`,
+    },
+  });
   revalidatePath("/talent/recommendations");
 }
 
@@ -48,9 +58,20 @@ export async function confirmTalentDecisionCycle(formData: FormData) {
   const resultCount = await prisma.talentDecisionEmployeeResult.count({ where: { cycleId } });
   if (resultCount === 0) throw new Error("候选池为空，不能确认批次");
   const now = new Date();
-  await prisma.$transaction([
-    prisma.talentDecisionEmployeeResult.updateMany({ where: { cycleId }, data: { frozenAt: now } }),
-    prisma.talentDecisionCycle.update({ where: { id: cycleId }, data: { status: "CONFIRMED", confirmedById: user.id, confirmedAt: now } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await tx.talentDecisionEmployeeResult.updateMany({ where: { cycleId }, data: { frozenAt: now } });
+    await tx.talentDecisionCycle.update({ where: { id: cycleId }, data: { status: "CONFIRMED", confirmedById: user.id, confirmedAt: now } });
+    await tx.talentActionLog.create({
+      data: {
+        targetType: "TalentDecisionCycle",
+        targetId: cycleId,
+        action: "CONFIRM",
+        actorId: user.id,
+        beforeJson: JSON.stringify({ status: cycle.status }),
+        afterJson: JSON.stringify({ status: "CONFIRMED" }),
+        remark: `确认决策批次：${cycle.name}；候选池 ${resultCount} 人`,
+      },
+    });
+  });
   revalidatePath("/talent/recommendations");
 }

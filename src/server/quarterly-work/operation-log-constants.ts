@@ -1,10 +1,24 @@
-export const OPERATION_LOG_TARGET_TYPES = ["PRODUCT_GOAL", "PROJECT", "QUARTERLY_WORK"] as const;
+export const OPERATION_LOG_TARGET_TYPES = [
+  "PRODUCT_GOAL",
+  "PROJECT",
+  "QUARTERLY_WORK",
+  "ANNUAL_GOAL_PLAN",
+  "ANNUAL_GOAL_METRIC",
+  "ANNUAL_GOAL_METRIC_SOURCE",
+  "ANNUAL_GOAL_METRIC_ASSIGNMENT",
+  "ANNUAL_GOAL_QUARTER",
+] as const;
 export type OperationLogTargetType = (typeof OPERATION_LOG_TARGET_TYPES)[number];
 
 export const OPERATION_LOG_TARGET_TYPE_LABELS: Record<OperationLogTargetType, string> = {
   PRODUCT_GOAL: "产品目标",
   PROJECT: "项目",
   QUARTERLY_WORK: "需求",
+  ANNUAL_GOAL_PLAN: "年度方案",
+  ANNUAL_GOAL_METRIC: "部门指标",
+  ANNUAL_GOAL_METRIC_SOURCE: "元指标",
+  ANNUAL_GOAL_METRIC_ASSIGNMENT: "小组承接",
+  ANNUAL_GOAL_QUARTER: "季度指标",
 };
 
 export const OPERATION_LOG_ACTION_CREATE = "新增";

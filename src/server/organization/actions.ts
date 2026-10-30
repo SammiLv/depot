@@ -80,6 +80,40 @@ async function requirePermissionEditor(scope: PermissionScopeInput) {
   return user;
 }
 
+/**
+ * 权限类变更统一审计：模块 PERMISSION，日志中心「账号与权限」视图可见。
+ * 必须在业务写同一事务内调用，保证日志失败随业务回滚。
+ */
+async function writePermissionAuditEvent(
+  tx: Prisma.TransactionClient,
+  currentUser: { id: string; name: string },
+  input: {
+    actionName: string;
+    objectType: string;
+    objectName: string;
+    objectId?: string;
+    operationNote?: string;
+  },
+) {
+  await writeAuditEvent(tx, {
+    actorId: currentUser.id,
+    actorType: "USER",
+    actorName: currentUser.name,
+    module: AUDIT_MODULES.PERMISSION,
+    actionCode: AUDIT_ACTION_CODES.PERMISSION_SCOPE_CHANGE,
+    actionName: input.actionName,
+    isSuccess: true,
+    objectType: input.objectType,
+    objectId: input.objectId ?? null,
+    objectName: input.objectName,
+    operationNote: input.operationNote,
+  });
+}
+
+function formatPermissionScopeNote(scope: { scopeType: string; departmentOrgNodeId: string }) {
+  return scope.scopeType === "SYSTEM" ? "系统" : `部门(${scope.departmentOrgNodeId})`;
+}
+
 function assertManagerRole(roleType: RoleType) {
   if (!managerEditableRoles.includes(roleType)) {
     throw new Error("部门主管只能设置组长或普通成员角色");
@@ -618,6 +652,25 @@ export async function createTeam(formData: FormData) {
     });
 
     await rebuildOrgClosures(tx);
+
+    // 记录组织节点创建日志
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ORGANIZATION,
+      actionCode: AUDIT_ACTION_CODES.ORG_NODE_CREATE,
+      actionName: "创建小组",
+      isSuccess: true,
+      objectType: "Team",
+      objectId: teamOrgNodeId,
+      objectName: name.trim(),
+      afterData: {
+        name: name.trim(),
+        nodeType: "TEAM",
+        parentId: parentNode.id,
+      },
+    });
   });
 
   await syncTeamLeader(teamOrgNodeId, leaderId, departmentOrgNodeId);
@@ -856,6 +909,13 @@ export async function saveRoleMenuPermissions(formData: FormData) {
   await prisma.$transaction(async (tx) => {
     const permissionIds = menus.map((menu) => menu.id);
 
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "保存菜单权限矩阵",
+      objectType: "PermissionMatrix",
+      objectName: "菜单权限矩阵",
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；权限格 ${nextCells.size} 项`,
+    });
+
     if (scope.scopeType === "SYSTEM") {
       const deleted = await tx.roleMenuPermission.deleteMany({
         where: {
@@ -914,13 +974,20 @@ export async function saveRoleMenuPermissions(formData: FormData) {
 export async function saveAnnualGoalRolePermissions(formData: FormData) {
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
-  await requirePermissionEditor(scope);
+  const currentUser = await requirePermissionEditor(scope);
   const validAbilityIds = new Set<OrgPermissionAbilityKey>(annualGoalMatrixPermissionAbilityKeys);
 
   const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
   const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "保存指标管理权限矩阵",
+      objectType: "PermissionMatrix",
+      objectName: "指标管理权限矩阵",
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；权限格 ${requestedCells.length} 项`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.annualGoal,
@@ -961,13 +1028,20 @@ export async function saveAnnualGoalRolePermissions(formData: FormData) {
 export async function saveKpiRolePermissions(formData: FormData) {
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
-  await requirePermissionEditor(scope);
+  const currentUser = await requirePermissionEditor(scope);
   const validAbilityIds = new Set<OrgPermissionAbilityKey>(kpiOrdinaryPermissionAbilityKeys);
 
   const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
   const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "保存KPI权限矩阵",
+      objectType: "PermissionMatrix",
+      objectName: "KPI 权限矩阵",
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；权限格 ${requestedCells.length} 项`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.kpi,
@@ -1010,12 +1084,19 @@ export async function saveKpiRolePermissions(formData: FormData) {
 export async function saveNotificationRolePermissions(formData: FormData) {
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
-  await requirePermissionEditor(scope);
+  const currentUser = await requirePermissionEditor(scope);
   const validAbilityIds = new Set<OrgPermissionAbilityKey>(notificationOrdinaryPermissionAbilityKeys);
   const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
   const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "保存通知权限矩阵",
+      objectType: "PermissionMatrix",
+      objectName: "通知权限矩阵",
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；权限格 ${requestedCells.length} 项`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.notification,
@@ -1069,12 +1150,19 @@ export async function saveNotificationRolePermissions(formData: FormData) {
 export async function saveProductManagementRolePermissions(formData: FormData) {
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
-  await requirePermissionEditor(scope);
+  const currentUser = await requirePermissionEditor(scope);
   const validAbilityIds = new Set<OrgPermissionAbilityKey>(productManagementOrdinaryPermissionAbilityKeys);
   const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
   const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "保存产品管理权限矩阵",
+      objectType: "PermissionMatrix",
+      objectName: "产品管理权限矩阵",
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；权限格 ${requestedCells.length} 项`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.productManagement,
@@ -1115,12 +1203,19 @@ export async function saveProductManagementRolePermissions(formData: FormData) {
 export async function saveTalentRolePermissions(formData: FormData) {
   const permissionsValue = formData.get("permissions") as string;
   const scope = await resolvePermissionScope(formData);
-  await requirePermissionEditor(scope);
+  const currentUser = await requirePermissionEditor(scope);
   const validAbilityIds = new Set<OrgPermissionAbilityKey>(talentMatrixPermissionAbilityKeys);
   const requestedCells = parsePermissionCells(permissionsValue, validAbilityIds);
   const orgNodeId = scope.scopeType === "DEPARTMENT" ? scope.departmentOrgNodeId : null;
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "保存人才发展权限矩阵",
+      objectType: "PermissionMatrix",
+      objectName: "人才发展权限矩阵",
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；权限格 ${requestedCells.length} 项`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.talent,
@@ -1167,14 +1262,30 @@ async function saveAndSyncPermissionMatrix(
 ) {
   const scope = await resolvePermissionScope(formData);
   if (scope.scopeType !== "SYSTEM") throw new Error("仅系统权限矩阵可同步至所有部门");
-  await requireAdmin();
+  const currentUser = await requireAdmin();
 
   const expectedConfirmation = mode === "CHANGES" ? "SYNC_PERMISSION_CHANGES" : "SYNC_FULL_PERMISSION_MATRIX";
   if (formData.get("confirmation") !== expectedConfirmation) throw new Error("请完成二次确认后再同步");
   const permissions = formData.get("permissions");
   if (typeof permissions !== "string" || !permissions) throw new Error("权限矩阵不能为空");
 
+  const matrixKindNames: Record<PermissionMatrixKind, string> = {
+    menu: "菜单",
+    "annual-goal": "指标管理",
+    kpi: "KPI",
+    notification: "通知",
+    "product-management": "产品管理",
+    talent: "人才发展",
+  };
+
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: `同步${matrixKindNames[kind]}权限矩阵至全部部门`,
+      objectType: "PermissionMatrix",
+      objectName: `${matrixKindNames[kind]}权限矩阵`,
+      operationNote: `模式：${mode === "CHANGES" ? "仅变更项" : "完整覆盖"}`,
+    });
+
     if (kind === "menu") await syncRoleMenuPermissionMatrix(tx, permissions, mode);
     else if (kind === "annual-goal") await syncAnnualGoalPermissionMatrix(tx, permissions, mode);
     else if (kind === "kpi") await syncKpiPermissionMatrix(tx, permissions, mode);
@@ -1482,7 +1593,7 @@ export async function deleteKpiUserPermissionGrant(formData: FormData) {
 }
 
 export async function applyRoleMenuPermissionToAllDepartments(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
   const roleType = formData.get("roleType") as RoleType;
   const allowed = formData.get("allowed") === "true";
@@ -1509,6 +1620,14 @@ export async function applyRoleMenuPermissionToAllDepartments(formData: FormData
   });
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "批量同步菜单权限至全部部门",
+      objectType: "MenuPermission",
+      objectId: permissionId,
+      objectName: menu.path,
+      operationNote: `角色 ${roleType}：${allowed ? "允许" : "禁止"}；覆盖 ${departments.length} 个部门`,
+    });
+
     await tx.roleMenuPermission.deleteMany({
       where: {
         scopeType: "SYSTEM",
@@ -1554,7 +1673,7 @@ export async function applyRoleMenuPermissionToAllDepartments(formData: FormData
 }
 
 export async function applyAnnualGoalPermissionToAllDepartments(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
   const roleType = formData.get("roleType") as RoleType;
   const allowed = formData.get("allowed") === "true";
@@ -1578,6 +1697,14 @@ export async function applyAnnualGoalPermissionToAllDepartments(formData: FormDa
   const scopeType = annualGoalPermissionScopeByAbilityRole[permissionId as AnnualGoalAbilityKey][roleType];
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "批量同步指标管理权限至全部部门",
+      objectType: "OrgPermissionAbility",
+      objectId: permissionId,
+      objectName: permissionId,
+      operationNote: `角色 ${roleType}：${allowed ? "允许" : "禁止"}；覆盖 ${departments.length} 个部门`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.annualGoal,
@@ -1622,7 +1749,7 @@ export async function applyAnnualGoalPermissionToAllDepartments(formData: FormDa
 }
 
 export async function applyKpiPermissionToAllDepartments(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
   const roleType = formData.get("roleType") as RoleType;
   const allowed = formData.get("allowed") === "true";
@@ -1645,6 +1772,14 @@ export async function applyKpiPermissionToAllDepartments(formData: FormData) {
   });
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "批量同步KPI权限至全部部门",
+      objectType: "OrgPermissionAbility",
+      objectId: permissionId,
+      objectName: permissionId,
+      operationNote: `角色 ${roleType}：${allowed ? "允许" : "禁止"}；覆盖 ${departments.length} 个部门`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.kpi,
@@ -1689,7 +1824,7 @@ export async function applyKpiPermissionToAllDepartments(formData: FormData) {
 }
 
 export async function applyNotificationPermissionToAllDepartments(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
   const roleType = formData.get("roleType") as RoleType;
   const allowed = formData.get("allowed") === "true";
@@ -1713,6 +1848,14 @@ export async function applyNotificationPermissionToAllDepartments(formData: Form
   });
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "批量同步通知权限至全部部门",
+      objectType: "OrgPermissionAbility",
+      objectId: permissionId,
+      objectName: permissionId,
+      operationNote: `角色 ${roleType}：${allowed ? "允许" : "禁止"}；覆盖 ${departments.length} 个部门`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.notification,
@@ -1758,7 +1901,7 @@ export async function applyNotificationPermissionToAllDepartments(formData: Form
 }
 
 export async function applyProductManagementPermissionToAllDepartments(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
   const roleType = formData.get("roleType") as RoleType;
   const allowed = formData.get("allowed") === "true";
@@ -1782,6 +1925,14 @@ export async function applyProductManagementPermissionToAllDepartments(formData:
   });
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "批量同步产品管理权限至全部部门",
+      objectType: "OrgPermissionAbility",
+      objectId: permissionId,
+      objectName: permissionId,
+      operationNote: `角色 ${roleType}：${allowed ? "允许" : "禁止"}；覆盖 ${departments.length} 个部门`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.productManagement,
@@ -1827,7 +1978,7 @@ export async function applyProductManagementPermissionToAllDepartments(formData:
 }
 
 export async function applyTalentPermissionToAllDepartments(formData: FormData) {
-  await requireAdmin();
+  const currentUser = await requireAdmin();
   const permissionId = formData.get("permissionId") as string;
   const roleType = formData.get("roleType") as RoleType;
   const allowed = formData.get("allowed") === "true";
@@ -1851,6 +2002,14 @@ export async function applyTalentPermissionToAllDepartments(formData: FormData) 
   });
 
   await prisma.$transaction(async (tx) => {
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "批量同步人才发展权限至全部部门",
+      objectType: "OrgPermissionAbility",
+      objectId: permissionId,
+      objectName: permissionId,
+      operationNote: `角色 ${roleType}：${allowed ? "允许" : "禁止"}；覆盖 ${departments.length} 个部门`,
+    });
+
     await tx.orgPermissionGrant.deleteMany({
       where: {
         moduleKey: orgPermissionModuleKeys.talent,
@@ -2053,7 +2212,7 @@ async function normalizeApprovalPolicyStepTargets(
 
 export async function saveKpiApprovalPolicy(formData: FormData) {
   const scope = await resolvePermissionScope(formData);
-  await requirePermissionEditor(scope);
+  const currentUser = await requirePermissionEditor(scope);
   const id = String(formData.get("id") ?? "").trim() || null;
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim() || null;
@@ -2133,6 +2292,14 @@ export async function saveKpiApprovalPolicy(formData: FormData) {
         });
       }
     }
+
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: id ? "编辑KPI审批策略" : "新建KPI审批策略",
+      objectType: "KpiApprovalPolicy",
+      objectId: policy.id,
+      objectName: name,
+      operationNote: `范围：${formatPermissionScopeNote(scope)}；审批步骤 ${steps.length} 级；状态：${isActive ? "启用" : "停用"}`,
+    });
   });
   revalidateOrganization();
 }
@@ -2155,23 +2322,33 @@ export async function toggleKpiApprovalPolicy(formData: FormData) {
       policy.id,
     );
   }
-  await prisma.kpiApprovalPolicy.update({
-    where: { id },
-    data: {
-      isActive: !policy.isActive,
-      activeScopeKey: getKpiApprovalPolicyActiveScopeKey(
-        policy.scopeType,
-        policy.departmentOrgNodeId,
-        !policy.isActive,
-      ),
-    },
+  const currentUser = await requireCurrentUser();
+  await prisma.$transaction(async (tx) => {
+    await tx.kpiApprovalPolicy.update({
+      where: { id },
+      data: {
+        isActive: !policy.isActive,
+        activeScopeKey: getKpiApprovalPolicyActiveScopeKey(
+          policy.scopeType,
+          policy.departmentOrgNodeId,
+          !policy.isActive,
+        ),
+      },
+    });
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: policy.isActive ? "停用KPI审批策略" : "启用KPI审批策略",
+      objectType: "KpiApprovalPolicy",
+      objectId: id,
+      objectName: policy.name,
+    });
   });
   revalidateOrganization();
 }
 
 export async function deleteKpiApprovalPolicy(formData: FormData) {
   const id = String(formData.get("id") ?? "").trim();
-  await requireKpiApprovalPolicyEditor(id);
+  const policy = await requireKpiApprovalPolicyEditor(id);
+  const currentUser = await requireCurrentUser();
   const usageCount = await prisma.personalKpi.count({ where: { approvalPolicyId: id } });
   if (usageCount > 0) {
     throw new Error("该审批策略已生成 KPI 单据，只能停用，不能删除");
@@ -2189,6 +2366,12 @@ export async function deleteKpiApprovalPolicy(formData: FormData) {
     await tx.kpiApprovalPolicyStep.deleteMany({ where: { policyId: id } });
     await tx.kpiApprovalPolicyScope.deleteMany({ where: { policyId: id } });
     await tx.kpiApprovalPolicy.delete({ where: { id } });
+    await writePermissionAuditEvent(tx, currentUser, {
+      actionName: "删除KPI审批策略",
+      objectType: "KpiApprovalPolicy",
+      objectId: id,
+      objectName: policy.name,
+    });
   });
   revalidateOrganization();
 }

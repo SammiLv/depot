@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "@/server/db/prisma";
+import { ANNUAL_GOAL_LOG_TARGET_TYPES } from "@/server/annual-goals/operation-log";
 import {
   type AuditQueryOptions,
   type AuditQueryResult,
@@ -75,7 +76,15 @@ export async function queryAuditLogs(
   ]);
 
   // 合并所有结果
-  const allRecords = results.flat();
+  let allRecords = results.flat();
+
+  // 多源合并后按模块过滤：OperationLog 一个源承载多个模块（产品管理/年度指标），
+  // 仅靠数据源选择无法精确筛选，必须以后过滤为准（AuditEvent 已带 module 字段，重复过滤无副作用）
+  const filterModules = options.modules || (options.module ? [options.module] : []);
+  if (filterModules.length > 0) {
+    const filterModuleSet = new Set(filterModules);
+    allRecords = allRecords.filter((record) => filterModuleSet.has(record.module));
+  }
 
   // 按时间倒序排序
   allRecords.sort((a, b) => b.operatedAt.getTime() - a.operatedAt.getTime());
@@ -191,6 +200,13 @@ async function queryOperationLogs(
   skip: number,
   take: number
 ): Promise<UnifiedAuditRecord[]> {
+  // 仅选「年度指标」未选「产品管理」时，OperationLog 只查指标类 targetType，
+  // 避免拉出全部产品日志再由后过滤丢弃
+  const modules = options.modules || (options.module ? [options.module] : []);
+  const targetTypes = modules.includes("ANNUAL_GOAL") && !modules.includes("PRODUCT_MANAGEMENT")
+    ? [...ANNUAL_GOAL_LOG_TARGET_TYPES]
+    : undefined;
+
   const where = buildOperationLogWhere({
     startDate: options.startDate,
     endDate: options.endDate,
@@ -198,6 +214,7 @@ async function queryOperationLogs(
     actorIds: options.actorIds,
     objectType: options.objectType,
     objectId: options.objectId,
+    targetTypes,
   });
 
   const logs = await prisma.operationLog.findMany({

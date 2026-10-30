@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { NotificationTriggerType, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
+import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 import { deliverTestNotification } from "@/server/notifications/engine";
 import { getNotificationEvent, isNotificationModule, SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
 import {
@@ -26,6 +27,37 @@ function requiredString(value: FormDataEntryValue | null, label: string) {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) throw new Error(`${label}不能为空`);
   return text;
+}
+
+/**
+ * 通知场景/群机器人配置变更审计：模块 NOTIFICATION，日志中心「通知」视图可见。
+ * 注意脱敏：禁止写入 Webhook 地址、安全设置值等敏感信息。
+ */
+async function writeNotificationConfigAudit(
+  tx: Prisma.TransactionClient,
+  currentUser: { id: string; name: string },
+  input: {
+    actionCode: string;
+    actionName: string;
+    objectType: string;
+    objectId: string;
+    objectName: string;
+    operationNote?: string;
+  },
+) {
+  await writeAuditEvent(tx, {
+    actorId: currentUser.id,
+    actorType: "USER",
+    actorName: currentUser.name,
+    module: AUDIT_MODULES.NOTIFICATION,
+    actionCode: input.actionCode,
+    actionName: input.actionName,
+    isSuccess: true,
+    objectType: input.objectType,
+    objectId: input.objectId,
+    objectName: input.objectName,
+    operationNote: input.operationNote,
+  });
 }
 
 function optionalString(value: FormDataEntryValue | null) {
@@ -152,22 +184,43 @@ export async function saveNotificationScenario(formData: FormData): Promise<stri
 
   if (id) {
     await assertCanManageNotificationScenarioRecord(id);
-    await prisma.notificationScenario.update({
-      where: { id },
-      data: {
-        ...data,
-        updatedById: currentUser.id,
-      },
-    });
-  } else {
-    await prisma.notificationScenario.create({
-      data: {
-        ...data,
-        createdById: currentUser.id,
-        updatedById: currentUser.id,
-      },
-    });
   }
+
+  await prisma.$transaction(async (tx) => {
+    if (id) {
+      await tx.notificationScenario.update({
+        where: { id },
+        data: {
+          ...data,
+          updatedById: currentUser.id,
+        },
+      });
+      await writeNotificationConfigAudit(tx, currentUser, {
+        actionCode: AUDIT_ACTION_CODES.NOTIFICATION_SCENARIO_UPDATE,
+        actionName: "编辑通知场景",
+        objectType: "NotificationScenario",
+        objectId: id,
+        objectName: data.name,
+        operationNote: `触发类型：${data.triggerType === "EVENT" ? "事件" : "定时"}；状态：${data.isActive ? "启用" : "停用"}`,
+      });
+    } else {
+      const scenario = await tx.notificationScenario.create({
+        data: {
+          ...data,
+          createdById: currentUser.id,
+          updatedById: currentUser.id,
+        },
+      });
+      await writeNotificationConfigAudit(tx, currentUser, {
+        actionCode: AUDIT_ACTION_CODES.NOTIFICATION_SCENARIO_CREATE,
+        actionName: "新建通知场景",
+        objectType: "NotificationScenario",
+        objectId: scenario.id,
+        objectName: data.name,
+        operationNote: `触发类型：${data.triggerType === "EVENT" ? "事件" : "定时"}；状态：${data.isActive ? "启用" : "停用"}`,
+      });
+    }
+  });
 
   revalidatePath("/notifications");
 
@@ -193,17 +246,37 @@ export async function toggleNotificationScenario(formData: FormData) {
     if (schedule) nextRunAt = computeNextRunAt(schedule);
   }
 
-  await prisma.notificationScenario.update({
-    where: { id },
-    data: { isActive, nextRunAt, updatedById: currentUser.id },
+  await prisma.$transaction(async (tx) => {
+    await tx.notificationScenario.update({
+      where: { id },
+      data: { isActive, nextRunAt, updatedById: currentUser.id },
+    });
+    await writeNotificationConfigAudit(tx, currentUser, {
+      actionCode: AUDIT_ACTION_CODES.NOTIFICATION_SCENARIO_UPDATE,
+      actionName: isActive ? "启用通知场景" : "停用通知场景",
+      objectType: "NotificationScenario",
+      objectId: id,
+      objectName: scenario.name,
+    });
   });
   revalidatePath("/notifications");
 }
 
 export async function deleteNotificationScenario(formData: FormData) {
   const id = requiredString(formData.get("id"), "场景");
-  await assertCanManageNotificationScenarioRecord(id);
-  await prisma.notificationScenario.delete({ where: { id } });
+  const currentUser = await assertCanManageNotificationScenarioRecord(id);
+  const scenario = await prisma.notificationScenario.findUnique({ where: { id }, select: { id: true, name: true } });
+  if (!scenario) throw new Error("场景不存在");
+  await prisma.$transaction(async (tx) => {
+    await tx.notificationScenario.delete({ where: { id } });
+    await writeNotificationConfigAudit(tx, currentUser, {
+      actionCode: AUDIT_ACTION_CODES.NOTIFICATION_SCENARIO_DELETE,
+      actionName: "删除通知场景",
+      objectType: "NotificationScenario",
+      objectId: id,
+      objectName: scenario.name,
+    });
+  });
   revalidatePath("/notifications");
 }
 
@@ -292,35 +365,67 @@ export async function saveNotificationGroupBot(formData: FormData) {
 
   if (id) {
     await assertCanManageNotificationGroupBotRecord(id);
-    await prisma.notificationGroupBot.update({
-      where: { id },
-      data: {
-        name,
-        webhookUrl,
-        securityType,
-        securityValue,
-        updatedById: currentUser.id,
-      },
-    });
-  } else {
-    await prisma.notificationGroupBot.create({
-      data: {
-        name,
-        webhookUrl,
-        securityType,
-        securityValue,
-        createdById: currentUser.id,
-        updatedById: currentUser.id,
-      },
-    });
   }
+
+  await prisma.$transaction(async (tx) => {
+    if (id) {
+      await tx.notificationGroupBot.update({
+        where: { id },
+        data: {
+          name,
+          webhookUrl,
+          securityType,
+          securityValue,
+          updatedById: currentUser.id,
+        },
+      });
+      await writeNotificationConfigAudit(tx, currentUser, {
+        actionCode: AUDIT_ACTION_CODES.NOTIFICATION_BOT_UPDATE,
+        actionName: "编辑群机器人",
+        objectType: "NotificationGroupBot",
+        objectId: id,
+        objectName: name,
+        operationNote: `安全设置类型：${securityType}`,
+      });
+    } else {
+      const bot = await tx.notificationGroupBot.create({
+        data: {
+          name,
+          webhookUrl,
+          securityType,
+          securityValue,
+          createdById: currentUser.id,
+          updatedById: currentUser.id,
+        },
+      });
+      await writeNotificationConfigAudit(tx, currentUser, {
+        actionCode: AUDIT_ACTION_CODES.NOTIFICATION_BOT_CREATE,
+        actionName: "新建群机器人",
+        objectType: "NotificationGroupBot",
+        objectId: bot.id,
+        objectName: name,
+        operationNote: `安全设置类型：${securityType}`,
+      });
+    }
+  });
 
   revalidatePath("/notifications");
 }
 
 export async function deleteNotificationGroupBot(formData: FormData) {
   const id = requiredString(formData.get("id"), "群机器人");
-  await assertCanManageNotificationGroupBotRecord(id);
-  await prisma.notificationGroupBot.delete({ where: { id } });
+  const currentUser = await assertCanManageNotificationGroupBotRecord(id);
+  const bot = await prisma.notificationGroupBot.findUnique({ where: { id }, select: { id: true, name: true } });
+  if (!bot) throw new Error("群机器人不存在");
+  await prisma.$transaction(async (tx) => {
+    await tx.notificationGroupBot.delete({ where: { id } });
+    await writeNotificationConfigAudit(tx, currentUser, {
+      actionCode: AUDIT_ACTION_CODES.NOTIFICATION_BOT_DELETE,
+      actionName: "删除群机器人",
+      objectType: "NotificationGroupBot",
+      objectId: id,
+      objectName: bot.name,
+    });
+  });
   revalidatePath("/notifications");
 }

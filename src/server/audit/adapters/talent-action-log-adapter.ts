@@ -101,6 +101,7 @@ function getTalentTypePrefix(targetType: string): string {
     RewardRecord: "奖励记录",
     EmploymentContractTerm: "合同期限",
     TalentImportBatch: "批量导入",
+    TalentDecisionCycle: "决策批次",
   };
   return typePrefixMap[targetType] || "人才对象";
 }
@@ -118,6 +119,7 @@ function formatTalentActionName(action: string, targetType: string): string {
     RewardRecord: "奖励记录",
     EmploymentContractTerm: "合同期限",
     TalentImportBatch: "批量导入",
+    TalentDecisionCycle: "决策批次",
   };
 
   const actionNames: Record<string, string> = {
@@ -126,6 +128,7 @@ function formatTalentActionName(action: string, targetType: string): string {
     DELETE: "删除",
     PUBLISH: "发布",
     CONFIRM: "确认",
+    CALCULATE: "计算",
     VOID: "作废",
     IMPORT: "导入",
     APPROVE: "审批",
