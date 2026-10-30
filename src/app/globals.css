@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* rjmart ui 企业组件库（Nexus 私服 @rjmart scope） */
+@reference "@rjmart/ui/theme.css";
+@import "@rjmart/ui/styles.css";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -157,4 +161,31 @@
 .dropdown-panel-enter > .dropdown-panel-enter-body {
   min-height: 0;
   overflow: hidden;
+}
+
+/* 状态 pill 悬停提示：自绘 tooltip，悬停约 100ms 即浮现（替代延迟较长的原生 title） */
+.status-pill-tip {
+  position: relative;
+}
+.status-pill-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease 0.08s;
+  z-index: 30;
+}
+.status-pill-tip:hover::after {
+  opacity: 1;
 }

@@ -173,7 +173,7 @@ export function DateInput({
 
   return (
     <div
-      className={`flex items-center gap-1 focus-within:border-ring ${className}`}
+      className={`flex items-center gap-1 focus-within:border-[#3069F9] ${className}`}
       onFocus={onFocus}
       onBlur={onBlur}
     >

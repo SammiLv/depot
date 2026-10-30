@@ -5,6 +5,9 @@ import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DateInput } from "@/components/date-input";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { QuarterSelect } from "@/components/quarter-select";
+import { SearchableSelect } from "@/components/searchable-select";
+import { Input as RjInput, InputNumber as RjInputNumber, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
 import { Badge, Button, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -101,16 +104,21 @@ function emptyMetricText(value: string | null | undefined) {
   return value?.trim() ? value : "-";
 }
 
-/** 状态多选：点击切换选中态 */
+/** 状态多选：Shift+点击切换选中态（已选则反选移除，未选则追加） */
 function toggleFilterKey<T>(list: readonly T[], key: T): T[] {
   return list.includes(key) ? list.filter((item) => item !== key) : [...list, key];
 }
 
 /**
- * 状态 pill 点击语义：普通点击单选（再点一次取消）；Ctrl/⌘+点击多选（追加/移除）。
+ * 状态 pill 普通点击语义：
+ * - 多选时点【已选中】的项：反选移除它，保留未点击的其他状态；
+ * - 其他情况：单选替换为点击项（已单选它则取消回到全部）。
+ * 追加多选只能 Shift+点击（toggleFilterKey）。
  */
-function nextStatusSelection<T>(current: readonly T[], key: T, multi: boolean): T[] {
-  if (multi) return toggleFilterKey(current, key);
+function plainStatusSelection<T>(current: readonly T[], key: T): T[] {
+  if (current.length >= 2 && current.includes(key)) {
+    return current.filter((item) => item !== key);
+  }
   return current.length === 1 && current[0] === key ? [] : [key];
 }
 
@@ -344,7 +352,7 @@ function Dialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className={`relative w-full ${size === "sm" ? "max-w-md" : "max-w-2xl"} rounded-2xl border border-border bg-card shadow-xl ${
@@ -479,10 +487,11 @@ function renderRequiredLabel(label: string) {
   return <>{trimmedLabel.slice(0, -1).trimEnd()} <span className="text-destructive">*</span></>;
 }
 
-function FormRow({ label, children, align = "start" }: { label: string; children: React.ReactNode; align?: "start" | "center" }) {
+function FormRow({ label, children, align = "start", labelClassName }: { label: string; children: React.ReactNode; align?: "start" | "center"; labelClassName?: string }) {
+  const alignmentClass = labelClassName ?? (align === "center" ? "self-center" : "pt-3");
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4">
-      <label className={`pt-3 text-sm font-medium ${align === "center" ? "self-center pt-0" : ""}`}>{renderRequiredLabel(label)}</label>
+      <label className={`text-sm font-medium ${alignmentClass}`}>{renderRequiredLabel(label)}</label>
       <div>{children}</div>
     </div>
   );
@@ -492,7 +501,7 @@ const stickyDialogFormClassName = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)_
 
 function StickyFormScroll({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-0 overflow-y-auto pr-1">
+    <div className="min-h-0 overflow-y-auto pr-3 [scrollbar-gutter:stable]">
       <div className="space-y-4">{children}</div>
     </div>
   );
@@ -513,108 +522,22 @@ function MemberPicker({
   options: Array<{ id: string; label: string }>;
   defaultValue: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(defaultValue);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSelectedId(defaultValue), 0);
     return () => window.clearTimeout(timer);
   }, [defaultValue]);
 
-  useEffect(() => {
-    if (!open) {
-      const timer = window.setTimeout(() => setQuery(""), 0);
-      return () => window.clearTimeout(timer);
-    }
-
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(timer);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!wrapperRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [open]);
-
-  const selectedOption = options.find((option) => option.id === selectedId) ?? options[0] ?? null;
-  const filteredOptions = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return options;
-    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
-  }, [options, query]);
-
   return (
-    <div ref={wrapperRef} className="relative">
-      <input type="hidden" name={name} value={selectedOption?.id ?? ""} />
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
-      >
-        <span className={`truncate text-left ${selectedOption ? "text-foreground" : "text-muted-foreground"}`}>
-          {selectedOption?.label ?? "请选择负责人"}
-        </span>
-        <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-      </button>
-
-      {open ? (
-        <div className={`absolute z-50 mt-2 w-full ${dropdownPanelEnterClass}`}>
-          <div className={`${dropdownPanelEnterBodyClass} rounded-lg border border-border bg-card p-2 shadow-xl`}>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索成员"
-            className="mb-2 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          />
-          <div className="max-h-56 overflow-y-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((option) => {
-                const active = option.id === selectedOption?.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(option.id);
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
-                  >
-                    <span className="truncate">{option.label}</span>
-                    {active ? <Check className="ml-2 h-4 w-4 shrink-0" /> : null}
-                  </button>
-                );
-              })
-            ) : (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground">未找到匹配成员</div>
-            )}
-          </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    <SearchableSelect
+      name={name}
+      options={options.map((option) => ({ value: option.id, label: option.label }))}
+      value={selectedId || null}
+      onChange={(next) => setSelectedId(next)}
+      placeholder="搜索成员"
+      className="w-full"
+    />
   );
 }
 
@@ -674,109 +597,25 @@ function ProjectPicker({
   defaultValue: string;
   onChange?: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(defaultValue);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSelectedId(defaultValue), 0);
     return () => window.clearTimeout(timer);
   }, [defaultValue]);
 
-  useEffect(() => {
-    if (!open) {
-      const timer = window.setTimeout(() => setQuery(""), 0);
-      return () => window.clearTimeout(timer);
-    }
-
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(timer);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!wrapperRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [open]);
-
-  const selectedOption = options.find((option) => option.id === selectedId) ?? null;
-  const filteredOptions = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return options;
-    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
-  }, [options, query]);
-
   return (
-    <div ref={wrapperRef} className="relative">
-      <input type="hidden" name={name} value={selectedId} />
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
-      >
-        <span className={`truncate text-left ${selectedOption || selectedId ? "text-foreground" : "text-muted-foreground"}`}>
-          {selectedOption?.label ?? (selectedId ? "所选项目不在可选列表，请刷新页面" : "请选择项目")}
-        </span>
-        <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-      </button>
-
-      {open ? (
-        <div className={`absolute z-50 mt-2 w-full ${dropdownPanelEnterClass}`}>
-          <div className={`${dropdownPanelEnterBodyClass} rounded-lg border border-border bg-card p-2 shadow-xl`}>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索项目"
-            className="mb-2 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          />
-          <div className="max-h-56 overflow-y-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((option) => {
-                const active = option.id === selectedOption?.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(option.id);
-                      onChange?.(option.id);
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
-                  >
-                    <span className="truncate">{option.label}</span>
-                    {active ? <Check className="ml-2 h-4 w-4 shrink-0" /> : null}
-                  </button>
-                );
-              })
-            ) : (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground">未找到匹配项目</div>
-            )}
-          </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    <SearchableSelect
+      name={name}
+      options={options.map((option) => ({ value: option.id, label: option.label }))}
+      value={selectedId || null}
+      onChange={(next) => {
+        setSelectedId(next);
+        onChange?.(next);
+      }}
+      placeholder="搜索项目"
+      className="w-full"
+    />
   );
 }
 
@@ -833,6 +672,8 @@ function QuarterlyWorkForm({
         ? "false"
         : ""
   );
+  const [devSourceValue, setDevSourceValue] = useState(item?.developmentSource ?? DEVELOPMENT_SOURCE_EXTERNAL);
+  const [taskResultValue, setTaskResultValue] = useState(item?.taskResult ?? "");
   const workloadRequired = (mode === "backfill" || needsDevValue === "true") && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
@@ -886,12 +727,12 @@ function QuarterlyWorkForm({
           </div>
         </FormRow>
         <FormRow label="需求名称 *" align="center">
-          <input
+          <RjInput
             name="title"
             required
             defaultValue={item?.title ?? ""}
             placeholder="请输入需求名称"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
@@ -906,42 +747,35 @@ function QuarterlyWorkForm({
             )}
           />
         </FormRow>
-        <FormRow label="需求周期" align="center">
+        <FormRow label="需求周期 *" align="center">
           <DateRangePicker
             nameStart="startDate"
             nameEnd="endDate"
-            defaultStart={
-              item?.startDate
-                ?? (item?.startMonth ? new Date(item.year ?? new Date().getFullYear(), item.startMonth - 1, 1) : new Date())
-            }
-            defaultEnd={
-              item?.endDate
-                ?? (item?.endMonth
-                  ? new Date(item.year ?? new Date().getFullYear(), item.endMonth, 0)
-                  : item?.startDate
-                    ?? (item?.startMonth ? new Date(item.year ?? new Date().getFullYear(), item.startMonth, 0) : new Date()))
-            }
+            defaultStart={item?.startDate ?? null}
+            defaultEnd={item?.endDate ?? null}
           />
         </FormRow>
-        <FormRow label="是否需要开发 *" align="center">
+        <FormRow label="是否需要开发 *" align="center" labelClassName="self-start pt-[5px]">
           <div className="w-full space-y-1">
             {mode === "backfill" ? (
               <>
                 <input type="hidden" name="needsDevelopment" value="true" />
-                <div className="flex h-10 w-full items-center rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground">是</div>
+                <div className="flex h-10 w-full items-center rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-muted-foreground transition-colors hover:border-[#3069F9]">是</div>
               </>
             ) : (
-              <select
-                name="needsDevelopment"
-                required
-                value={needsDevValue}
-                onChange={(event) => setNeedsDevValue(event.target.value)}
-                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-              >
-                <option value="" disabled>请选择是否需要开发</option>
-                <option value="true">是</option>
-                <option value="false">否</option>
-              </select>
+              <>
+                <input type="hidden" name="needsDevelopment" value={needsDevValue} />
+                <RjSelect
+                  options={[
+                    { label: "是", value: "true" },
+                    { label: "否", value: "false" },
+                  ]}
+                  value={needsDevValue || null}
+                  onChange={(v) => setNeedsDevValue(String(v ?? ""))}
+                  placeholder="请选择是否需要开发"
+                  className="w-full"
+                />
+              </>
             )}
             {mode !== "backfill" ? (
               <p className="text-xs text-muted-foreground">
@@ -952,46 +786,44 @@ function QuarterlyWorkForm({
         </FormRow>
         {needsDevValue === "true" ? (
           <FormRow label="开发方 *" align="center">
-            <select
-              name="developmentSource"
-              required
-              defaultValue={item?.developmentSource ?? DEVELOPMENT_SOURCE_EXTERNAL}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              <option value={DEVELOPMENT_SOURCE_EXTERNAL}>外部开发</option>
-              <option value={DEVELOPMENT_SOURCE_INTERNAL}>内部自研</option>
-            </select>
+            <input type="hidden" name="developmentSource" value={devSourceValue} />
+            <RjSelect
+              options={[
+                { label: "外部开发", value: DEVELOPMENT_SOURCE_EXTERNAL },
+                { label: "内部自研", value: DEVELOPMENT_SOURCE_INTERNAL },
+              ]}
+              value={devSourceValue}
+              onChange={(v) => setDevSourceValue(String(v ?? DEVELOPMENT_SOURCE_EXTERNAL))}
+              className="w-full"
+            />
           </FormRow>
         ) : null}
         <FormRow label="需求描述">
-          <textarea
+          <RjTextarea
             name="taskDescription"
             rows={3}
             defaultValue={item?.taskDescription ?? ""}
             placeholder="请输入需求描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="需求目标 *">
-          <textarea
+          <RjTextarea
             name="description"
             required
             defaultValue={item?.description ?? ""}
             rows={4}
             placeholder="请输入需求目标"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          <input
+          <RjInputNumber
             name="workloadPersonDay"
-            type="number"
-            step="0.1"
-            min="0"
-            required={workloadRequired}
-            defaultValue={item?.workloadPersonDay ?? ""}
+            min={0}
+            step={0.1}
+            defaultValue={item?.workloadPersonDay ?? null}
             placeholder="请输入工作量"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
         {needsDevValue === "true" ? (
@@ -1002,32 +834,26 @@ function QuarterlyWorkForm({
           </div>
         ) : null}
         <FormRow label="需求状态" align="center">
-          <select
-            name="status"
-            required
+          <input type="hidden" name="status" value={workStatus} />
+          <RjSelect
+            options={statusOptions.map((option) => ({
+              value: option,
+              label: mode === "backfill" && option === "DELAYED_COMPLETED" ? "延期完成" : columnTitleByStatus[option],
+            }))}
             value={workStatus}
-            onChange={(event) => setWorkStatus(event.target.value as ColumnStatus)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {statusOptions.map((option) => (
-              <option key={option} value={option}>
-                {mode === "backfill" && option === "DELAYED_COMPLETED" ? "延期完成" : columnTitleByStatus[option]}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setWorkStatus(v as ColumnStatus)}
+            className="w-full"
+          />
         </FormRow>
         <FormRow label={taskResultRequired ? "需求结果 *" : "需求结果"} align="center">
-          <select
-            name="taskResult"
-            required={taskResultRequired}
-            defaultValue={item?.taskResult ?? ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="" disabled>请选择需求结果</option>
-            {TASK_RESULTS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+          <input type="hidden" name="taskResult" value={taskResultValue} />
+          <RjSelect
+            options={TASK_RESULTS.map((option) => ({ value: option, label: option }))}
+            value={taskResultValue || null}
+            onChange={(v) => setTaskResultValue(String(v ?? ""))}
+            placeholder="请选择需求结果"
+            className="w-full"
+          />
         </FormRow>
         {workStatus === "COMPLETED" || mode === "backfill" ? (
           <FormRow label="完成时间 *" align="center">
@@ -1035,17 +861,17 @@ function QuarterlyWorkForm({
               name="completedAt"
               required
               defaultValue={toDateInputValue(item?.completedAt)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+              className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
             />
           </FormRow>
         ) : null}
         <FormRow label="需求执行概况">
-          <textarea
+          <RjTextarea
             name="executionSummary"
             rows={3}
             defaultValue={item?.executionSummary ?? ""}
             placeholder="请输入需求最终执行情况的描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
     </>
@@ -1094,38 +920,22 @@ function ProductGoalMultiPicker({
   options: Array<{ id: string; title: string; year: number }>;
   defaultSelectedIds?: string[];
 }) {
-  const [selectedIds, setSelectedIds] = useState(defaultSelectedIds);
-
-  const toggleSelection = (goalId: string) => {
-    setSelectedIds((current) => (
-      current.includes(goalId)
-        ? current.filter((id) => id !== goalId)
-        : [...current, goalId]
-    ));
-  };
+  const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds);
 
   return (
     <div className="space-y-2">
       {selectedIds.map((goalId) => (
         <input key={goalId} type="hidden" name="productGoalIds" value={goalId} />
       ))}
-      <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background">
-        {options.length ? options.map((goal) => (
-          <label
-            key={goal.id}
-            className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30"
-          >
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(goal.id)}
-              onChange={() => toggleSelection(goal.id)}
-            />
-            <span className="min-w-0 flex-1 break-words">{goal.year} · {goal.title}</span>
-          </label>
-        )) : (
-          <div className="px-3 py-4 text-sm text-muted-foreground">暂无可选产品目标</div>
-        )}
-      </div>
+      <RjSelect
+        multiple
+        allowSearch
+        options={options.map((goal) => ({ value: goal.id, label: `${goal.year} · ${goal.title}` }))}
+        value={selectedIds}
+        onChange={(v) => setSelectedIds(Array.isArray(v) ? v.map(String) : [])}
+        placeholder="搜索产品目标"
+        className="w-full"
+      />
       <div className="text-xs text-muted-foreground">已选 {selectedIds.length} 个，至少选择 1 个</div>
     </div>
   );
@@ -1216,22 +1026,18 @@ function ProjectEditForm({
     return "";
   });
 
-  const quarterOptions = useMemo(() => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const years = [currentYear, currentYear + 1];
-    const quarters: { value: string; label: string }[] = [];
-    for (const year of years) {
-      for (let q = 1; q <= 4; q++) {
-        quarters.push({ value: `${year}-Q${q}`, label: `${year} Q${q}` });
-      }
-    }
-    return quarters;
-  }, []);
+  const [startQuarter, setStartQuarter] = useState(item.startQuarter ?? "");
+  const [endQuarter, setEndQuarter] = useState(item.endQuarter ?? "");
+  // 起止季度可比（YYYY-Qn 定长字符串字典序即时间序）
+  const quarterRangeInvalid = Boolean(startQuarter && endQuarter && startQuarter > endQuarter);
 
   const submitProjectForm = async (formData: FormData) => {
     try {
       setErrorMessage("");
+      if (quarterRangeInvalid) {
+        setErrorMessage("起始季度不能晚于结束季度");
+        return;
+      }
       if (editNeedsDev === "false" && nonDevProjectBlockedMessage) {
         setErrorMessage(nonDevProjectBlockedMessage);
         return;
@@ -1264,11 +1070,13 @@ function ProjectEditForm({
       <input type="hidden" name="projectId" value={item.id} />
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <StickyFormScroll>
-        <FormRow label="项目名称 *" align="center">          <input
+        <FormRow label="项目名称 *" align="center">
+          <RjInput
             name="title"
             required
             defaultValue={item.title}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            placeholder="请输入项目名称"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="产品目标 *">
@@ -1286,45 +1094,42 @@ function ProjectEditForm({
         </FormRow>
         <FormRow label="规划周期" align="center">
           <div className="flex items-center gap-2">
-            <select
+            <QuarterSelect
               name="startQuarter"
-              defaultValue={item.startQuarter ?? ""}
-              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              <option value="">起始季度</option>
-              {quarterOptions.map((q) => (
-                <option key={q.value} value={q.value}>{q.label}</option>
-              ))}
-            </select>
+              value={startQuarter}
+              onChange={setStartQuarter}
+              placeholder="起始季度"
+              invalid={quarterRangeInvalid}
+            />
             <span className="text-muted-foreground">~</span>
-            <select
+            <QuarterSelect
               name="endQuarter"
-              defaultValue={item.endQuarter ?? ""}
-              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              <option value="">结束季度</option>
-              {quarterOptions.map((q) => (
-                <option key={q.value} value={q.value}>{q.label}</option>
-              ))}
-            </select>
+              value={endQuarter}
+              onChange={setEndQuarter}
+              placeholder="结束季度"
+              invalid={quarterRangeInvalid}
+            />
           </div>
+          {quarterRangeInvalid ? (
+            <p className="mt-1 text-xs text-[#F53F3F]">起始季度不能晚于结束季度</p>
+          ) : null}
         </FormRow>
         <FormRow label="项目描述">
-          <textarea
+          <RjTextarea
             name="description"
             rows={3}
             defaultValue={item.description ?? ""}
             placeholder="请输入项目描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="预期收益">
-          <textarea
+          <RjTextarea
             name="expectedOutcome"
             rows={3}
             defaultValue={item.expectedOutcome ?? ""}
             placeholder="请输入项目预期收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
@@ -1336,63 +1141,53 @@ function ProjectEditForm({
               <div className="mt-1 text-xs text-muted-foreground">由下属需求工作量自动汇总，不可手动修改</div>
             </>
           ) : (
-            <input
+            <RjInputNumber
               name="workloadPersonDay"
-              type="number"
-              step="0.1"
-              min="0"
-              required={workloadRequired}
-              value={workloadPersonDay}
-              onChange={(event) => setWorkloadPersonDay(event.target.value)}
+              min={0}
+              step={0.1}
+              value={workloadPersonDay === "" ? null : Number(workloadPersonDay)}
+              onChange={(v) => setWorkloadPersonDay(v === null ? "" : String(v))}
               placeholder="请输入工作量"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
             />
           )}
         </FormRow>
         <FormRow label="其他成本">
-          <textarea
+          <RjTextarea
             name="otherCost"
             rows={2}
             defaultValue={item.otherCost ?? ""}
             placeholder="请输入其他成本"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
-        <FormRow label="是否开发项目 *" align="center">
+        <FormRow label="是否开发项目 *" align="center" labelClassName="self-start pt-[5px]">
           <div className="w-full space-y-1">
-            <select
-              name="needsDevelopment"
-              required
+            <RjSelect
+              options={[
+                { label: "是", value: "true" },
+                { label: "否", value: "false" },
+              ]}
               value={editNeedsDev}
-              onChange={(event) => {
-                const next = event.target.value;
+              onChange={(v) => {
+                const next = String(v ?? "true");
                 setEditNeedsDev(next);
                 if (next === "false" && projectStatus === "LAUNCHED") {
                   setProjectStatus("IN_PROGRESS");
                 }
               }}
               disabled={needsDevLocked}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
-            >
-              <option value="true">是</option>
-              <option value="false">否</option>
-            </select>
-            {needsDevLocked ? <input type="hidden" name="needsDevelopment" value={editNeedsDev} /> : null}
+              className="w-full"
+            />
+            <input type="hidden" name="needsDevelopment" value={editNeedsDev} />
             {editNeedsDev === "false" && nonDevProjectBlockedMessage ? (
               <p className="text-xs text-destructive">{nonDevProjectBlockedMessage}</p>
             ) : null}
           </div>
         </FormRow>
         <FormRow label="项目状态" align="center">
-          <select
-            name="status"
-            required
-            value={projectStatus}
-            onChange={(event) => setProjectStatus(event.target.value as ProjectStatus)}
-            disabled={item.status === "COMPLETED" || item.status === "CLOSED"}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
-          >
-            {PROJECT_STATUS_TRANSITION_OPTIONS[item.status]
+          <input type="hidden" name="status" value={projectStatus} />
+          <RjSelect
+            options={PROJECT_STATUS_TRANSITION_OPTIONS[item.status]
               .filter((option) => {
                 // 非开发项目没有「已上线」可选
                 if (option === "LAUNCHED" && editNeedsDev === "false") return false;
@@ -1400,10 +1195,12 @@ function ProjectEditForm({
                 if (item.status === "IN_PROGRESS" && editNeedsDev === "true" && option !== "IN_PROGRESS" && option !== "LAUNCHED") return false;
                 return true;
               })
-              .map((option) => (
-                <option key={option} value={option}>{projectTitleByStatus[option]}</option>
-              ))}
-          </select>
+              .map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
+            value={projectStatus}
+            onChange={(v) => setProjectStatus(v as ProjectStatus)}
+            disabled={item.status === "COMPLETED" || item.status === "CLOSED"}
+            className="w-full"
+          />
         </FormRow>
         {cascadesCompletion ? (
           <div className="-mt-1 mb-2 flex items-start gap-2 rounded-lg bg-[#FFF7E8] px-3 py-2 text-xs leading-[18px] text-[#FF7D00]">
@@ -1421,7 +1218,7 @@ function ProjectEditForm({
                 name="completedAt"
                 required
                 defaultValue={toDateInputValue(item.completedAt)}
-                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
               />
             </FormRow>
           </div>
@@ -1433,7 +1230,7 @@ function ProjectEditForm({
                 name="launchedAt"
                 required
                 defaultValue={toDateInputValue(item.launchedAt)}
-                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
               />
             </FormRow>
           </div>
@@ -1528,18 +1325,10 @@ function ProjectCreateForm({
     ? editableProjectStatuses
     : editableProjectStatuses.filter((status) => status !== "LAUNCHED");
 
-  const quarterOptions = useMemo(() => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const years = [currentYear, currentYear + 1];
-    const quarters: { value: string; label: string }[] = [];
-    for (const year of years) {
-      for (let q = 1; q <= 4; q++) {
-        quarters.push({ value: `${year}-Q${q}`, label: `${year} Q${q}` });
-      }
-    }
-    return quarters;
-  }, []);
+  const [startQuarter, setStartQuarter] = useState("");
+  const [endQuarter, setEndQuarter] = useState("");
+  // 起止季度可比（YYYY-Qn 定长字符串字典序即时间序）
+  const quarterRangeInvalid = Boolean(startQuarter && endQuarter && startQuarter > endQuarter);
 
   const validateQuarterRange = (formData: FormData) => {
     const startQuarter = String(formData.get("startQuarter") ?? "").trim();
@@ -1579,11 +1368,11 @@ function ProjectCreateForm({
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <StickyFormScroll>
         <FormRow label="项目名称 *" align="center">
-          <input
+          <RjInput
             name="title"
             required
             placeholder="请输入项目名称"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="产品目标 *">
@@ -1601,89 +1390,79 @@ function ProjectCreateForm({
         </FormRow>
         <FormRow label="规划周期 *" align="center">
           <div className="flex items-center gap-2">
-            <select
+            <QuarterSelect
               name="startQuarter"
-              defaultValue=""
-              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              <option value="">起始季度</option>
-              {quarterOptions.map((q) => (
-                <option key={q.value} value={q.value}>{q.label}</option>
-              ))}
-            </select>
+              value={startQuarter}
+              onChange={setStartQuarter}
+              placeholder="起始季度"
+              invalid={quarterRangeInvalid}
+            />
             <span className="text-muted-foreground">~</span>
-            <select
+            <QuarterSelect
               name="endQuarter"
-              defaultValue=""
-              className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-            >
-              <option value="">结束季度</option>
-              {quarterOptions.map((q) => (
-                <option key={q.value} value={q.value}>{q.label}</option>
-              ))}
-            </select>
+              value={endQuarter}
+              onChange={setEndQuarter}
+              placeholder="结束季度"
+              invalid={quarterRangeInvalid}
+            />
           </div>
+          {quarterRangeInvalid ? (
+            <p className="mt-1 text-xs text-[#F53F3F]">起始季度不能晚于结束季度</p>
+          ) : null}
         </FormRow>
         <FormRow label="是否开发项目 *" align="center">
-          <select
-            name="needsDevelopment"
-            required
-            value={createNeedsDev}
-            onChange={(event) => {
-              const next = event.target.value;
+          <input type="hidden" name="needsDevelopment" value={createNeedsDev} />
+          <RjSelect
+            options={[
+              { label: "是", value: "true" },
+              { label: "否", value: "false" },
+            ]}
+            value={createNeedsDev || null}
+            onChange={(v) => {
+              const next = String(v ?? "");
               setCreateNeedsDev(next);
               if (next === "false" && createProjectStatus === "LAUNCHED") {
                 setCreateProjectStatus("NOT_STARTED");
               }
             }}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="" disabled>请选择</option>
-            <option value="true">是</option>
-            <option value="false">否</option>
-          </select>
+            placeholder="请选择"
+            className="w-full"
+          />
         </FormRow>
         <FormRow label="项目描述 *">
-          <textarea
+          <RjTextarea
             name="description"
             required
             rows={3}
             placeholder="请输入项目描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="预期收益 *">
-          <textarea
+          <RjTextarea
             name="expectedOutcome"
             required
             rows={3}
             placeholder="请输入项目预期收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label={createWorkloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          <input
+          <RjInputNumber
             name="workloadPersonDay"
-            type="number"
-            step="0.1"
-            min="0"
-            required={createWorkloadRequired}
+            min={0}
+            step={0.1}
             placeholder="请输入工作量"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
           />
         </FormRow>
         <FormRow label="项目状态" align="center">
-          <select
-            name="status"
-            required
+          <input type="hidden" name="status" value={createProjectStatus} />
+          <RjSelect
+            options={createStatusOptions.map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
             value={createProjectStatus}
-            onChange={(event) => setCreateProjectStatus(event.target.value as ProjectStatus)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {createStatusOptions.map((option) => (
-              <option key={option} value={option}>{projectTitleByStatus[option]}</option>
-            ))}
-          </select>
+            onChange={(v) => setCreateProjectStatus(v as ProjectStatus)}
+            className="w-full"
+          />
         </FormRow>
         {createProjectStatus === "COMPLETED" ? (
           <div ref={completedAtRowRef}>
@@ -1692,7 +1471,7 @@ function ProjectCreateForm({
                 name="completedAt"
                 required
                 defaultValue={toDateInputValue(null)}
-                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
               />
             </FormRow>
           </div>
@@ -1704,7 +1483,7 @@ function ProjectCreateForm({
                 name="launchedAt"
                 required
                 defaultValue={toDateInputValue(null)}
-                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
               />
             </FormRow>
           </div>
@@ -1863,6 +1642,8 @@ function ProductGoalCreateForm({
     const currentYear = new Date().getFullYear();
     return [currentYear, currentYear + 1, currentYear + 2];
   }, []);
+  const [goalYear, setGoalYear] = useState(String(data.year));
+  const [goalStatus, setGoalStatus] = useState("NOT_STARTED");
 
   return (
     <form action={async (fd: FormData) => {
@@ -1876,7 +1657,7 @@ function ProductGoalCreateForm({
             name="title"
             required
             placeholder="请输入产品目标名称"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
@@ -1887,44 +1668,40 @@ function ProductGoalCreateForm({
           />
         </FormRow>
         <FormRow label="年份 *" align="center">
-          <select
-            name="year"
-            defaultValue={String(data.year)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {yearOptions.map((year) => (
-              <option key={year} value={year}>{year} 年</option>
-            ))}
-          </select>
+          <input type="hidden" name="year" value={goalYear} />
+          <RjSelect
+            options={yearOptions.map((year) => ({ value: String(year), label: `${year} 年` }))}
+            value={goalYear}
+            onChange={(v) => setGoalYear(String(v ?? String(data.year)))}
+            className="w-full"
+          />
         </FormRow>
         <FormRow label="产品目标描述 *">
-          <textarea
+          <RjTextarea
             name="description"
             required
             rows={3}
             placeholder="请输入产品目标描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="预期收益 *">
-          <textarea
+          <RjTextarea
             name="expectedOutcome"
             required
             rows={3}
             placeholder="请输入预期收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="产品目标状态" align="center">
-          <select
-            name="status"
-            defaultValue="NOT_STARTED"
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {editableProjectStatuses.map((option) => (
-              <option key={option} value={option}>{projectTitleByStatus[option]}</option>
-            ))}
-          </select>
+          <input type="hidden" name="status" value={goalStatus} />
+          <RjSelect
+            options={editableProjectStatuses.map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
+            value={goalStatus}
+            onChange={(v) => setGoalStatus(String(v ?? "NOT_STARTED"))}
+            className="w-full"
+          />
         </FormRow>
       </div>
       <div className="mt-6 flex justify-end gap-3">
@@ -1952,6 +1729,7 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
   const selectedProject = selectedProjectId ? launchedProjectMap.get(selectedProjectId) ?? null : null;
   const [errorMessage, setErrorMessage] = useState("");
   const [trackingSequence, setTrackingSequence] = useState<string>("");
+  const [judgementValue, setJudgementValue] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
 
   // 默认跟踪周期：无记录默认第 1 次，已有记录默认剩余的周期
@@ -1980,35 +1758,44 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
     <form ref={formRef} className={stickyDialogFormClassName}>
       <StickyFormScroll>
         <FormRow label="项目 *" align="center">
-          <ProjectPicker
-            name="projectId"
-            options={projectPickerOptions}
-            defaultValue={selectedProjectId}
-            onChange={setSelectedProjectId}
-          />
+          {defaultProjectId ? (
+            <>
+              <input type="hidden" name="projectId" value={selectedProjectId} />
+              <div className="flex h-8 w-full items-center rounded-md border border-[#D9D9D9] bg-[#F5F5F5] px-3 text-sm text-[rgba(0,0,0,0.65)]">
+                {selectedProject?.title ?? "-"}
+              </div>
+            </>
+          ) : (
+            <ProjectPicker
+              name="projectId"
+              options={projectPickerOptions}
+              defaultValue={selectedProjectId}
+              onChange={setSelectedProjectId}
+            />
+          )}
         </FormRow>
         <FormRow label="项目上线时间" align="center">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.launchedAt)}</div>
         </FormRow>
         <FormRow label="跟踪周期 *" align="center">
-          <select
-            name="trackingSequence"
-            required
-            value={trackingSequence}
-            onChange={(event) => setTrackingSequence(event.target.value)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-
-            {selectedProject?.launchedAt ? ([1, 2] as const).map((sequence) => {
-              const dates = getValueTrackingTaskDates(new Date(selectedProject.launchedAt!), sequence);
-              const taken = selectedProject.existingTrackingSequences.includes(sequence);
-              return (
-                <option key={sequence} value={sequence} disabled={taken}>
-                  第 {sequence} 次跟踪（{formatDateOnlyLabel(dates.periodStartAt)} ~ {formatDateOnlyLabel(dates.checkpointAt)}）{taken ? "（已有记录）" : ""}
-                </option>
-              );
-            }) : null}
-          </select>
+          <input type="hidden" name="trackingSequence" value={trackingSequence} />
+          <RjSelect
+            options={selectedProject?.launchedAt
+              ? ([1, 2] as const).map((sequence) => {
+                  const dates = getValueTrackingTaskDates(new Date(selectedProject.launchedAt!), sequence);
+                  const taken = selectedProject.existingTrackingSequences.includes(sequence);
+                  return {
+                    value: String(sequence),
+                    label: `第 ${sequence} 次跟踪（${formatDateOnlyLabel(dates.periodStartAt)} ~ ${formatDateOnlyLabel(dates.checkpointAt)}）${taken ? "（已有记录）" : ""}`,
+                    disabled: taken,
+                  };
+                })
+              : []}
+            value={trackingSequence || null}
+            onChange={(v) => setTrackingSequence(String(v ?? ""))}
+            placeholder="请选择跟踪周期"
+            className="w-full"
+          />
         </FormRow>
         <FormRow label="预期收益">
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? "-"}</div>
@@ -2026,44 +1813,41 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
         </FormRow>
         <FormRow label="实际收益 *">
           <div className="space-y-2">
-            <textarea
+            <RjTextarea
               name="actualValue"
               rows={2}
               required
               defaultValue={selectedProject?.actualValue ?? ""}
               placeholder="请输入实际收益"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+              className="w-full"
             />
             <div className="text-xs text-muted-foreground">本次修改会覆盖上次保存的内容</div>
           </div>
         </FormRow>
         <FormRow label="跟踪结果描述">
-          <textarea
+          <RjTextarea
             name="trackingResult"
             rows={3}
             placeholder="请输入跟踪结果描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="价值判断 *" align="center">
-          <select
-            name="valueJudgement"
-            required
-            defaultValue={isValueJudgement(selectedProject?.valueJudgement) ? selectedProject.valueJudgement : ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="" disabled>请选择价值判断</option>
-            {VALUE_JUDGEMENTS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+          <input type="hidden" name="valueJudgement" value={judgementValue} />
+          <RjSelect
+            options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
+            value={judgementValue || null}
+            onChange={(v) => setJudgementValue(String(v ?? ""))}
+            placeholder="请选择价值判断"
+            className="w-full"
+          />
         </FormRow>
         <FormRow label="后续优化">
-          <textarea
+          <RjTextarea
             name="followUpOptimization"
             rows={3}
             placeholder="请输入后续优化"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
       </StickyFormScroll>
@@ -2128,6 +1912,9 @@ function ValueTrackSubmitForm({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [judgementValue, setJudgementValue] = useState(
+    isValueJudgement(track.valueJudgement) ? track.valueJudgement : "",
+  );
   const sequence = track.trackingSequence;
   const frozen = track.isFinal;
   const notDue = track.taskState === "NOT_DUE";
@@ -2191,44 +1978,41 @@ function ValueTrackSubmitForm({
           <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{project?.expectedOutcome ?? "-"}</div>
         </FormRow>
         <FormRow label="实际收益 *">
-          <textarea
+          <RjTextarea
             name="actualValue"
             rows={2}
             required
             defaultValue={track.actualValue ?? ""}
             placeholder="请输入实际收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="价值判断 *" align="center">
-          <select
-            name="valueJudgement"
-            required
-            defaultValue={isValueJudgement(track.valueJudgement) ? track.valueJudgement : ""}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="" disabled>请选择价值判断</option>
-            {VALUE_JUDGEMENTS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+          <input type="hidden" name="valueJudgement" value={judgementValue} />
+          <RjSelect
+            options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
+            value={judgementValue || null}
+            onChange={(v) => setJudgementValue(String(v ?? ""))}
+            placeholder="请选择价值判断"
+            className="w-full"
+          />
         </FormRow>
         <FormRow label="跟踪结果描述">
-          <textarea
+          <RjTextarea
             name="trackingResult"
             rows={3}
             defaultValue={track.trackingResult ?? ""}
             placeholder="请输入跟踪结果描述"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="后续优化">
-          <textarea
+          <RjTextarea
             name="followUpOptimization"
             rows={3}
             defaultValue={track.followUpOptimization ?? ""}
             placeholder="请输入后续优化"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         {frozen ? (
@@ -2275,35 +2059,32 @@ function ValueTrackStatusFields({
   defaultJudgement?: string | null;
 }) {
   const [status, setStatus] = useState(defaultStatus || VALUE_TRACK_STATUS_OBSERVING);
+  const [judgementValue, setJudgementValue] = useState(
+    isValueJudgement(defaultJudgement) ? defaultJudgement : "",
+  );
   const showJudgement = status !== VALUE_TRACK_STATUS_PENDING_OBSERVATION;
 
   return (
     <>
       <FormRow label="跟踪状态 *" align="center">
-        <select
-          name="valueTrackStatus"
+        <input type="hidden" name="valueTrackStatus" value={status} />
+        <RjSelect
+          options={VALUE_TRACK_STATUSES.map((option) => ({ value: option, label: option }))}
           value={status}
-          onChange={(event) => setStatus(event.target.value)}
-          className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-        >
-          {VALUE_TRACK_STATUSES.map((option) => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
+          onChange={(v) => setStatus(String(v ?? status))}
+          className="w-full"
+        />
       </FormRow>
       {showJudgement ? (
         <FormRow label="价值判断 *" align="center">
-          <select
-            name="valueJudgement"
-            defaultValue={isValueJudgement(defaultJudgement) ? defaultJudgement : ""}
-            required
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            <option value="" disabled>请选择价值判断</option>
-            {VALUE_JUDGEMENTS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+          <input type="hidden" name="valueJudgement" value={judgementValue} />
+          <RjSelect
+            options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
+            value={judgementValue || null}
+            onChange={(v) => setJudgementValue(String(v ?? ""))}
+            placeholder="请选择价值判断"
+            className="w-full"
+          />
         </FormRow>
       ) : null}
     </>
@@ -2363,21 +2144,21 @@ function ValueOverviewEditForm({
           </div>
         </FormRow>
         <FormRow label="其他成本">
-          <textarea
+          <RjTextarea
             name="otherCost"
             rows={2}
             defaultValue={item.otherCost ?? ""}
             placeholder="请输入其他成本"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="实际收益">
-          <textarea
+          <RjTextarea
             name="actualValue"
             rows={2}
             defaultValue={item.actualValue ?? ""}
             placeholder="请输入实际收益"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <ValueTrackStatusFields
@@ -2419,6 +2200,8 @@ function ProductGoalEditForm({
     const currentYear = new Date().getFullYear();
     return [currentYear, currentYear + 1, currentYear + 2];
   }, []);
+  const [goalYear, setGoalYear] = useState(String(item.year));
+  const [goalStatus, setGoalStatus] = useState(item.status);
 
   return (
     <form
@@ -2442,7 +2225,7 @@ function ProductGoalEditForm({
             name="title"
             required
             defaultValue={item.title}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
+            className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
           />
         </FormRow>
         <FormRow label="负责人 *" align="center">
@@ -2453,44 +2236,40 @@ function ProductGoalEditForm({
           />
         </FormRow>
         <FormRow label="年份 *" align="center">
-          <select
-            name="year"
-            defaultValue={String(item.year)}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {yearOptions.map((year) => (
-              <option key={year} value={year}>{year} 年</option>
-            ))}
-          </select>
+          <input type="hidden" name="year" value={goalYear} />
+          <RjSelect
+            options={yearOptions.map((year) => ({ value: String(year), label: `${year} 年` }))}
+            value={goalYear}
+            onChange={(v) => setGoalYear(String(v ?? String(item.year)))}
+            className="w-full"
+          />
         </FormRow>
         <FormRow label="产品目标描述 *">
-          <textarea
+          <RjTextarea
             name="description"
             required
             rows={3}
             defaultValue={item.description ?? ""}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="预期收益 *">
-          <textarea
+          <RjTextarea
             name="expectedOutcome"
             required
             rows={3}
             defaultValue={item.expectedOutcome ?? ""}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            className="w-full"
           />
         </FormRow>
         <FormRow label="产品目标状态" align="center">
-          <select
-            name="status"
-            defaultValue={item.status}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm focus:border-ring focus:outline-none"
-          >
-            {editableProjectStatuses.map((option) => (
-              <option key={option} value={option}>{projectTitleByStatus[option]}</option>
-            ))}
-          </select>
+          <input type="hidden" name="status" value={goalStatus} />
+          <RjSelect
+            options={editableProjectStatuses.map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
+            value={goalStatus}
+            onChange={(v) => setGoalStatus(String(v ?? item.status) as ProjectStatus)}
+            className="w-full"
+          />
         </FormRow>
       </StickyFormScroll>
       <StickyFormFooter>
@@ -5220,7 +4999,15 @@ function QuarterlyWorkShell({
   const activeView = data.workspaceFilters.view === "list" ? "list" : "card";
   const [viewMode, setViewMode] = useState<"card" | "list">(activeView);
   const activeProjectPanel = data.workspaceFilters.projectPanel;
-  const activeStatuses = data.workspaceFilters.status;
+  const routerStatuses = data.workspaceFilters.status;
+  // 本地镜像：点击先乐观更新，避免 URL 往返期间用旧选中集计算导致分支错乱；
+  // 服务端新数据回来后同步（setTimeout 规避 effect 内同步 setState 的级联渲染告警）
+  const [activeStatusesState, setActiveStatusesState] = useState(routerStatuses);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setActiveStatusesState(routerStatuses), 0);
+    return () => window.clearTimeout(timer);
+  }, [routerStatuses]);
+  const activeStatuses = activeStatusesState;
   const activeStatus = activeStatuses.length > 0 ? activeStatuses[0] : "all";
   const isGoalHome = entityTab === "goal";
   const isProjectHome = entityTab === "project";
@@ -5681,8 +5468,9 @@ function QuarterlyWorkShell({
                   <button
                     key={item.key}
                     type="button"
-                    onClick={(event) => setGoalStatusFilter(item.key === "all" ? [] : nextStatusSelection(goalStatusFilter, item.key, event.metaKey || event.ctrlKey))}
-                    className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
+                    data-tip={item.key === "all" ? "点击「全部」，取消选中其他状态" : "点击 选中/反选，shift + 点击 多选"}
+                    onClick={(event) => setGoalStatusFilter(item.key === "all" ? [] : event.shiftKey ? toggleFilterKey(goalStatusFilter, item.key) : plainStatusSelection(goalStatusFilter, item.key))}
+                    className={`status-pill-tip flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition focus:outline-none ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
                         : "border-[#E5E6EB] bg-white font-normal text-[#181818] hover:border-[#3069F9]"
@@ -5700,8 +5488,13 @@ function QuarterlyWorkShell({
                   <button
                     key={item.key}
                     type="button"
-                    onClick={(event) => onUpdateStatusFilters(item.key === "all" ? [] : nextStatusSelection(activeStatuses, item.key, event.metaKey || event.ctrlKey))}
-                    className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
+                    data-tip={item.key === "all" ? "点击「全部」，取消选中其他状态" : "点击 选中/反选，shift + 点击 多选"}
+                    onClick={(event) => {
+                      const nextStatuses = item.key === "all" ? [] : event.shiftKey ? toggleFilterKey(activeStatuses, item.key) : plainStatusSelection(activeStatuses, item.key);
+                      setActiveStatusesState(nextStatuses);
+                      onUpdateStatusFilters(nextStatuses);
+                    }}
+                    className={`status-pill-tip flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition focus:outline-none ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
                         : "border-[#E5E6EB] bg-white font-normal text-[#181818] hover:border-[#3069F9]"
@@ -5719,8 +5512,9 @@ function QuarterlyWorkShell({
                   <button
                     key={item.key}
                     type="button"
-                    onClick={(event) => setTaskStatusFilter(item.key === "all" ? [] : nextStatusSelection(taskStatusFilter, item.key, event.metaKey || event.ctrlKey))}
-                    className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
+                    data-tip={item.key === "all" ? "点击「全部」，取消选中其他状态" : "点击 选中/反选，shift + 点击 多选"}
+                    onClick={(event) => setTaskStatusFilter(item.key === "all" ? [] : event.shiftKey ? toggleFilterKey(taskStatusFilter, item.key) : plainStatusSelection(taskStatusFilter, item.key))}
+                    className={`status-pill-tip flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition focus:outline-none ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
                         : "border-[#E5E6EB] bg-white font-normal text-[#181818] hover:border-[#3069F9]"
@@ -5738,8 +5532,9 @@ function QuarterlyWorkShell({
                   <button
                     key={item.key}
                     type="button"
-                    onClick={(event) => setValueStatusFilter(item.key === "all" ? [] : nextStatusSelection(valueStatusFilter, item.key, event.metaKey || event.ctrlKey))}
-                    className={`flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition ${
+                    data-tip={item.key === "all" ? "点击「全部」，取消选中其他状态" : "点击 选中/反选，shift + 点击 多选"}
+                    onClick={(event) => setValueStatusFilter(item.key === "all" ? [] : event.shiftKey ? toggleFilterKey(valueStatusFilter, item.key) : plainStatusSelection(valueStatusFilter, item.key))}
+                    className={`status-pill-tip flex h-[46px] w-full items-center rounded-xl border px-3 text-left text-sm transition focus:outline-none ${
                       active
                         ? "border-[#0655FE] bg-white font-medium text-[#3069F9] shadow-[0px_6px_16px_0px_rgba(47,107,255,0.12)]"
                         : "border-[#E5E6EB] bg-white font-normal text-[#181818] hover:border-[#3069F9]"
@@ -6291,7 +6086,7 @@ export function QuarterlyWorkContent({ data }: Props) {
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+              <label className="flex h-9 items-center gap-2 rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-foreground transition-colors hover:border-[#3069F9]">
                 <select
                   value={String(data.year)}
                   onChange={(event) => updatePeriodFilters(Number.parseInt(event.target.value, 10), data.quarter === "all" ? "all" : data.quarter)}
@@ -6302,7 +6097,7 @@ export function QuarterlyWorkContent({ data }: Props) {
                   ))}
                 </select>
               </label>
-              <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+              <label className="flex h-9 items-center gap-2 rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-foreground transition-colors hover:border-[#3069F9]">
                 <select
                   value={String(data.quarter)}
                   onChange={(event) => updatePeriodFilters(data.year, event.target.value === "all" ? "all" : Number.parseInt(event.target.value, 10))}

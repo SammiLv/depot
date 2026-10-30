@@ -186,7 +186,7 @@ export function DateRangePicker({
           if (!open && startDate) setPanelMonth(startDate);
           setOpen((current) => !current);
         }}
-        className={`flex h-10 w-full items-center gap-2 rounded-lg border bg-background px-3 text-sm transition-colors disabled:opacity-50 ${
+        className={`flex h-10 w-full items-center gap-2 rounded-md border bg-white px-3 text-sm transition-colors disabled:opacity-50 ${
           open ? "border-[#3069F9]" : "border-[#D9D9D9] hover:border-[#3069F9]"
         }`}
       >

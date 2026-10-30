@@ -34,6 +34,8 @@
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@rjmart/icons": "^0.2.2",
+    "@rjmart/ui": "^0.16.1",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "lucide-react": "^1.17.0",

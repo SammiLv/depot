@@ -634,9 +634,11 @@ export async function createQuarterlyWork(formData: FormData) {
   const { currentUser } = await requireManageProductTask();
   const title = requiredString(formData.get("title"), "工作标题");
   const ownerId = requiredString(formData.get("ownerId"), "负责人");
-  const startDate = parsePeriodStartDate(formData.get("startDate")) ?? startOfToday();
-  const endDate = parsePeriodEndDate(formData.get("endDate"))
-    ?? new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 23, 59, 59, 999);
+  const startDate = parsePeriodStartDate(formData.get("startDate"));
+  const endDate = parsePeriodEndDate(formData.get("endDate"));
+  if (!startDate || !endDate) {
+    throw new Error("需求周期为必填项");
+  }
   if (startDate.getTime() > endDate.getTime()) {
     throw new Error("开始时间不能晚于结束时间");
   }
