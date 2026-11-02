@@ -44,6 +44,11 @@ export async function canBackfillProjectRequirement(user?: ScopeUser) {
   return canManageProductManagementAbility(productManagementAbilityKeys.backfillProjectRequirement, user);
 }
 
+/** 已终态项目/需求的编辑与删除权限（存量数据修正类，仅管理员/部门主管默认授予） */
+export async function canEditTerminalProjectWork(user?: ScopeUser) {
+  return canManageProductManagementAbility(productManagementAbilityKeys.editTerminalProjectWork, user);
+}
+
 export async function requireProductManagementAbility(
   abilityKey: OrgPermissionAbilityKey,
   errorMessage: string,

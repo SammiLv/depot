@@ -546,9 +546,15 @@ function projectAllowsNewRequirement(status: ProjectStatus): boolean {
   return status !== "COMPLETED" && status !== "CLOSED";
 }
 
-/** 与 updateQuarterlyWork/deleteQuarterlyWork 守卫一致：已终态需求不可编辑/删除 */
-function workAllowsEdit(status: ProjectWorkspaceTaskItem["status"]): boolean {
-  return status === "NOT_STARTED" || status === "IN_PROGRESS";
+/** 与 updateProject/deleteProject 终态守卫一致：持「项目需求编辑&删除」权限时已终态项目放开编辑/删除 */
+function projectAllowsEditTerminal(status: ProjectStatus, canEditTerminal = false): boolean {
+  return canEditTerminal && (status === "COMPLETED" || status === "CLOSED");
+}
+
+/** 与 updateQuarterlyWork/deleteQuarterlyWork 守卫一致：已终态需求默认不可编辑/删除，持「项目需求编辑&删除」权限放开已完成/已关闭（延期完成除外） */
+function workAllowsEdit(status: ProjectWorkspaceTaskItem["status"], canEditTerminal = false): boolean {
+  if (status === "NOT_STARTED" || status === "IN_PROGRESS") return true;
+  return canEditTerminal && (status === "COMPLETED" || status === "CLOSED");
 }
 
 function buildRequirementProjectOptions(data: Props["data"]) {
@@ -672,7 +678,7 @@ function QuarterlyWorkForm({
         ? "false"
         : ""
   );
-  const [devSourceValue, setDevSourceValue] = useState(item?.developmentSource ?? DEVELOPMENT_SOURCE_EXTERNAL);
+  const [devSourceValue, setDevSourceValue] = useState(item?.developmentSource ?? "");
   const [taskResultValue, setTaskResultValue] = useState(item?.taskResult ?? "");
   const workloadRequired = (mode === "backfill" || needsDevValue === "true") && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
@@ -793,7 +799,8 @@ function QuarterlyWorkForm({
                 { label: "内部自研", value: DEVELOPMENT_SOURCE_INTERNAL },
               ]}
               value={devSourceValue}
-              onChange={(v) => setDevSourceValue(String(v ?? DEVELOPMENT_SOURCE_EXTERNAL))}
+              onChange={(v) => setDevSourceValue(String(v ?? ""))}
+              placeholder="请选择开发方"
               className="w-full"
             />
           </FormRow>
@@ -3143,6 +3150,7 @@ function ProjectCard({
   canCreateValueTrack,
   canManageProjectAndValueTracking,
   canManageProductTask,
+  canEditTerminalProjectWork,
   onCreateTask,
   onCreateValueTrack,
   onEditProject,
@@ -3158,6 +3166,7 @@ function ProjectCard({
   canCreateValueTrack: boolean;
   canManageProjectAndValueTracking: boolean;
   canManageProductTask: boolean;
+  canEditTerminalProjectWork: boolean;
   onCreateTask: () => void;
   onCreateValueTrack: () => void;
   onEditProject: () => void;
@@ -3186,7 +3195,7 @@ function ProjectCard({
                 />
                 {canManageProjectAndValueTracking ? (
                   <>
-                    {projectAllowsNewRequirement(project.status) ? (
+                    {projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork) ? (
                       <button
                         type="button"
                         aria-label="编辑项目"
@@ -3197,7 +3206,7 @@ function ProjectCard({
                         <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
                       </button>
                     ) : null}
-                    {projectAllowsNewRequirement(project.status) ? (
+                    {projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork) ? (
                       <button
                         type="button"
                         aria-label="删除项目"
@@ -3291,7 +3300,7 @@ function ProjectCard({
                   <ProjectTaskCard
                     key={task.id}
                     task={task}
-                    canEdit={canManageProductTask && workAllowsEdit(task.status)}
+                    canEdit={canManageProductTask && workAllowsEdit(task.status, canEditTerminalProjectWork)}
                     onEdit={() => onEditTask(task)}
                     onDelete={() => onDeleteTask(task)}
                   />
@@ -3621,6 +3630,7 @@ function ProjectExpandedPanel({
   canCreateValueTrack,
   canManageProjectAndValueTracking,
   canManageProductTask,
+  canEditTerminalProjectWork,
   onSwitchPanel,
   onCreateTask,
   onCreateValueTrack,
@@ -3634,6 +3644,7 @@ function ProjectExpandedPanel({
   canCreateValueTrack: boolean;
   canManageProjectAndValueTracking: boolean;
   canManageProductTask: boolean;
+  canEditTerminalProjectWork: boolean;
   onSwitchPanel: (panel: Props["data"]["workspaceFilters"]["projectPanel"]) => void;
   onCreateTask: () => void;
   onCreateValueTrack: () => void;
@@ -3693,9 +3704,9 @@ function ProjectExpandedPanel({
                   remainLabel={remain}
                   remainClassName={remainOverdue ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}
                   completedAt={task.completedAt}
-                  canEdit={canManageProductTask && workAllowsEdit(task.status)}
+                  canEdit={canManageProductTask && workAllowsEdit(task.status, canEditTerminalProjectWork)}
                   onEdit={() => onEditTask(task)}
-                  canDelete={canManageProductTask && workAllowsEdit(task.status)}
+                  canDelete={canManageProductTask && workAllowsEdit(task.status, canEditTerminalProjectWork)}
                   onDelete={() => onDeleteTask(task)}
                 />
               );
@@ -3864,6 +3875,7 @@ function ProjectTreeTable({
   canManageProjectAndValueTracking,
   canManageProductTask,
   canBackfill,
+  canEditTerminalProjectWork,
   onToggleExpand,
   onSwitchPanel,
   onCreateTask,
@@ -3883,6 +3895,7 @@ function ProjectTreeTable({
   canManageProjectAndValueTracking: boolean;
   canManageProductTask: boolean;
   canBackfill: boolean;
+  canEditTerminalProjectWork: boolean;
   onToggleExpand: (projectId: string) => void;
   onSwitchPanel: (panel: Props["data"]["workspaceFilters"]["projectPanel"]) => void;
   onCreateTask: (projectId: string) => void;
@@ -4012,8 +4025,8 @@ function ProjectTreeTable({
                       (canCreateTask && projectAllowsNewRequirement(project.status))
                       || canCreateValueTrack
                     }
-                    canManage={canManageProjectAndValueTracking && projectAllowsNewRequirement(project.status)}
-                    canEdit={canManageProjectAndValueTracking && projectAllowsNewRequirement(project.status)}
+                    canManage={canManageProjectAndValueTracking && (projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork))}
+                    canEdit={canManageProjectAndValueTracking && (projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork))}
                     onCreate={() => {
                       if (activePanel === "value" && canCreateValueTrack) {
                         onCreateValueTrack(project.id);
@@ -4043,6 +4056,7 @@ function ProjectTreeTable({
                   canCreateValueTrack={canCreateValueTrack}
                   canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                   canManageProductTask={canManageProductTask}
+                  canEditTerminalProjectWork={canEditTerminalProjectWork}
                   onSwitchPanel={onSwitchPanel}
                   onCreateTask={() => onCreateTask(project.id)}
                   onCreateValueTrack={() => onCreateValueTrack(project.id)}
@@ -4722,11 +4736,13 @@ function ValueListTable({
 function TaskListTable({
   tasks,
   canManage,
+  canEditTerminalProjectWork,
   onEdit,
   onDelete,
 }: {
   tasks: ProjectWorkspaceTaskItem[];
   canManage: boolean;
+  canEditTerminalProjectWork: boolean;
   onEdit: (task: ProjectWorkspaceTaskItem) => void;
   onDelete: (task: ProjectWorkspaceTaskItem) => void;
 }) {
@@ -4839,7 +4855,7 @@ function TaskListTable({
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.completedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`}>
-                {canManage && workAllowsEdit(task.status) ? (
+                {canManage && workAllowsEdit(task.status, canEditTerminalProjectWork) ? (
                   <>
                     <button
                       type="button"
@@ -5604,7 +5620,7 @@ function QuarterlyWorkShell({
                     <TaskMasonryGrid
                       tasks={visibleTasks}
                       canEdit={canManageProductTask}
-                      canManageTask={(task) => canManageProductTask && workAllowsEdit(task.status)}
+                      canManageTask={(task) => canManageProductTask && workAllowsEdit(task.status, data.permissions.canEditTerminalProjectWork)}
                       onEditTask={onEditTask}
                       onDeleteTask={onDeleteTask}
                     />
@@ -5614,6 +5630,7 @@ function QuarterlyWorkShell({
                 <TaskListTable
                   tasks={visibleTasks}
                   canManage={canManageProductTask}
+                  canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
                   onEdit={onEditTask}
                   onDelete={onDeleteTask}
                 />
@@ -5682,6 +5699,7 @@ function QuarterlyWorkShell({
                     canCreateValueTrack={canCreateValueTrack}
                     canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                     canManageProductTask={canManageProductTask}
+                    canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
                     onCreateTask={() => onCreateTask(project.id)}
                     onCreateValueTrack={() => onCreateValueTrack(project.id)}
                     onEditProject={() => onEditProject(project)}
@@ -5706,6 +5724,7 @@ function QuarterlyWorkShell({
                 canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                 canManageProductTask={canManageProductTask}
                 canBackfill={canBackfillProjectRequirement}
+                canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
                 onToggleExpand={(projectId) => setExpandedProjectId((current) => current === projectId ? null : projectId)}
                 onSwitchPanel={(panel) => onUpdateFilters({ projectPanel: panel === "task" ? null : panel })}
                 onCreateTask={onCreateTask}

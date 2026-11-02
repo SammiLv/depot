@@ -1,4 +1,4 @@
-import { RoleType } from "@prisma/client";
+import { RoleType, type OrgPermissionAbilityKey } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import {
   annualGoalDefaultPermissionGrants,
@@ -30,6 +30,7 @@ export async function ensureInitialSystemBootstrap() {
   await ensureSystemMenus();
   await ensureAnnualGoalPermissionGrants();
   await ensureBackfillProjectRequirementPermissions();
+  await ensureEditTerminalProjectWorkPermissions();
   await ensureAdminKpiPermissions();
   await ensureKpiDistributionAlertGrants();
   await ensureDefaultTalentPermissions();
@@ -126,14 +127,14 @@ export async function ensureAnnualGoalPermissionGrants() {
   }
 }
 
-// 需求补录默认授权（幂等）：仅管理员（ALL 系统模板行）与部门主管（各部门 SUBTREE 行）。
+// 数据修正类权限默认授权（幂等）：仅管理员（ALL 系统模板行）与部门主管（各部门 SUBTREE 行）。
 // 存量库由服务启动引导补发，可重复执行。
-async function ensureBackfillRoleGrant(
+async function ensureDataCorrectionRoleGrant(
+  abilityKey: OrgPermissionAbilityKey,
   roleType: RoleType,
   scopeType: "ALL" | "SUBTREE",
   orgNodeId: string | null,
 ) {
-  const abilityKey = productManagementAbilityKeys.backfillProjectRequirement;
   const result = await prisma.orgPermissionGrant.updateMany({
     where: {
       moduleKey: orgPermissionModuleKeys.productManagement,
@@ -163,10 +164,19 @@ async function ensureBackfillRoleGrant(
 }
 
 export async function ensureBackfillProjectRequirementPermissions() {
-  await ensureBackfillRoleGrant("ADMIN", "ALL", null);
+  await ensureDataCorrectionRoleGrant(productManagementAbilityKeys.backfillProjectRequirement, "ADMIN", "ALL", null);
   const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
   for (const department of departments) {
-    await ensureBackfillRoleGrant("DEPARTMENT_MANAGER", "SUBTREE", department.id);
+    await ensureDataCorrectionRoleGrant(productManagementAbilityKeys.backfillProjectRequirement, "DEPARTMENT_MANAGER", "SUBTREE", department.id);
+  }
+}
+
+// 终态项目/需求编辑删除默认授权（幂等）：与需求补录同口径，仅管理员与部门主管
+export async function ensureEditTerminalProjectWorkPermissions() {
+  await ensureDataCorrectionRoleGrant(productManagementAbilityKeys.editTerminalProjectWork, "ADMIN", "ALL", null);
+  const departments = await prisma.orgNode.findMany({ where: { nodeType: "DEPARTMENT" }, select: { id: true } });
+  for (const department of departments) {
+    await ensureDataCorrectionRoleGrant(productManagementAbilityKeys.editTerminalProjectWork, "DEPARTMENT_MANAGER", "SUBTREE", department.id);
   }
 }
 

@@ -5,6 +5,7 @@ import { prisma } from "@/server/db/prisma";
 import { requireCurrentUser } from "@/server/auth/current-user";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import {
+  canEditTerminalProjectWork,
   requireCanBackfillProjectRequirement,
   requireManageProductGoal,
   requireManageProductTask,
@@ -565,7 +566,7 @@ function parseDepartmentOrgNodeId(value: FormDataEntryValue | null) {
   return departmentOrgNodeId;
 }
 
-async function findEditableProject(currentUser: ScopeUser, projectId: string) {
+async function findEditableProject(currentUser: ScopeUser, projectId: string, options?: { allowTerminal?: boolean }) {
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const project = await prisma.project.findFirst({
     where: {
@@ -579,7 +580,7 @@ async function findEditableProject(currentUser: ScopeUser, projectId: string) {
   });
 
   if (!project) throw new Error("项目不存在或无权限编辑");
-  if (project.status === "COMPLETED" || project.status === "CLOSED") {
+  if (!options?.allowTerminal && (project.status === "COMPLETED" || project.status === "CLOSED")) {
     throw new Error("已完成或已关闭的项目不能新增季度工作");
   }
   return project;
@@ -594,9 +595,11 @@ async function ensureProjectForWork(params: {
   owner: Awaited<ReturnType<typeof findEditableOwner>>;
   workStatus: WorkStatus;
   needsDevelopment: boolean;
+  /** 持「项目需求编辑&删除」权限的更新路径放行终态项目（新建不开放） */
+  allowTerminalProject?: boolean;
 }) {
   if (params.projectId) {
-    return findEditableProject(params.currentUser, params.projectId);
+    return findEditableProject(params.currentUser, params.projectId, { allowTerminal: params.allowTerminalProject });
   }
 
   const projectStatus: ProjectStatus = params.workStatus === "IN_PROGRESS" ? "IN_PROGRESS" : params.workStatus === "CLOSED" ? "CLOSED" : params.workStatus === "COMPLETED" ? "COMPLETED" : "NOT_STARTED";
@@ -777,9 +780,13 @@ export async function updateQuarterlyWork(formData: FormData) {
 
   if (!existingWork) throw new Error("季度工作不存在或无权限编辑");
 
-  // 已终态需求不可编辑（历史数据修正走管理员数据修正）
-  if (existingWork.status === "COMPLETED" || existingWork.status === "DELAYED_COMPLETED" || existingWork.status === "CLOSED") {
-    throw new Error("已完成或已关闭的需求不能编辑");
+  // 已终态需求编辑需「项目需求编辑&删除」数据修正权限；延期完成不在状态矩阵手动编辑范围内，维持硬限制
+  if (existingWork.status === "COMPLETED" || existingWork.status === "CLOSED") {
+    if (!(await canEditTerminalProjectWork(currentUser))) {
+      throw new Error("已完成或已关闭的需求不能编辑");
+    }
+  } else if (existingWork.status === "DELAYED_COMPLETED") {
+    throw new Error("延期完成的需求不能编辑");
   }
 
   assertEditableStatus(existingWork.status);
@@ -795,6 +802,7 @@ export async function updateQuarterlyWork(formData: FormData) {
     owner,
     workStatus: status,
     needsDevelopment,
+    allowTerminalProject: await canEditTerminalProjectWork(currentUser),
   });
   // 周期：优先用表单日期；未传则沿用已有日期；老数据再退到 年+月份 推导
   const fallbackStart = existingWork.startDate
@@ -1694,9 +1702,11 @@ export async function deleteQuarterlyWork(formData: FormData) {
   });
 
   if (!work) throw new Error("需求不存在或无权限删除");
-  // 已终态需求不可删除（保留历史数据与统计口径）
+  // 已终态需求删除需「项目需求编辑&删除」数据修正权限（保留历史数据与统计口径）
   if (work.status === "COMPLETED" || work.status === "DELAYED_COMPLETED" || work.status === "CLOSED") {
-    throw new Error("已完成或已关闭的需求不能删除");
+    if (!(await canEditTerminalProjectWork(currentUser))) {
+      throw new Error("已完成或已关闭的需求不能删除");
+    }
   }
 
   await prisma.quarterlyWork.update({
@@ -1732,9 +1742,11 @@ export async function deleteProject(formData: FormData) {
   });
 
   if (!project) throw new Error("项目不存在或无权限删除");
-  // 已终态项目不可删除（保留历史数据与审计链）
+  // 已终态项目删除需「项目需求编辑&删除」数据修正权限（保留历史数据与审计链）
   if (project.status === "COMPLETED" || project.status === "CLOSED") {
-    throw new Error("已完成或已关闭的项目不能删除");
+    if (!(await canEditTerminalProjectWork(currentUser))) {
+      throw new Error("已完成或已关闭的项目不能删除");
+    }
   }
 
   await prisma.$transaction(async (tx) => {
@@ -1840,9 +1852,11 @@ export async function updateProject(formData: FormData) {
     },
   });
   if (!project) throw new Error("项目不存在或无权限编辑");
-  // 已终态项目内容不可再编辑（历史数据修正走补录需求/管理员数据修正）
+  // 已终态项目编辑需「项目需求编辑&删除」数据修正权限（改动仍会同步价值跟踪并重算首版完成度）
   if (project.status === "COMPLETED" || project.status === "CLOSED") {
-    throw new Error("已完成或已关闭的项目不能编辑");
+    if (!(await canEditTerminalProjectWork(currentUser))) {
+      throw new Error("已完成或已关闭的项目不能编辑");
+    }
   }
 
   // 已上线过的项目不能改为非开发项目（会抹掉首版完成度分界）
@@ -1892,8 +1906,8 @@ export async function updateProject(formData: FormData) {
 
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
-  // 上方已拦截终态项目，走到这里 project.status 必非已完成
-  const becameCompleted = status === "COMPLETED";
+  // 终态项目可被授予「项目需求编辑&删除」权限的用户再编辑：status 保持已完成时不重复触发完成动作
+  const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
   const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
   const nextLaunchedAt = status === "LAUNCHED"
     ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt)

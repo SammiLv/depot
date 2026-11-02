@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/prisma";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
 import {
   canBackfillProjectRequirement,
+  canEditTerminalProjectWork,
   canManageProductGoal,
   canManageProductTask,
   canManageProjectAndValueTracking,
@@ -1530,11 +1531,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     canManageProjectAndValueTrackingPermission,
     canManageProductTaskPermission,
     canBackfillProjectRequirementPermission,
+    canEditTerminalProjectWorkPermission,
   ] = await Promise.all([
     canManageProductGoal(currentUser),
     canManageProjectAndValueTracking(currentUser),
     canManageProductTask(currentUser),
     canBackfillProjectRequirement(currentUser),
+    canEditTerminalProjectWork(currentUser),
   ]);
 
   return {
@@ -1554,6 +1557,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       canManageProjectAndValueTracking: canManageProjectAndValueTrackingPermission,
       canManageProductTask: canManageProductTaskPermission,
       canBackfillProjectRequirement: canBackfillProjectRequirementPermission,
+      canEditTerminalProjectWork: canEditTerminalProjectWorkPermission,
     },
     currentUserId: currentUser.id,
     isSystemAdmin: currentUser.roleType === "ADMIN",

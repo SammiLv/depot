@@ -419,6 +419,10 @@ export default async function OrgPage({
       name: "项目需求补录",
       description: "允许对已完成开发项目补录历史需求（存量数据修正），补录记录带审计标识。默认仅管理员与部门主管。",
     },
+    EDIT_TERMINAL_PROJECT_WORK: {
+      name: "项目需求编辑&删除",
+      description: "允许对已完成/已关闭的项目与需求进行编辑或删除（存量数据修正）。涉及上线时间、工作量等修改会同步价值跟踪并重算首版完成度。默认仅管理员与部门主管。",
+    },
   } as const;
 
   const productManagementPermissionMap = new Map(productManagementPermissionGrants

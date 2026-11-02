@@ -1,0 +1,2 @@
+-- SQLite stores enum values as TEXT; OrgPermissionAbilityKey
+-- adds EDIT_TERMINAL_PROJECT_WORK at application level (已终态项目/需求编辑删除，存量数据修正专用).
