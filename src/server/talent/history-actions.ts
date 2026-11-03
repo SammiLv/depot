@@ -8,6 +8,7 @@ import { resolveAuthorizedOrgNodeIds, resolvePermissionCoverage } from "@/server
 import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
 import { isFeedbackEligibleForFormalResult } from "./decision-engine";
 import { shouldSyncCurrentContract } from "./employee-profile";
+import { syncHasFormalPromotionInCurrentContract } from "./formal-promotion-in-contract";
 import { isSuccessfulPromotionOutcome, promotionOutcomeValues } from "./promotion-outcome";
 import { companyCoinAwardAmounts, isControlledCompanyCoinAward, rewardCycleLabels, rewardFormLabels, rewardLevelLabels, rewardRecipientLabels, type RewardCycle, type RewardForm, type RewardLevel, type RewardRecipient } from "./reward-types";
 
@@ -103,6 +104,7 @@ export async function createTalentHistoryRecord(formData: FormData) {
         if (!promotionOutcomeValues.includes(outcome)) throw new Error("晋升结果无效");
         const row = await tx.promotionRecord.create({ data: { ...common, fromJobLevelId: profile?.jobLevelId, toJobLevelId, promotionType: recordOptional(formData, userId, "promotionType", isBatch), outcome, reason: recordOptional(formData, userId, "reason", isBatch) } });
         if (isSuccessfulPromotionOutcome(outcome)) await tx.employeeTalentProfile.upsert({ where: { userId }, update: { jobLevelId: toJobLevelId, updatedById: user.id }, create: { userId, jobLevelId: toJobLevelId, updatedById: user.id } });
+        await syncHasFormalPromotionInCurrentContract(tx, userId, user.id);
         targetType = "PromotionRecord";
         targetId = row.id;
       }
@@ -119,6 +121,7 @@ export async function createTalentHistoryRecord(formData: FormData) {
         if (shouldSyncCurrentContract(outcome)) {
           await tx.employeeTalentProfile.upsert({ where: { userId }, update: { currentContractStartAt: startDate, currentContractEndAt: endDate, currentContractSequence: renewalSequence, updatedById: user.id, deletedAt: null }, create: { userId, currentContractStartAt: startDate, currentContractEndAt: endDate, currentContractSequence: renewalSequence, updatedById: user.id } });
           await tx.user.update({ where: { id: userId }, data: { contractRenewAt: endDate } });
+          await syncHasFormalPromotionInCurrentContract(tx, userId, user.id);
         }
         targetType = "EmploymentContractTerm";
         targetId = row.id;
@@ -169,6 +172,7 @@ export async function voidTalentHistoryRecord(formData: FormData) {
       }
       await tx.promotionRecord.update({ where: { id }, data: { resultStatus: "VOIDED", voidReason } });
       if (isSuccessfulPromotionOutcome(row.outcome)) await tx.employeeTalentProfile.updateMany({ where: { userId: row.userId, deletedAt: null }, data: { jobLevelId: row.fromJobLevelId, updatedById: user.id } });
+      await syncHasFormalPromotionInCurrentContract(tx, row.userId, user.id);
     }
     else if (decisionType === "SALARY_ADJUSTMENT") { const row = await tx.salaryAdjustmentRecord.findUnique({ where: { id } }); if (!row || row.resultStatus !== "CONFIRMED") throw new Error("加薪记录不存在或已作废"); const newer = await tx.salaryAdjustmentRecord.count({ where: { userId: row.userId, resultStatus: "CONFIRMED", deletedAt: null, effectiveDate: { gt: row.effectiveDate } } }); if (newer) throw new Error("只能作废该员工最新的加薪记录"); await tx.salaryAdjustmentRecord.update({ where: { id }, data: { resultStatus: "VOIDED", voidReason } }); await tx.employeeTalentProfile.updateMany({ where: { userId: row.userId, deletedAt: null }, data: { currentSalary: row.beforeSalary, updatedById: user.id } }); }
     else if (decisionType === "CONTRACT_RENEWAL") { const row = await tx.employmentContractTerm.findUnique({ where: { id } }); if (!row || row.resultStatus !== "CONFIRMED") throw new Error("聘期记录不存在或已作废"); await tx.employmentContractTerm.update({ where: { id }, data: { resultStatus: "VOIDED", voidReason } }); }

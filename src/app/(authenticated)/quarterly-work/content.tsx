@@ -912,8 +912,7 @@ function QuarterlyWorkForm({
               defaultValue={item?.completedAt ? new Date(item.completedAt) : null}
               onChange={(value) => setCompletedAtValue(toDateInputValue(value))}
               placeholder="选择时间"
-              className="w-full"
-            />
+              className="w-full"            />
           </FieldCell>
           <FieldCell label="需求结果" required className="flex-1">
             <input type="hidden" name="taskResult" value={taskResultValue} />
@@ -1211,8 +1210,7 @@ function ProjectEditForm({
             <MemberPicker
               name="ownerId"
               options={memberOptions}
-              defaultValue={resolveDefaultOwnerId(memberOptions, item.ownerId)}
-            />
+              defaultValue={resolveDefaultOwnerId(memberOptions, item.ownerId)}            />
           </FieldCell>
         </FieldRow>
         <FieldRow>
@@ -1590,8 +1588,7 @@ function ProjectCreateForm({
             className="w-full"
           />
         </FieldCell>
-</StickyFormScroll>
-      <StickyFormFooter>
+</StickyFormScroll>      <StickyFormFooter>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}

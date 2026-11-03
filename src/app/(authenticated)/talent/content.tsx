@@ -27,6 +27,7 @@ import { DeleteDraftTemplateDialog } from "./config/reviews/delete-draft-templat
 import type { ReviewCycleDetail, ReviewWorkspaceData } from "./review-workspace-types";
 import type { TalentDecisionRuleWorkspaceData, TalentOperationWorkspaceData } from "./operation-workspace-types";
 import type { CareerWorkspaceData, CompetencyWorkspaceData } from "./operation-workspace-types";
+import { remainingPromotionOpportunityBadgeStyle } from "@/lib/promotion-opportunity-colors";
 import {
   categoryLabels,
   conditionSummary,
@@ -1852,7 +1853,12 @@ function PromotionOverview({
               <UserAvatar name={item.name} avatarUrl={item.avatarUrl} className="h-[42px] w-[42px] rounded-[12px] text-sm" />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
-                <div className="text-xs text-[#777777]">剩余{item.remainingCount}次</div>
+                <span
+                  className="mt-0.5 inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-medium"
+                  style={remainingPromotionOpportunityBadgeStyle(item.remainingCount)}
+                >
+                  剩余{item.remainingCount}次
+                </span>
               </div>
             </div>
           )) : (

@@ -9,6 +9,7 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { prisma } from "@/server/db/prisma";
 import { resolveAuthorizedOrgNodeIds, resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
 import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
+import { syncHasFormalPromotionInCurrentContract } from "./formal-promotion-in-contract";
 import {
   historyImportRecordKey,
   normalizeContractOutcome,
@@ -288,6 +289,7 @@ export async function confirmTalentHistoryImport(formData: FormData) {
       let targetId: string;
       if (value.decisionType === "PROMOTION") {
         const row = await tx.promotionRecord.create({ data: { recordNo: value.recordNo, userId: value.userId, toJobLevelId: value.toJobLevelId, promotionType: value.promotionType, reason: value.reason, effectiveDate, sourceType: "MANUAL_IMPORT", externalProcessNo: value.externalProcessNo, resultStatus: "CONFIRMED", confirmedById: actor.id, confirmedAt: new Date(), createdById: actor.id } });
+        await syncHasFormalPromotionInCurrentContract(tx, value.userId, actor.id);
         targetType = "PromotionRecord"; targetId = row.id;
       } else if (value.decisionType === "CONTRACT_RENEWAL") {
         const row = await tx.employmentContractTerm.create({ data: { userId: value.userId, contractNo: value.contractNo ?? value.recordNo, startDate: new Date(value.startDate!), endDate: new Date(value.endDate!), renewalSequence: value.renewalSequence!, outcome: value.outcome!, sourceType: "MANUAL_IMPORT", resultStatus: "CONFIRMED", externalProcessNo: value.externalProcessNo, confirmedById: actor.id, confirmedAt: new Date(), createdById: actor.id } });
