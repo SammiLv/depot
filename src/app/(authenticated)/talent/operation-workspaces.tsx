@@ -16,6 +16,7 @@ import type { AssessmentWorkspaceData, DecisionWorkspaceData, EmployeeProfileWor
 import { EmployeeProfileEditor } from "./employees/profile-content";
 import { HistoryRecordForm } from "./history/history-record-form";
 import { formatCalendarDate } from "@/lib/calendar-date";
+import { remainingPromotionOpportunityTextColor } from "@/lib/promotion-opportunity-colors";
 import { BusinessAssessmentCycleCreateForm } from "./business-assessment-cycle-create";
 
 const inputClass = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
@@ -419,6 +420,18 @@ function TalentProfileTable({ data, onView, onEdit, onDelete }: {
   </Card>;
 }
 
+function RemainingPromotionOpportunityBadge({ count }: { count: number }) {
+  return (
+    <span className="inline-flex items-center whitespace-nowrap rounded-md bg-muted/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+      可晋升机会剩余：
+      <span className="font-semibold" style={{ color: remainingPromotionOpportunityTextColor(count) }}>
+        {count}
+      </span>
+      次
+    </span>
+  );
+}
+
 function TalentDecisionFacts({ employee }: { employee: EmployeeProfileWorkspaceData["employees"][number] }) {
   const valueLabel = (value: string) => value === "YES" ? "是" : value === "NO" ? "否" : "未维护";
   const facts = [
@@ -430,7 +443,7 @@ function TalentDecisionFacts({ employee }: { employee: EmployeeProfileWorkspaceD
   return <div>
     <div className="mb-1 text-xs text-muted-foreground lg:hidden">人才决策事实</div>
     <div className="space-y-0.5 text-xs leading-5">
-      {facts.map(([label, value]) => <div key={label} className="flex items-center gap-1 whitespace-nowrap"><span><span className="text-muted-foreground">{label}：</span><span className="font-medium">{valueLabel(value)}</span></span>{label === "聘期内正式晋升" && value === "NO" && employee.remainingPromotionOpportunityCount !== null ? <Badge tone={employee.remainingPromotionOpportunityCount >= 5 ? "success" : employee.remainingPromotionOpportunityCount <= 2 ? "danger" : "warning"}>可晋升机会剩余：{employee.remainingPromotionOpportunityCount}次</Badge> : null}</div>)}
+      {facts.map(([label, value]) => <div key={label} className="flex items-center gap-1 whitespace-nowrap"><span><span className="text-muted-foreground">{label}：</span><span className="font-medium">{valueLabel(value)}</span></span>{label === "聘期内正式晋升" && value === "NO" && employee.remainingPromotionOpportunityCount !== null ? <RemainingPromotionOpportunityBadge count={employee.remainingPromotionOpportunityCount} /> : null}</div>)}
     </div>
   </div>;
 }
