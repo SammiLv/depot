@@ -829,6 +829,7 @@ function QuarterlyWorkForm({
             name="workloadPersonDay"
             min={0}
             step={0.1}
+            precision={1}
             defaultValue={item?.workloadPersonDay ?? null}
             placeholder="请输入工作量"
           />
@@ -1152,6 +1153,7 @@ function ProjectEditForm({
               name="workloadPersonDay"
               min={0}
               step={0.1}
+              precision={1}
               value={workloadPersonDay === "" ? null : Number(workloadPersonDay)}
               onChange={(v) => setWorkloadPersonDay(v === null ? "" : String(v))}
               placeholder="请输入工作量"
@@ -1459,6 +1461,7 @@ function ProjectCreateForm({
             name="workloadPersonDay"
             min={0}
             step={0.1}
+            precision={1}
             placeholder="请输入工作量"
           />
         </FormRow>
