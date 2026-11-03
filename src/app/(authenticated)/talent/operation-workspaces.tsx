@@ -16,7 +16,7 @@ import type { AssessmentWorkspaceData, DecisionWorkspaceData, EmployeeProfileWor
 import { EmployeeProfileEditor } from "./employees/profile-content";
 import { HistoryRecordForm } from "./history/history-record-form";
 import { formatCalendarDate } from "@/lib/calendar-date";
-import { remainingPromotionOpportunityTextColor } from "@/lib/promotion-opportunity-colors";
+import { remainingPromotionOpportunityBadgeStyle } from "@/lib/promotion-opportunity-colors";
 import { BusinessAssessmentCycleCreateForm } from "./business-assessment-cycle-create";
 
 const inputClass = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
@@ -421,13 +421,13 @@ function TalentProfileTable({ data, onView, onEdit, onDelete }: {
 }
 
 function RemainingPromotionOpportunityBadge({ count }: { count: number }) {
+  const badgeStyle = remainingPromotionOpportunityBadgeStyle(count);
   return (
-    <span className="inline-flex items-center whitespace-nowrap rounded-md bg-muted/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-      可晋升机会剩余：
-      <span className="font-semibold" style={{ color: remainingPromotionOpportunityTextColor(count) }}>
-        {count}
-      </span>
-      次
+    <span
+      className="inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium"
+      style={{ backgroundColor: badgeStyle.backgroundColor, color: badgeStyle.color }}
+    >
+      可晋升机会剩余：{count}次
     </span>
   );
 }
