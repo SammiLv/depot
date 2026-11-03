@@ -1158,6 +1158,10 @@ export async function createProject(formData: FormData) {
   if (status === "COMPLETED" && needsDevelopment) {
     throw new Error("开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成");
   }
+  const closeReason = (formData.get("closeReason") as string | null)?.trim() || null;
+  if (status === "CLOSED" && !closeReason) {
+    throw new Error("关闭状态的项目必须填写关闭原因");
+  }
   const owner = await findEditableOwner(currentUser, ownerId, departmentOrgNodeId);
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
   const scopeWhere = getProjectManagementScopeWhere(currentUser, scopeDepartmentOrgNodeId, scopedOrgNodeIds);
@@ -1176,6 +1180,7 @@ export async function createProject(formData: FormData) {
         status,
         needsDevelopment,
         workloadPersonDay,
+        closeReason,
         createdById: currentUser.id,
         launchedAt: status === "LAUNCHED" ? parseLaunchedAtInput(formData.get("launchedAt")) : null,
         completedAt: resolveProjectCompletedAtByStatus(status, formData.get("completedAt")),
@@ -1834,6 +1839,10 @@ export async function updateProject(formData: FormData) {
   const expectedOutcome = (formData.get("expectedOutcome") as string)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
+  const closeReason = (formData.get("closeReason") as string | null)?.trim() || null;
+  if (status === "CLOSED" && !closeReason) {
+    throw new Error("关闭状态的项目必须填写关闭原因");
+  }
   const startQuarter = (formData.get("startQuarter") as string)?.trim() || null;
   const endQuarter = (formData.get("endQuarter") as string)?.trim() || null;
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -1951,6 +1960,7 @@ export async function updateProject(formData: FormData) {
         expectedOutcome,
         workloadPersonDay: resolvedWorkloadPersonDay,
         otherCost,
+        closeReason,
         startQuarter,
         endQuarter,
         status,

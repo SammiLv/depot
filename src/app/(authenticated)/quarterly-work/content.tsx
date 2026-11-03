@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, InputNumber as RjInputNumber, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
+import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
 import { Badge, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -1025,7 +1025,6 @@ function ProductGoalMultiPicker({
         placeholder="搜索产品目标"
         className="w-full"
       />
-      <div className="text-xs text-muted-foreground">已选 {selectedIds.length} 个，至少选择 1 个</div>
     </div>
   );
 }
@@ -1158,105 +1157,83 @@ function ProjectEditForm({
     >
       <input type="hidden" name="projectId" value={item.id} />
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
+      {/* 其他成本不在项目弹窗展示（价值跟踪弹窗维护），隐藏域保留原值防止被清空 */}
+      <input type="hidden" name="otherCost" value={item.otherCost ?? ""} />
       <StickyFormScroll>
-        <FormRow label="项目名称 *" align="center">
-          <RjInput
-            name="title"
-            required
-            defaultValue={item.title}
-            placeholder="请输入项目名称"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="产品目标 *">
-          <ProductGoalMultiPicker
-            options={productGoalOptions}
-            defaultSelectedIds={item.productGoalIds}
-          />
-        </FormRow>
-        <FormRow label="负责人 *" align="center">
-          <MemberPicker
-            name="ownerId"
-            options={memberOptions}
-            defaultValue={resolveDefaultOwnerId(memberOptions, item.ownerId)}
-          />
-        </FormRow>
-        <FormRow label="规划周期" align="center">
-          <div className="flex items-center gap-2">
-            <input type="hidden" name="startQuarter" value={startQuarter} />
+        <FieldRow>
+          <FieldCell label="项目名称" required className="flex-1">
+            <RjInput
+              name="title"
+              required
+              defaultValue={item.title}
+              placeholder="请输入项目名称"
+              className="w-full"
+            />
+          </FieldCell>
+          <FieldCell label="产品目标" required className="flex-1">
+            <ProductGoalMultiPicker
+              options={productGoalOptions}
+              defaultSelectedIds={item.productGoalIds}
+            />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="需求周期" required className="flex-1">
+            <div className="flex items-center gap-2">
+              <input type="hidden" name="startQuarter" value={startQuarter} />
+              <RjSelect
+                className="min-w-0 flex-1"
+                allowSearch
+                options={quarterOptions}
+                value={startQuarter || null}
+                onChange={(next) => setStartQuarter(String(next ?? ""))}
+                placeholder="开始季度"
+                invalid={quarterRangeInvalid}
+              />
+              <span className="text-muted-foreground">~</span>
+              <input type="hidden" name="endQuarter" value={endQuarter} />
+              <RjSelect
+                className="min-w-0 flex-1"
+                allowSearch
+                options={quarterOptions}
+                value={endQuarter || null}
+                onChange={(next) => setEndQuarter(String(next ?? ""))}
+                placeholder="结束季度"
+                invalid={quarterRangeInvalid}
+              />
+            </div>
+            {quarterRangeInvalid ? (
+              <p className="mt-1 text-xs text-[#F53F3F]">起始季度不能晚于结束季度</p>
+            ) : null}
+          </FieldCell>
+          <FieldCell label="需求负责人" required className="flex-1">
+            <MemberPicker
+              name="ownerId"
+              options={memberOptions}
+              defaultValue={resolveDefaultOwnerId(memberOptions, item.ownerId)}
+            />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="项目状态" required className="flex-1">
+            <input type="hidden" name="status" value={projectStatus} />
             <RjSelect
-              className="min-w-0 flex-1"
-              allowSearch
-              options={quarterOptions}
-              value={startQuarter || null}
-              onChange={(next) => setStartQuarter(String(next ?? ""))}
-              placeholder="起始季度"
-              invalid={quarterRangeInvalid}
+              options={PROJECT_STATUS_TRANSITION_OPTIONS[item.status]
+                .filter((option) => {
+                  // 非开发项目没有「已上线」可选
+                  if (option === "LAUNCHED" && editNeedsDev === "false") return false;
+                  // 开发项目从「进行中」的下一步必须是「已上线」
+                  if (item.status === "IN_PROGRESS" && editNeedsDev === "true" && option !== "IN_PROGRESS" && option !== "LAUNCHED") return false;
+                  return true;
+                })
+                .map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
+              value={projectStatus}
+              onChange={(v) => setProjectStatus(v as ProjectStatus)}
+              disabled={item.status === "COMPLETED" || item.status === "CLOSED"}
+              className="w-full"
             />
-            <span className="text-muted-foreground">~</span>
-            <input type="hidden" name="endQuarter" value={endQuarter} />
-            <RjSelect
-              className="min-w-0 flex-1"
-              allowSearch
-              options={quarterOptions}
-              value={endQuarter || null}
-              onChange={(next) => setEndQuarter(String(next ?? ""))}
-              placeholder="结束季度"
-              invalid={quarterRangeInvalid}
-            />
-          </div>
-          {quarterRangeInvalid ? (
-            <p className="mt-1 text-xs text-[#F53F3F]">起始季度不能晚于结束季度</p>
-          ) : null}
-        </FormRow>
-        <FormRow label="项目描述">
-          <RjTextarea
-            name="description"
-            rows={3}
-            defaultValue={item.description ?? ""}
-            placeholder="请输入项目描述"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="预期收益">
-          <RjTextarea
-            name="expectedOutcome"
-            rows={3}
-            defaultValue={item.expectedOutcome ?? ""}
-            placeholder="请输入项目预期收益"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          {hasTasks ? (
-            <>
-              <div className="min-h-[40px] w-full rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
-                {workloadPersonDay || "—"}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">由下属需求工作量自动汇总，不可手动修改</div>
-            </>
-          ) : (
-            <RjInputNumber
-              name="workloadPersonDay"
-              min={0}
-              step={0.1}
-              value={workloadPersonDay === "" ? null : Number(workloadPersonDay)}
-              onChange={(v) => setWorkloadPersonDay(v === null ? "" : String(v))}
-              placeholder="请输入工作量"
-            />
-          )}
-        </FormRow>
-        <FormRow label="其他成本">
-          <RjTextarea
-            name="otherCost"
-            rows={2}
-            defaultValue={item.otherCost ?? ""}
-            placeholder="请输入其他成本"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="是否开发项目 *" align="center" labelClassName="self-start pt-[5px]">
-          <div className="w-full space-y-1">
+          </FieldCell>
+          <FieldCell label="是否开发项目" required className="flex-1">
             <RjSelect
               options={[
                 { label: "是", value: "true" },
@@ -1275,30 +1252,12 @@ function ProjectEditForm({
             />
             <input type="hidden" name="needsDevelopment" value={editNeedsDev} />
             {editNeedsDev === "false" && nonDevProjectBlockedMessage ? (
-              <p className="text-xs text-destructive">{nonDevProjectBlockedMessage}</p>
+              <p className="mt-1 text-xs text-destructive">{nonDevProjectBlockedMessage}</p>
             ) : null}
-          </div>
-        </FormRow>
-        <FormRow label="项目状态" align="center">
-          <input type="hidden" name="status" value={projectStatus} />
-          <RjSelect
-            options={PROJECT_STATUS_TRANSITION_OPTIONS[item.status]
-              .filter((option) => {
-                // 非开发项目没有「已上线」可选
-                if (option === "LAUNCHED" && editNeedsDev === "false") return false;
-                // 开发项目从「进行中」的下一步只能是「已上线」
-                if (item.status === "IN_PROGRESS" && editNeedsDev === "true" && option !== "IN_PROGRESS" && option !== "LAUNCHED") return false;
-                return true;
-              })
-              .map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
-            value={projectStatus}
-            onChange={(v) => setProjectStatus(v as ProjectStatus)}
-            disabled={item.status === "COMPLETED" || item.status === "CLOSED"}
-            className="w-full"
-          />
-        </FormRow>
+          </FieldCell>
+        </FieldRow>
         {cascadesCompletion ? (
-          <div className="-mt-1 mb-2 flex items-start gap-2 rounded-lg bg-[#FFF7E8] px-3 py-2 text-xs leading-[18px] text-[#FF7D00]">
+          <div className="flex items-start gap-2 rounded-lg bg-[#FFF7E8] px-3 py-2 text-xs leading-[18px] text-[#FF7D00]">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>项目下所有未完成的需求都将被同时标记为「{projectStatus === "COMPLETED" ? "已完成" : "已关闭"}」，完成时间统一记为当前项目的完成时间。</span>
           </div>
@@ -1306,21 +1265,70 @@ function ProjectEditForm({
         {item.status === "COMPLETED" || item.status === "CLOSED" ? (
           <input type="hidden" name="status" value={item.status} />
         ) : null}
-        {projectStatus === "COMPLETED" ? (
-          <div ref={completedAtRowRef}>
-            <FormRow label="完成时间 *" align="center">
-              <FormDatePicker name="completedAt" defaultDate={item.completedAt} />
-            </FormRow>
+        {projectStatus === "COMPLETED" || projectStatus === "LAUNCHED" ? (
+          <div ref={projectStatus === "LAUNCHED" ? launchedAtRowRef : completedAtRowRef}>
+            <FieldRow>
+              <FieldCell label={projectStatus === "LAUNCHED" ? "上线时间" : "完成时间"} required className="flex-1">
+                <FormDatePicker
+                  name={projectStatus === "LAUNCHED" ? "launchedAt" : "completedAt"}
+                  defaultDate={projectStatus === "LAUNCHED" ? item.launchedAt : item.completedAt}
+                />
+              </FieldCell>
+              <FieldCell label="工作量（人天）" required className="flex-1">
+                {hasTasks ? (
+                  <>
+                    <div className="flex h-8 w-full items-center rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-foreground">
+                      {workloadPersonDay || "—"}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">由下属需求工作量自动汇总，不可手动修改</p>
+                  </>
+                ) : (
+                  <RjInput
+                    name="workloadPersonDay"
+                    inputMode="decimal"
+                    value={workloadPersonDay}
+                    onChange={(event) => setWorkloadPersonDay(event.target.value)}
+                    placeholder="请输入工作量"
+                    className="w-full"
+                  />
+                )}
+              </FieldCell>
+            </FieldRow>
           </div>
+        ) : (
+          <input type="hidden" name="workloadPersonDay" value={workloadPersonDay} />
+        )}
+        {projectStatus === "CLOSED" ? (
+          <FieldCell label="关闭原因" required>
+            <RjTextarea
+              name="closeReason"
+              rows={3}
+              required
+              defaultValue={item.closeReason ?? ""}
+              placeholder="请输入关闭原因"
+              className="w-full"
+            />
+          </FieldCell>
         ) : null}
-        {projectStatus === "LAUNCHED" ? (
-          <div ref={launchedAtRowRef}>
-            <FormRow label="上线时间 *" align="center">
-              <FormDatePicker name="launchedAt" defaultDate={item.launchedAt} />
-            </FormRow>
-          </div>
-        ) : null}
-      </StickyFormScroll>
+        <FieldCell label="项目描述">
+          <RjTextarea
+            name="description"
+            rows={3}
+            defaultValue={item.description ?? ""}
+            placeholder="请输入项目描述"
+            className="w-full"
+          />
+        </FieldCell>
+        <FieldCell label="预期收益">
+          <RjTextarea
+            name="expectedOutcome"
+            rows={3}
+            defaultValue={item.expectedOutcome ?? ""}
+            placeholder="请输入项目预期收益"
+            className="w-full"
+          />
+        </FieldCell>
+</StickyFormScroll>
       <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
           项目变更为已完成或关闭时，将同步更新其下所有需求状态，且不再有价值跟踪等后续事项。
@@ -1452,75 +1460,118 @@ function ProjectCreateForm({
     }}>
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       <StickyFormScroll>
-        <FormRow label="项目名称 *" align="center">
-          <RjInput
-            name="title"
-            required
-            placeholder="请输入项目名称"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="产品目标 *">
-          <ProductGoalMultiPicker
-            options={productGoalOptions}
-            defaultSelectedIds={defaultProductGoalIds ?? []}
-          />
-        </FormRow>
-        <FormRow label="负责人 *" align="center">
-          <MemberPicker
-            name="ownerId"
-            options={memberOptions}
-            defaultValue={resolveDefaultOwnerId(memberOptions, data.currentUserId)}
-          />
-        </FormRow>
-        <FormRow label="规划周期 *" align="center">
-          <div className="flex items-center gap-2">
-            <input type="hidden" name="startQuarter" value={startQuarter} />
-            <RjSelect
-              className="min-w-0 flex-1"
-              allowSearch
-              options={quarterOptions}
-              value={startQuarter || null}
-              onChange={(next) => setStartQuarter(String(next ?? ""))}
-              placeholder="起始季度"
-              invalid={quarterRangeInvalid}
+        <FieldRow>
+          <FieldCell label="项目名称" required className="flex-1">
+            <RjInput
+              name="title"
+              required
+              placeholder="请输入项目名称"
+              className="w-full"
             />
-            <span className="text-muted-foreground">~</span>
-            <input type="hidden" name="endQuarter" value={endQuarter} />
-            <RjSelect
-              className="min-w-0 flex-1"
-              allowSearch
-              options={quarterOptions}
-              value={endQuarter || null}
-              onChange={(next) => setEndQuarter(String(next ?? ""))}
-              placeholder="结束季度"
-              invalid={quarterRangeInvalid}
+          </FieldCell>
+          <FieldCell label="产品目标" required className="flex-1">
+            <ProductGoalMultiPicker
+              options={productGoalOptions}
+              defaultSelectedIds={defaultProductGoalIds ?? []}
             />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="需求周期" required className="flex-1">
+            <div className="flex items-center gap-2">
+              <input type="hidden" name="startQuarter" value={startQuarter} />
+              <RjSelect
+                className="min-w-0 flex-1"
+                allowSearch
+                options={quarterOptions}
+                value={startQuarter || null}
+                onChange={(next) => setStartQuarter(String(next ?? ""))}
+                placeholder="开始季度"
+                invalid={quarterRangeInvalid}
+              />
+              <span className="text-muted-foreground">~</span>
+              <input type="hidden" name="endQuarter" value={endQuarter} />
+              <RjSelect
+                className="min-w-0 flex-1"
+                allowSearch
+                options={quarterOptions}
+                value={endQuarter || null}
+                onChange={(next) => setEndQuarter(String(next ?? ""))}
+                placeholder="结束季度"
+                invalid={quarterRangeInvalid}
+              />
+            </div>
+            {quarterRangeInvalid ? (
+              <p className="mt-1 text-xs text-[#F53F3F]">起始季度不能晚于结束季度</p>
+            ) : null}
+          </FieldCell>
+          <FieldCell label="需求负责人" required className="flex-1">
+            <MemberPicker
+              name="ownerId"
+              options={memberOptions}
+              defaultValue={resolveDefaultOwnerId(memberOptions, data.currentUserId)}
+            />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="项目状态" required className="flex-1">
+            <input type="hidden" name="status" value={createProjectStatus} />
+            <RjSelect
+              options={createStatusOptions.map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
+              value={createProjectStatus}
+              onChange={(v) => setCreateProjectStatus(v as ProjectStatus)}
+              className="w-full"
+            />
+          </FieldCell>
+          <FieldCell label="是否开发项目" required className="flex-1">
+            <RjSelect
+              options={[
+                { label: "是", value: "true" },
+                { label: "否", value: "false" },
+              ]}
+              value={createNeedsDev || null}
+              onChange={(v) => {
+                const next = String(v ?? "");
+                setCreateNeedsDev(next);
+                if (next === "false" && createProjectStatus === "LAUNCHED") {
+                  setCreateProjectStatus("NOT_STARTED");
+                }
+              }}
+              placeholder="请选择"
+              className="w-full"
+            />
+            <input type="hidden" name="needsDevelopment" value={createNeedsDev} />
+          </FieldCell>
+        </FieldRow>
+        {createProjectStatus === "COMPLETED" || createProjectStatus === "LAUNCHED" ? (
+          <div ref={createProjectStatus === "LAUNCHED" ? launchedAtRowRef : completedAtRowRef}>
+            <FieldRow>
+              <FieldCell label={createProjectStatus === "LAUNCHED" ? "上线时间" : "完成时间"} required className="flex-1">
+                <FormDatePicker name={createProjectStatus === "LAUNCHED" ? "launchedAt" : "completedAt"} />
+              </FieldCell>
+              <FieldCell label="工作量（人天）" required className="flex-1">
+                <RjInput
+                  name="workloadPersonDay"
+                  inputMode="decimal"
+                  placeholder="请输入工作量"
+                  className="w-full"
+                />
+              </FieldCell>
+            </FieldRow>
           </div>
-          {quarterRangeInvalid ? (
-            <p className="mt-1 text-xs text-[#F53F3F]">起始季度不能晚于结束季度</p>
-          ) : null}
-        </FormRow>
-        <FormRow label="是否开发项目 *" align="center">
-          <input type="hidden" name="needsDevelopment" value={createNeedsDev} />
-          <RjSelect
-            options={[
-              { label: "是", value: "true" },
-              { label: "否", value: "false" },
-            ]}
-            value={createNeedsDev || null}
-            onChange={(v) => {
-              const next = String(v ?? "");
-              setCreateNeedsDev(next);
-              if (next === "false" && createProjectStatus === "LAUNCHED") {
-                setCreateProjectStatus("NOT_STARTED");
-              }
-            }}
-            placeholder="请选择"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="项目描述 *">
+        ) : null}
+        {createProjectStatus === "CLOSED" ? (
+          <FieldCell label="关闭原因" required>
+            <RjTextarea
+              name="closeReason"
+              rows={3}
+              required
+              placeholder="请输入关闭原因"
+              className="w-full"
+            />
+          </FieldCell>
+        ) : null}
+        <FieldCell label="项目描述" required>
           <RjTextarea
             name="description"
             required
@@ -1528,8 +1579,8 @@ function ProjectCreateForm({
             placeholder="请输入项目描述"
             className="w-full"
           />
-        </FormRow>
-        <FormRow label="预期收益 *">
+        </FieldCell>
+        <FieldCell label="预期收益" required>
           <RjTextarea
             name="expectedOutcome"
             required
@@ -1537,39 +1588,8 @@ function ProjectCreateForm({
             placeholder="请输入项目预期收益"
             className="w-full"
           />
-        </FormRow>
-        <FormRow label={createWorkloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          <RjInputNumber
-            name="workloadPersonDay"
-            min={0}
-            step={0.1}
-            placeholder="请输入工作量"
-          />
-        </FormRow>
-        <FormRow label="项目状态" align="center">
-          <input type="hidden" name="status" value={createProjectStatus} />
-          <RjSelect
-            options={createStatusOptions.map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
-            value={createProjectStatus}
-            onChange={(v) => setCreateProjectStatus(v as ProjectStatus)}
-            className="w-full"
-          />
-        </FormRow>
-        {createProjectStatus === "COMPLETED" ? (
-          <div ref={completedAtRowRef}>
-            <FormRow label="完成时间 *" align="center">
-              <FormDatePicker name="completedAt" />
-            </FormRow>
-          </div>
-        ) : null}
-        {createProjectStatus === "LAUNCHED" ? (
-          <div ref={launchedAtRowRef}>
-            <FormRow label="上线时间 *" align="center">
-              <FormDatePicker name="launchedAt" />
-            </FormRow>
-          </div>
-        ) : null}
-      </StickyFormScroll>
+        </FieldCell>
+</StickyFormScroll>
       <StickyFormFooter>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">

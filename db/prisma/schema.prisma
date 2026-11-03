@@ -796,6 +796,8 @@ model Project {
   actualValue       String?
   valueJudgement    String?
   valueTrackStatus  String?
+  // 项目关闭原因（关闭状态必填，随编辑弹窗维护）
+  closeReason       String?
   createdById       String
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt

@@ -128,6 +128,7 @@ type ProjectBoardItem = {
   workloadPersonDay: number | null;
   needsDevelopment: boolean | null;
   otherCost: string | null;
+  closeReason: string | null;
   actualValue: string | null;
   valueJudgement: string | null;
   valueTrackStatus: string;
@@ -882,6 +883,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       workloadPersonDay: projectWorks.length > 0 ? taskWorkloadPersonDay : project.workloadPersonDay,
       needsDevelopment: project.needsDevelopment,
       otherCost: project.otherCost,
+      closeReason: project.closeReason,
       actualValue: project.actualValue,
       valueJudgement: project.valueJudgement,
       valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
