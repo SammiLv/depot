@@ -773,6 +773,8 @@ function QuarterlyWorkForm({
   };
 
   const closedReasonRequired = workStatus === "CLOSED";
+  // 需求结果为「未达标」时执行概述必填（服务端同步校验）
+  const summaryRequired = closedReasonRequired || taskResultValue === "未达标";
   const showCompletedFields = workStatus === "COMPLETED" || mode === "backfill";
   /** 未启动态按设计稿不展示完成类字段（工作量/需求结果/需求执行概述），但隐藏域保留原值防止被清空 */
   const showProgressFields = workStatus !== "NOT_STARTED";
@@ -931,11 +933,11 @@ function QuarterlyWorkForm({
         <input type="hidden" name="workloadPersonDay" value={item?.workloadPersonDay ?? ""} />
       ) : null}
       {showProgressFields ? (
-      <FieldCell label={closedReasonRequired ? "关闭原因" : "需求执行概述"} required={closedReasonRequired}>
+      <FieldCell label={closedReasonRequired ? "关闭原因" : "需求执行概述"} required={summaryRequired}>
         <RjTextarea
           name="executionSummary"
           rows={3}
-          required={closedReasonRequired}
+          required={summaryRequired}
           defaultValue={item?.executionSummary ?? ""}
           placeholder={closedReasonRequired ? "请输入关闭原因" : "请输入需求最终执行情况的描述"}
           className="w-full"
@@ -953,10 +955,9 @@ function QuarterlyWorkForm({
           className="w-full"
         />
       </FieldCell>
-      <FieldCell label="需求目标" required>
+      <FieldCell label="需求目标">
         <RjTextarea
           name="description"
-          required
           defaultValue={item?.description ?? ""}
           rows={4}
           placeholder="请输入需求目标"

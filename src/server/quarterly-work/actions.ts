@@ -590,7 +590,7 @@ async function ensureProjectForWork(params: {
   currentUser: ScopeUser;
   projectId: string | null;
   title: string;
-  description: string;
+  description: string | null;
   expectedOutcome: string;
   owner: Awaited<ReturnType<typeof findEditableOwner>>;
   workStatus: WorkStatus;
@@ -652,6 +652,9 @@ export async function createQuarterlyWork(formData: FormData) {
   if (status === "CLOSED" && !executionSummary) {
     throw new Error("关闭状态的需求必须填写关闭原因");
   }
+  if (taskResult === "未达标" && !executionSummary) {
+    throw new Error("需求结果为「未达标」时必须填写需求执行概述");
+  }
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
@@ -664,7 +667,7 @@ export async function createQuarterlyWork(formData: FormData) {
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
   }
-  const description = requiredString(formData.get("description"), "本季度工作目标");
+  const description = (formData.get("description") as string | null)?.trim() || null;
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
@@ -739,6 +742,9 @@ export async function updateQuarterlyWork(formData: FormData) {
   if (status === "CLOSED" && !executionSummary) {
     throw new Error("关闭状态的需求必须填写关闭原因");
   }
+  if (taskResult === "未达标" && !executionSummary) {
+    throw new Error("需求结果为「未达标」时必须填写需求执行概述");
+  }
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
@@ -751,7 +757,7 @@ export async function updateQuarterlyWork(formData: FormData) {
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
   }
-  const description = requiredString(formData.get("description"), "本季度工作目标");
+  const description = (formData.get("description") as string | null)?.trim() || null;
   const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
   const projectId = parseProjectId(formData.get("projectId"));
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
