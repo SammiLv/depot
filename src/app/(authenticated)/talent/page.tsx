@@ -5,6 +5,7 @@ import { getTalentHistoryData, getTalentRecommendationData } from "@/server/tale
 import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
 import { getRemainingPromotionOpportunityCount, getContractExpiryMonthTabs, getContractExpiryWindowEnd } from "@/server/talent/employee-profile";
+import { groupSuccessPromotionsByUserId, shouldIncludeInLowPromotionOpportunity } from "@/server/talent/formal-promotion-in-contract";
 import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
 import { getTalentReviewConfig, getTalentReviewCycleDetail, getTalentReviewCycles } from "@/server/talent/review-query";
 import { getTalentDecisionRuleConfiguration } from "@/server/talent/decision-rule-query";
@@ -49,7 +50,7 @@ export default async function TalentPage() {
   const quarterStart = startOfQuarter(now);
   const quarterEnd = endOfQuarter(now);
 
-  const [latestKpis, latestAssessmentSummaries, assessmentCycles, contractsExpiringSoonProfiles, recentPromotionRecords, currentQuarterRewardRecords, employeeProfilesForPromotion] = await Promise.all([
+  const [latestKpis, latestAssessmentSummaries, assessmentCycles, contractsExpiringSoonProfiles, recentPromotionRecords, currentQuarterRewardRecords, employeeProfilesForPromotion, successPromotionsInContractScope] = await Promise.all([
     prisma.personalKpi.findMany({
       where: { userId: { in: participantUserIds }, status: "COMPLETED", deletedAt: null },
       orderBy: [{ year: "desc" }, { quarter: "desc" }],
@@ -92,9 +93,16 @@ export default async function TalentPage() {
     }),
     prisma.employeeTalentProfile.findMany({
       where: { userId: { in: participantUserIds }, deletedAt: null },
-      select: { userId: true, currentContractEndAt: true, hasFormalPromotionInCurrentContract: true },
+      select: { userId: true, currentContractStartAt: true, currentContractEndAt: true, hasFormalPromotionInCurrentContract: true },
     }),
+    participantUserIds.length
+      ? prisma.promotionRecord.findMany({
+          where: { userId: { in: participantUserIds }, deletedAt: null, resultStatus: "CONFIRMED", outcome: "SUCCESS" },
+          select: { userId: true, effectiveDate: true, outcome: true, resultStatus: true },
+        })
+      : Promise.resolve([]),
   ]);
+  const successPromotionsByUserId = groupSuccessPromotionsByUserId(successPromotionsInContractScope);
 
   const cycleById = new Map(assessmentCycles.map((cycle) => [cycle.id, cycle]));
 
@@ -131,12 +139,14 @@ export default async function TalentPage() {
     });
   }
 
-  const lowPromotionOpportunityProfiles = employeeProfilesForPromotion.filter((profile) => {
-    if (!profile.currentContractEndAt) return false;
-    if (profile.hasFormalPromotionInCurrentContract === true) return false;
-    const count = getRemainingPromotionOpportunityCount(profile.currentContractEndAt, now);
-    return count !== null && count <= 2;
-  });
+  const lowPromotionOpportunityProfiles = employeeProfilesForPromotion.filter((profile) =>
+    shouldIncludeInLowPromotionOpportunity(
+      profile.currentContractStartAt,
+      profile.currentContractEndAt,
+      successPromotionsByUserId.get(profile.userId) ?? [],
+      now,
+    ),
+  );
   const lowPromotionOpportunityCount = lowPromotionOpportunityProfiles.length;
 
   const latestPromotionRecord = recentPromotionRecords.length > 0
