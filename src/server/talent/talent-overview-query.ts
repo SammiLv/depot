@@ -70,7 +70,7 @@ export async function getTalentOverviewPageData(user: Awaited<ReturnType<typeof 
       where: {
         userId: { in: participantUserIds },
         deletedAt: null,
-        currentContractEndAt: { gte: now, lte: ninetyDaysLater },
+        currentContractEndAt: { lte: ninetyDaysLater },
       },
       select: { userId: true },
     }),

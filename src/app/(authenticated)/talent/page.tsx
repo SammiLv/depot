@@ -4,7 +4,7 @@ import { getBusinessAssessmentPageData } from "@/server/talent/assessment-query"
 import { getTalentHistoryData, getTalentRecommendationData } from "@/server/talent/decision-history-query";
 import { getWorkIncidentPageData } from "@/server/talent/incident-query";
 import { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
-import { getRemainingPromotionOpportunityCount, getContractExpiryMonthTabs, getContractExpiryWindowEnd } from "@/server/talent/employee-profile";
+import { getRemainingPromotionOpportunityCount, getContractExpiryMonthTabs, getContractExpiryStatus, getContractExpiryWindowEnd } from "@/server/talent/employee-profile";
 import { groupSuccessPromotionsByUserId, shouldIncludeInLowPromotionOpportunity } from "@/server/talent/formal-promotion-in-contract";
 import { getCareerConfiguration, getCompetencyConfiguration } from "@/server/talent/config-query";
 import { getTalentReviewConfig, getTalentReviewCycleDetail, getTalentReviewCycles } from "@/server/talent/review-query";
@@ -68,7 +68,7 @@ export default async function TalentPage() {
       where: {
         userId: { in: participantUserIds },
         deletedAt: null,
-        currentContractEndAt: { gte: now, lte: ninetyDaysLater },
+        currentContractEndAt: { lte: ninetyDaysLater },
       },
       select: { userId: true, currentContractEndAt: true },
     }),
@@ -187,12 +187,14 @@ export default async function TalentPage() {
       name: userNameById.get(profile.userId) ?? profile.userId,
       avatarUrl: userAvatarById.get(profile.userId) ?? null,
       endAt: profile.currentContractEndAt.toISOString(),
+      expired: getContractExpiryStatus(profile.currentContractEndAt, now) === "EXPIRED",
     }))
     .sort((left, right) => new Date(left.endAt).getTime() - new Date(right.endAt).getTime());
 
   const contractsExpiringSoonMonths = getContractExpiryMonthTabs(now).map((tab) => ({
     ...tab,
     count: contractsExpiringSoonItems.filter((item) => {
+      if (item.expired) return false;
       const endAt = new Date(item.endAt);
       return endAt.getFullYear() === tab.year && endAt.getMonth() + 1 === tab.month;
     }).length,

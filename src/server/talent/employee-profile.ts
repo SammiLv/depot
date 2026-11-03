@@ -64,8 +64,8 @@ export function contractExpiryMonthKey(year: number, month: number) {
   return `${year}-${month}`;
 }
 
-export function formatContractExpiryDateLabel(endAt: Date) {
-  return `${endAt.getMonth() + 1}月${endAt.getDate()}日到期`;
+export function formatContractExpiryDateLabel(endAt: Date, expired = false) {
+  return `${endAt.getMonth() + 1}月${endAt.getDate()}日${expired ? "已过期" : "到期"}`;
 }
 
 export function getContractExpiryStatus(endAt: Date | null, referenceDate = new Date()): ContractExpiryStatus {

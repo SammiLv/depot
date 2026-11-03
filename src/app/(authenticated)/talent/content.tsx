@@ -321,7 +321,7 @@ export default function TalentPageContent({
   latestAssessmentByUserId: Record<string, { userId: string; cycleId: string; earnedScore: number; maxScore: number; isOverallPassed: boolean; cycle: { year: number; quarter: number } | null }>;
   statCards: {
     contractsExpiringSoon: number;
-    contractsExpiringSoonItems: Array<{ userId: string; name: string; avatarUrl: string | null; endAt: string }>;
+    contractsExpiringSoonItems: Array<{ userId: string; name: string; avatarUrl: string | null; endAt: string; expired: boolean }>;
     contractsExpiringSoonMonths: Array<{ year: number; month: number; label: string; count: number }>;
     recentPromotions: number;
     recentPromotionHalfYear: "first" | "second";
@@ -1887,7 +1887,7 @@ function ContractExpiryOverview({
   items,
 }: {
   months: Array<{ year: number; month: number; label: string; count: number }>;
-  items: Array<{ userId: string; name: string; avatarUrl: string | null; endAt: string }>;
+  items: Array<{ userId: string; name: string; avatarUrl: string | null; endAt: string; expired: boolean }>;
 }) {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
@@ -1895,6 +1895,7 @@ function ContractExpiryOverview({
     const sorted = [...items].sort((left, right) => new Date(left.endAt).getTime() - new Date(right.endAt).getTime());
     if (!selectedMonthKey) return sorted;
     return sorted.filter((item) => {
+      if (item.expired) return false;
       const endAt = new Date(item.endAt);
       return contractExpiryMonthKey(endAt.getFullYear(), endAt.getMonth() + 1) === selectedMonthKey;
     });
@@ -1937,7 +1938,7 @@ function ContractExpiryOverview({
             <UserAvatar name={item.name} avatarUrl={item.avatarUrl} className="h-[42px] w-[42px] rounded-[12px] text-sm" />
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-[#181818]">{item.name}</div>
-              <div className="text-xs text-[#777777]">{formatContractExpiryDateLabel(new Date(item.endAt))}</div>
+              <div className={`text-xs ${item.expired ? "font-medium text-[#F53F3F]" : "text-[#777777]"}`}>{formatContractExpiryDateLabel(new Date(item.endAt), item.expired)}</div>
             </div>
           </div>
         )) : (

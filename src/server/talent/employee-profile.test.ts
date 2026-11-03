@@ -62,6 +62,7 @@ test("近90天窗口内合同按起止日期判断", () => {
 
 test("合同到期日期展示文案", () => {
   assert.equal(formatContractExpiryDateLabel(new Date("2026-10-24T00:00:00.000Z")), "10月24日到期");
+  assert.equal(formatContractExpiryDateLabel(new Date("2026-10-24T00:00:00.000Z"), true), "10月24日已过期");
   assert.equal(contractExpiryMonthKey(2026, 10), "2026-10");
 });
 
