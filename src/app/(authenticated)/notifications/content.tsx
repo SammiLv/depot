@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import { Badge, Button as UiButton, Card } from "@/components/ui-kit";
+import { Badge, Card } from "@/components/ui-kit";
 import { runServerAction } from "@/lib/run-server-action";
 import {
   deleteNotificationGroupBot,
@@ -24,6 +24,7 @@ import {
 import type { ScheduleConfig, ScheduleScanType } from "@/server/notifications/types";
 import { SCHEDULE_SCAN_REGISTRY } from "@/server/notifications/event-registry";
 import { ConfirmDeleteButton } from "@/components/confirm-delete";
+import { Button as RjButton } from "@rjmart/ui";
 
 type NotificationDeleteState = { status: "idle" | "success" | "error"; message: string };
 const initialNotificationDeleteState: NotificationDeleteState = { status: "idle", message: "" };
@@ -47,8 +48,8 @@ async function deleteGroupBotWithState(_state: NotificationDeleteState, formData
   }
 }
 
-function Button({ className = "", size = "md", ...props }: ComponentProps<typeof UiButton>) {
-  return <UiButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
+function Button({ className = "", size = "default", ...props }: ComponentProps<typeof RjButton>) {
+  return <RjButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
 }
 
 const tableShellClass = "overflow-hidden rounded-2xl border border-border bg-card";
@@ -591,7 +592,7 @@ function GroupBotForm({
         </div>
       </div>
       <div className="flex shrink-0 justify-end gap-2 border-t border-border px-6 py-4">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">{bot ? "保存" : "添加"}</Button>
       </div>
     </form>
@@ -916,7 +917,7 @@ function ScenarioForm({
           <label className="text-sm font-medium">接收人规则</label>
           <Button
             type="button"
-            variant="outline"
+            variant="outlined"
             size="sm"
             onClick={() => setRules((prev) => [...prev, { type: availableResolvers[0] ?? "SUBJECT_USER" }])}
           >
@@ -1069,7 +1070,7 @@ function ScenarioForm({
       </div>
 
       <div className="flex shrink-0 justify-end gap-2 border-t border-border px-6 py-4">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">保存</Button>
       </div>
     </form>

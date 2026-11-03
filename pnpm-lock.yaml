@@ -7,6 +7,9 @@ settings:
 overrides:
   better-sqlite3: ^13.0.3
 
+patchedDependencies:
+  '@rjmart/ui': f47993e2f532fe15394e8f6570abaafb19061092c17297d66c5810c4fb12b8d9
+
 importers:
 
   .:
@@ -22,7 +25,7 @@ importers:
         version: 0.2.2(react@19.2.4)
       '@rjmart/ui':
         specifier: ^0.16.1
-        version: 0.16.1(@standard-schema/spec@1.1.0)(@types/react-dom@19.3.0(@types/react@19.2.16))(@types/react@19.2.16)(ajv@8.20.0)(effect@3.20.0)(embla-carousel@8.6.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(valibot@1.2.0(typescript@5.9.3))
+        version: 0.16.1(patch_hash=f47993e2f532fe15394e8f6570abaafb19061092c17297d66c5810c4fb12b8d9)(@standard-schema/spec@1.1.0)(@types/react-dom@19.3.0(@types/react@19.2.16))(@types/react@19.2.16)(ajv@8.20.0)(effect@3.20.0)(embla-carousel@8.6.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(valibot@1.2.0(typescript@5.9.3))
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -5193,7 +5196,7 @@ snapshots:
       lucide-react: 0.469.0(react@19.2.4)
       react: 19.2.4
 
-  '@rjmart/ui@0.16.1(@standard-schema/spec@1.1.0)(@types/react-dom@19.3.0(@types/react@19.2.16))(@types/react@19.2.16)(ajv@8.20.0)(effect@3.20.0)(embla-carousel@8.6.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(valibot@1.2.0(typescript@5.9.3))':
+  '@rjmart/ui@0.16.1(patch_hash=f47993e2f532fe15394e8f6570abaafb19061092c17297d66c5810c4fb12b8d9)(@standard-schema/spec@1.1.0)(@types/react-dom@19.3.0(@types/react@19.2.16))(@types/react@19.2.16)(ajv@8.20.0)(effect@3.20.0)(embla-carousel@8.6.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(valibot@1.2.0(typescript@5.9.3))':
     dependencies:
       '@dnd-kit/core': 6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@dnd-kit/sortable': 10.0.0(@dnd-kit/core@6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4)

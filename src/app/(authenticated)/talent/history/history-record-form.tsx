@@ -1,9 +1,9 @@
 "use client";
 
-import { Button } from "@/components/ui-kit";
 import { createTalentHistoryRecord } from "@/server/talent/history-actions";
 import { companyCoinAwardAmounts, companyCoinAwardBaseAmounts, isControlledCompanyCoinAward, rewardCycleLabels, rewardFormLabels, rewardLevelLabels, rewardRecipientLabels, type RewardCycle, type RewardForm, type RewardLevel, type RewardRecipient } from "@/server/talent/reward-types";
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@rjmart/ui";
 
 type HistoryType = "PROMOTION" | "CONTRACT_RENEWAL" | "SALARY_ADJUSTMENT" | "REWARD";
 type HistorySource = "MANUAL_ENTRY" | "COMPANY_SYSTEM" | "RECOMMENDATION";

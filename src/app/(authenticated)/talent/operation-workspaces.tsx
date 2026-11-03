@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Button, Card } from "@/components/ui-kit";
+import { Badge, Card } from "@/components/ui-kit";
 import { ConfirmDeleteButton } from "@/components/confirm-delete";
 import { deleteBusinessAssessmentCycleWithState, importBusinessAssessmentResultsWithState, updateBusinessAssessmentCyclePeriodWithState, updateBusinessAssessmentResultWithState } from "@/server/talent/assessment-actions";
 import type { BusinessAssessmentOperationState } from "@/server/talent/assessment-actions";
@@ -17,6 +17,7 @@ import { EmployeeProfileEditor } from "./employees/profile-content";
 import { HistoryRecordForm } from "./history/history-record-form";
 import { formatCalendarDate } from "@/lib/calendar-date";
 import { BusinessAssessmentCycleCreateForm } from "./business-assessment-cycle-create";
+import { Button } from "@rjmart/ui";
 
 const inputClass = "h-9 rounded-lg border border-border bg-background px-3 text-sm";
 const actionClass = "h-9 rounded-lg px-4 text-sm font-semibold";
@@ -29,7 +30,7 @@ function Header({ title, description, action }: { title: string; description: st
 }
 
 function BackButton({ onClick }: { onClick: () => void; label?: string }) {
-  return <Button type="button" variant="outline" className={actionClass} onClick={onClick}><ArrowLeft className="h-4 w-4" />返回</Button>;
+  return <Button type="button" variant="outlined" className={actionClass} onClick={onClick}><ArrowLeft className="h-4 w-4" />返回</Button>;
 }
 
 function Empty({ children }: { children: React.ReactNode }) { return <div className="py-10 text-center text-sm text-muted-foreground">{children}</div>; }
@@ -121,7 +122,7 @@ export function BusinessAssessmentQuarterlyWorkspace({ data }: { data: Assessmen
           <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核开始日期</span><input name="assessmentStartDate" type="date" required defaultValue={formatCalendarDate(selectedCycle.assessmentStartDate)} className={`${inputClass} w-full`}/></label>
           <span className="hidden pb-2 text-xs text-muted-foreground sm:block">至</span>
           <label className="block"><span className="mb-1 block text-xs text-muted-foreground">考核结束日期</span><input name="assessmentEndDate" type="date" required defaultValue={formatCalendarDate(selectedCycle.assessmentEndDate)} className={`${inputClass} w-full`}/></label>
-          <Button type="submit" variant="outline" className={actionClass} disabled={updatingPeriod}>{updatingPeriod ? "更新中" : "更新时间段"}</Button>
+          <Button type="submit" variant="outlined" className={actionClass} disabled={updatingPeriod}>{updatingPeriod ? "更新中" : "更新时间段"}</Button>
         </form>
         <OperationFeedback state={periodState}/>
       </Card>
@@ -311,7 +312,7 @@ export function TalentHistoryWorkspace({ data, employeeProfiles, initialCategory
   if (workspace === "profile-view" && selectedProfile) return <div><Header title="查看人才档案" description={`${selectedProfile.name} · 只读档案信息`} action={<BackButton onClick={() => setWorkspace("main")}/>}/><TalentProfileDetail data={employeeProfiles} employee={selectedProfile}/></div>;
   if (workspace === "profile-edit") return <div><Header title="维护人才档案" description="统一维护员工入职、合同、职级、薪资和人才决策事实" action={<BackButton onClick={() => setWorkspace("main")}/>}/><EmployeeProfileEditor data={employeeProfiles} initialSelectedId={selectedProfileId || undefined}/></div>;
   if (workspace === "main") return <div>
-    <Header title="人才履历" description="查询人才档案及已正式发生的晋升、续签、加薪和奖励记录" action={<div className="flex flex-wrap gap-2">{employeeProfiles.canEdit && <Button variant="outline" className={actionClass} onClick={() => { router.refresh(); setSelectedProfileId(""); setWorkspace("profile-edit"); }}>维护人才档案</Button>}{data.canManage && <Button className={actionClass} onClick={() => setWorkspace("history")}><Plus className="h-4 w-4"/>进入履历管理</Button>}</div>}/>
+    <Header title="人才履历" description="查询人才档案及已正式发生的晋升、续签、加薪和奖励记录" action={<div className="flex flex-wrap gap-2">{employeeProfiles.canEdit && <Button variant="outlined" className={actionClass} onClick={() => { router.refresh(); setSelectedProfileId(""); setWorkspace("profile-edit"); }}>维护人才档案</Button>}{data.canManage && <Button className={actionClass} onClick={() => setWorkspace("history")}><Plus className="h-4 w-4"/>进入履历管理</Button>}</div>}/>
     <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
       <SelectableMetric label="人才档案" value={`${employeeProfiles.employees.length} 人`} selected={selectedCategory === "profiles"} onClick={() => setSelectedCategory("profiles")}/>
       <SelectableMetric label="续签记录" value={`${data.counts.contract} 条`} selected={selectedCategory === "contract"} onClick={() => setSelectedCategory("contract")}/>
@@ -482,7 +483,7 @@ function ProfileDeleteDialog({ target, state, pending, action, onClose }: {
       {matchingError ? <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{state.message}</p> : null}
       <form action={action} className="mt-6 flex justify-end gap-3">
         <input type="hidden" name="userId" value={target.id}/>
-        <Button type="button" variant="outline" className={`${actionClass} whitespace-nowrap`} onClick={onClose} disabled={pending}>取消</Button>
+        <Button type="button" variant="outlined" className={`${actionClass} whitespace-nowrap`} onClick={onClose} disabled={pending}>取消</Button>
         <Button type="submit" className={`${actionClass} whitespace-nowrap bg-red-600 hover:bg-red-700`} disabled={pending}>{pending ? "删除中" : "确认删除"}</Button>
       </form>
     </div>

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button } from "@/components/ui-kit";
+import { Badge } from "@/components/ui-kit";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { queryAuditLogsAction } from "./actions";
 import { type UnifiedAuditRecord } from "@/server/audit";
+import { Button } from "@rjmart/ui";
 
 interface AuditLogTableProps {
   view: string;
@@ -125,7 +126,7 @@ export function AuditLogTable({ view, searchParams }: AuditLogTableProps) {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+            variant="outlined"
             size="sm"
             disabled={page <= 1}
             onClick={() => {
@@ -138,7 +139,7 @@ export function AuditLogTable({ view, searchParams }: AuditLogTableProps) {
             上一页
           </Button>
           <Button
-            variant="outline"
+            variant="outlined"
             size="sm"
             disabled={page >= totalPages}
             onClick={() => {

@@ -1,8 +1,8 @@
 "use client";
 
-import { Button } from "@/components/ui-kit";
 import { Search, X } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@rjmart/ui";
 
 interface AuditFiltersProps {
   view: string;
@@ -145,7 +145,7 @@ export function AuditFilters({ view, users = [], initialFilters = {} }: AuditFil
           <Search className="mr-2 h-4 w-4" />
           查询
         </Button>
-        <Button variant="outline" size="sm" onClick={handleReset}>
+        <Button variant="outlined" size="sm" onClick={handleReset}>
           <X className="mr-2 h-4 w-4" />
           重置
         </Button>

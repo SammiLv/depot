@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { Button } from "@/components/ui-kit";
 import { UserAvatar } from "@/components/user-avatar";
 import { getRoleLabel } from "@/server/permissions/role-labels";
+import { Button } from "@rjmart/ui";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -73,7 +73,7 @@ export function UserSelector({ users }: { users: LoginUser[] }) {
         <div className="mt-8">
           <Button
             type="button"
-            variant="primary"
+            variant="solid"
             size="lg"
             className="w-full"
             disabled={!selectedUserId}

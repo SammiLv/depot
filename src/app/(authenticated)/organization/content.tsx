@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
+import { Badge, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { runServerAction } from "@/lib/run-server-action";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree, Search } from "lucide-react";
@@ -19,6 +19,8 @@ import {
   type PermissionSelectionState,
 } from "@/lib/permission-matrix";
 import type { OrganizationEntityNode, OrganizationHierarchyNode, OrganizationPersonNode } from "./page";
+import { Select as RjSelect } from "@rjmart/ui";
+import { Button } from "@rjmart/ui";
 
 type RoleType = "ADMIN" | "DEPARTMENT_MANAGER" | "TEAM_LEADER" | "MEMBER";
 
@@ -342,100 +344,6 @@ function getGrantScopeLabel(scopeType: KpiUserPermissionGrant["scopeType"]) {
 }
 
 type KpiApprovalPolicyStepDraft = Omit<KpiApprovalPolicy["steps"][number], "id">;
-
-type SearchableSelectOption = {
-  value: string;
-  label: string;
-};
-
-function SearchableSelect({
-  value,
-  options,
-  searchPlaceholder,
-  emptyLabel,
-  onChange,
-}: {
-  value: string;
-  options: SearchableSelectOption[];
-  searchPlaceholder: string;
-  emptyLabel: string;
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const selectedOption = options.find((option) => option.value === value) ?? options[0];
-  const normalizedSearch = search.trim().toLocaleLowerCase();
-  const filteredOptions = normalizedSearch
-    ? options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedSearch))
-    : options;
-
-  useEffect(() => {
-    if (!open) return;
-    const closeWhenClickingOutside = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", closeWhenClickingOutside);
-    document.addEventListener("keydown", closeWithEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeWhenClickingOutside);
-      document.removeEventListener("keydown", closeWithEscape);
-    };
-  }, [open]);
-
-  return (
-    <div ref={containerRef} className={`relative ${open ? "z-50" : "z-0"}`}>
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className={`flex h-9 w-full items-center justify-between gap-3 rounded-lg border bg-background px-3 text-left text-sm transition ${open ? "border-primary ring-2 ring-primary/15" : "border-border hover:border-ring"}`}
-      >
-        <span className="min-w-0 flex-1 truncate">{selectedOption?.label ?? emptyLabel}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[260px] rounded-xl border border-border bg-card p-2 shadow-xl">
-          <input
-            autoFocus
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={searchPlaceholder}
-            className="mb-2 h-9 w-full rounded-lg border border-primary bg-background px-3 text-sm outline-none ring-2 ring-primary/10"
-          />
-          <div role="listbox" className="max-h-56 space-y-1 overflow-y-auto">
-            {filteredOptions.length > 0 ? filteredOptions.map((option) => {
-              const selected = option.value === value;
-              return (
-                <button
-                  key={option.value || "automatic"}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => {
-                    onChange(option.value);
-                    setSearch("");
-                    setOpen(false);
-                  }}
-                  className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${selected ? "bg-primary/10 text-primary" : "hover:bg-muted"}`}
-                >
-                  <span>{option.label}</span>
-                  {selected ? <Check className="h-4 w-4 shrink-0" /> : null}
-                </button>
-              );
-            }) : (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">{emptyLabel}</div>
-            )}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function getApprovalResolverTypeForNode(nodeType: ApprovalOrgNodeOption["nodeType"]): KpiApprovalPolicyStepDraft["resolverType"] {
   if (nodeType === "TEAM") return "TEAM_LEADER";
@@ -781,7 +689,7 @@ function UserForm({
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">{isEdit ? "保存" : "创建"}</Button>
       </div>
     </form>
@@ -807,7 +715,7 @@ function DepartmentForm({ users, onClose }: { users: OrgUser[]; onClose: () => v
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">创建</Button>
       </div>
     </form>
@@ -905,7 +813,7 @@ function TeamForm({
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">{isEdit ? "保存" : "创建"}</Button>
       </div>
     </form>
@@ -922,9 +830,9 @@ function DeleteConfirm({ message, action, onClose }: { message: string; action: 
       <p className="text-sm text-muted-foreground">{message}</p>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <div className="flex justify-end gap-3">
-        <Button variant="outline" disabled={pending} onClick={onClose}>取消</Button>
+        <Button variant="outlined" disabled={pending} onClick={onClose}>取消</Button>
         <Button
-          variant="primary"
+          variant="solid"
           disabled={pending}
           onClick={async () => {
             setPending(true);
@@ -1107,7 +1015,7 @@ function KpiUserPermissionGrantForm({
       </div>
 
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button
           type="submit"
           disabled={selectedUserIds.length === 0 || selectedAbilityKeys.length === 0 || selectedNodeIds.length === 0}
@@ -1143,7 +1051,7 @@ function ApplyAllDepartmentsConfirm({ data, onClose }: { data: ApplyAllDialogDat
         覆盖应用到全部部门。此操作会替换各部门当前该权限的显式配置。
       </p>
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">确认应用</Button>
       </div>
     </form>
@@ -1236,7 +1144,7 @@ function PermissionMatrixSyncConfirm({ data, onClose }: { data: PermissionMatrix
       </p>
       {error ? <div role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" disabled={pending} onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" disabled={pending} onClick={onClose}>取消</Button>
         <Button type="submit" disabled={pending}>{pending ? "同步中…" : data.mode === "CHANGES" ? "确认同步本次变更" : "确认完整覆盖所有部门"}</Button>
       </div>
     </form>
@@ -1558,7 +1466,7 @@ function KpiApprovalPolicyForm({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="font-medium">审批步骤</div>
-          <Button type="button" variant="outline" className="h-8" onClick={() => setSteps((rows) => [...rows, {
+          <Button type="button" variant="outlined" className="h-8" onClick={() => setSteps((rows) => [...rows, {
             label: `审批步骤 ${rows.length + 1}`,
             nodeMode: "CASCADE_TO_DEPARTMENT",
             approvalOrgNodeId: null,
@@ -1584,18 +1492,20 @@ function KpiApprovalPolicyForm({
               </label>
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground">审批节点</span>
-                <SearchableSelect
+                <RjSelect
+                  className="w-full"
+                  allowSearch
                   value={getApprovalNodeSelectValue(step)}
                   options={[
                     { value: "ORG_NODE_OWNER", label: "组织节点负责人" },
                     { value: "CASCADE_TO_DEPARTMENT", label: "逐级审批至部门" },
                   ]}
-                  searchPlaceholder="搜索审批节点"
-                  emptyLabel="暂无匹配的审批节点"
+                  placeholder="搜索审批节点"
                   onChange={(value) => {
+                    const nextValue = String(value ?? "");
                     setSteps((rows) => rows.map((row, rowIndex) => {
                       if (rowIndex !== index) return row;
-                      if (value === "CASCADE_TO_DEPARTMENT") return { ...row, nodeMode: "CASCADE_TO_DEPARTMENT", approvalOrgNodeId: null, approvalOrgNodeIds: [], ancestorDepth: null, resolverType: "TEAM_LEADER", resolverUserId: null };
+                      if (nextValue === "CASCADE_TO_DEPARTMENT") return { ...row, nodeMode: "CASCADE_TO_DEPARTMENT", approvalOrgNodeId: null, approvalOrgNodeIds: [], ancestorDepth: null, resolverType: "TEAM_LEADER", resolverUserId: null };
                       return { ...row, nodeMode: "ORG_NODE_OWNER", approvalOrgNodeId: null, ancestorDepth: null, resolverType: "TEAM_LEADER" };
                     }));
                   }}
@@ -1608,15 +1518,16 @@ function KpiApprovalPolicyForm({
                     {getAutomaticApproverLabel(step, orgNodeById)}
                   </div>
                 ) : (
-                  <SearchableSelect
+                  <RjSelect
+                    className="w-full"
+                    allowSearch
                     value={step.resolverUserId ?? ""}
                     options={[
                       { value: "", label: getAutomaticApproverLabel(step, orgNodeById) },
                       ...selectableUsers.map((user) => ({ value: user.id, label: `指定审批人：${user.name}` })),
                     ]}
-                    searchPlaceholder="搜索审批人"
-                    emptyLabel="暂无匹配的审批人"
-                    onChange={(value) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, resolverUserId: value || null } : row))}
+                    placeholder="搜索审批人"
+                    onChange={(value) => setSteps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, resolverUserId: String(value ?? "") || null } : row))}
                   />
                 )}
               </div>
@@ -1651,7 +1562,7 @@ function KpiApprovalPolicyForm({
         ))}
       </div>
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="submit">保存策略</Button>
       </div>
     </form>
@@ -2152,15 +2063,15 @@ export function OrgContent({
             {tab === "organization" && (canManageUsers || canManageTeams || (isAdmin && selectedScope.scopeType === "SYSTEM")) && (
               <div className="flex flex-wrap items-center gap-2">
                 {isAdmin && selectedScope.scopeType === "SYSTEM" && (
-                  <Button variant="outline" onClick={handleDingTalkSync} className="h-9 rounded-lg text-primary border-primary/40" disabled={syncing}>
+                  <Button variant="outlined" onClick={handleDingTalkSync} className="h-9 rounded-lg text-primary border-primary/40" disabled={syncing}>
                     <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
                     {syncing ? "更新中" : "从钉钉更新"}
                   </Button>
                 )}
                 {isAdmin && selectedScope.scopeType === "SYSTEM" && (
-                  <Button variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "department" })}><Plus className="w-4 h-4" />新增部门</Button>
+                  <Button variant="outlined" className="h-9 rounded-lg" onClick={() => setDialog({ type: "department" })}><Plus className="w-4 h-4" />新增部门</Button>
                 )}
-                {canManageTeams && <Button variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
+                {canManageTeams && <Button variant="outlined" className="h-9 rounded-lg" onClick={() => setDialog({ type: "team" })}><Plus className="w-4 h-4" />新增小组</Button>}
                 {canManageUsers && <Button className="h-9 rounded-lg" onClick={() => setDialog({ type: "user" })}><Plus className="w-4 h-4" />新增成员</Button>}
               </div>
             )}
@@ -2783,7 +2694,7 @@ export function OrgContent({
                       <div className="mt-1 text-xs text-muted-foreground">为具体用户追加跨节点查看或操作权限，不影响角色默认权限。</div>
                     </div>
                     {canManageRolePermissions ? (
-                      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setDialog({ type: "kpiUserPermission" })}>
+                      <Button type="button" variant="outlined" className="h-9 rounded-lg" onClick={() => setDialog({ type: "kpiUserPermission" })}>
                         <Plus className="w-4 h-4" />新增授权
                       </Button>
                     ) : null}
@@ -3051,7 +2962,7 @@ export function OrgContent({
                         <option value="">选择主管</option>
                         {users.filter((u) => u.roleType !== "ADMIN").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                       </select>
-                      <Button type="submit" variant="outline" className="h-9 px-3 text-xs">保存</Button>
+                      <Button type="submit" variant="outlined" className="h-9 px-3 text-xs">保存</Button>
                     </form>
                   )}
                 </div>

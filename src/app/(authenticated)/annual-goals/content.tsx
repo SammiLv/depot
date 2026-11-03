@@ -2,11 +2,12 @@
 
 import { useEffect, useState, type ComponentProps, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Badge, Button as UiButton, Card, Progress } from "@/components/ui-kit";
+import { Badge, Card, Progress } from "@/components/ui-kit";
 import { createAnnualGoalMetric, createAnnualGoalMetricSource, createAnnualGoalPlan, deleteAnnualGoalMetric, deleteAnnualGoalMetricSource, deleteAnnualGoalPlan, deleteAnnualGoalQuarterTargets, saveAnnualGoalQuarterTargets, updateAnnualGoalMetric, updateAnnualGoalMetricSource, updateAnnualGoalPlan, updateAnnualGoalQuarterProgress, updateAnnualGoalWeeklyProgress } from "@/server/annual-goals/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import type { getAnnualGoalsData } from "@/server/annual-goals/annual-goals-query";
 import { Edit, Plus, Trash2, X } from "lucide-react";
+import { Button as RjButton } from "@rjmart/ui";
 
 type Data = Awaited<ReturnType<typeof getAnnualGoalsData>>;
 type Plan = Data["plans"][number];
@@ -17,8 +18,8 @@ type PlanDetailView = Pick<Plan, "ownerType" | "year" | "metrics" | "permissions
 type PlanTab = "metrics" | "sources" | "quarters";
 type Props = { data: Data };
 
-function Button({ className = "", size = "md", ...props }: ComponentProps<typeof UiButton>) {
-  return <UiButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
+function Button({ className = "", size = "default", ...props }: ComponentProps<typeof RjButton>) {
+  return <RjButton {...props} size={size} className={`rounded-lg px-5 text-sm font-semibold shadow-none ${className}`.trim()} />;
 }
 
 function renderRequiredLabel(label: string) {
@@ -301,7 +302,7 @@ function PlanForm({ plan, data, onClose }: { plan?: Plan; data: Data; onClose: (
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit">{plan ? "保存" : "创建"}</Button>
         </div>
       </div>
@@ -534,7 +535,7 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit">{metric ? "保存" : isTeamPlan ? "选择" : "创建"}</Button>
         </div>
       </div>
@@ -690,7 +691,7 @@ function SourceMetricForm({ plan, parentMetric: initialParent, sourceMetric, dat
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit" disabled={!parentMetric}>{sourceMetric ? "保存" : "创建"}</Button>
         </div>
       </div>
@@ -809,7 +810,7 @@ function QuarterTargetForm({ metric, sourceMetric, onClose }: { metric: Metric; 
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit">保存</Button>
         </div>
       </div>
@@ -959,7 +960,7 @@ function QuarterTargetSetupForm({ plan, onClose }: { plan: Plan; onClose: () => 
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit">保存</Button>
         </div>
       </div>
@@ -1088,7 +1089,7 @@ function QuarterProgressUpdateForm({ metric, sourceMetric, onClose }: { metric: 
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit">保存</Button>
         </div>
       </div>
@@ -1187,7 +1188,7 @@ function QuarterWeeklyUpdateForm({ plan, onClose }: { plan: Plan; onClose: () =>
       <div className="mt-6 space-y-3">
         {error && <div className="text-sm text-destructive">{error}</div>}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
           <Button type="submit">保存</Button>
         </div>
       </div>
@@ -1219,7 +1220,7 @@ function QuarterTargetChooser({ plan, onSelect, onClose }: { plan: Plan; onSelec
       </div>
       {options.length === 0 && <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">暂无可拆解的部门指标或元指标</div>}
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" onClick={onClose}>取消</Button>
         <Button type="button" onClick={() => selected && onSelect(selected.metric, selected.sourceMetric)}>继续</Button>
       </div>
     </div>
@@ -1237,7 +1238,7 @@ function DeleteMetricConfirm({ metric, onClose }: { metric: Metric; onClose: () 
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">确认删除指标「{metric.name}」？删除后不会计入方案权重和完成度。</p>
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button variant="outlined" onClick={onClose}>取消</Button>
         <form onSubmit={handleSubmit} noValidate>
           {metric.assignmentId
             ? <input type="hidden" name="assignmentId" value={metric.assignmentId} />
@@ -1260,7 +1261,7 @@ function DeleteSourceMetricConfirm({ sourceMetric, onClose }: { sourceMetric: So
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">确认删除元指标「{sourceMetric.name}」？相关承接关系和共享季度指标也会同步软删。</p>
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button variant="outlined" onClick={onClose}>取消</Button>
         <form onSubmit={handleSubmit} noValidate>
           <input type="hidden" name="id" value={sourceMetric.id} />
           <Button type="submit" className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
@@ -1283,7 +1284,7 @@ function DeleteQuarterTargetsConfirm({ metric, sourceMetric, onClose }: { metric
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">确认删除「{subject.name}」的季度指标？删除后该行不再展示在季度指标列表中。</p>
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button variant="outlined" onClick={onClose}>取消</Button>
         <form onSubmit={handleSubmit} noValidate>
           <input type="hidden" name="metricId" value={metric.authorityMetricId} />
           {(sourceMetric?.id ?? metric.sourceMetricId) && (
@@ -1318,7 +1319,7 @@ function DeletePlanConfirm({ plan, years, onClose }: { plan: Plan; years: number
       </div>
       <p className="text-sm text-muted-foreground">确认删除方案「{plan.name}」？删除后会同步软删该方案下的部门指标、元指标、承接关系和季度指标。</p>
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button variant="outlined" onClick={onClose}>取消</Button>
         <form id="delete-plan-form" onSubmit={handleSubmit} noValidate>
           <input type="hidden" name="id" value={plan.id} />
           <Button type="submit" className="!bg-destructive hover:!bg-destructive/90">确认删除</Button>
@@ -1611,13 +1612,13 @@ export function AnnualGoalsContent({ data }: Props) {
     <>
       {tab === "metrics" && activePlanDetailView?.ownerType === "DEPARTMENT" ? (
         <>
-          {data.permissions.canCreatePlan && <Button variant="outline" onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建部门方案</Button>}
+          {data.permissions.canCreatePlan && <Button variant="outlined" onClick={() => setPlanDialog("new")}><Plus className="w-4 h-4" />新建部门方案</Button>}
           {data.permissions.canEditDepartmentPlans && activeDepartmentPlan ? (
             <>
-              <Button variant="outline" onClick={() => setPlanDialog(activeDepartmentPlan)}>
+              <Button variant="outlined" onClick={() => setPlanDialog(activeDepartmentPlan)}>
                 <Edit className="w-4 h-4" />编辑方案
               </Button>
-              <Button variant="outline" onClick={() => setDeletePlan(activeDepartmentPlan)} className="text-destructive hover:text-destructive">
+              <Button variant="outlined" onClick={() => setDeletePlan(activeDepartmentPlan)} className="text-destructive hover:text-destructive">
                 <Trash2 className="w-4 h-4" />删除方案
               </Button>
             </>
@@ -1651,7 +1652,7 @@ export function AnnualGoalsContent({ data }: Props) {
             <Button onClick={() => setQuarterTargetSetupPlan(activePlan)}>拆解季度指标</Button>
           )}
           {tab === "quarters" && (activePlan.ownerType === "DEPARTMENT" || activePlan.ownerType === "TEAM") && activePlan.permissions.canUpdateWeeklyProgress && (
-            <Button variant="outline" onClick={() => setWeeklyProgressPlan(activePlan)}>周更新</Button>
+            <Button variant="outlined" onClick={() => setWeeklyProgressPlan(activePlan)}>周更新</Button>
           )}
         </>
       ) : null}
@@ -1813,7 +1814,7 @@ export function AnnualGoalsContent({ data }: Props) {
                   ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {tab === "metrics" ? <Button variant="outline" disabled><Plus className="w-4 h-4" />新增年度指标</Button> : null}
+                  {tab === "metrics" ? <Button variant="outlined" disabled><Plus className="w-4 h-4" />新增年度指标</Button> : null}
                   <label className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground">
                     <select
                       value={String(data.selectedYear)}

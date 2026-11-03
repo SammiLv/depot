@@ -6,10 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
-import { Badge, Button, Card } from "@/components/ui-kit";
-import { toast, ToastHost } from "@/components/toast";
+import { Badge, Card } from "@/components/ui-kit";
+import { message } from "@rjmart/ui";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
 import { pickKpiFilterParams } from "../kpi-sections";
+import { Button } from "@rjmart/ui";
 
 type EditableStage = "SELF" | "LEADER" | "MANAGER" | "FINAL" | null;
 type PendingAction = "submit" | "approve" | "reject" | null;
@@ -263,7 +264,7 @@ function ConfirmDialog({
           </div>
         ) : null}
         <div className="mt-6 flex justify-end gap-3">
-          <Button type="button" variant="outline" disabled={submitting} onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" disabled={submitting} onClick={onClose}>取消</Button>
           <Button type="button" disabled={submitting || (requireRemark ? !(remark ?? "").trim() : false)} onClick={onConfirm}>{confirmLabel}</Button>
         </div>
       </div>
@@ -352,14 +353,14 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
         if (!Number.isFinite(value)) {
           setPendingAction(null);
           setErrorMessage(`第${index + 1}项“${item.name}”评分格式不正确`);
-          toast.error(`第${index + 1}项“${item.name}”评分格式不正确`);
+          message.error(`第${index + 1}项“${item.name}”评分格式不正确`);
           return;
         }
         const directionError = validateScoreByDirection(value, item.scoreDirection);
         if (directionError) {
           setPendingAction(null);
           setErrorMessage(`第${index + 1}项“${item.name}”${directionError}`);
-          toast.error(`第${index + 1}项“${item.name}”${directionError}`);
+          message.error(`第${index + 1}项“${item.name}”${directionError}`);
           return;
         }
       }
@@ -416,7 +417,6 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
   return (
     <>
-      <ToastHost />
       <form ref={formRef} className="space-y-6 pb-24">
         <input type="hidden" name="personalKpiId" value={data.id} />
         {!canEditFinal ? <input type="hidden" name="attendanceScore" value={formatScore(data.totals.attendanceScore)} /> : null}
@@ -432,7 +432,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
               </p>
             </div>
             <Link href={backHref}>
-              <Button className="rounded-lg" variant="outline">返回 KPI 列表</Button>
+              <Button className="rounded-lg" variant="outlined">返回 KPI 列表</Button>
             </Link>
           </div>
 
@@ -769,8 +769,8 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
           {!viewOnly && data.availableActions.canSave ? (
             <div className="flex flex-wrap justify-end gap-3 border-t border-border pt-4">
-              <Button className="rounded-lg" variant="outline" disabled={isSubmitting} onClick={() => void runAction("save")}>保存</Button>
-              {data.availableActions.canReject ? <Button className="rounded-lg" variant="outline" disabled={isSubmitting} onClick={() => openPendingAction("reject")}>退回</Button> : null}
+              <Button className="rounded-lg" variant="outlined" disabled={isSubmitting} onClick={() => void runAction("save")}>保存</Button>
+              {data.availableActions.canReject ? <Button className="rounded-lg" variant="outlined" disabled={isSubmitting} onClick={() => openPendingAction("reject")}>退回</Button> : null}
               {data.availableActions.canSubmit ? <Button className="rounded-lg" disabled={isSubmitting} onClick={() => openPendingAction("submit")}>提交</Button> : null}
               {data.availableActions.canApprove ? <Button className="rounded-lg" disabled={isSubmitting} onClick={() => openPendingAction("approve")}>审核通过</Button> : null}
             </div>

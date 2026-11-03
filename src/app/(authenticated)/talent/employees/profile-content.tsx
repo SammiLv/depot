@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 import { ArrowLeft, Save, Search } from "lucide-react";
-import { Badge, Button, Card, PageHeader } from "@/components/ui-kit";
+import { Badge, Card, PageHeader } from "@/components/ui-kit";
 import { saveEmployeeBasicProfile, type EmployeeProfileActionState } from "@/server/talent/employee-profile-actions";
 import type { getEmployeeProfileManagementData } from "@/server/talent/employee-profile-query";
+import { Button } from "@rjmart/ui";
 
 export type EmployeeProfileData = Awaited<ReturnType<typeof getEmployeeProfileManagementData>>;
 

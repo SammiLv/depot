@@ -85,22 +85,3 @@ export function Progress({ value, tone = "primary" }: { value: number; tone?: "p
   );
 }
 
-export function Button({
-  children, variant = "primary", size = "md", onClick, type = "button", className = "", disabled = false, form,
-}: { children: ReactNode; variant?: "primary" | "ghost" | "outline"; size?: "sm" | "md" | "lg"; onClick?: () => void; type?: "button" | "submit"; className?: string; disabled?: boolean; form?: string }) {
-  const variants: Record<string, string> = {
-    primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-    ghost: "hover:bg-muted text-foreground",
-    outline: "border border-border bg-card hover:bg-muted text-foreground",
-  };
-  const sizes: Record<string, string> = {
-    sm: "h-8 px-3 text-xs",
-    md: "h-9 px-4 text-sm",
-    lg: "h-12 px-6 text-[15px]",
-  };
-  return (
-    <button type={type} form={form} onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}>
-      {children}
-    </button>
-  );
-}

@@ -1,13 +1,13 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { Button } from "@/components/ui-kit";
+import { Button } from "@rjmart/ui";
 
 function SubmitButton({ pendingText, idleText }: { pendingText: string; idleText: string }) {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" variant="primary" size="lg" className="w-full" disabled={pending}>
+    <Button type="submit" size="lg" className="w-full" disabled={pending}>
       {pending ? pendingText : idleText}
     </Button>
   );

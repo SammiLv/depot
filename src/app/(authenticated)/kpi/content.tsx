@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Badge, Button, Card, Progress } from "@/components/ui-kit";
+import { Badge, Card, Progress } from "@/components/ui-kit";
 import { downloadKpiTemplateCsv, importKpiTemplates, initializeQuarterlyKpis, updateKpiTemplate, createKpiTemplate, toggleKpiTemplateActive, deleteKpiTemplate, deletePersonalKpi } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import { Search, Upload, X, GripVertical } from "lucide-react";
@@ -12,6 +12,7 @@ import { isEffectiveScoreBelow } from "@/server/kpi/kpi-list-score-display";
 import { BusinessAssessmentQuarterlyWorkspace, WorkIncidentWorkspace } from "../talent/operation-workspaces";
 import type { AssessmentWorkspaceData, IncidentWorkspaceData } from "../talent/operation-workspace-types";
 import { buildKpiSectionHref, KPI_SECTION_TABS, type KpiSectionTab } from "./kpi-sections";
+import { Button } from "@rjmart/ui";
 
 
 type Props = {
@@ -236,7 +237,7 @@ function QuarterlyKpiDeleteConfirm({ row, onClose, onComplete }: { row: Quarterl
       <p className="text-sm text-muted-foreground">确认删除成员「{row.userName}」的季度 KPI？删除后该成员本季度的 KPI 数据将被移除，且无法恢复。</p>
       {errorMessage ? <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorMessage}</div> : null}
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button variant="outlined" onClick={onClose}>取消</Button>
         <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
       </div>
     </div>
@@ -262,7 +263,7 @@ function TemplateDeleteConfirm({ row, onClose, onComplete }: { row: TemplateRow;
       </p>
       {errorMessage ? <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorMessage}</div> : null}
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={onClose}>取消</Button>
+        <Button variant="outlined" onClick={onClose}>取消</Button>
         <Button className="!bg-destructive hover:!bg-destructive/90" onClick={() => void handleDelete()}>确认删除</Button>
       </div>
     </div>
@@ -657,7 +658,7 @@ function CreateTemplateDrawer({
           <div className="text-sm font-medium">模板项</div>
           <Button
             type="button"
-            variant="outline"
+            variant="outlined"
             className="h-9 rounded-lg"
             onClick={() =>
               setDraftItems([
@@ -801,7 +802,7 @@ function CreateTemplateDrawer({
       </div>
 
       <div className="sticky bottom-[-1.5rem] mt-6 flex justify-end gap-3 border-t border-border bg-card px-6 py-4">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">创建模板</Button>
       </div>
     </form>
@@ -1064,7 +1065,7 @@ function TemplateEditDrawer({
             <div className="text-sm font-medium">模板项</div>
             <Button
               type="button"
-              variant="outline"
+              variant="outlined"
               className="h-9 rounded-lg"
               onClick={() =>
                 setDraftItems([
@@ -1222,7 +1223,7 @@ function TemplateEditDrawer({
         </div>
 
         <div className="sticky bottom-[-1.5rem] mt-6 flex justify-end gap-3 border-t border-border bg-card px-6 py-4">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           <Button type="submit" className="rounded-lg">保存修改</Button>
         </div>
       </form>
@@ -1289,7 +1290,7 @@ function InitializeForm({
         <div>维护后模板再修改，也不会影响已生成单据</div>
       </div>
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">确定</Button>
       </div>
     </form>
@@ -1369,7 +1370,7 @@ function TemplateImportForm({
         />
       </div>
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="h-9 rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="h-9 rounded-lg"><Upload className="h-4 w-4" />导入模板</Button>
       </div>
     </form>
@@ -1688,8 +1689,8 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
               canManageKpi ? <Button className="h-9 rounded-lg" onClick={() => setShowInitDialog(true)}>初始化季度KPI</Button> : null
             ) : canManageKpiTemplate ? (
               <>
-                <Button variant="outline" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
-                {canManageKpiTemplate ? <Button variant="outline" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button> : null}
+                <Button variant="outlined" className="h-9 rounded-lg" onClick={handleDownloadTemplate}>下载模板</Button>
+                {canManageKpiTemplate ? <Button variant="outlined" className="h-9 rounded-lg" onClick={() => setShowImportDialog(true)}><Upload className="w-4 h-4" />导入模板</Button> : null}
                 {canManageKpiTemplate ? <Button className="h-9 rounded-lg" onClick={() => setShowCreateDrawer(true)}>新建模板</Button> : null}
               </>
             ) : null}

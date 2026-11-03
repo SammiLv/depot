@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ConfigProvider } from "@rjmart/ui";
 import { getCurrentUser } from "@/server/auth/current-user";
 import { getRoleLabel } from "@/server/permissions/role-labels";
 import { prisma } from "@/server/db/prisma";
@@ -61,5 +62,5 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
       path: menuPermission.path,
     }));
 
-  return <AppShell user={user} allowedMenus={allowedMenus}>{children}</AppShell>;
+  return <AppShell user={user} allowedMenus={allowedMenus}><ConfigProvider>{children}</ConfigProvider></AppShell>;
 }

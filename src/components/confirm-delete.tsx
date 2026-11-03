@@ -1,12 +1,15 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useState } from "react";
+import { Button, confirm, message } from "@rjmart/ui";
 
 type ConfirmDeleteState = { status: string; message: string };
 
 /**
- * 通用删除二次确认弹窗。不用浏览器 window.confirm，统一产品内弹窗样式。
- * action 为 useActionState 兼容的 server action；hidden 为随表单提交的隐藏字段。
+ * 删除二次确认按钮（全部基于 @rjmart/ui）：
+ * 触发器为公司库 Button（link + danger），点击弹库 confirm（危险确定按钮），
+ * 确认后组装 hidden 字段调用 server action（useActionState 签名兼容），
+ * 失败以 message.error 提示。
  */
 export function ConfirmDeleteButton<S extends ConfirmDeleteState>({
   action,
@@ -15,7 +18,7 @@ export function ConfirmDeleteButton<S extends ConfirmDeleteState>({
   title,
   description,
   trigger,
-  triggerClassName = "inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700",
+  triggerClassName,
   disabled = false,
   triggerTitle,
 }: {
@@ -29,50 +32,44 @@ export function ConfirmDeleteButton<S extends ConfirmDeleteState>({
   disabled?: boolean;
   triggerTitle?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState(action, initialState);
-  useEffect(() => {
-    if (state.status === "success") setOpen(false);
-  }, [state]);
+  const [pending, setPending] = useState(false);
+
+  const handleClick = async () => {
+    const ok = await confirm({
+      title,
+      description,
+      okText: "确定删除",
+      cancelText: "取消",
+      okButtonProps: { color: "danger" },
+    });
+    if (!ok) return;
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(hidden)) {
+      formData.append(key, value);
+    }
+    setPending(true);
+    try {
+      const result = await action(initialState, formData);
+      if (result.status === "error" && result.message) {
+        message.error(result.message);
+      }
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
-    <>
-      <button type="button" disabled={disabled} title={triggerTitle} onClick={() => setOpen(true)} className={triggerClassName}>
-        {trigger}
-      </button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
-            <h3 className="text-base font-semibold text-foreground">{title}</h3>
-            <p className="mt-2 text-sm text-muted-foreground">{description}</p>
-            {state.status === "error" && state.message && (
-              <p className="mt-3 text-sm text-red-600">{state.message}</p>
-            )}
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => setOpen(false)}
-                className="h-9 rounded-lg border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                取消
-              </button>
-              <form action={formAction}>
-                {Object.entries(hidden).map(([key, value]) => (
-                  <input key={key} type="hidden" name={key} value={value} />
-                ))}
-                <button
-                  type="submit"
-                  disabled={pending}
-                  className="h-9 rounded-lg bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-                >
-                  {pending ? "删除中…" : "确定删除"}
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <Button
+      type="button"
+      variant="link"
+      color="danger"
+      size="sm"
+      disabled={disabled || pending}
+      title={triggerTitle}
+      onClick={handleClick}
+      className={triggerClassName}
+    >
+      {trigger}
+    </Button>
   );
 }
