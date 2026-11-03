@@ -3,12 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DateInput } from "@/components/date-input";
-import { DateRangePicker } from "@/components/date-range-picker";
-import { QuarterSelect } from "@/components/quarter-select";
-import { SearchableSelect } from "@/components/searchable-select";
-import { Input as RjInput, InputNumber as RjInputNumber, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
-import { Badge, Button, Card, Progress } from "@/components/ui-kit";
+import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, InputNumber as RjInputNumber, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
+import { Badge, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
@@ -27,6 +23,7 @@ import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@
 import { runServerAction } from "@/lib/run-server-action";
 import { getServerActionErrorMessage } from "@/lib/server-action-error";
 import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
+import { Button } from "@rjmart/ui";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
 type BoardTab = "goal" | "project" | "board" | "value" | "log";
@@ -466,7 +463,7 @@ function BoardSearchBar({
             className="h-9 w-64 rounded-lg bg-muted pl-9 pr-3 text-sm focus:outline-none"
           />
         </div>
-        <Button type="submit" variant="outline" className="h-9 rounded-lg">搜索</Button>
+        <Button type="submit" variant="outlined" className="h-9 rounded-lg">搜索</Button>
         {appliedQuery ? (
           <button
             type="button"
@@ -493,6 +490,60 @@ function FormRow({ label, children, align = "start", labelClassName }: { label: 
     <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4">
       <label className={`text-sm font-medium ${alignmentClass}`}>{renderRequiredLabel(label)}</label>
       <div>{children}</div>
+    </div>
+  );
+}
+
+/** 需求弹窗改版（设计稿）：两列等宽行，列间距 16px */
+function FieldRow({ children }: { children: React.ReactNode }) {
+  return <div className="flex gap-4">{children}</div>;
+}
+
+/** 规划周期可选项：去年至明年各季度（格式 yyyy-Qn，与库 Select 搭配替代自建 QuarterSelect）。模块级常量，跨年刷新后自动更新 */
+function buildQuarterOptions(): Array<{ value: string; label: string }> {
+  const year = new Date().getFullYear();
+  return [year - 1, year, year + 1].flatMap((optionYear) =>
+    [1, 2, 3, 4].map((quarter) => ({ value: `${optionYear}-Q${quarter}`, label: `${optionYear} Q${quarter}` })),
+  );
+}
+
+const quarterOptions = buildQuarterOptions();
+
+/** 表单日期选择：库 DatePicker + 隐藏域，随选随写 yyyy-MM-dd 供 server action 提交 */
+function FormDatePicker({ name, defaultDate }: { name: string; defaultDate?: Date | string | null }) {
+  const [value, setValue] = useState(toDateInputValue(defaultDate));
+  return (
+    <>
+      <input type="hidden" name={name} value={value} />
+      <RjDatePicker
+        defaultValue={defaultDate ? new Date(defaultDate) : null}
+        onChange={(next) => setValue(toDateInputValue(next))}
+        placeholder="选择时间"
+        className="w-full"
+      />
+    </>
+  );
+}
+
+/** 需求弹窗改版（设计稿）：标签在上（14px #181818 + 红色 *），控件在下，间距 6px */
+function FieldCell({
+  label,
+  required = false,
+  className,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`flex min-w-0 flex-col gap-1.5 ${className ?? ""}`}>
+      <span className="flex items-center gap-[3px] text-sm leading-[22px] text-[#181818]">
+        {label}
+        {required ? <span className="text-[12px] font-semibold leading-[18px] text-[#F53F3F]">*</span> : null}
+      </span>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -530,14 +581,18 @@ function MemberPicker({
   }, [defaultValue]);
 
   return (
-    <SearchableSelect
-      name={name}
-      options={options.map((option) => ({ value: option.id, label: option.label }))}
-      value={selectedId || null}
-      onChange={(next) => setSelectedId(next)}
-      placeholder="搜索成员"
-      className="w-full"
-    />
+    <>
+      <input type="hidden" name={name} value={selectedId} />
+      <RjSelect
+        allowSearch
+        clearable
+        options={options.map((option) => ({ value: option.id, label: option.label }))}
+        value={selectedId || null}
+        onChange={(next) => setSelectedId(String(next ?? ""))}
+        placeholder="搜索成员"
+        className="w-full"
+      />
+    </>
   );
 }
 
@@ -611,17 +666,22 @@ function ProjectPicker({
   }, [defaultValue]);
 
   return (
-    <SearchableSelect
-      name={name}
-      options={options.map((option) => ({ value: option.id, label: option.label }))}
-      value={selectedId || null}
-      onChange={(next) => {
-        setSelectedId(next);
-        onChange?.(next);
-      }}
-      placeholder="搜索项目"
-      className="w-full"
-    />
+    <>
+      <input type="hidden" name={name} value={selectedId} />
+      <RjSelect
+        allowSearch
+        clearable
+        options={options.map((option) => ({ value: option.id, label: option.label }))}
+        value={selectedId || null}
+        onChange={(next) => {
+          const nextId = String(next ?? "");
+          setSelectedId(nextId);
+          onChange?.(nextId);
+        }}
+        placeholder="搜索项目"
+        className="w-full"
+      />
+    </>
   );
 }
 
@@ -680,6 +740,11 @@ function QuarterlyWorkForm({
   );
   const [devSourceValue, setDevSourceValue] = useState(item?.developmentSource ?? "");
   const [taskResultValue, setTaskResultValue] = useState(item?.taskResult ?? "");
+  const [completedAtValue, setCompletedAtValue] = useState(toDateInputValue(item?.completedAt));
+  const [periodValue, setPeriodValue] = useState({
+    start: toDateInputValue(item?.startDate),
+    end: toDateInputValue(item?.endDate),
+  });
   const workloadRequired = (mode === "backfill" || needsDevValue === "true") && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
   const ownerTeamOrgNodeIdByMemberId = useMemo(
@@ -707,13 +772,80 @@ function QuarterlyWorkForm({
     onClose();
   };
 
+  const closedReasonRequired = workStatus === "CLOSED";
+  const showCompletedFields = workStatus === "COMPLETED" || mode === "backfill";
+  /** 未启动态按设计稿不展示完成类字段（工作量/需求结果/需求执行概述），但隐藏域保留原值防止被清空 */
+  const showProgressFields = workStatus !== "NOT_STARTED";
+
   const formFields = (
     <>
-        <FormRow label="所属项目" align="center">
+      <FieldRow>
+        <FieldCell label="需求名称" required className="flex-1">
+          <RjInput
+            name="title"
+            required
+            defaultValue={item?.title ?? ""}
+            placeholder="请输入需求名称"
+            className="w-full"
+          />
+        </FieldCell>
+        <FieldCell label="需求状态" required className="flex-1">
+          <input type="hidden" name="status" value={workStatus} />
+          <RjSelect
+            options={statusOptions.map((option) => ({
+              value: option,
+              label: mode === "backfill" && option === "DELAYED_COMPLETED" ? "延期完成" : columnTitleByStatus[option],
+            }))}
+            value={workStatus}
+            onChange={(v) => setWorkStatus(v as ColumnStatus)}
+            className="w-full"
+          />
+        </FieldCell>
+      </FieldRow>
+      <FieldRow>
+        <FieldCell label="是否需要开发" required className="flex-1">
+          {mode === "backfill" ? (
+            <>
+              <input type="hidden" name="needsDevelopment" value="true" />
+              <div className="flex h-10 w-full items-center rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-muted-foreground transition-colors hover:border-[#3069F9]">是</div>
+            </>
+          ) : (
+            <>
+              <input type="hidden" name="needsDevelopment" value={needsDevValue} />
+              <RjSelect
+                options={[
+                  { label: "是", value: "true" },
+                  { label: "否", value: "false" },
+                ]}
+                value={needsDevValue || null}
+                onChange={(v) => setNeedsDevValue(String(v ?? ""))}
+                placeholder="请选择是否需要开发"
+                className="w-full"
+              />
+            </>
+          )}
+        </FieldCell>
+        <FieldCell label="开发方" required className="flex-1">
+          <input type="hidden" name="developmentSource" value={devSourceValue} />
+          <RjSelect
+            options={[
+              { label: "外部开发", value: DEVELOPMENT_SOURCE_EXTERNAL },
+              { label: "内部自研", value: DEVELOPMENT_SOURCE_INTERNAL },
+            ]}
+            value={devSourceValue || null}
+            onChange={(v) => setDevSourceValue(String(v ?? ""))}
+            placeholder="请选择"
+            disabled={needsDevValue !== "true"}
+            className="w-full"
+          />
+        </FieldCell>
+      </FieldRow>
+      <FieldRow>
+        <FieldCell label="所属项目" required className="flex-1">
           {mode === "backfill" ? (
             <>
               <input type="hidden" name="projectId" value={fixedProject?.id ?? ""} />
-              <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+              <div className="flex min-h-[40px] w-full items-center rounded-md border border-[#D9D9D9] bg-white px-3 py-1.5 text-sm text-foreground">
                 <div className="whitespace-pre-wrap break-words">{fixedProject?.title ?? "-"}</div>
               </div>
             </>
@@ -725,23 +857,8 @@ function QuarterlyWorkForm({
               onChange={setSelectedProjectId}
             />
           )}
-        </FormRow>
-        <FormRow label="项目预期收益 *">
-          <input type="hidden" name="expectedOutcome" value={selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? ""} />
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
-            <div className="whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? "-"}</div>
-          </div>
-        </FormRow>
-        <FormRow label="需求名称 *" align="center">
-          <RjInput
-            name="title"
-            required
-            defaultValue={item?.title ?? ""}
-            placeholder="请输入需求名称"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="负责人 *" align="center">
+        </FieldCell>
+        <FieldCell label="需求负责人" required className="flex-1">
           <MemberPicker
             name="ownerId"
             options={memberOptions}
@@ -752,141 +869,106 @@ function QuarterlyWorkForm({
               data.currentUserId,
             )}
           />
-        </FormRow>
-        <FormRow label="需求周期 *" align="center">
-          <DateRangePicker
-            nameStart="startDate"
-            nameEnd="endDate"
-            defaultStart={item?.startDate ?? null}
-            defaultEnd={item?.endDate ?? null}
+        </FieldCell>
+      </FieldRow>
+      {/* 项目预期收益字段已从弹窗移除，仍以隐藏域随表单提交，保持服务端数据流不变 */}
+      <input type="hidden" name="expectedOutcome" value={selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? ""} />
+      <FieldRow>
+        <FieldCell label="需求周期" required className="flex-1">
+          <input type="hidden" name="startDate" value={periodValue.start} />
+          <input type="hidden" name="endDate" value={periodValue.end} />
+          <RjDateRangePicker
+            defaultValue={item?.startDate && item?.endDate ? { from: new Date(item.startDate), to: new Date(item.endDate) } : null}
+            onChange={(range) => setPeriodValue({
+              start: toDateInputValue(range?.from),
+              end: toDateInputValue(range?.to ?? null),
+            })}
+            startPlaceholder="开始时间"
+            endPlaceholder="结束时间"
+            className="w-full"
           />
-        </FormRow>
-        <FormRow label="是否需要开发 *" align="center" labelClassName="self-start pt-[5px]">
-          <div className="w-full space-y-1">
-            {mode === "backfill" ? (
-              <>
-                <input type="hidden" name="needsDevelopment" value="true" />
-                <div className="flex h-10 w-full items-center rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-muted-foreground transition-colors hover:border-[#3069F9]">是</div>
-              </>
-            ) : (
-              <>
-                <input type="hidden" name="needsDevelopment" value={needsDevValue} />
-                <RjSelect
-                  options={[
-                    { label: "是", value: "true" },
-                    { label: "否", value: "false" },
-                  ]}
-                  value={needsDevValue || null}
-                  onChange={(v) => setNeedsDevValue(String(v ?? ""))}
-                  placeholder="请选择是否需要开发"
-                  className="w-full"
-                />
-              </>
-            )}
-            {mode !== "backfill" ? (
-              <p className="text-xs text-muted-foreground">
-                注意：开发需求必须选择「是」，以纳入首版完成度统计，否则将影响首版完成度统计的准确度。
-              </p>
-            ) : null}
-          </div>
-        </FormRow>
-        {needsDevValue === "true" ? (
-          <FormRow label="开发方 *" align="center">
-            <input type="hidden" name="developmentSource" value={devSourceValue} />
-            <RjSelect
-              options={[
-                { label: "外部开发", value: DEVELOPMENT_SOURCE_EXTERNAL },
-                { label: "内部自研", value: DEVELOPMENT_SOURCE_INTERNAL },
-              ]}
-              value={devSourceValue}
-              onChange={(v) => setDevSourceValue(String(v ?? ""))}
-              placeholder="请选择开发方"
+        </FieldCell>
+        {workStatus === "NOT_STARTED" ? (
+          <div className="flex-1" />
+        ) : (
+          <FieldCell label="工作量（人天）" required={workloadRequired} className="flex-1">
+            <RjInput
+              name="workloadPersonDay"
+              inputMode="decimal"
+              defaultValue={item?.workloadPersonDay ?? ""}
+              placeholder="请输入工作量"
               className="w-full"
             />
-          </FormRow>
-        ) : null}
-        <FormRow label="需求描述">
-          <RjTextarea
-            name="taskDescription"
-            rows={3}
-            defaultValue={item?.taskDescription ?? ""}
-            placeholder="请输入需求描述"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="需求目标 *">
-          <RjTextarea
-            name="description"
-            required
-            defaultValue={item?.description ?? ""}
-            rows={4}
-            placeholder="请输入需求目标"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label={workloadRequired ? "工作量(人天) *" : "工作量(人天)"} align="center">
-          <RjInputNumber
-            name="workloadPersonDay"
-            min={0}
-            step={0.1}
-            defaultValue={item?.workloadPersonDay ?? null}
-            placeholder="请输入工作量"
-          />
-        </FormRow>
-        {needsDevValue === "true" ? (
-          <div className="-mt-2 text-xs text-muted-foreground">
-            {workloadRequired
-              ? "需要开发且已完成的需求必须填写工作量，用于计算首版完成度。"
-              : "进行中的开发需求可在完成后填写工作量。"}
-          </div>
-        ) : null}
-        <FormRow label="需求状态" align="center">
-          <input type="hidden" name="status" value={workStatus} />
-          <RjSelect
-            options={statusOptions.map((option) => ({
-              value: option,
-              label: mode === "backfill" && option === "DELAYED_COMPLETED" ? "延期完成" : columnTitleByStatus[option],
-            }))}
-            value={workStatus}
-            onChange={(v) => setWorkStatus(v as ColumnStatus)}
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label={taskResultRequired ? "需求结果 *" : "需求结果"} align="center">
-          <input type="hidden" name="taskResult" value={taskResultValue} />
-          <RjSelect
-            options={TASK_RESULTS.map((option) => ({ value: option, label: option }))}
-            value={taskResultValue || null}
-            onChange={(v) => setTaskResultValue(String(v ?? ""))}
-            placeholder="请选择需求结果"
-            className="w-full"
-          />
-        </FormRow>
-        {workStatus === "COMPLETED" || mode === "backfill" ? (
-          <FormRow label="完成时间 *" align="center">
-            <DateInput
-              name="completedAt"
-              required
-              defaultValue={toDateInputValue(item?.completedAt)}
-              className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
+          </FieldCell>
+        )}
+      </FieldRow>
+      {showCompletedFields ? (
+        <FieldRow>
+          <FieldCell label="完成时间" required className="flex-1">
+            <input type="hidden" name="completedAt" value={completedAtValue} />
+            <RjDatePicker
+              defaultValue={item?.completedAt ? new Date(item.completedAt) : null}
+              onChange={(value) => setCompletedAtValue(toDateInputValue(value))}
+              placeholder="选择时间"
+              className="w-full"
             />
-          </FormRow>
-        ) : null}
-        <FormRow label="需求执行概况">
-          <RjTextarea
-            name="executionSummary"
-            rows={3}
-            defaultValue={item?.executionSummary ?? ""}
-            placeholder="请输入需求最终执行情况的描述"
-            className="w-full"
-          />
-        </FormRow>
+          </FieldCell>
+          <FieldCell label="需求结果" required className="flex-1">
+            <input type="hidden" name="taskResult" value={taskResultValue} />
+            <RjSelect
+              options={TASK_RESULTS.map((option) => ({ value: option, label: option }))}
+              value={taskResultValue || null}
+              onChange={(v) => setTaskResultValue(String(v ?? ""))}
+              placeholder="请选择需求结果"
+              className="w-full"
+            />
+          </FieldCell>
+        </FieldRow>
+      ) : (
+        <input type="hidden" name="taskResult" value={taskResultValue} />
+      )}
+      {!showProgressFields ? (
+        <input type="hidden" name="workloadPersonDay" value={item?.workloadPersonDay ?? ""} />
+      ) : null}
+      {showProgressFields ? (
+      <FieldCell label={closedReasonRequired ? "关闭原因" : "需求执行概述"} required={closedReasonRequired}>
+        <RjTextarea
+          name="executionSummary"
+          rows={3}
+          required={closedReasonRequired}
+          defaultValue={item?.executionSummary ?? ""}
+          placeholder={closedReasonRequired ? "请输入关闭原因" : "请输入需求最终执行情况的描述"}
+          className="w-full"
+        />
+      </FieldCell>
+      ) : (
+        <input type="hidden" name="executionSummary" value={item?.executionSummary ?? ""} />
+      )}
+      <FieldCell label="需求描述">
+        <RjTextarea
+          name="taskDescription"
+          rows={3}
+          defaultValue={item?.taskDescription ?? ""}
+          placeholder="请输入需求描述"
+          className="w-full"
+        />
+      </FieldCell>
+      <FieldCell label="需求目标" required>
+        <RjTextarea
+          name="description"
+          required
+          defaultValue={item?.description ?? ""}
+          rows={4}
+          placeholder="请输入需求目标"
+          className="w-full"
+        />
+      </FieldCell>
     </>
   );
 
   const formActions = (
     <div className="flex justify-end gap-3">
-      <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+      <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
       <Button type="submit" className="rounded-lg">
         {mode === "backfill" ? <ScrollText className="h-4 w-4" /> : mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
         {mode === "backfill" ? "补录" : mode === "edit" ? "保存" : "创建"}
@@ -1101,18 +1183,24 @@ function ProjectEditForm({
         </FormRow>
         <FormRow label="规划周期" align="center">
           <div className="flex items-center gap-2">
-            <QuarterSelect
-              name="startQuarter"
-              value={startQuarter}
-              onChange={setStartQuarter}
+            <input type="hidden" name="startQuarter" value={startQuarter} />
+            <RjSelect
+              className="min-w-0 flex-1"
+              allowSearch
+              options={quarterOptions}
+              value={startQuarter || null}
+              onChange={(next) => setStartQuarter(String(next ?? ""))}
               placeholder="起始季度"
               invalid={quarterRangeInvalid}
             />
             <span className="text-muted-foreground">~</span>
-            <QuarterSelect
-              name="endQuarter"
-              value={endQuarter}
-              onChange={setEndQuarter}
+            <input type="hidden" name="endQuarter" value={endQuarter} />
+            <RjSelect
+              className="min-w-0 flex-1"
+              allowSearch
+              options={quarterOptions}
+              value={endQuarter || null}
+              onChange={(next) => setEndQuarter(String(next ?? ""))}
               placeholder="结束季度"
               invalid={quarterRangeInvalid}
             />
@@ -1221,24 +1309,14 @@ function ProjectEditForm({
         {projectStatus === "COMPLETED" ? (
           <div ref={completedAtRowRef}>
             <FormRow label="完成时间 *" align="center">
-              <DateInput
-                name="completedAt"
-                required
-                defaultValue={toDateInputValue(item.completedAt)}
-                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
-              />
+              <FormDatePicker name="completedAt" defaultDate={item.completedAt} />
             </FormRow>
           </div>
         ) : null}
         {projectStatus === "LAUNCHED" ? (
           <div ref={launchedAtRowRef}>
             <FormRow label="上线时间 *" align="center">
-              <DateInput
-                name="launchedAt"
-                required
-                defaultValue={toDateInputValue(item.launchedAt)}
-                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
-              />
+              <FormDatePicker name="launchedAt" defaultDate={item.launchedAt} />
             </FormRow>
           </div>
         ) : null}
@@ -1253,7 +1331,7 @@ function ProjectEditForm({
           </div>
         ) : null}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           <Button type="submit" className="rounded-lg">
             <Pencil className="h-4 w-4" />
             保存
@@ -1271,7 +1349,7 @@ function ProjectEditForm({
           项目下所有未完成的需求都将被同时标记为「{projectStatus === "COMPLETED" ? "已完成" : "已关闭"}」，完成时间统一记为当前项目的完成时间。是否继续？
         </div>
         <div className="flex justify-end gap-3 px-5 pb-4">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={() => setPendingCascadeSubmit(null)}>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={() => setPendingCascadeSubmit(null)}>
             取消
           </Button>
           <Button
@@ -1397,18 +1475,24 @@ function ProjectCreateForm({
         </FormRow>
         <FormRow label="规划周期 *" align="center">
           <div className="flex items-center gap-2">
-            <QuarterSelect
-              name="startQuarter"
-              value={startQuarter}
-              onChange={setStartQuarter}
+            <input type="hidden" name="startQuarter" value={startQuarter} />
+            <RjSelect
+              className="min-w-0 flex-1"
+              allowSearch
+              options={quarterOptions}
+              value={startQuarter || null}
+              onChange={(next) => setStartQuarter(String(next ?? ""))}
               placeholder="起始季度"
               invalid={quarterRangeInvalid}
             />
             <span className="text-muted-foreground">~</span>
-            <QuarterSelect
-              name="endQuarter"
-              value={endQuarter}
-              onChange={setEndQuarter}
+            <input type="hidden" name="endQuarter" value={endQuarter} />
+            <RjSelect
+              className="min-w-0 flex-1"
+              allowSearch
+              options={quarterOptions}
+              value={endQuarter || null}
+              onChange={(next) => setEndQuarter(String(next ?? ""))}
               placeholder="结束季度"
               invalid={quarterRangeInvalid}
             />
@@ -1474,24 +1558,14 @@ function ProjectCreateForm({
         {createProjectStatus === "COMPLETED" ? (
           <div ref={completedAtRowRef}>
             <FormRow label="完成时间 *" align="center">
-              <DateInput
-                name="completedAt"
-                required
-                defaultValue={toDateInputValue(null)}
-                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
-              />
+              <FormDatePicker name="completedAt" />
             </FormRow>
           </div>
         ) : null}
         {createProjectStatus === "LAUNCHED" ? (
           <div ref={launchedAtRowRef}>
             <FormRow label="上线时间 *" align="center">
-              <DateInput
-                name="launchedAt"
-                required
-                defaultValue={toDateInputValue(null)}
-                className="h-10 w-full rounded-md border border-[#D9D9D9] bg-white px-3 text-sm transition-colors hover:border-[#3069F9] focus:border-[#3069F9] focus:outline-none"
-              />
+              <FormDatePicker name="launchedAt" />
             </FormRow>
           </div>
         ) : null}
@@ -1503,7 +1577,7 @@ function ProjectCreateForm({
           </div>
         ) : null}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           <Button type="submit" className="rounded-lg">
             <Plus className="h-4 w-4" />
             创建
@@ -1712,7 +1786,7 @@ function ProductGoalCreateForm({
         </FormRow>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">
           <Plus className="h-4 w-4" />
           创建
@@ -1865,7 +1939,7 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
           </div>
         ) : null}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           <Button type="button" className="rounded-lg" onClick={() => void handleSubmit()}>
             <Plus className="h-4 w-4" />
             创建
@@ -2045,7 +2119,7 @@ function ValueTrackSubmitForm({
           </div>
         ) : null}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           {canSave ? (
             <Button type="button" className="rounded-lg" onClick={() => void handleSubmit()}>
               <Check className="h-4 w-4" />
@@ -2180,7 +2254,7 @@ function ValueOverviewEditForm({
           </div>
         ) : null}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           <Button type="submit" className="rounded-lg">
             <Pencil className="h-4 w-4" />
             保存
@@ -2286,7 +2360,7 @@ function ProductGoalEditForm({
           </div>
         ) : null}
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+          <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
           <Button type="submit" className="rounded-lg">
             <Pencil className="h-4 w-4" />
             保存
@@ -2315,7 +2389,7 @@ function ValueTrackDeleteForm({ item, onClose }: { item: Props["data"]["valueTra
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">
           <Trash2 className="h-4 w-4" />
           删除
@@ -2341,7 +2415,7 @@ function ProductGoalDeleteForm({ item, onClose }: { item: Props["data"]["product
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">
           <Trash2 className="h-4 w-4" />
           删除
@@ -2367,7 +2441,7 @@ function ProjectDeleteForm({ item, onClose }: { item: NonNullable<ProjectDeleteS
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">
           <Trash2 className="h-4 w-4" />
           删除
@@ -2393,7 +2467,7 @@ function QuarterlyWorkDeleteForm({ item, onClose }: { item: Props["data"]["colum
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
         <Button type="submit" className="rounded-lg">
           <Trash2 className="h-4 w-4" />
           删除
@@ -6090,16 +6164,16 @@ export function QuarterlyWorkContent({ data }: Props) {
             {(canCreateProductGoal || canCreateProject || canCreateTask || canCreateValueTrack) && (
               <div className="flex items-center gap-2">
                 {canCreateProductGoal ? (
-                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProductGoalDialog(true)}><Plus className="h-4 w-4" />新增产品目标</Button>
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outlined" onClick={() => setCreateProductGoalDialog(true)}><Plus className="h-4 w-4" />新增产品目标</Button>
                 ) : null}
                 {canCreateProject ? (
-                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outlined" onClick={() => setCreateProjectDialog("NOT_STARTED")}><Plus className="h-4 w-4" />新增项目</Button>
                 ) : null}
                 {canCreateTask ? (
                   <Button className="h-9 rounded-lg px-4 text-sm font-semibold" onClick={() => setCreateDialog({ status: "NOT_STARTED", title: "未启动" })}><Plus className="h-4 w-4" />新增需求</Button>
                 ) : null}
                 {canCreateValueTrack ? (
-                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outline" onClick={() => openValueTrackCreateDialog(null)}><Plus className="h-4 w-4" />新增价值跟踪</Button>
+                  <Button className="h-9 rounded-lg px-4 text-sm font-semibold" variant="outlined" onClick={() => openValueTrackCreateDialog(null)}><Plus className="h-4 w-4" />新增价值跟踪</Button>
                 ) : null}
               </div>
             )}

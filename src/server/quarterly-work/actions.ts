@@ -649,6 +649,9 @@ export async function createQuarterlyWork(formData: FormData) {
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
+  if (status === "CLOSED" && !executionSummary) {
+    throw new Error("关闭状态的需求必须填写关闭原因");
+  }
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
@@ -733,6 +736,9 @@ export async function updateQuarterlyWork(formData: FormData) {
   const status = parseStatus(formData.get("status"));
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
+  if (status === "CLOSED" && !executionSummary) {
+    throw new Error("关闭状态的需求必须填写关闭原因");
+  }
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
   const workloadPersonDay = parseOptionalFloat(formData.get("workloadPersonDay"));
   const needsDevelopment = parseRequiredBoolean(formData.get("needsDevelopment"), "是否需要开发");
