@@ -1625,6 +1625,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         postLaunchIterationWorkloadPersonDay: project.postLaunchIterationWorkloadPersonDay,
         otherCost: project.otherCost,
         actualValue: project.actualValue,
+        firstVersionCompletionPercent: getProjectValueMetrics(project)?.firstVersionCompletionPercent ?? null,
         valueJudgement: project.valueJudgement,
         valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
         // 该项目已存在的跟踪周期序号（新增弹窗中对应选项禁用）

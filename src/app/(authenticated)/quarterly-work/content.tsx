@@ -361,7 +361,7 @@ function Dialog({
         <div
           className={`flex shrink-0 items-center justify-between ${
             stickyLayout
-              ? "border-b border-border px-6 py-4"
+              ? "px-6 py-4"
               : size === "sm"
                 ? "sticky top-0 z-10 rounded-t-2xl bg-card px-5 pt-5 pb-2"
                 : "sticky top-0 z-10 rounded-t-2xl bg-card px-6 pt-6 pb-5"
@@ -373,7 +373,7 @@ function Dialog({
           </button>
         </div>
         {stickyLayout ? (
-          <div className="min-h-0 overflow-hidden px-6 pb-6 pt-4">{children}</div>
+          <div className="min-h-0 overflow-hidden pl-6 pr-2 pb-6 pt-4">{children}</div>
         ) : (
           <div className={size === "sm" ? "" : "px-6 pb-6"}>{children}</div>
         )}
@@ -552,7 +552,7 @@ const stickyDialogFormClassName = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)_
 
 function StickyFormScroll({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-0 overflow-y-auto pr-3 [scrollbar-gutter:stable]">
+    <div className="min-h-0 overflow-y-auto pr-4 [scrollbar-gutter:stable]">
       <div className="space-y-4">{children}</div>
     </div>
   );
@@ -560,7 +560,7 @@ function StickyFormScroll({ children }: { children: React.ReactNode }) {
 
 function StickyFormFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="space-y-3 border-t border-border bg-card pt-4">{children}</div>
+    <div className="space-y-3 bg-card pr-4 pt-4">{children}</div>
   );
 }
 
@@ -1856,61 +1856,87 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
   return (
     <form ref={formRef} className={stickyDialogFormClassName}>
       <StickyFormScroll>
-        <FormRow label="项目 *" align="center">
-          {defaultProjectId ? (
-            <>
-              <input type="hidden" name="projectId" value={selectedProjectId} />
-              <div className="flex h-8 w-full items-center rounded-md border border-[#D9D9D9] bg-[#F5F5F5] px-3 text-sm text-[rgba(0,0,0,0.65)]">
-                {selectedProject?.title ?? "-"}
-              </div>
-            </>
-          ) : (
-            <ProjectPicker
-              name="projectId"
-              options={projectPickerOptions}
-              defaultValue={selectedProjectId}
-              onChange={setSelectedProjectId}
+        <FieldRow>
+          <FieldCell label="项目名称" required className="flex-1">
+            {defaultProjectId ? (
+              <>
+                <input type="hidden" name="projectId" value={selectedProjectId} />
+                <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{selectedProject?.title ?? "-"}</div>
+              </>
+            ) : (
+              <ProjectPicker
+                name="projectId"
+                options={projectPickerOptions}
+                defaultValue={selectedProjectId}
+                onChange={setSelectedProjectId}
+              />
+            )}
+          </FieldCell>
+          <FieldCell label="首版上线时间" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.launchedAt)}</div>
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="跟踪任务" required className="flex-1">
+            <input type="hidden" name="trackingSequence" value={trackingSequence} />
+            <RjSelect
+              options={([1, 2] as const).map((sequence) => ({
+                value: String(sequence),
+                label: `第 ${sequence} 次跟踪${selectedProject?.existingTrackingSequences.includes(sequence) ? "（已有记录）" : ""}`,
+                disabled: selectedProject ? selectedProject.existingTrackingSequences.includes(sequence) : false,
+              }))}
+              value={trackingSequence || null}
+              onChange={(v) => setTrackingSequence(String(v ?? ""))}
+              placeholder="请选择跟踪任务"
+              className="w-full"
             />
-          )}
-        </FormRow>
-        <FormRow label="项目上线时间" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(selectedProject?.launchedAt)}</div>
-        </FormRow>
-        <FormRow label="跟踪周期 *" align="center">
-          <input type="hidden" name="trackingSequence" value={trackingSequence} />
-          <RjSelect
-            options={selectedProject?.launchedAt
-              ? ([1, 2] as const).map((sequence) => {
-                  const dates = getValueTrackingTaskDates(new Date(selectedProject.launchedAt!), sequence);
-                  const taken = selectedProject.existingTrackingSequences.includes(sequence);
-                  return {
-                    value: String(sequence),
-                    label: `第 ${sequence} 次跟踪（${formatDateOnlyLabel(dates.periodStartAt)} ~ ${formatDateOnlyLabel(dates.checkpointAt)}）${taken ? "（已有记录）" : ""}`,
-                    disabled: taken,
-                  };
-                })
-              : []}
-            value={trackingSequence || null}
-            onChange={(v) => setTrackingSequence(String(v ?? ""))}
-            placeholder="请选择跟踪周期"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="预期收益">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.expectedOutcome ?? "-"}</div>
-        </FormRow>
-        <FormRow label="工作量(首版/迭代/合计)" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
-            {selectedProject
-              ? `${formatWorkload(selectedProject.firstVersionWorkloadPersonDay)} / ${formatWorkload(selectedProject.postLaunchIterationWorkloadPersonDay)} / ${formatWorkload(selectedProject.workloadPersonDay)} 人天`
-              : "-"}
-            <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计</span>
-          </div>
-        </FormRow>
-        <FormRow label="其他成本">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.otherCost ?? "-"}</div>
-        </FormRow>
-        <FormRow label="实际收益 *">
+          </FieldCell>
+          <FieldCell label="跟踪周期" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+              {selectedProject?.launchedAt && trackingSequence
+                ? (() => {
+                    const dates = getValueTrackingTaskDates(new Date(selectedProject.launchedAt!), Number(trackingSequence) as 1 | 2);
+                    return `${formatDateOnlyLabel(dates.periodStartAt)} ~ ${formatDateOnlyLabel(dates.checkpointAt)}`;
+                  })()
+                : "-"}
+            </div>
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="首版完成度" className="flex-1">
+            <div className="flex min-h-[24px] w-full items-center px-1 py-2 text-sm text-foreground">
+              {formatCompletionPercent(selectedProject?.firstVersionCompletionPercent)}
+              <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计，不可手工编辑</span>
+            </div>
+          </FieldCell>
+          <FieldCell label="价值判断" required className="flex-1">
+            <input type="hidden" name="valueJudgement" value={judgementValue} />
+            <RjSelect
+              options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
+              value={judgementValue || null}
+              onChange={(v) => setJudgementValue(String(v ?? ""))}
+              placeholder="请选择价值判断"
+              className="w-full"
+            />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="工作量(首版/迭代/合计)" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+              {selectedProject
+                ? `${formatWorkload(selectedProject.firstVersionWorkloadPersonDay)} / ${formatWorkload(selectedProject.postLaunchIterationWorkloadPersonDay)} / ${formatWorkload(selectedProject.workloadPersonDay)} 人天`
+                : "-"}
+              <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计</span>
+            </div>
+          </FieldCell>
+          <FieldCell label="其他成本" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{selectedProject?.otherCost ?? "-"}</div>
+          </FieldCell>
+        </FieldRow>
+        <FieldCell label="预期收益">
+          <ClampedReadOnlyText text={selectedProject?.expectedOutcome ?? "-"} />
+        </FieldCell>
+        <FieldCell label="实际收益" required>
           <div className="space-y-2">
             <RjTextarea
               name="actualValue"
@@ -1922,33 +1948,23 @@ function ValueTrackCreateForm({ data, defaultProjectId, onClose }: { data: Props
             />
             <div className="text-xs text-muted-foreground">本次修改会覆盖上次保存的内容</div>
           </div>
-        </FormRow>
-        <FormRow label="跟踪结果描述">
+        </FieldCell>
+        <FieldCell label="跟踪结果描述">
           <RjTextarea
             name="trackingResult"
             rows={3}
             placeholder="请输入跟踪结果描述"
             className="w-full"
           />
-        </FormRow>
-        <FormRow label="价值判断 *" align="center">
-          <input type="hidden" name="valueJudgement" value={judgementValue} />
-          <RjSelect
-            options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
-            value={judgementValue || null}
-            onChange={(v) => setJudgementValue(String(v ?? ""))}
-            placeholder="请选择价值判断"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="后续优化">
+        </FieldCell>
+        <FieldCell label="后续优化">
           <RjTextarea
             name="followUpOptimization"
             rows={3}
             placeholder="请输入后续优化"
             className="w-full"
           />
-        </FormRow>
+        </FieldCell>
       </StickyFormScroll>
       <StickyFormFooter>
         {errorMessage ? (
@@ -2043,40 +2059,63 @@ function ValueTrackSubmitForm({
     <form ref={formRef} className={stickyDialogFormClassName}>
       <input type="hidden" name="trackId" value={track.id} />
       <StickyFormScroll>
-        <FormRow label="项目" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{track.projectTitle}</div>
-        </FormRow>
-        <FormRow label="首版上线时间" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(project?.launchedAt)}</div>
-        </FormRow>
-        <FormRow label="跟踪任务" align="center">
-          <div className="flex min-h-[24px] w-full items-center gap-2 px-1 py-2 text-sm text-foreground">
-            <span>{sequence ? `第 ${sequence} 次跟踪` : "手动快照"}</span>
-            <span className={`rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
-              {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
-            </span>
-          </div>
-        </FormRow>
-        <FormRow label="跟踪周期 / 截止" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
-            {formatDateTimeLabel(track.periodStartAt)} ~ {formatDateTimeLabel(track.checkpointAt)} / {formatDateTimeLabel(track.deadlineAt)}
-          </div>
-        </FormRow>
-        <FormRow label="工作量(首版/迭代/合计)" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
-            {formatWorkload(firstWorkload)} / {formatWorkload(iterationWorkload)} / {formatWorkload(totalWorkload)} 人天
-            <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计</span>
-          </div>
-        </FormRow>
-        <FormRow label="首版完成度" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
-            {formatCompletionPercent(completionPercent)}
-          </div>
-        </FormRow>
-        <FormRow label="预期收益">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{project?.expectedOutcome ?? "-"}</div>
-        </FormRow>
-        <FormRow label="实际收益 *">
+        <FieldRow>
+          <FieldCell label="项目名称" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{track.projectTitle}</div>
+          </FieldCell>
+          <FieldCell label="首版上线时间" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(project?.launchedAt)}</div>
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="跟踪任务" className="flex-1">
+            <div className="flex min-h-[24px] w-full items-center gap-2 px-1 py-2 text-sm text-foreground">
+              <span>{sequence ? `第 ${sequence} 次跟踪` : "手动快照"}</span>
+              <span className={`rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
+                {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
+              </span>
+            </div>
+          </FieldCell>
+          <FieldCell label="跟踪周期" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+              {formatDateTimeLabel(track.periodStartAt)} ~ {formatDateTimeLabel(track.checkpointAt)}
+              <span className="ml-1 text-xs text-muted-foreground">截止 {formatDateTimeLabel(track.deadlineAt)}</span>
+            </div>
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="首版完成度" className="flex-1">
+            <div className="flex min-h-[24px] w-full items-center px-1 py-2 text-sm text-foreground">
+              {formatCompletionPercent(completionPercent)}
+              <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计，不可手工编辑</span>
+            </div>
+          </FieldCell>
+          <FieldCell label="价值判断" required className="flex-1">
+            <input type="hidden" name="valueJudgement" value={judgementValue} />
+            <RjSelect
+              options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
+              value={judgementValue || null}
+              onChange={(v) => setJudgementValue(String(v ?? ""))}
+              placeholder="请选择价值判断"
+              className="w-full"
+            />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="工作量(首版/迭代/合计)" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+              {formatWorkload(firstWorkload)} / {formatWorkload(iterationWorkload)} / {formatWorkload(totalWorkload)} 人天
+              <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计</span>
+            </div>
+          </FieldCell>
+          <FieldCell label="其他成本" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{project?.otherCost ?? "-"}</div>
+          </FieldCell>
+        </FieldRow>
+        <FieldCell label="预期收益">
+          <ClampedReadOnlyText text={project?.expectedOutcome ?? "-"} />
+        </FieldCell>
+        <FieldCell label="实际收益" required>
           <RjTextarea
             name="actualValue"
             rows={2}
@@ -2085,18 +2124,8 @@ function ValueTrackSubmitForm({
             placeholder="请输入实际收益"
             className="w-full"
           />
-        </FormRow>
-        <FormRow label="价值判断 *" align="center">
-          <input type="hidden" name="valueJudgement" value={judgementValue} />
-          <RjSelect
-            options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
-            value={judgementValue || null}
-            onChange={(v) => setJudgementValue(String(v ?? ""))}
-            placeholder="请选择价值判断"
-            className="w-full"
-          />
-        </FormRow>
-        <FormRow label="跟踪结果描述">
+        </FieldCell>
+        <FieldCell label="跟踪结果描述">
           <RjTextarea
             name="trackingResult"
             rows={3}
@@ -2104,8 +2133,8 @@ function ValueTrackSubmitForm({
             placeholder="请输入跟踪结果描述"
             className="w-full"
           />
-        </FormRow>
-        <FormRow label="后续优化">
+        </FieldCell>
+        <FieldCell label="后续优化">
           <RjTextarea
             name="followUpOptimization"
             rows={3}
@@ -2113,7 +2142,7 @@ function ValueTrackSubmitForm({
             placeholder="请输入后续优化"
             className="w-full"
           />
-        </FormRow>
+        </FieldCell>
         {frozen ? (
           <div className="rounded-lg border border-[#E8F2FF] bg-[#F5F9FF] px-4 py-3 text-sm text-[#3069F9]">
             该任务已完成最终确认，指标已冻结，仅可查看。
@@ -2150,43 +2179,44 @@ function ValueTrackSubmitForm({
   );
 }
 
-function ValueTrackStatusFields({
-  defaultStatus,
-  defaultJudgement,
-}: {
-  defaultStatus?: string | null;
-  defaultJudgement?: string | null;
-}) {
-  const [status, setStatus] = useState(defaultStatus || VALUE_TRACK_STATUS_OBSERVING);
-  const [judgementValue, setJudgementValue] = useState(
-    isValueJudgement(defaultJudgement) ? defaultJudgement : "",
-  );
-  const showJudgement = status !== VALUE_TRACK_STATUS_PENDING_OBSERVATION;
+/** 只读长文本：超过两行缩略展示，提供收起/展开按钮 */
+function ClampedReadOnlyText({ text, lines = 2 }: { text: string; lines?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (expanded) return;
+    const element = contentRef.current;
+    if (!element) return;
+    const check = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
+    check();
+    const timer = window.setTimeout(check, 100);
+    window.addEventListener("resize", check);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", check);
+    };
+  }, [text, expanded]);
 
   return (
-    <>
-      <FormRow label="跟踪状态 *" align="center">
-        <input type="hidden" name="valueTrackStatus" value={status} />
-        <RjSelect
-          options={VALUE_TRACK_STATUSES.map((option) => ({ value: option, label: option }))}
-          value={status}
-          onChange={(v) => setStatus(String(v ?? status))}
-          className="w-full"
-        />
-      </FormRow>
-      {showJudgement ? (
-        <FormRow label="价值判断 *" align="center">
-          <input type="hidden" name="valueJudgement" value={judgementValue} />
-          <RjSelect
-            options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
-            value={judgementValue || null}
-            onChange={(v) => setJudgementValue(String(v ?? ""))}
-            placeholder="请选择价值判断"
-            className="w-full"
-          />
-        </FormRow>
+    <div className="min-w-0 px-1 py-2">
+      <div
+        ref={contentRef}
+        className={`whitespace-pre-wrap break-words text-sm text-foreground ${expanded ? "" : "line-clamp-2"}`}
+      >
+        {text}
+      </div>
+      {overflowing ? (
+        <button
+          type="button"
+          className="mt-0.5 text-xs text-[#3069F9] hover:underline"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起" : "展开"}
+        </button>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -2198,6 +2228,11 @@ function ValueOverviewEditForm({
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
+  const [status, setStatus] = useState(item.valueTrackStatus || VALUE_TRACK_STATUS_OBSERVING);
+  const [judgementValue, setJudgementValue] = useState(
+    isValueJudgement(item.valueJudgement) ? item.valueJudgement : "",
+  );
+  const showJudgement = status !== VALUE_TRACK_STATUS_PENDING_OBSERVATION;
 
   return (
     <form
@@ -2215,34 +2250,57 @@ function ValueOverviewEditForm({
     }}>
       <input type="hidden" name="projectId" value={item.id} />
       <StickyFormScroll>
-        <FormRow label="项目名称" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.title}</div>
-        </FormRow>
-        <FormRow label="负责人" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.owner}</div>
-        </FormRow>
-        <FormRow label="上线时间" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(item.launchedAt)}</div>
-        </FormRow>
-        <FormRow label="预期收益">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground whitespace-pre-wrap break-words">{item.expectedOutcome || "—"}</div>
-        </FormRow>
-        <FormRow label="首版工作量(人天)" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.firstVersionWorkloadPersonDay ?? "—"}</div>
-        </FormRow>
-        <FormRow label="迭代工作量(人天)" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.postLaunchIterationWorkloadPersonDay ?? "—"}</div>
-        </FormRow>
-        <FormRow label="总工作量(人天)" align="center">
-          <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.workloadPersonDay ?? "—"}</div>
-        </FormRow>
-        <FormRow label="首版完成度" align="center">
-          <div className="flex min-h-[24px] w-full items-center px-1 py-2 text-sm text-foreground">
-            {formatCompletionPercent(item.firstVersionCompletionPercent)}
-            <span className="ml-1 text-xs text-muted-foreground">按需求工作量自动统计，不可手工编辑</span>
-          </div>
-        </FormRow>
-        <FormRow label="其他成本">
+        <FieldRow>
+          <FieldCell label="项目名称" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.title}</div>
+          </FieldCell>
+          <FieldCell label="负责人" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{item.owner}</div>
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="首版上线时间" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">{formatDateTimeLabel(item.launchedAt)}</div>
+          </FieldCell>
+          <FieldCell label="首版完成度" className="flex-1">
+            <div className="flex min-h-[24px] w-full items-center px-1 py-2 text-sm text-foreground">
+              {formatCompletionPercent(item.firstVersionCompletionPercent)}
+            </div>
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="工作量(首版/迭代/合计)" className="flex-1">
+            <div className="min-h-[24px] w-full px-1 py-2 text-sm text-foreground">
+              {formatWorkload(item.firstVersionWorkloadPersonDay)} / {formatWorkload(item.postLaunchIterationWorkloadPersonDay)} / {formatWorkload(item.workloadPersonDay)} 人天
+            </div>
+          </FieldCell>
+          <FieldCell label="预期收益" className="flex-1">
+            <ClampedReadOnlyText text={item.expectedOutcome || "—"} />
+          </FieldCell>
+        </FieldRow>
+        <FieldRow>
+          <FieldCell label="跟踪状态" required className="flex-1">
+            <input type="hidden" name="valueTrackStatus" value={status} />
+            <RjSelect
+              options={VALUE_TRACK_STATUSES.map((option) => ({ value: option, label: option }))}
+              value={status}
+              onChange={(v) => setStatus(String(v ?? status))}
+              className="w-full"
+            />
+          </FieldCell>
+          <FieldCell label="价值判断" className="flex-1">
+            <input type="hidden" name="valueJudgement" value={judgementValue} />
+            <RjSelect
+              options={VALUE_JUDGEMENTS.map((option) => ({ value: option, label: option }))}
+              value={judgementValue || null}
+              onChange={(v) => setJudgementValue(String(v ?? ""))}
+              placeholder={showJudgement ? "请选择价值判断" : "选择跟踪状态后可填写"}
+              disabled={!showJudgement}
+              className="w-full"
+            />
+          </FieldCell>
+        </FieldRow>
+        <FieldCell label="其他成本">
           <RjTextarea
             name="otherCost"
             rows={2}
@@ -2250,8 +2308,8 @@ function ValueOverviewEditForm({
             placeholder="请输入其他成本"
             className="w-full"
           />
-        </FormRow>
-        <FormRow label="实际收益">
+        </FieldCell>
+        <FieldCell label="实际收益">
           <RjTextarea
             name="actualValue"
             rows={2}
@@ -2259,11 +2317,7 @@ function ValueOverviewEditForm({
             placeholder="请输入实际收益"
             className="w-full"
           />
-        </FormRow>
-        <ValueTrackStatusFields
-          defaultStatus={item.valueTrackStatus}
-          defaultJudgement={item.valueJudgement}
-        />
+        </FieldCell>
       </StickyFormScroll>
       <StickyFormFooter>
         {errorMessage ? (

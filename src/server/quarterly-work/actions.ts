@@ -488,8 +488,12 @@ function parseValueJudgement(value: FormDataEntryValue | null, status: ValueTrac
   if (status === VALUE_TRACK_STATUS_PENDING_OBSERVATION) {
     return null;
   }
-  if (!text || !(VALUE_JUDGEMENTS as readonly string[]).includes(text)) {
-    throw new Error("价值判断为必填项");
+  // 价值判断非必填：未填写则清空（允许显式重置为空）
+  if (text === null) {
+    return null;
+  }
+  if (!(VALUE_JUDGEMENTS as readonly string[]).includes(text)) {
+    throw new Error("价值判断取值无效");
   }
   return text as ValueJudgement;
 }
@@ -1597,7 +1601,11 @@ export async function updateProjectValue(formData: FormData) {
   const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
   const valueTrackStatus = parseValueTrackStatus(formData.get("valueTrackStatus"));
-  const valueJudgement = parseValueJudgement(formData.get("valueJudgement"), valueTrackStatus);
+  // 编辑项目价值弹窗不维护价值判断：未提交该字段时保留原值（判断值由价值跟踪填报/新增维护）
+  const valueJudgementEntry = formData.get("valueJudgement");
+  const valueJudgement = valueJudgementEntry === null
+    ? undefined
+    : parseValueJudgement(valueJudgementEntry, valueTrackStatus);
   const { departmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
 
   const project = await prisma.project.findFirst({
@@ -1630,8 +1638,8 @@ export async function updateProjectValue(formData: FormData) {
     data: {
       otherCost,
       actualValue,
-      valueJudgement,
       valueTrackStatus,
+      ...(valueJudgement !== undefined ? { valueJudgement } : {}),
     },
   });
 
