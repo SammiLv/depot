@@ -219,6 +219,7 @@ type ValueTrackItem = {
   firstVersionCompletionPercent: number | null;
   workloadComplete: boolean | null;
   actualValue: string | null;
+  otherCost: string | null;
   valueJudgement: string | null;
   valueTrackStatus: string;
 };
@@ -1096,8 +1097,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       totalWorkloadPersonDay: track.totalWorkloadPersonDay,
       firstVersionCompletionPercent: track.firstVersionCompletionPercent,
       workloadComplete: track.workloadComplete,
-      // 价值判断/实际收益读记录自身的填报快照，不随项目当前值变化
+      // 价值判断/实际收益/其他成本读记录自身的填报快照，不随项目当前值变化
       actualValue: track.actualValue ?? null,
+      otherCost: track.otherCost ?? null,
       valueJudgement: track.valueJudgement ?? null,
       valueTrackStatus: normalizeValueTrackStatus(project?.valueTrackStatus),
     };

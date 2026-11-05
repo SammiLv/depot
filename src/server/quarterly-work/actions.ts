@@ -1346,6 +1346,7 @@ export async function createValueTrack(formData: FormData) {
   const { currentUser } = await requireManageProjectAndValueTracking();
   const projectId = requiredString(formData.get("projectId"), "项目");
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
+  const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const valueJudgement = parseOptionalValueJudgement(formData.get("valueJudgement"));
   const trackingResult = (formData.get("trackingResult") as string | null)?.trim() || null;
   const followUpOptimization = (formData.get("followUpOptimization") as string | null)?.trim() || null;
@@ -1363,7 +1364,7 @@ export async function createValueTrack(formData: FormData) {
         { OR: [{ launchedAt: { not: null } }, { needsDevelopment: true }] },
       ],
     },
-    select: { id: true, title: true, launchedAt: true, valueJudgement: true, valueTrackStatus: true, actualValue: true },
+    select: { id: true, title: true, launchedAt: true, valueJudgement: true, valueTrackStatus: true, actualValue: true, otherCost: true },
   });
 
   if (!project) throw new Error("项目不存在、非开发项目或无权限选择");
@@ -1402,6 +1403,7 @@ export async function createValueTrack(formData: FormData) {
       where: { id: project.id },
       data: {
         actualValue,
+        otherCost,
         valueJudgement,
         valueTrackStatus: nextValueTrackStatus,
       },
@@ -1421,6 +1423,7 @@ export async function createValueTrack(formData: FormData) {
         deadlineAt: taskDates?.deadlineAt ?? null,
         valueJudgement,
         actualValue,
+        otherCost,
         firstVersionWorkloadPersonDay: snapshot.firstVersionWorkloadPersonDay,
         postLaunchIterationWorkloadPersonDay: snapshot.postLaunchIterationWorkloadPersonDay,
         totalWorkloadPersonDay: snapshot.totalWorkloadPersonDay,
@@ -1439,6 +1442,7 @@ export async function createValueTrack(formData: FormData) {
     "新增价值跟踪记录",
     buildFieldChangeRemark([
       { label: "实际收益", previous: project.actualValue, next: actualValue },
+      { label: "其他成本", previous: project.otherCost, next: otherCost },
       { label: "跟踪状态", previous: project.valueTrackStatus, next: nextValueTrackStatus },
       { label: "价值判断", previous: project.valueJudgement, next: valueJudgement },
     ]),
@@ -1471,6 +1475,7 @@ export async function submitValueTrack(formData: FormData) {
   const trackingResult = (formData.get("trackingResult") as string | null)?.trim() || null;
   const followUpOptimization = (formData.get("followUpOptimization") as string | null)?.trim() || null;
   const actualValue = (formData.get("actualValue") as string | null)?.trim() || null;
+  const otherCost = (formData.get("otherCost") as string | null)?.trim() || null;
   const valueJudgementInput = parseOptionalValueJudgement(formData.get("valueJudgement"));
   if (!actualValue) throw new Error("实际收益为必填项");
   if (!valueJudgementInput) throw new Error("价值判断为必填项");
@@ -1508,6 +1513,7 @@ export async function submitValueTrack(formData: FormData) {
       title: true,
       launchedAt: true,
       actualValue: true,
+      otherCost: true,
       valueJudgement: true,
       valueTrackStatus: true,
     },
@@ -1544,6 +1550,7 @@ export async function submitValueTrack(formData: FormData) {
         trackedAt: now,
         valueJudgement: nextJudgement,
         actualValue,
+        otherCost,
         firstVersionWorkloadPersonDay: snapshot.firstVersionWorkloadPersonDay,
         postLaunchIterationWorkloadPersonDay: snapshot.postLaunchIterationWorkloadPersonDay,
         totalWorkloadPersonDay: snapshot.totalWorkloadPersonDay,
@@ -1557,6 +1564,7 @@ export async function submitValueTrack(formData: FormData) {
       where: { id: project.id },
       data: {
         actualValue,
+        otherCost,
         valueJudgement: nextJudgement,
         valueTrackStatus: nextValueTrackStatus,
       },
@@ -1574,6 +1582,7 @@ export async function submitValueTrack(formData: FormData) {
     buildFieldChangeRemark([
       { label: "跟踪结果描述", previous: track.trackingResult, next: trackingResult },
       { label: "实际收益", previous: project.actualValue, next: actualValue },
+      { label: "其他成本", previous: project.otherCost, next: otherCost },
       { label: "价值判断", previous: project.valueJudgement, next: nextJudgement },
       { label: "跟踪状态", previous: project.valueTrackStatus, next: nextValueTrackStatus },
       { label: "首版工作量(人天)", previous: track.firstVersionWorkloadPersonDay, next: snapshot.firstVersionWorkloadPersonDay },

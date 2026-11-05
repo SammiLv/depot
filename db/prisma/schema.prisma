@@ -938,6 +938,8 @@ model RequirementValueTrack {
   // 填报时快照：当次提交的价值判断与实际收益（历史行展示当时填报值，不随项目当前值变化）
   valueJudgement                       String?
   actualValue                          String?
+  // 填报时快照：当次提交的其他成本
+  otherCost                            String?
   isFinal                              Boolean   @default(false)
   completedById                        String?
   completedAt                          DateTime?
