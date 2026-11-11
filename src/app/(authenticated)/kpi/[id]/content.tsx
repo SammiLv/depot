@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
-import { consumeStaleServerActionMessage } from "@/lib/stale-client-reload";
+import { consumeStaleServerActionMessage, ensureClientBuildBeforeServerAction } from "@/lib/stale-client-reload";
 import { Badge, Card } from "@/components/ui-kit";
 import { message } from "@rjmart/ui";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
@@ -375,6 +375,9 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       setIsSubmitting(true);
       setErrorMessage(null);
       setSuccessMessage(null);
+      if (action === "approve" || action === "submit") {
+        await ensureClientBuildBeforeServerAction();
+      }
       const formData = new FormData(formRef.current);
       if (action === "reject") {
         formData.set("rejectRemark", rejectRemark);
@@ -407,7 +410,9 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       });
     } catch (error) {
       setSuccessMessage(null);
-      setErrorMessage(error instanceof Error ? error.message : "KPI 评分保存失败，请稍后重试");
+      const messageText = error instanceof Error ? error.message : "KPI 评分保存失败，请稍后重试";
+      setErrorMessage(messageText);
+      message.error(messageText);
     } finally {
       setIsSubmitting(false);
     }

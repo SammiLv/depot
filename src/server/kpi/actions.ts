@@ -24,7 +24,7 @@ import {
 import { reconcileStalledApprovalSteps, transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
 import { resolveKpiRating } from "@/server/talent/decision-rule-config";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
-import { resolveActingApprovalStep } from "@/server/kpi/approval-step-utils";
+import { findActivePendingApprovalStep, resolveActingApprovalStep } from "@/server/kpi/approval-step-utils";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 
@@ -1649,18 +1649,34 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       orgPermissionModuleKeys.kpi,
       kpiAbilityKeys.scoreFinal,
     );
-    const actingApprovalStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
+    const activePendingStep = approvalSteps.length ? findActivePendingApprovalStep(approvalSteps) : null;
+    let actingApprovalStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
       ? resolveActingApprovalStep(approvalSteps, currentUser.id, {
           allowFinalActingByStagePermission: Boolean(scoreFinalScope),
         })
       : null;
-    const editableStage = resolveKpiEditableStage({
+    if (
+      personalKpi.status === "PENDING_FINAL_REVIEW"
+      && activePendingStep?.stageKey === "FINAL"
+      && !actingApprovalStep
+      && scoreFinalScope
+    ) {
+      actingApprovalStep = activePendingStep;
+    }
+    let editableStage = resolveKpiEditableStage({
       status: personalKpi.status,
       currentUserId: currentUser.id,
       ownerUserId: personalKpi.userId,
       hasApprovalChain,
       currentApprovalStepStageKey: actingApprovalStep?.stageKey,
     });
+    if (
+      personalKpi.status === "PENDING_FINAL_REVIEW"
+      && activePendingStep?.stageKey === "FINAL"
+      && actingApprovalStep?.id === activePendingStep.id
+    ) {
+      editableStage = "FINAL";
+    }
     if (!editableStage) {
       throw new Error("当前 KPI 阶段不支持评分操作");
     }

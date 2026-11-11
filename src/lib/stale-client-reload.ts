@@ -32,3 +32,27 @@ export function consumeStaleServerActionMessage() {
   sessionStorage.removeItem(SERVER_ACTION_STALE_MESSAGE_KEY);
   return message;
 }
+
+const CLIENT_BUILD_ID_KEY = "depot:client-build-id";
+
+/** 若页面加载时的 BUILD_ID 与服务端当前不一致，先刷新再提交，避免 Server Action 丢失 */
+export async function ensureClientBuildBeforeServerAction() {
+  if (typeof window === "undefined") return;
+  const pageBuildId = document.body.dataset.buildId?.trim() || "";
+  if (!pageBuildId) return;
+  const response = await fetch("/api/build-id", { cache: "no-store" });
+  if (!response.ok) return;
+  const data = (await response.json()) as { buildId?: string };
+  const serverBuildId = data.buildId?.trim() || "";
+  if (!serverBuildId || serverBuildId === pageBuildId) {
+    sessionStorage.setItem(CLIENT_BUILD_ID_KEY, serverBuildId || pageBuildId);
+    return;
+  }
+  sessionStorage.setItem(
+    SERVER_ACTION_STALE_MESSAGE_KEY,
+    "服务已发布新版本，页面将自动刷新，请再次点击审核通过。",
+  );
+  sessionStorage.setItem(CLIENT_BUILD_ID_KEY, serverBuildId);
+  window.location.reload();
+  await new Promise(() => {});
+}
