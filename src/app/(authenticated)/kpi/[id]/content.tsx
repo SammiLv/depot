@@ -4,7 +4,7 @@ import Link from "next/link";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
-import { rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
+import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import { consumeStaleServerActionMessage, ensureClientBuildBeforeServerAction } from "@/lib/stale-client-reload";
 import { Badge, Card } from "@/components/ui-kit";
@@ -406,18 +406,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       } else if (action === "submit") {
         await runServerAction(() => submitPersonalKpiScoring(formData));
       } else if (action === "approve") {
-        const response = await fetch("/api/kpi/scoring/approve", {
-          method: "POST",
-          body: formData,
-          credentials: "same-origin",
-        });
-        const payload = (await response.json()) as { nextStatus?: string; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "审核失败");
-        }
-        if (payload.nextStatus !== "COMPLETED") {
-          throw new Error(`审核未生效，当前仍为「${payload.nextStatus ?? data.stageKey}」`);
-        }
+        await runServerAction(() => approvePersonalKpiScoring(formData));
       } else {
         await runServerAction(() => rejectPersonalKpiScoring(formData));
       }
@@ -461,7 +450,7 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
   return (
     <>
-      <form ref={formRef} className="space-y-6 pb-24">
+      <form ref={formRef} className="space-y-6 pb-24" onSubmit={(event) => event.preventDefault()}>
         <input type="hidden" name="personalKpiId" value={data.id} />
         {!canEditFinal ? <input type="hidden" name="attendanceScore" value={formatScore(data.totals.attendanceScore)} /> : null}
         <Card className="space-y-6">
@@ -813,10 +802,10 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
           {!viewOnly && data.availableActions.canSave ? (
             <div className="flex flex-wrap justify-end gap-3 border-t border-border pt-4">
-              <Button className="rounded-lg" variant="outlined" disabled={isSubmitting} onClick={() => void runAction("save")}>保存</Button>
-              {data.availableActions.canReject ? <Button className="rounded-lg" variant="outlined" disabled={isSubmitting} onClick={() => openPendingAction("reject")}>退回</Button> : null}
-              {data.availableActions.canSubmit ? <Button className="rounded-lg" disabled={isSubmitting} onClick={() => openPendingAction("submit")}>提交</Button> : null}
-              {data.availableActions.canApprove ? <Button className="rounded-lg" disabled={isSubmitting} onClick={() => openPendingAction("approve")}>审核通过</Button> : null}
+              <Button type="button" className="rounded-lg" variant="outlined" disabled={isSubmitting} onClick={() => void runAction("save")}>保存</Button>
+              {data.availableActions.canReject ? <Button type="button" className="rounded-lg" variant="outlined" disabled={isSubmitting} onClick={() => openPendingAction("reject")}>退回</Button> : null}
+              {data.availableActions.canSubmit ? <Button type="button" className="rounded-lg" disabled={isSubmitting} onClick={() => openPendingAction("submit")}>提交</Button> : null}
+              {data.availableActions.canApprove ? <Button type="button" className="rounded-lg" disabled={isSubmitting} onClick={() => openPendingAction("approve")}>审核通过</Button> : null}
             </div>
           ) : null}
         </Card>
