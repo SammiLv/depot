@@ -16,7 +16,9 @@ export function clearStaleClientReloadFlag() {
 
 export function reloadOnceForStaleClient() {
   if (typeof window === "undefined") return;
-  if (sessionStorage.getItem(SERVER_ACTION_RELOAD_ONCE_KEY)) return;
+    if (sessionStorage.getItem(SERVER_ACTION_RELOAD_ONCE_KEY)) {
+      throw new Error("页面版本与服务器不一致，请 Ctrl+F5 强刷后再次操作");
+    }
   sessionStorage.setItem(SERVER_ACTION_RELOAD_ONCE_KEY, "1");
   sessionStorage.setItem(
     SERVER_ACTION_STALE_MESSAGE_KEY,

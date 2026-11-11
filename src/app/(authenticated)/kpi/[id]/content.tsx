@@ -4,7 +4,7 @@ import Link from "next/link";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
-import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
+import { rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
 import { consumeStaleServerActionMessage, ensureClientBuildBeforeServerAction } from "@/lib/stale-client-reload";
 import { Badge, Card } from "@/components/ui-kit";
@@ -347,9 +347,28 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
   const canEditManager = !viewOnly && data.editableStage === "MANAGER" && data.availableActions.canSave;
   const canEditFinal = !viewOnly && data.editableStage === "FINAL" && data.availableActions.canSave;
 
+  function validateBeforeScoring(action: "save" | "submit" | "approve" | "reject") {
+    if (data.editableStage === "FINAL" && (action === "approve" || action === "save")) {
+      const attendance = parseScoreInput(attendanceScore);
+      const directionError = validateScoreByDirection(attendance, "DEDUCTION");
+      if (directionError) {
+        return `考勤分${directionError}`;
+      }
+      return null;
+    }
+    if (action !== "save" && action !== "reject" && formRef.current && !formRef.current.reportValidity()) {
+      return "请检查表单必填项（如上级点评等）是否已填写";
+    }
+    return null;
+  }
+
   async function runAction(action: "save" | "submit" | "approve" | "reject") {
     if (!formRef.current) return;
-    if (action !== "save" && action !== "reject" && !formRef.current.reportValidity()) {
+    const validationMessage = validateBeforeScoring(action);
+    if (validationMessage) {
+      setErrorMessage(validationMessage);
+      message.error(validationMessage);
+      setPendingAction(null);
       return;
     }
     if (action !== "reject" && data.editableStage !== "FINAL") {
@@ -387,7 +406,18 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
       } else if (action === "submit") {
         await runServerAction(() => submitPersonalKpiScoring(formData));
       } else if (action === "approve") {
-        await runServerAction(() => approvePersonalKpiScoring(formData));
+        const response = await fetch("/api/kpi/scoring/approve", {
+          method: "POST",
+          body: formData,
+          credentials: "same-origin",
+        });
+        const payload = (await response.json()) as { nextStatus?: string; error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "审核失败");
+        }
+        if (payload.nextStatus !== "COMPLETED") {
+          throw new Error(`审核未生效，当前仍为「${payload.nextStatus ?? data.stageKey}」`);
+        }
       } else {
         await runServerAction(() => rejectPersonalKpiScoring(formData));
       }
@@ -420,7 +450,10 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
 
   function openPendingAction(action: "submit" | "approve" | "reject") {
     if (!formRef.current) return;
-    if ((action === "submit" || action === "approve") && !formRef.current.reportValidity()) {
+    const validationMessage = validateBeforeScoring(action);
+    if (validationMessage) {
+      setErrorMessage(validationMessage);
+      message.error(validationMessage);
       return;
     }
     setPendingAction(action);

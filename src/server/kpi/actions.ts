@@ -1599,6 +1599,7 @@ async function resolveActiveKpiRatingSnapshot(
 async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringAction) {
   const personalKpiId = requiredString(formData.get("personalKpiId"), "季度 KPI");
   const currentUser = await requireCurrentUser();
+  console.error(`[kpi-scoring] action=${action} kpi=${personalKpiId} user=${currentUser.id}`);
   const summary = parseScoringSummary(formData);
   const rejectRemark = action === "reject" ? parseRejectRemark(formData) : null;
 
