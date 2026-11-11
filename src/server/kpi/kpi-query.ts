@@ -15,7 +15,7 @@ import {
 import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
 import { buildKpiListScoreDisplay, type KpiListScoreDisplay } from "@/server/kpi/kpi-list-score-display";
 import { evaluateKpiDistribution, resolveEffectiveKpiScore, type KpiDistributionEvaluation } from "@/server/kpi/kpi-distribution";
-import { findUserPendingApprovalStep, canUserActOnApprovalStage, buildGroupedApprovalStepDisplays } from "@/server/kpi/approval-step-utils";
+import { canUserActOnApprovalStage, buildGroupedApprovalStepDisplays, resolveActingApprovalStep } from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 import { resolveKpiPeriod, type KpiPeriodOptions } from "@/server/kpi/kpi-period";
 
@@ -695,14 +695,17 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     : 0;
   const finalTotal = personalKpi.finalScore ?? rawManagerTotal + attendanceScore;
   const hasApprovalChain = approvalSteps.length > 0;
-  const currentApprovalStep = findUserPendingApprovalStep(approvalSteps, currentUser.id);
+  const scoreFinalScope = await resolvePermissionScope(currentUser, orgPermissionModuleKeys.kpi, kpiAbilityKeys.scoreFinal);
+  const actingApprovalStep = resolveActingApprovalStep(approvalSteps, currentUser.id, {
+    allowFinalActingByStagePermission: Boolean(scoreFinalScope),
+  });
   const selfReviewActive = isSelfReviewStatus(personalKpi.status);
   const editableStage = resolveKpiEditableStage({
     status: personalKpi.status,
     currentUserId: currentUser.id,
     ownerUserId: personalKpi.userId,
     hasApprovalChain,
-    currentApprovalStepStageKey: currentApprovalStep?.stageKey,
+    currentApprovalStepStageKey: actingApprovalStep?.stageKey,
   });
   const scoringAbilityKey = getScoringAbilityKey(editableStage);
   const hasStagePermission = scoringAbilityKey
@@ -711,7 +714,7 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const canScore = editableStage === "SELF"
     ? hasStagePermission && currentUser.id === personalKpi.userId
     : hasApprovalChain
-      ? Boolean(currentApprovalStep)
+      ? Boolean(actingApprovalStep)
       : hasStagePermission;
   // 草稿可见性（严格）：未提交阶段的分数/汇总/评语，仅「在该阶段做过保存动作的那个人」可见；
   // 其余人（含被考核人本人、上级、下一阶段审批人）一律视为未填。提交后按阶段完成状态对下游可见。
@@ -750,9 +753,9 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
   const displaySelfComment = canSeeSelfDraft ? personalKpi.selfComment : null;
   const displayLeaderTotal = canSeeLeaderDraft ? rawLeaderTotal : fallback(items.map(() => null));
   const displayManagerTotal = canSeeManagerDraft ? rawManagerTotal : fallback(items.map(() => null));
-  const currentStepScores = currentApprovalStep
+  const currentStepScores = actingApprovalStep
     ? await prisma.personalKpiItemStepScore.findMany({
-        where: { approvalStepId: currentApprovalStep.id },
+        where: { approvalStepId: actingApprovalStep.id },
         select: { personalKpiItemId: true, score: true },
       })
     : [];
@@ -809,8 +812,8 @@ export async function getPersonalKpiDetail(currentUser: DataScopeInput, personal
     stageKey: personalKpi.status,
     status: personalKpi.status === "COMPLETED"
       ? "终审"
-      : !selfReviewActive && currentApprovalStep
-        ? getApprovalStepDisplayLabel(currentApprovalStep.stageKey) || stageLabels[personalKpi.status] || personalKpi.status
+      : !selfReviewActive && actingApprovalStep
+        ? getApprovalStepDisplayLabel(actingApprovalStep.stageKey) || stageLabels[personalKpi.status] || personalKpi.status
         : stageLabels[personalKpi.status] ?? personalKpi.status,
     tone,
     editableStage,

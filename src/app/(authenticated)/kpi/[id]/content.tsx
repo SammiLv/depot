@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { approvePersonalKpiScoring, rejectPersonalKpiScoring, savePersonalKpiScoring, submitPersonalKpiScoring } from "@/server/kpi/actions";
 import { runServerAction } from "@/lib/run-server-action";
+import { consumeStaleServerActionMessage } from "@/lib/stale-client-reload";
 import { Badge, Card } from "@/components/ui-kit";
 import { message } from "@rjmart/ui";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
@@ -285,6 +286,11 @@ export function KpiDetailContent({ data, viewOnly = false }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    const staleMessage = consumeStaleServerActionMessage();
+    if (staleMessage) {
+      setErrorMessage(staleMessage);
+      return;
+    }
     const pending = readKpiDetailSuccessNotice(data.id);
     if (pending) setSuccessMessage(pending);
   }, [data.id, data.status, data.stageKey]);
