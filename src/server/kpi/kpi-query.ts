@@ -15,7 +15,12 @@ import {
 import { getTalentKpiDeductionReminder } from "@/server/talent/kpi-deduction-query";
 import { buildKpiListScoreDisplay, type KpiListScoreDisplay } from "@/server/kpi/kpi-list-score-display";
 import { evaluateKpiDistribution, resolveEffectiveKpiScore, type KpiDistributionEvaluation } from "@/server/kpi/kpi-distribution";
-import { canUserActOnApprovalStage, buildGroupedApprovalStepDisplays, resolveActingApprovalStep } from "@/server/kpi/approval-step-utils";
+import {
+  canUserActOnApprovalStage,
+  buildGroupedApprovalStepDisplays,
+  findUserPendingApprovalStep,
+  resolveActingApprovalStep,
+} from "@/server/kpi/approval-step-utils";
 import { parseStructuredSummary } from "@/server/kpi/kpi-summary-utils";
 import { resolveKpiPeriod, type KpiPeriodOptions } from "@/server/kpi/kpi-period";
 
