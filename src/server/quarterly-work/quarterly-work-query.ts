@@ -1134,13 +1134,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   // 开发项目创建即进入统计，未上线时全部需求计入首版
   const getProjectValueMetrics = (project: (typeof projects)[number]) => {
     if (project.needsDevelopment !== true && !project.launchedAt) return null;
-    // 工作量完整度按当前全部开发需求统计
+    // 工作量完整度按当前全部开发需求统计；仅「已完成但缺工作量」视为缺失（进行中需求完成时才必填工作量）
     let includedRequirementCount = 0;
     let missingWorkloadRequirementCount = 0;
     for (const work of worksByProject.get(project.id) ?? []) {
       if (work.needsDevelopment !== true || work.status === "CLOSED") continue;
       includedRequirementCount += 1;
-      if (work.workloadPersonDay === null || work.workloadPersonDay === undefined) missingWorkloadRequirementCount += 1;
+      if (work.completedAt && (work.workloadPersonDay === null || work.workloadPersonDay === undefined)) missingWorkloadRequirementCount += 1;
     }
     const finalTrack = (allValueTracksByProject.get(project.id) ?? []).find((track) => track.isFinal);
     if (finalTrack) {
@@ -1159,7 +1159,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     const iterationWorkload = project.postLaunchIterationWorkloadPersonDay;
     const totalWorkload = project.totalWorkloadPersonDay
       ?? ((firstVersionWorkload ?? 0) + (iterationWorkload ?? 0));
-    // 任一纳入需求缺工作量、无开发需求或总量为 0 时，完成度不可计算（缺数据不按 0 处理）
+    // 任一已完成需求缺工作量（历史脏数据）、无开发需求或总量为 0 时，完成度不可计算（缺数据不按 0 处理）
     const calculable = firstVersionWorkload !== null
       && includedRequirementCount > 0
       && missingWorkloadRequirementCount === 0

@@ -2003,7 +2003,7 @@ function formatWorkload(value: number | null | undefined) {
 }
 
 function formatCompletionPercent(value: number | null | undefined) {
-  // 工作量数据为空（无开发需求/缺工作量/总量为 0）时，完成度直接显示「-」
+  // 工作量数据为空（无开发需求/已完成需求缺工作量/总量为 0）时，完成度直接显示「-」
   if (value === null || value === undefined) return "-";
   return `${value.toFixed(1)}%`;
 }

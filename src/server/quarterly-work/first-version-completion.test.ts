@@ -117,7 +117,7 @@ test("完成时间晚于统计截止的需求不计入对应检查点快照", ()
   assert.ok(Math.abs(result.firstVersionCompletionPercent! - 80) < 1e-9);
 });
 
-test("缺工作量返回不可计算，不按 0 处理", () => {
+test("已完成需求缺工作量（历史脏数据）返回不可计算，不按 0 处理", () => {
   const launchedAt = new Date(2026, 5, 30);
   const cutoff = getValueTrackingTaskDates(launchedAt, 2).checkpointAt;
   const result = calculateFirstVersionCompletion(launchedAt, [
@@ -129,6 +129,21 @@ test("缺工作量返回不可计算，不按 0 处理", () => {
   assert.equal(result.workloadComplete, false);
   assert.equal(result.includedRequirementCount, 2);
   assert.equal(result.missingWorkloadRequirementCount, 1);
+});
+
+test("进行中需求缺工作量不阻塞统计（完成时才必填工作量，届时自动纳入）", () => {
+  const launchedAt = new Date(2026, 5, 30);
+  const cutoff = getValueTrackingTaskDates(launchedAt, 2).checkpointAt;
+  const result = calculateFirstVersionCompletion(launchedAt, [
+    req(new Date(2026, 5, 1), 80),
+    req(null, null), // 进行中、未填工作量：不计入也不阻塞
+  ], cutoff);
+
+  assert.equal(result.firstVersionCompletionPercent, 100);
+  assert.equal(result.workloadComplete, true);
+  assert.equal(result.includedRequirementCount, 2);
+  assert.equal(result.missingWorkloadRequirementCount, 0);
+  assert.equal(result.totalWorkloadPersonDay, 80);
 });
 
 test("没有开发需求或总工作量为 0 返回不可计算", () => {

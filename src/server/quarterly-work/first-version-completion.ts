@@ -11,7 +11,8 @@ import { toBusinessDate } from "@/server/quarterly-work/value-tracking-period";
  *   检查点后 7 天填报宽限期内新增的需求不计入该检查点快照；
  * - 首版完成度 = 首版工作量 / 项目总工作量 × 100（0~100，页面展示时保留 1 位小数）；
  * - 项目未上线时全部需求计入首版（迭代为 0）；
- * - 没有开发需求、任一纳入需求缺工作量、总工作量为 0 时不可计算（返回 null）。
+ * - 尚未完成的需求工作量在完成时才必填，缺工作量不阻塞统计（完成填量后自动纳入）；
+ * - 没有开发需求、任一已完成需求缺工作量（历史脏数据）、总工作量为 0 时不可计算（返回 null）。
  */
 
 export type FirstVersionCompletionRequirement = {
@@ -29,11 +30,11 @@ export type FirstVersionCompletionResult = {
   totalWorkloadPersonDay: number;
   /** 0~100 百分数；不可计算时为 null */
   firstVersionCompletionPercent: number | null;
-  /** 纳入统计的开发需求是否全部填写了工作量 */
+  /** 纳入统计的开发需求是否全部填写了工作量（仅约束已完成需求；进行中的需求完成时才必填工作量） */
   workloadComplete: boolean;
   /** 纳入统计的开发需求数 */
   includedRequirementCount: number;
-  /** 缺少工作量的纳入需求数 */
+  /** 已完成但缺少工作量的纳入需求数（历史脏数据；进行中未填量不计入） */
   missingWorkloadRequirementCount: number;
   /** 需求创建时间晚于统计截止、未纳入本次计算的需求数 */
   excludedAfterCutoffCount: number;
@@ -92,7 +93,8 @@ export function calculateFirstVersionCompletion(
 
     includedCount += 1;
     if (requirement.workloadPersonDay === null || requirement.workloadPersonDay === undefined) {
-      missingCount += 1;
+      // 仅「已完成但缺工作量」视为数据缺失；进行中的需求完成时才必填工作量，不阻塞统计
+      if (completedDay) missingCount += 1;
       continue;
     }
     if (!launchDay || (completedDay && completedDay <= launchDay)) {
