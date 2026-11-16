@@ -76,3 +76,6 @@ kpi-*.xlsx
 # WorkBuddy 工作区与运行时日志（不应入库）
 .workbuddy/
 logs/
+
+# 本地 AI 工具 skills（如 Codex .agents 目录），不入库
+.agents/
