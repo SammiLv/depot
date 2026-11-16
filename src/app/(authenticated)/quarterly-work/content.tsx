@@ -747,29 +747,60 @@ function QuarterlyWorkForm({
   });
   const workloadRequired = (mode === "backfill" || needsDevValue === "true") && workStatus === "COMPLETED";
   const taskResultRequired = workStatus === "COMPLETED";
+  const [errorMessage, setErrorMessage] = useState("");
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
     [data.memberOptions]
   );
 
   const submitAction = async (fd: FormData) => {
-    const nextOwnerId = String(
-      fd.get("ownerId")
-        ?? item?.ownerId
-        ?? selectedProject?.ownerId
-        ?? data.currentUserId
-        ?? memberOptions[0]?.id
-        ?? ""
-    );
-    if (mode === "edit") {
-      await runServerAction(() => updateQuarterlyWork(fd));
-    } else if (mode === "backfill") {
-      await runServerAction(() => backfillQuarterlyWork(fd));
-    } else {
-      await runServerAction(() => createQuarterlyWork(fd));
+    try {
+      setErrorMessage("");
+      if (mode !== "backfill" && !needsDevValue) {
+        setErrorMessage("请选择是否需要开发");
+        return;
+      }
+      if (needsDevValue === "true" && !devSourceValue) {
+        setErrorMessage("请选择开发方");
+        return;
+      }
+      const workloadRaw = (fd.get("workloadPersonDay") as string | null)?.trim();
+      if (workloadRequired && !workloadRaw) {
+        setErrorMessage("需要开发且已完成的需求请填写工作量(人天)");
+        return;
+      }
+      if (
+        (workStatus === "COMPLETED" || mode === "backfill")
+        && !String(fd.get("completedAt") ?? completedAtValue ?? "").trim()
+      ) {
+        setErrorMessage("需求状态为已完成时，完成时间为必填项");
+        return;
+      }
+      if (taskResultRequired && !taskResultValue) {
+        setErrorMessage("请选择需求结果");
+        return;
+      }
+
+      const nextOwnerId = String(
+        fd.get("ownerId")
+          ?? item?.ownerId
+          ?? selectedProject?.ownerId
+          ?? data.currentUserId
+          ?? memberOptions[0]?.id
+          ?? ""
+      );
+      if (mode === "edit") {
+        await runServerAction(() => updateQuarterlyWork(fd));
+      } else if (mode === "backfill") {
+        await runServerAction(() => backfillQuarterlyWork(fd));
+      } else {
+        await runServerAction(() => createQuarterlyWork(fd));
+      }
+      onSuccess(ownerTeamOrgNodeIdByMemberId.get(nextOwnerId) ?? null);
+      onClose();
+    } catch (error) {
+      setErrorMessage(getServerActionErrorMessage(error, "保存需求失败，请检查后重试。"));
     }
-    onSuccess(ownerTeamOrgNodeIdByMemberId.get(nextOwnerId) ?? null);
-    onClose();
   };
 
   const closedReasonRequired = workStatus === "CLOSED";
@@ -966,13 +997,22 @@ function QuarterlyWorkForm({
     </>
   );
 
+  const errorBanner = errorMessage ? (
+    <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      {errorMessage}
+    </div>
+  ) : null;
+
   const formActions = (
-    <div className="flex justify-end gap-3">
-      <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
-      <Button type="submit" className="rounded-lg">
-        {mode === "backfill" ? <ScrollText className="h-4 w-4" /> : mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-        {mode === "backfill" ? "补录" : mode === "edit" ? "保存" : "创建"}
-      </Button>
+    <div className="flex flex-col gap-3">
+      {errorBanner}
+      <div className="flex justify-end gap-3">
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">
+          {mode === "backfill" ? <ScrollText className="h-4 w-4" /> : mode === "edit" ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          {mode === "backfill" ? "补录" : mode === "edit" ? "保存" : "创建"}
+        </Button>
+      </div>
     </div>
   );
 

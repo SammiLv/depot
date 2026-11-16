@@ -349,6 +349,8 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
   const defaultResponsibleUser = candidateResponsibleUser && teamMemberOptionIds.has(candidateResponsibleUser.id)
     ? candidateResponsibleUser
     : null;
+  const teamCurrentValueFromQuarters = isTeamPlan && !!metric && metric.quarterTargets.length > 0;
+  const currentValueDisabled = teamCurrentValueFromQuarters || (!isTeamPlan && !!metric && metric.sources.length > 0);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -390,9 +392,11 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
       if (targetValidationError) {
         nextFieldErrors.targetValue = targetValidationError;
       }
-      const currentValidationError = validateUnitValue(formData.get("currentValue"), resolvedUnit, "当前值");
-      if (currentValidationError) {
-        nextFieldErrors.currentValue = currentValidationError;
+      if (!currentValueDisabled) {
+        const currentValidationError = validateUnitValue(formData.get("currentValue"), resolvedUnit, "当前值");
+        if (currentValidationError) {
+          nextFieldErrors.currentValue = currentValidationError;
+        }
       }
       if (Object.keys(nextFieldErrors).length > 0) {
         setFieldErrors(nextFieldErrors);
@@ -419,6 +423,12 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
       {!metric && <input type="hidden" name="planId" value={plan.authorityPlanId} />}
       {plan.teamOrgNodeId && <input type="hidden" name="teamOrgNodeId" value={plan.teamOrgNodeId} />}
       <div className="space-y-4">
+        {isTeamPlan && metric?.assignmentId && (
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            设计组入口维护本组承接关系：权重、小组负责人与当前值（未拆解季度时）。
+            「全部 → 小组指标」中的同名项为元指标定义，可改名称、目标等；弹窗标题相同，表单字段不同属正常现象。
+          </p>
+        )}
         {isTeamPlan && !metric ? (
           <>
             <div className="flex items-center gap-3">
@@ -468,8 +478,11 @@ function MetricForm({ plan, metric, data, onClose }: { plan: Plan; metric?: Metr
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">当前值</label>
-                <input name="currentValue" type="number" step={getNumberStep(unitValue)} defaultValue={formatInputValue(metric?.currentValue, "0")} disabled={isTeamPlan || (!!metric && metric.sources.length > 0)} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
+                <input name="currentValue" type="number" step={getNumberStep(unitValue)} defaultValue={formatInputValue(metric?.currentValue, "0")} disabled={currentValueDisabled} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring disabled:bg-muted disabled:text-muted-foreground" />
                 {fieldErrors.currentValue && <div className="mt-1 text-xs text-destructive">{fieldErrors.currentValue}</div>}
+                {teamCurrentValueFromQuarters && (
+                  <p className="mt-1 text-xs text-muted-foreground">已拆解季度指标，请在「季度指标」或「周更新」中维护当前值。</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">{renderRequiredLabel("单位 *")}</label>

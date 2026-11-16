@@ -21,10 +21,10 @@ import {
   resolveKpiEditableStage,
   type KpiEditableStage,
 } from "@/server/kpi/approval-workflow";
-import { transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
+import { reconcileStalledApprovalSteps, transitionKpiApprovalChain } from "@/server/kpi/approval-workflow-store";
 import { resolveKpiRating } from "@/server/talent/decision-rule-config";
 import { validateScoreByDirection } from "@/server/kpi/kpi-score-direction";
-import { findUserPendingApprovalStep, getMinPendingStepOrder } from "@/server/kpi/approval-step-utils";
+import { findActivePendingApprovalStep, resolveActingApprovalStep } from "@/server/kpi/approval-step-utils";
 import { emitNotificationEvent } from "@/server/notifications/emit";
 import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 
@@ -1598,8 +1598,7 @@ async function resolveActiveKpiRatingSnapshot(
 
 async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringAction) {
   const personalKpiId = requiredString(formData.get("personalKpiId"), "季度 KPI");
-  const currentUser = await requireCurrentUser();
-  const summary = parseScoringSummary(formData);
+  const currentUser = await requireCurrentUser();  const summary = parseScoringSummary(formData);
   const rejectRemark = action === "reject" ? parseRejectRemark(formData) : null;
 
   const result = await prisma.$transaction(async (tx) => {
@@ -1635,29 +1634,48 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
 
     const approvalStepCount = await tx.personalKpiApprovalStep.count({ where: { personalKpiId } });
     const hasApprovalChain = approvalStepCount > 0;
+    if (hasApprovalChain) {
+      await reconcileStalledApprovalSteps(tx, personalKpiId);
+    }
     const approvalSteps = hasApprovalChain
       ? await tx.personalKpiApprovalStep.findMany({
           where: { personalKpiId },
           orderBy: { stepOrder: "asc" },
         })
       : [];
-    const currentApprovalStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
-      ? findUserPendingApprovalStep(approvalSteps, currentUser.id)
+    const scoreFinalScope = await resolvePermissionScope(
+      currentUser,
+      orgPermissionModuleKeys.kpi,
+      kpiAbilityKeys.scoreFinal,
+    );
+    const activePendingStep = approvalSteps.length ? findActivePendingApprovalStep(approvalSteps) : null;
+    let actingApprovalStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
+      ? resolveActingApprovalStep(approvalSteps, currentUser.id, {
+          allowFinalActingByStagePermission: Boolean(scoreFinalScope),
+        })
       : null;
-    const activeStageStep = !isSelfReviewStatus(personalKpi.status) && approvalSteps.length
-      ? (() => {
-          const minOrder = getMinPendingStepOrder(approvalSteps);
-          if (minOrder == null) return null;
-          return approvalSteps.find((step) => step.stepOrder === minOrder && step.status === "PENDING") ?? null;
-        })()
-      : null;
-    const editableStage = resolveKpiEditableStage({
+    if (
+      personalKpi.status === "PENDING_FINAL_REVIEW"
+      && activePendingStep?.stageKey === "FINAL"
+      && !actingApprovalStep
+      && scoreFinalScope
+    ) {
+      actingApprovalStep = activePendingStep;
+    }
+    let editableStage = resolveKpiEditableStage({
       status: personalKpi.status,
       currentUserId: currentUser.id,
       ownerUserId: personalKpi.userId,
       hasApprovalChain,
-      currentApprovalStepStageKey: currentApprovalStep?.stageKey ?? activeStageStep?.stageKey,
+      currentApprovalStepStageKey: actingApprovalStep?.stageKey,
     });
+    if (
+      personalKpi.status === "PENDING_FINAL_REVIEW"
+      && activePendingStep?.stageKey === "FINAL"
+      && actingApprovalStep?.id === activePendingStep.id
+    ) {
+      editableStage = "FINAL";
+    }
     if (!editableStage) {
       throw new Error("当前 KPI 阶段不支持评分操作");
     }
@@ -1674,7 +1692,7 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       assertRequiredScoringSummary(editableStage, summary, action);
     }
     if (editableStage !== "SELF" && hasApprovalChain) {
-      if (!currentApprovalStep) {
+      if (!actingApprovalStep) {
         throw new Error("你不是当前阶段的审批人");
       }
     } else {
@@ -1726,17 +1744,17 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         } else {
           await tx.personalKpiItem.update({ where: { id: itemId }, data: { managerScore: scoreValue } });
         }
-        if (currentApprovalStep && editableStage !== "SELF") {
+        if (actingApprovalStep && editableStage !== "SELF") {
           await tx.personalKpiItemStepScore.upsert({
             where: {
               personalKpiItemId_approvalStepId: {
                 personalKpiItemId: itemId,
-                approvalStepId: currentApprovalStep.id,
+                approvalStepId: actingApprovalStep.id,
               },
             },
             create: {
               personalKpiItemId: itemId,
-              approvalStepId: currentApprovalStep.id,
+              approvalStepId: actingApprovalStep.id,
               score: scoreValue,
             },
             update: {
@@ -1772,11 +1790,11 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
       nextStatus = await transitionKpiApprovalChain(tx, {
         personalKpiId,
         action,
-        currentStep: currentApprovalStep
+        currentStep: actingApprovalStep
           ? {
-              id: currentApprovalStep.id,
-              stageKey: currentApprovalStep.stageKey,
-              stepOrder: currentApprovalStep.stepOrder,
+              id: actingApprovalStep.id,
+              stageKey: actingApprovalStep.stageKey,
+              stepOrder: actingApprovalStep.stepOrder,
             }
           : null,
         comment: rejectRemark,
@@ -1788,11 +1806,11 @@ async function persistPersonalKpiScoring(formData: FormData, action: KpiScoringA
         nextStatus = await transitionKpiApprovalChain(tx, {
           personalKpiId,
           action,
-          currentStep: currentApprovalStep
+          currentStep: actingApprovalStep
           ? {
-              id: currentApprovalStep.id,
-              stageKey: currentApprovalStep.stageKey,
-              stepOrder: currentApprovalStep.stepOrder,
+              id: actingApprovalStep.id,
+              stageKey: actingApprovalStep.stageKey,
+              stepOrder: actingApprovalStep.stepOrder,
             }
           : null,
           comment: getApprovalStepComment(editableStage, summary),

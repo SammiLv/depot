@@ -5,6 +5,7 @@ import {
   canUserActOnApprovalStage,
   formatParallelApproverNames,
   getGroupedApprovalStepProgress,
+  resolveActingApprovalStep,
 } from "@/server/kpi/approval-step-utils";
 
 test("parallel approver names are joined with 或", () => {
@@ -39,6 +40,18 @@ test("approval stage action is blocked while KPI is still in self review", () =>
   ];
   assert.equal(canUserActOnApprovalStage(steps, "leader-a", "LEADER", true), false);
   assert.equal(canUserActOnApprovalStage(steps, "leader-a", "LEADER", false), true);
+});
+
+test("resolveActingApprovalStep allows final permission on current FINAL pending step", () => {
+  const steps = [
+    { id: "final-1", stepOrder: 3, stageKey: "FINAL", status: "PENDING", approverId: "admin-a" },
+  ];
+  assert.equal(resolveActingApprovalStep(steps, "admin-a"), steps[0]);
+  assert.equal(
+    resolveActingApprovalStep(steps, "admin-b", { allowFinalActingByStagePermission: true }),
+    steps[0],
+  );
+  assert.equal(resolveActingApprovalStep(steps, "admin-b"), null);
 });
 
 test("group is completed when any parallel approver completes", () => {

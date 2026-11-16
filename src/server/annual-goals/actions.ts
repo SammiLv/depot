@@ -831,9 +831,26 @@ export async function updateAnnualGoalMetric(formData: FormData) {
       throw new Error("指标权重合计不能超过 100%");
     }
     const nextSortOrder = formData.get("sortOrder") === null ? assignment.sortOrder : numberFromForm(formData.get("sortOrder"), "排序");
+    const progressSubject = assignment.sourceMetric ?? assignment.metric;
+    const quarterTargetCount = progressSubject
+      ? await prisma.annualGoalQuarterTarget.count({
+          where: {
+            deletedAt: null,
+            ...(assignment.sourceMetricId
+              ? { sourceMetricId: assignment.sourceMetricId, metricId: null }
+              : { metricId: assignment.metricId, sourceMetricId: null }),
+          },
+        })
+      : 0;
+    let nextCurrentValue: number | null = null;
+    if (quarterTargetCount === 0 && formData.get("currentValue") !== null && progressSubject) {
+      nextCurrentValue = numberFromForm(formData.get("currentValue") || "0", "当前值");
+      if (nextCurrentValue < 0) throw new Error("数值不能小于 0");
+    }
     const responsibleNameMap = await resolveResponsibleUserNameMap([assignment.responsibleUserId, responsibleUserId]);
     const teamName = (await findOrgNodeById(assignment.teamOrgNodeId))?.name ?? assignment.teamOrgNodeId;
     const assignmentMetricName = assignment.sourceMetric?.name ?? assignment.metric?.name ?? "";
+    const subjectUnit = progressSubject?.unit ?? "";
     const remark = buildAnnualGoalChangeRemark([
       { label: "权重", previous: `${assignment.weight}%`, next: `${weight}%` },
       {
@@ -842,7 +859,11 @@ export async function updateAnnualGoalMetric(formData: FormData) {
         next: responsibleUserId ? responsibleNameMap.get(responsibleUserId) ?? null : null,
       },
       { label: "排序", previous: assignment.sortOrder, next: nextSortOrder },
+      ...(nextCurrentValue !== null && progressSubject && nextCurrentValue !== progressSubject.currentValue
+        ? [{ label: "当前值", previous: `${progressSubject.currentValue}${subjectUnit}`, next: `${nextCurrentValue}${subjectUnit}` }]
+        : []),
     ]);
+    const progressUpdatedAt = new Date();
     await prisma.$transaction(async (tx) => {
       await tx.annualGoalMetricAssignment.update({
         where: { id: assignmentId },
@@ -853,6 +874,20 @@ export async function updateAnnualGoalMetric(formData: FormData) {
           updatedById: context.user.id,
         },
       });
+      if (nextCurrentValue !== null && progressSubject && nextCurrentValue !== progressSubject.currentValue) {
+        if (assignment.sourceMetricId && assignment.sourceMetric) {
+          await tx.annualGoalMetricSource.update({
+            where: { id: assignment.sourceMetricId },
+            data: { currentValue: nextCurrentValue, progressUpdatedAt, updatedById: context.user.id },
+          });
+          await syncParentMetricFromSources(tx, assignment.sourceMetric.parentMetricId, progressUpdatedAt, context.user.id);
+        } else if (assignment.metricId) {
+          await tx.annualGoalMetric.update({
+            where: { id: assignment.metricId },
+            data: { currentValue: nextCurrentValue, progressUpdatedAt, updatedById: context.user.id },
+          });
+        }
+      }
       if (remark) {
         await writeAnnualGoalOperationLog(tx, {
           targetType: "ANNUAL_GOAL_METRIC_ASSIGNMENT",

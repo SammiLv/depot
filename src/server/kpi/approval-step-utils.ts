@@ -1,4 +1,5 @@
 export type ApprovalStepLike = {
+  id?: string;
   stepOrder: number;
   status: string;
   approverId: string;
@@ -77,6 +78,25 @@ export function findUserPendingApprovalStep<T extends ApprovalStepLike>(
   return steps.find(
     (step) => step.stepOrder === minOrder && step.status === "PENDING" && step.approverId === userId,
   ) ?? null;
+}
+
+export function findActivePendingApprovalStep<T extends ApprovalStepLike>(steps: T[]): T | null {
+  const minOrder = getMinPendingStepOrder(steps);
+  if (minOrder == null) return null;
+  return steps.find((step) => step.stepOrder === minOrder && step.status === "PENDING") ?? null;
+}
+
+/** 当前用户可操作的审批步骤：本人待办优先；终审阶段允许具备终审权限者代办当前链上 FINAL 步骤 */
+export function resolveActingApprovalStep<T extends ApprovalStepLike>(
+  steps: T[],
+  userId: string,
+  options?: { allowFinalActingByStagePermission?: boolean },
+): T | null {
+  const ownStep = findUserPendingApprovalStep(steps, userId);
+  if (ownStep) return ownStep;
+  if (!options?.allowFinalActingByStagePermission) return null;
+  const activeStep = findActivePendingApprovalStep(steps);
+  return activeStep?.stageKey === "FINAL" ? activeStep : null;
 }
 
 export function isUserActiveApproverAtStage<T extends ApprovalStepLike>(
