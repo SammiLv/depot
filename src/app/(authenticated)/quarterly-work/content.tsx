@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
 import { Badge, Card, Progress } from "@/components/ui-kit";
-import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
+import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
 import { getValueTrackingTaskDates } from "@/server/quarterly-work/value-tracking-period";
@@ -62,6 +62,7 @@ type ValueTrackDialogState = {
 type ValueOverviewDialogState = Props["data"]["valueOverviewItems"][number] | null;
 type ProductGoalDialogState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
 type ProductGoalDeleteState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
+type ValueTrackDeleteState = Props["data"]["valueTrackItems"][number] | null;
 type ProjectDeleteState = Props["data"]["projectColumns"][number]["items"][number] | Props["data"]["valueOverviewItems"][number] | null;
 type BoardDeleteState = Props["data"]["columns"][number]["items"][number] | null;
 type FormSuccessHandler = (ownerTeamOrgNodeId: Props["data"]["memberOptions"][number]["teamOrgNodeId"] | null) => void;
@@ -2490,6 +2491,34 @@ function ProductGoalDeleteForm({ item, onClose }: { item: Props["data"]["product
           产品目标：{item.title}
           <br />
           负责人：{item.owner}
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end gap-3">
+        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
+        <Button type="submit" className="rounded-lg">
+          <Trash2 className="h-4 w-4" />
+          删除
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ValueTrackDeleteForm({ item, onClose }: { item: Props["data"]["valueTrackItems"][number]; onClose: () => void }) {
+  const router = useRouter();
+  return (
+    <form action={async (formData: FormData) => {
+      await runServerAction(() => deleteValueTrack(formData));
+      router.refresh();
+      onClose();
+    }}>
+      <input type="hidden" name="trackId" value={item.id} />
+      <div className="space-y-4">
+        <p className="text-sm text-foreground">确定删除这条价值跟踪记录吗？</p>
+        <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          项目：{item.projectTitle}
+          <br />
+          跟踪时间：{formatTrackedAtLabel(item.trackedAt)}
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
@@ -6853,6 +6882,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const valueTrackLogSectionRef = useRef<HTMLDivElement | null>(null);
   const [productGoalDialog, setProductGoalDialog] = useState<ProductGoalDialogState>(null);
   const [productGoalDeleteDialog, setProductGoalDeleteDialog] = useState<ProductGoalDeleteState>(null);
+  const [valueTrackDeleteDialog, setValueTrackDeleteDialog] = useState<ValueTrackDeleteState>(null);
   const [projectDeleteDialog, setProjectDeleteDialog] = useState<ProjectDeleteState>(null);
   const [boardDeleteDialog, setBoardDeleteDialog] = useState<BoardDeleteState>(null);
   const [createProjectDialog, setCreateProjectDialog] = useState<ProjectStatus | null>(null);
@@ -7973,14 +8003,16 @@ export function QuarterlyWorkContent({ data }: Props) {
                                 >
                                   编辑
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setValueTrackDeleteDialog(item)}
-                                  className="text-destructive hover:underline"
-                                  aria-label={`删除${item.projectTitle}的价值跟踪`}
-                                >
-                                  删除
-                                </button>
+                                {!item.isFinal && item.trackingSequence !== 1 && item.trackingSequence !== 2 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setValueTrackDeleteDialog(item)}
+                                    className="text-destructive hover:underline"
+                                    aria-label={`删除${item.projectTitle}的价值跟踪`}
+                                  >
+                                    删除
+                                  </button>
+                                ) : null}
                               </div>
                             ) : (
                               <span className="text-muted-foreground">—</span>
@@ -8278,6 +8310,15 @@ export function QuarterlyWorkContent({ data }: Props) {
             track={valueTrackDialog.track}
             project={valueTrackDialog.project}
             onClose={() => setValueTrackDialog(null)}
+          />
+        ) : null}
+      </Dialog>
+
+      <Dialog open={!!valueTrackDeleteDialog} onClose={() => setValueTrackDeleteDialog(null)} title="删除价值跟踪">
+        {valueTrackDeleteDialog ? (
+          <ValueTrackDeleteForm
+            item={valueTrackDeleteDialog}
+            onClose={() => setValueTrackDeleteDialog(null)}
           />
         ) : null}
       </Dialog>
