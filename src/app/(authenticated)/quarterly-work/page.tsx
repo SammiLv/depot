@@ -46,7 +46,8 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
     selectedYear,
     selectedQuarter,
     goalId: readParam(params?.goalId) ?? undefined,
-    view: viewRaw === "list" ? "list" : undefined,
+    // card 也要显式透传：否则服务端回退角色默认（管理员/主管默认列表），导致切换卡片不生效
+    view: viewRaw === "list" ? "list" : viewRaw === "card" ? "card" : undefined,
     projectPanel: projectPanelRaw === "value" ? "value" : undefined,
     panel: parsePanelParam(params?.panel),
     status: parseStatusesParam(params?.status),

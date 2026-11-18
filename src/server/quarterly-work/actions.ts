@@ -1699,6 +1699,10 @@ export async function deleteValueTrack(formData: FormData) {
 
   if (!track) throw new Error("价值跟踪不存在或无权限删除");
   if (track.isFinal) throw new Error("已完成最终确认的价值跟踪不可删除");
+  // 第 1/2 次跟踪任务由服务端固定预生成，不允许删除
+  if (track.trackingSequence === 1 || track.trackingSequence === 2) {
+    throw new Error("固定生成的价值跟踪任务不可删除");
+  }
 
   await prisma.requirementValueTrack.update({
     where: { id: track.id },

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
 import { Badge, Card, Progress } from "@/components/ui-kit";
-import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
+import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
 import { matchesDepartmentAndTeamScope } from "@/server/quarterly-work/quarterly-work-period-filters";
 import { getValueTrackingTaskDates } from "@/server/quarterly-work/value-tracking-period";
@@ -18,11 +18,11 @@ import {
   isValueJudgement,
 } from "@/server/quarterly-work/value-track-constants";
 import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
-import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_INTERNAL } from "@/server/quarterly-work/development-source-constants";
+import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_INTERNAL, developmentSourceLabel } from "@/server/quarterly-work/development-source-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
 import { getServerActionErrorMessage } from "@/lib/server-action-error";
-import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, X, Check, ChevronsUpDown, ChevronUp, Trash2, Search, ScrollText, ChevronDown, Eye, ArrowLeft, CalendarDays, Clock3, Target, TrendingUp, FileText, CircleCheck, Code2 } from "lucide-react";
 import { Button } from "@rjmart/ui";
 
 type Props = { data: Awaited<ReturnType<typeof getQuarterlyWorkData>> };
@@ -59,7 +59,6 @@ type ValueTrackDialogState = {
   track: Props["data"]["valueTrackItems"][number];
   project: ProjectWorkspaceItem | null;
 } | null;
-type ValueTrackDeleteState = Props["data"]["valueTrackItems"][number] | null;
 type ValueOverviewDialogState = Props["data"]["valueOverviewItems"][number] | null;
 type ProductGoalDialogState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
 type ProductGoalDeleteState = Props["data"]["productGoalColumns"][number]["items"][number] | null;
@@ -2335,21 +2334,21 @@ function ValueOverviewEditForm({
             />
           </FieldCell>
         </FieldRow>
-        <FieldCell label="其他成本">
-          <RjTextarea
-            name="otherCost"
-            rows={2}
-            defaultValue={item.otherCost ?? ""}
-            placeholder="请输入其他成本"
-            className="w-full"
-          />
-        </FieldCell>
         <FieldCell label="实际收益">
           <RjTextarea
             name="actualValue"
             rows={2}
             defaultValue={item.actualValue ?? ""}
             placeholder="请输入实际收益"
+            className="w-full"
+          />
+        </FieldCell>
+        <FieldCell label="其他成本">
+          <RjTextarea
+            name="otherCost"
+            rows={2}
+            defaultValue={item.otherCost ?? ""}
+            placeholder="请输入其他成本"
             className="w-full"
           />
         </FieldCell>
@@ -2474,34 +2473,6 @@ function ProductGoalEditForm({
           </Button>
         </div>
       </StickyFormFooter>
-    </form>
-  );
-}
-
-function ValueTrackDeleteForm({ item, onClose }: { item: Props["data"]["valueTrackItems"][number]; onClose: () => void }) {
-  const router = useRouter();
-  return (
-    <form action={async (formData: FormData) => {
-      await runServerAction(() => deleteValueTrack(formData));
-      router.refresh();
-      onClose();
-    }}>
-      <input type="hidden" name="trackId" value={item.id} />
-      <div className="space-y-4">
-        <p className="text-sm text-foreground">确定删除这条价值跟踪记录吗？</p>
-        <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          项目：{item.projectTitle}
-          <br />
-          跟踪时间：{formatTrackedAtLabel(item.trackedAt)}
-        </div>
-      </div>
-      <div className="mt-6 flex justify-end gap-3">
-        <Button type="button" variant="outlined" className="rounded-lg" onClick={onClose}>取消</Button>
-        <Button type="submit" className="rounded-lg">
-          <Trash2 className="h-4 w-4" />
-          删除
-        </Button>
-      </div>
     </form>
   );
 }
@@ -2706,12 +2677,14 @@ function ProjectTaskCard({
   canEdit,
   onEdit,
   onDelete,
+  onViewDetail,
   unstartedClass = "bg-[#FAFAFA]",
 }: {
   task: ProjectWorkspaceTaskItem;
   canEdit: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onViewDetail: () => void;
   unstartedClass?: string;
 }) {
   const completed = task.status === "COMPLETED";
@@ -2727,6 +2700,16 @@ function ProjectTaskCard({
         <div className="min-w-0 flex-1 text-sm font-medium leading-[22px] text-[#181818]">
           {task.title}
         </div>
+        {/* 查看详情：所有用户可见，放在编辑左侧 */}
+        <button
+          type="button"
+          onClick={onViewDetail}
+          title="查看详情"
+          aria-label={`查看${task.title}的详情`}
+          className="group flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[3.5px] bg-white/65 hover:bg-[#E8F2FF]"
+        >
+          <Eye className="h-3.5 w-3.5 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+        </button>
         {canEdit ? (
           <div className="flex h-[22px] shrink-0 items-center gap-2">
             <button
@@ -2831,6 +2814,7 @@ function TaskMasonryGrid({
   canManageTask,
   onEditTask,
   onDeleteTask,
+  onViewTask,
 }: {
   tasks: ProjectWorkspaceTaskItem[];
   canEdit: boolean;
@@ -2838,6 +2822,7 @@ function TaskMasonryGrid({
   canManageTask?: (task: ProjectWorkspaceTaskItem) => boolean;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
   onDeleteTask: (task: ProjectWorkspaceTaskItem) => void;
+  onViewTask: (task: ProjectWorkspaceTaskItem) => void;
 }) {
   const columnCount = useWorkspaceCardColumnCount();
   const columns = useMemo(() => splitIntoColumns(sortTaskCards(tasks), columnCount), [columnCount, tasks]);
@@ -2853,6 +2838,7 @@ function TaskMasonryGrid({
               canEdit={canEdit && (canManageTask ? canManageTask(task) : true)}
               onEdit={() => onEditTask(task)}
               onDelete={() => onDeleteTask(task)}
+              onViewDetail={() => onViewTask(task)}
               unstartedClass="bg-white"
             />
           ))}
@@ -2866,16 +2852,15 @@ function ProjectValueTrackCard({
   track,
   canEdit,
   onEdit,
-  onDelete,
+  onView,
 }: {
   track: ProjectWorkspaceValueTrackItem;
   canEdit: boolean;
   onEdit: () => void;
-  onDelete: () => void;
+  onView: () => void;
 }) {
   const followUp = formatValueTrackFollowUp(track.followUpOptimization);
-  // 未最终冻结的记录都可删除（含预生成任务，删除限制已放开）
-  const deletable = !track.isFinal;
+  // 跟踪任务由服务端固定预生成（第 1、第 2 两次检查），不提供删除入口
   const editable = canEdit && !track.isFinal;
 
   return (
@@ -2887,8 +2872,8 @@ function ProjectValueTrackCard({
             {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
           </span>
         ) : null}
-        {editable ? (
-          <div className="flex h-[22px] shrink-0 items-center gap-2">
+        <div className="flex h-[22px] shrink-0 items-center gap-2">
+          {editable ? (
             <button
               type="button"
               onClick={onEdit}
@@ -2898,18 +2883,18 @@ function ProjectValueTrackCard({
               <img src="/icons/edit-outlined.png" alt="" width={14} height={14} className="h-3.5 w-3.5 group-hover:hidden" />
               <img src="/icons/edit-outlined-blue.png" alt="" width={14} height={14} className="hidden h-3.5 w-3.5 group-hover:block" />
             </button>
-            {deletable ? (
-              <button
-                type="button"
-                onClick={onDelete}
-                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[3.5px] bg-white hover:bg-[#FFECE8]"
-                aria-label={`删除${track.periodLabel}跟踪过程`}
-              >
-                <img src="/icons/delete-outlined.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+          ) : null}
+          {/* 查看详情：所有用户可见，放在操作区末尾 */}
+          <button
+            type="button"
+            onClick={onView}
+            title="查看详情"
+            aria-label={`查看${track.periodLabel}的详情`}
+            className="group flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[3.5px] bg-white hover:bg-[#E8F2FF]"
+          >
+            <Eye className="h-3.5 w-3.5 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+          </button>
+        </div>
       </div>
       {track.checkpointAt ? (
         <div className="text-xs leading-[18px] text-[#999999]">
@@ -3017,16 +3002,16 @@ function ProjectValuePanel({
   canManageProjectAndValueTracking,
   onCreateValueTrack,
   onEditValueTrack,
-  onDeleteValueTrack,
   onEditValueOverview,
+  onViewTrack,
 }: {
   project: ProjectWorkspaceItem;
   canCreateValueTrack: boolean;
   canManageProjectAndValueTracking: boolean;
   onCreateValueTrack: () => void;
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
-  onDeleteValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
   onEditValueOverview?: () => void;
+  onViewTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const judgementTone = valueJudgementTone(project.valueTrackSummary.judgement);
   const summary = project.valueTrackSummary;
@@ -3105,7 +3090,7 @@ function ProjectValuePanel({
                   track={track}
                   canEdit={canManageProjectAndValueTracking}
                   onEdit={() => onEditValueTrack(track)}
-                  onDelete={() => onDeleteValueTrack(track)}
+                  onView={() => onViewTrack(track)}
                 />
               ))
             ) : (
@@ -3140,16 +3125,18 @@ function ValueHomeCard({
   canManageProjectAndValueTracking,
   onCreateValueTrack,
   onEditValueTrack,
-  onDeleteValueTrack,
   onEditValueOverview,
+  onViewDetail,
+  onViewTrack,
 }: {
   project: ProjectWorkspaceItem;
   canCreateValueTrack: boolean;
   canManageProjectAndValueTracking: boolean;
   onCreateValueTrack: () => void;
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
-  onDeleteValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
   onEditValueOverview: () => void;
+  onViewDetail: () => void;
+  onViewTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   return (
     <article className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl bg-white">
@@ -3167,6 +3154,16 @@ function ValueHomeCard({
                 <img src="/icons/add-task.png" alt="" width={24} height={24} className="block h-6 w-6" />
               </button>
             ) : null}
+            {/* 查看详情：所有用户可见，放在编辑左侧 */}
+            <button
+              type="button"
+              onClick={onViewDetail}
+              title="查看详情"
+              aria-label={`查看${project.title}的价值跟踪详情`}
+              className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#E8F2FF]"
+            >
+              <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+            </button>
             {canManageProjectAndValueTracking ? (
               <button
                 type="button"
@@ -3188,7 +3185,7 @@ function ValueHomeCard({
           canManageProjectAndValueTracking={canManageProjectAndValueTracking}
           onCreateValueTrack={onCreateValueTrack}
           onEditValueTrack={onEditValueTrack}
-          onDeleteValueTrack={onDeleteValueTrack}
+          onViewTrack={onViewTrack}
         />
       </div>
     </article>
@@ -3334,13 +3331,15 @@ function ProjectCard({
   canEditTerminalProjectWork,
   onCreateTask,
   onCreateValueTrack,
+  onViewDetail,
   onEditProject,
   onDeleteProject,
   onEditTask,
   onDeleteTask,
   onEditValueTrack,
-  onDeleteValueTrack,
   onEditValueOverview,
+  onViewTaskDetail,
+  onViewTrack,
 }: {
   project: ProjectWorkspaceItem;
   canCreateTask: boolean;
@@ -3350,13 +3349,15 @@ function ProjectCard({
   canEditTerminalProjectWork: boolean;
   onCreateTask: () => void;
   onCreateValueTrack: () => void;
+  onViewDetail: () => void;
   onEditProject: () => void;
   onDeleteProject: () => void;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
   onDeleteTask: (task: ProjectWorkspaceTaskItem) => void;
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
-  onDeleteValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
   onEditValueOverview: () => void;
+  onViewTaskDetail: (task: ProjectWorkspaceTaskItem) => void;
+  onViewTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const [panel, setPanel] = useState<"task" | "value">("task");
 
@@ -3374,6 +3375,16 @@ function ProjectCard({
                   onCreateTask={onCreateTask}
                   onCreateValueTrack={onCreateValueTrack}
                 />
+                {/* 查看详情：所有用户可见，放在编辑左侧 */}
+                <button
+                  type="button"
+                  aria-label="查看详情"
+                  title="查看详情"
+                  onClick={onViewDetail}
+                  className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#E8F2FF]"
+                >
+                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+                </button>
                 {canManageProjectAndValueTracking ? (
                   <>
                     {projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork) ? (
@@ -3484,6 +3495,7 @@ function ProjectCard({
                     canEdit={canManageProductTask && workAllowsEdit(task.status, canEditTerminalProjectWork)}
                     onEdit={() => onEditTask(task)}
                     onDelete={() => onDeleteTask(task)}
+                    onViewDetail={() => onViewTaskDetail(task)}
                   />
                 ))}
               </div>
@@ -3504,8 +3516,8 @@ function ProjectCard({
             canManageProjectAndValueTracking={canManageProjectAndValueTracking}
             onCreateValueTrack={onCreateValueTrack}
             onEditValueTrack={onEditValueTrack}
-            onDeleteValueTrack={onDeleteValueTrack}
             onEditValueOverview={onEditValueOverview}
+            onViewTrack={onViewTrack}
           />
         )}
       </div>
@@ -3987,6 +3999,7 @@ function ProjectListActionButtons({
   canEdit,
   onCreate,
   onBackfill,
+  onViewDetail,
   onEdit,
   onDelete,
 }: {
@@ -3996,12 +4009,14 @@ function ProjectListActionButtons({
   canEdit?: boolean;
   onCreate: () => void;
   onBackfill?: () => void;
+  onViewDetail: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const editAllowed = canEdit ?? canManage;
+  // 一行最多 4 个按钮（4×26+3×8=128px），超过自动换为两行
   return (
-    <div className="flex items-center justify-end gap-3">
+    <div className="flex max-w-[128px] flex-wrap items-center justify-end gap-2">
       {canCreate ? (
         <button
           type="button"
@@ -4035,6 +4050,15 @@ function ProjectListActionButtons({
             <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
           </button>
       ) : null}
+      <button
+        type="button"
+        onClick={onViewDetail}
+        title="查看详情"
+        aria-label="查看详情"
+        className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+      >
+        <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+      </button>
       {canManage ? (
           <button
             type="button"
@@ -4045,6 +4069,829 @@ function ProjectListActionButtons({
             <img src="/icons/delete-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
           </button>
       ) : null}
+    </div>
+  );
+}
+
+/** 详情抽屉需求卡片底色：逾期/延期=warning 橙、已完成=绿、进行中=蓝、其他=中性灰（设计稿方案B渐变） */
+function detailTaskCardBackground(task: ProjectWorkspaceTaskItem): string {
+  if (task.isOverdue || task.status === "DELAYED_COMPLETED") {
+    // token: warning gradient
+    return "linear-gradient(180deg, #FFEEE4 0%, #FFF9F5 30%, #FAFAFA 100%)";
+  }
+  if (task.status === "COMPLETED") {
+    // token: success gradient
+    return "linear-gradient(180deg, #EAFAEB 0%, #F5FFF7 30%, #FAFAFA 100%)";
+  }
+  if (task.status === "IN_PROGRESS") {
+    // token: info gradient
+    return "linear-gradient(180deg, #E9F9FB 0%, #F5FEFF 30%, #FAFAFA 100%)";
+  }
+  // token: bg_index_1/bg-Layout-secondary
+  return "#FAFAFA";
+}
+
+/**
+ * 项目详情抽屉（设计稿：项目详情/需求 方案B）。
+ * 右侧 600px 抽屉：固定头部（返回、项目名+状态、目标标签、编辑项目、摘要指标），
+ * 滚动区为项目目标/预期收益卡 + 需求/价值跟踪 Tabs。
+ */
+function ProjectDetailDrawer({
+  project,
+  canEditProject,
+  canCreateTask,
+  canEditTerminalProjectWork,
+  canManageValueTracking,
+  onClose,
+  onEditProject,
+  onCreateTask,
+  onEditTask,
+  onEditValueOverview,
+  onEditValueTrack,
+  onViewTask,
+}: {
+  project: ProjectWorkspaceItem;
+  canEditProject: boolean;
+  canCreateTask: boolean;
+  canEditTerminalProjectWork: boolean;
+  canManageValueTracking: boolean;
+  onClose: () => void;
+  onEditProject: () => void;
+  onCreateTask: () => void;
+  onEditTask: (task: ProjectWorkspaceTaskItem) => void;
+  onEditValueOverview: () => void;
+  onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
+  onViewTask: (task: ProjectWorkspaceTaskItem) => void;
+}) {
+  const [tab, setTab] = useState<"task" | "value">("task");
+  const summary = project.valueTrackSummary;
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    // z-30：低于编辑弹窗（Dialog z-40），编辑时抽屉保持打开、弹窗覆盖在上层，取消/保存后回到抽屉
+    <div className="fixed inset-0 z-30">
+      {/* token: 遮罩 rgba(29,27,36,0.38) */}
+      <div className="absolute inset-0 bg-[rgba(29,27,36,0.38)]" onClick={onClose} />
+      {/* token: 抽屉 bg_index_1/bg-layout #F5F5F5，阴影 -12px 0 32px rgba(30,24,48,0.12) */}
+      <div className="absolute bottom-4 right-4 top-4 flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl bg-[#F5F5F5] shadow-[-12px_0_32px_0_rgba(30,24,48,0.12)]">
+        {/* 固定头部：bg-container #FFFFFF，底部分割线 token line_index_1/split #F0F0F0 */}
+        <div className="shrink-0 border-b border-[#F0F0F0] bg-white px-4 pt-4">
+          <div className="flex items-start gap-4">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="返回"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#F4F4F6] text-[#181818] hover:bg-[#E8F2FF]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-base font-semibold leading-6 text-[#181818]">{project.title}</span>
+                <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] text-xs leading-[18px] ${projectStatusTagClass[project.status]}`}>
+                  <span className="h-1 w-1 rounded-full bg-current" />
+                  {projectTitleByStatus[project.status]}
+                </span>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {project.productGoals.length ? (
+                  project.productGoals.map((goal) => (
+                    <span key={goal.id} className="rounded bg-[#F5F5F5] px-2 py-[3px] text-xs leading-[18px] text-[#181818]">
+                      {goal.title}
+                    </span>
+                  ))
+                ) : (
+                  <span className="rounded bg-[#FFECE8] px-2 py-[3px] text-xs leading-[18px] text-[#F53F3F]">未关联目标</span>
+                )}
+              </div>
+            </div>
+            {canEditProject ? (
+              <button
+                type="button"
+                onClick={onEditProject}
+                className="flex h-8 shrink-0 items-center gap-2 rounded-md bg-[#FAFAFA] px-4 text-sm leading-[22px] text-[#181818] hover:bg-[#E8F2FF]"
+              >
+                <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
+                编辑项目
+              </button>
+            ) : null}
+          </div>
+          {/* 摘要指标：第一行 负责人/项目周期/累计工作量，第二行 是否开发/上线时间/完成时间 */}
+          <div className="flex flex-col gap-3 pb-4 pl-10 pt-4">
+            <div className="flex items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs leading-[18px] text-[#777777]">项目负责人</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#3069F9] text-[10px] font-semibold leading-[14px] text-white">
+                    {project.owner.slice(0, 1)}
+                  </span>
+                  <span className="truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                    {project.owner}{project.teamName ? ` · ${project.teamName}` : ""}
+                  </span>
+                </div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">项目周期</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {formatListQuarterRange(project.startQuarter, project.endQuarter)}
+                </div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">累计工作量（人天）</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {formatWorkload(project.workloadPersonDay)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs leading-[18px] text-[#777777]">是否开发项目</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{project.needsDevelopment ? "是" : "否"}</div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">上线时间</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(project.launchedAt)}</div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">完成时间</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(project.completedAt)}</div>
+              </div>
+            </div>
+            {project.status === "CLOSED" ? (
+              <div>
+                <div className="text-xs leading-[18px] text-[#777777]">关闭原因</div>
+                <div className="mt-1 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#181818]">{project.closeReason?.trim() || "-"}</div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* 滚动内容 */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-4">
+            {/* 项目描述卡：bg-container #FFFFFF，radius 16px */}
+            <div className="rounded-2xl bg-white p-4">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[#4B4B4B]" />
+                <span className="text-sm font-semibold leading-[22px] text-[#181818]">项目描述</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#181818]">
+                {project.description?.trim() || "暂无项目描述"}
+              </p>
+            </div>
+            {/* 预期收益卡 */}
+            <div className="rounded-2xl bg-white p-4">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-[#4B4B4B]" />
+                <span className="text-sm font-semibold leading-[22px] text-[#181818]">预期收益</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
+                {project.expectedOutcome?.trim() || "暂无预期收益"}
+              </p>
+            </div>
+
+            {/* 关联需求卡：需求 / 价值跟踪 Tabs */}
+            <div className="rounded-2xl bg-white px-4 pb-4">
+              <div className="flex items-center">
+                <div className="flex items-center gap-6">
+                  {([
+                    { key: "task" as const, label: "需求" },
+                    { key: "value" as const, label: "价值跟踪" },
+                  ]).map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setTab(item.key)}
+                      className={`relative flex h-12 items-center text-sm leading-[22px] ${
+                        tab === item.key ? "font-medium text-[#181818]" : "text-[#4B4B4B] hover:text-[#181818]"
+                      }`}
+                    >
+                      {item.label}
+                      {tab === item.key ? (
+                        <span className="absolute bottom-0 left-0 h-0.5 w-full rounded-full bg-[#3069F9]" />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1" />
+                {tab === "task" && canCreateTask ? (
+                  <button
+                    type="button"
+                    onClick={onCreateTask}
+                    aria-label="新增需求"
+                    title="新增需求"
+                    className="flex h-6 w-6 items-center justify-center rounded bg-[#181818] text-white hover:opacity-80"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+
+              {tab === "task" ? (
+                <div className="flex flex-col gap-4 pt-4">
+                  {project.tasks.length ? (
+                    project.tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onViewTask(task)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onViewTask(task);
+                          }
+                        }}
+                        className="cursor-pointer rounded-xl p-4 transition-shadow hover:shadow-md"
+                        style={{ background: detailTaskCardBackground(task) }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium leading-[22px] text-[#181818]">{task.title}</span>
+                          <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
+                          {workAllowsEdit(task.status, canEditTerminalProjectWork) ? (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onEditTask(task);
+                              }}
+                              aria-label={`编辑${task.title}`}
+                              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded border border-[rgba(255,255,255,0.65)] bg-white text-[#4B4B4B] hover:text-[#3069F9]"
+                            >
+                              <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-3 w-3" />
+                            </button>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
+                          {task.description?.trim() || task.expectedOutcome?.trim() || "-"}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+                          <span className="flex items-center gap-1">
+                            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#0655FE] text-[8px] font-semibold leading-[10px] text-white">
+                              {task.owner.slice(0, 1)}
+                            </span>
+                            <span className="text-sm leading-[22px] text-[#181818]">{task.owner}</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <CalendarDays className={`h-4 w-4 ${task.isOverdue ? "text-[#FF7D00]" : "text-[#181818]"}`} />
+                            <span className={`text-sm leading-[22px] ${task.isOverdue ? "text-[#FF7D00]" : "text-[#181818]"}`}>{task.periodLabel}</span>
+                          </span>
+                          {task.remainingWeeksLabel ? (
+                            <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs leading-[18px] ${task.remainingWeeksLabel.startsWith("逾期") ? "bg-[#FFECE8] text-[#F53F3F]" : "bg-[#FFF7E8] text-[#FF7D00]"}`}>
+                              {task.remainingWeeksLabel}
+                            </span>
+                          ) : null}
+                          {task.workloadPersonDay !== null && task.workloadPersonDay !== undefined ? (
+                            <span className="flex items-center gap-1">
+                              <Clock3 className="h-4 w-4 text-[#181818]" />
+                              <span className="text-sm leading-[22px] text-[#181818]">{formatWorkload(task.workloadPersonDay)}人天</span>
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="py-6 text-center text-sm text-[#777777]">暂无需求</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-4 pt-4">
+                  {/* 跟踪摘要：跟踪状态置顶；价值判断按值变色（未达红/已达蓝/超预期绿），与首版完成度分底色；盒子与下方跟踪记录卡同宽 */}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs leading-[18px] text-[#777777]">跟踪状态</span>
+                      <span className="text-sm font-semibold leading-[22px] text-[#181818]">{summary.status}</span>
+                      <div className="flex-1" />
+                      {canManageValueTracking ? (
+                        <button
+                          type="button"
+                          onClick={onEditValueOverview}
+                          title="编辑项目价值"
+                          aria-label="编辑项目价值"
+                          className="flex h-[26px] w-[26px] items-center justify-center rounded bg-[#F5F6F8] text-[#4B4B4B] hover:bg-[#E8F2FF] hover:text-[#3069F9]"
+                        >
+                          <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div className={`rounded-xl p-3 ${valueJudgementTone(summary.judgement).box}`}>
+                        <div className="text-xs leading-[18px] text-[#777777]">价值判断</div>
+                        <div className={`mt-1 text-sm font-semibold leading-[22px] ${valueJudgementTone(summary.judgement).text}`}>
+                          {valueJudgementLabel(summary.judgement)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-[#F7F8FA] p-3">
+                        <div className="text-xs leading-[18px] text-[#777777]">首版完成度</div>
+                        <div className="mt-1 text-sm font-semibold leading-[22px] text-[#181818]">
+                          {formatCompletionPercent(summary.firstVersionCompletionPercent)}
+                          {summary.totalWorkloadPersonDay !== null ? (
+                            <span className="ml-1 text-xs font-normal text-[#777777]">
+                              （{formatWorkload(summary.firstVersionWorkloadPersonDay)}/{formatWorkload(summary.postLaunchIterationWorkloadPersonDay)}/{formatWorkload(summary.totalWorkloadPersonDay)}）
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                    {/* 实际收益 / 其他成本：与上方两盒同边距的整行盒子 */}
+                    <div className="mt-3 rounded-xl bg-[#F7F8FA] p-3">
+                      <div className="text-xs leading-[18px] text-[#777777]">实际收益</div>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#181818]">{summary.actualValue?.trim() || "-"}</p>
+                    </div>
+                    <div className="mt-3 rounded-xl bg-[#F7F8FA] p-3">
+                      <div className="text-xs leading-[18px] text-[#777777]">其他成本</div>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#181818]">{project.otherCost?.trim() || "-"}</p>
+                    </div>
+                  </div>
+                  {/* 跟踪过程：标题 + 右侧横线（设计稿） */}
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 text-sm font-semibold leading-[22px] text-[#181818]">跟踪过程</span>
+                    <div className="h-px flex-1 bg-[#F0F0F0]" />
+                  </div>
+                  {project.valueTracks.length ? (
+                    project.valueTracks.map((track) => (
+                      <div key={track.id} className="rounded-xl bg-[#FAFAFA] p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-sm font-medium leading-[22px] text-[#181818]">{track.periodLabel}</span>
+                            <ListStatusTag label={VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState} className={VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? "bg-[#F5F5F5] text-[#777777]"} />
+                            {track.isFinal ? (
+                              <ListStatusTag label="最终确认" className="bg-[#E8FFEA] text-[#00B42A]" />
+                            ) : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-xs leading-[18px] text-[#777777]">{formatDateTimeLabel(track.trackedAt)}</span>
+                            {canManageValueTracking ? (
+                              <button
+                                type="button"
+                                onClick={() => onEditValueTrack(track)}
+                                title="编辑跟踪记录"
+                                aria-label={`编辑${track.periodLabel}`}
+                                className="flex h-[26px] w-[26px] items-center justify-center rounded bg-white text-[#4B4B4B] hover:bg-[#E8F2FF] hover:text-[#3069F9]"
+                              >
+                                <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-3.5 w-3.5" />
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                        {track.periodStartAt && track.checkpointAt ? (
+                          <div className="mt-1 text-xs leading-[18px] text-[#777777]">
+                            跟踪周期 {formatDateTimeLabel(track.periodStartAt)} ~ {formatDateTimeLabel(track.checkpointAt)}
+                          </div>
+                        ) : null}
+                        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
+                          {track.trackingResult?.trim() || "待填写跟踪结果"}
+                        </p>
+                        {track.followUpOptimization?.trim() ? (
+                          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
+                            <span className="text-[#4B4B4B]">后续优化：</span>
+                            {track.followUpOptimization}
+                          </p>
+                        ) : null}
+                        {track.actualValue?.trim() || valueJudgementLabel(track.valueJudgement) !== "-" ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs leading-[18px] text-[#777777]">
+                            {track.actualValue?.trim() ? <span>实际收益：{track.actualValue}</span> : null}
+                            {valueJudgementLabel(track.valueJudgement) !== "-" ? <span>价值判断：{valueJudgementLabel(track.valueJudgement)}</span> : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="py-6 text-center text-sm text-[#777777]">暂无跟踪记录</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 需求结果标签样式（详情抽屉「交付与复盘」）：已达标绿、未达标红 */
+function taskResultTagClass(taskResult: string | null): string {
+  if (taskResult === "已达标") return "bg-[#E9F8ED] text-[#29A35A]";
+  if (taskResult === "未达标") return "bg-[#FFECE8] text-[#F53F3F]";
+  return "bg-[#F5F5F5] text-[#777777]";
+}
+
+/**
+ * 需求详情抽屉（设计稿：项目详情 方案B 需求版）。
+ * 右侧 600px 抽屉：固定头部（返回、需求名+状态、所属项目、编辑需求、摘要指标），
+ * 滚动区为需求周期/需求描述/需求目标卡 + 交付与复盘卡。
+ */
+function RequirementDetailDrawer({
+  task,
+  canEdit,
+  onClose,
+  onEdit,
+}: {
+  task: ProjectWorkspaceTaskItem;
+  canEdit: boolean;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const periodText = task.startDate || task.endDate
+    ? `${formatDateTimeLabel(task.startDate)} 至 ${formatDateTimeLabel(task.endDate)}`
+    : task.periodLabel || "-";
+
+  return (
+    // z-30：低于编辑弹窗（Dialog z-40），编辑时抽屉保持打开、弹窗覆盖在上层，取消/保存后回到抽屉
+    <div className="fixed inset-0 z-30">
+      {/* token: 遮罩 rgba(29,27,36,0.38) */}
+      <div className="absolute inset-0 bg-[rgba(29,27,36,0.38)]" onClick={onClose} />
+      {/* token: 抽屉 bg_index_1/bg-layout #F5F5F5，阴影 -12px 0 32px rgba(30,24,48,0.12) */}
+      <div className="absolute bottom-4 right-4 top-4 flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl bg-[#F5F5F5] shadow-[-12px_0_32px_0_rgba(30,24,48,0.12)]">
+        {/* 固定头部：bg-container #FFFFFF，底部分割线 token line_index_1/split #F0F0F0 */}
+        <div className="shrink-0 border-b border-[#F0F0F0] bg-white px-4 pt-4">
+          <div className="flex items-start gap-4">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="返回"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#F4F4F6] text-[#181818] hover:bg-[#E8F2FF]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-base font-semibold leading-6 text-[#181818]">{task.title}</span>
+                <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] text-xs leading-[18px] ${taskListStatusTagClass(task)}`}>
+                  <span className="h-1 w-1 rounded-full bg-current" />
+                  {columnTitleByStatus[task.status]}
+                </span>
+              </div>
+              <div className="mt-2 truncate text-[11px] leading-4 text-[#8B8692]">
+                所属项目 · {task.projectTitle || "-"}
+              </div>
+            </div>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="flex h-8 shrink-0 items-center gap-2 rounded-md bg-[#FAFAFA] px-4 text-sm leading-[22px] text-[#181818] hover:bg-[#E8F2FF]"
+              >
+                <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
+                编辑需求
+              </button>
+            ) : null}
+          </div>
+          {/* 摘要指标：需求负责人 / 累计工作量 / 是否需要开发 */}
+          <div className="flex items-center pb-4 pl-10 pt-4">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs leading-[18px] text-[#777777]">需求负责人</div>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#3069F9] text-[10px] font-semibold leading-[14px] text-white">
+                  {task.owner.slice(0, 1)}
+                </span>
+                <span className="truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {task.owner}{task.teamName ? ` · ${task.teamName}` : ""}
+                </span>
+              </div>
+            </div>
+            <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+            <div className="min-w-0 flex-1 pl-4">
+              <div className="text-xs leading-[18px] text-[#777777]">累计工作量（人天）</div>
+              <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                {formatWorkload(task.workloadPersonDay)}
+              </div>
+            </div>
+            <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+            <div className="min-w-0 flex-1 pl-4">
+              <div className="text-xs leading-[18px] text-[#777777]">是否需要开发</div>
+              <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                {task.needsDevelopment ? "是" : "否"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 滚动内容 */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-4">
+            {/* 需求周期 / 开发方卡 */}
+            <div className="grid grid-cols-2 gap-4 rounded-2xl bg-white p-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4 text-[#4B4B4B]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求周期</span>
+                </div>
+                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">{periodText}</p>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Code2 className="h-4 w-4 text-[#4B4B4B]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">开发方</span>
+                </div>
+                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">
+                  {task.needsDevelopment ? developmentSourceLabel(task.developmentSource) : "-"}
+                </p>
+              </div>
+            </div>
+            {/* 需求描述卡 */}
+            <div className="rounded-2xl bg-white p-4">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[#4B4B4B]" />
+                <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求描述</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
+                {task.description?.trim() || "暂无需求描述"}
+              </p>
+            </div>
+            {/* 需求目标卡 */}
+            <div className="rounded-2xl bg-white p-4">
+              <div className="flex items-center gap-2">
+                <Target className="h-4 w-4 text-[#4B4B4B]" />
+                <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求目标</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
+                {task.expectedOutcome?.trim() || "暂无需求目标"}
+              </p>
+            </div>
+
+            {/* 交付与复盘卡 */}
+            <div className="rounded-2xl bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CircleCheck className="h-[13px] w-[13px] text-[#29A35A]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">交付与复盘</span>
+                </div>
+                {task.taskResult ? (
+                  <span className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-4 ${taskResultTagClass(task.taskResult)}`}>
+                    {task.taskResult}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3.5">
+                <div className="text-xs font-medium leading-4 text-[#918C98]">需求执行概况</div>
+                <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-[21px] text-[#5B5661]">
+                  {task.executionSummary?.trim() || "-"}
+                </p>
+              </div>
+              {/* 完成时间栏：token info_index_1/info-bg #E8F2FF */}
+              <div className="mt-3.5 flex items-center justify-between rounded-lg bg-[#E8F2FF] p-2">
+                <span className="flex items-center gap-2 text-sm leading-[22px] text-[#3069F9]">
+                  <CalendarDays className="h-4 w-4" />
+                  完成时间
+                </span>
+                <span className="text-sm font-medium leading-[22px] text-[#3B3742]">{formatDateTimeLabel(task.completedAt)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 价值跟踪详情抽屉（沿用需求详情抽屉样式，无单独设计稿）。
+ * 头部：项目名+状态、所属目标、项目负责人/完成时间；
+ * 内容：项目价值指标卡（跟踪状态/价值判断/累计工作量、首版上线时间/首版完成度/工作量、预期收益、实际收益、其他成本）+ 跟踪记录卡。
+ */
+function ValueTrackDetailDrawer({
+  project,
+  canManageValueTracking,
+  onClose,
+  onEditValueOverview,
+  onEditValueTrack,
+}: {
+  project: ProjectWorkspaceItem;
+  canManageValueTracking: boolean;
+  onClose: () => void;
+  onEditValueOverview: () => void;
+  onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
+}) {
+  const summary = project.valueTrackSummary;
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    // z-30：低于编辑弹窗（Dialog z-40），编辑时抽屉保持打开、弹窗覆盖在上层，取消/保存后回到抽屉
+    <div className="fixed inset-0 z-30">
+      {/* token: 遮罩 rgba(29,27,36,0.38) */}
+      <div className="absolute inset-0 bg-[rgba(29,27,36,0.38)]" onClick={onClose} />
+      {/* token: 抽屉 bg_index_1/bg-layout #F5F5F5，阴影 -12px 0 32px rgba(30,24,48,0.12) */}
+      <div className="absolute bottom-4 right-4 top-4 flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl bg-[#F5F5F5] shadow-[-12px_0_32px_0_rgba(30,24,48,0.12)]">
+        {/* 固定头部 */}
+        <div className="shrink-0 border-b border-[#F0F0F0] bg-white px-4 pt-4">
+          <div className="flex items-start gap-4">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="返回"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#F4F4F6] text-[#181818] hover:bg-[#E8F2FF]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-base font-semibold leading-6 text-[#181818]">{project.title}</span>
+                <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] text-xs leading-[18px] ${projectStatusTagClass[project.status]}`}>
+                  <span className="h-1 w-1 rounded-full bg-current" />
+                  {projectTitleByStatus[project.status]}
+                </span>
+              </div>
+              <div className="mt-2 truncate text-[11px] leading-4 text-[#8B8692]">
+                所属目标 · {project.productGoals.length ? project.productGoals.map((goal) => goal.title).join("、") : "未关联目标"}
+              </div>
+            </div>
+          </div>
+          {/* 摘要指标：第一行 负责人/项目周期/累计工作量，第二行 是否开发/上线时间/完成时间 */}
+          <div className="flex flex-col gap-3 pb-4 pl-10 pt-4">
+            <div className="flex items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs leading-[18px] text-[#777777]">项目负责人</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#3069F9] text-[10px] font-semibold leading-[14px] text-white">
+                    {project.owner.slice(0, 1)}
+                  </span>
+                  <span className="truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                    {project.owner}{project.teamName ? ` · ${project.teamName}` : ""}
+                  </span>
+                </div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">项目周期</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {formatListQuarterRange(project.startQuarter, project.endQuarter)}
+                </div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">累计工作量（人天）</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {formatWorkload(project.workloadPersonDay)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs leading-[18px] text-[#777777]">是否开发项目</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{project.needsDevelopment ? "是" : "否"}</div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">上线时间</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(project.launchedAt)}</div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">完成时间</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(project.completedAt)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 滚动内容：预期收益卡 + 统一一张「价值跟踪」大卡（版式与项目抽屉的价值跟踪 Tab 一致） */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-4">
+            {/* 预期收益卡 */}
+            <div className="rounded-2xl bg-white p-4">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-[#4B4B4B]" />
+                <span className="text-sm font-semibold leading-[22px] text-[#181818]">预期收益</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
+                {project.expectedOutcome?.trim() || "-"}
+              </p>
+            </div>
+            {/* 价值跟踪大卡 */}
+            <div className="rounded-2xl bg-white p-4">
+            <div className="text-sm font-semibold leading-[22px] text-[#181818]">价值跟踪</div>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-xs leading-[18px] text-[#777777]">跟踪状态</span>
+              <span className="text-sm font-semibold leading-[22px] text-[#181818]">{summary.status}</span>
+              <div className="flex-1" />
+              {canManageValueTracking ? (
+                <button
+                  type="button"
+                  onClick={onEditValueOverview}
+                  title="编辑项目价值"
+                  aria-label="编辑项目价值"
+                  className="flex h-[26px] w-[26px] items-center justify-center rounded bg-[#F5F6F8] hover:bg-[#E8F2FF]"
+                >
+                  <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className={`rounded-xl p-3 ${valueJudgementTone(summary.judgement).box}`}>
+                <div className="text-xs leading-[18px] text-[#777777]">价值判断</div>
+                <div className={`mt-1 text-sm font-semibold leading-[22px] ${valueJudgementTone(summary.judgement).text}`}>
+                  {valueJudgementLabel(summary.judgement)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-[#F7F8FA] p-3">
+                <div className="text-xs leading-[18px] text-[#777777]">首版完成度</div>
+                <div className="mt-1 text-sm font-semibold leading-[22px] text-[#181818]">
+                  {formatCompletionPercent(summary.firstVersionCompletionPercent)}
+                  {summary.totalWorkloadPersonDay !== null ? (
+                    <span className="ml-1 text-xs font-normal text-[#777777]">
+                      （{formatWorkload(summary.firstVersionWorkloadPersonDay)}/{formatWorkload(summary.postLaunchIterationWorkloadPersonDay)}/{formatWorkload(summary.totalWorkloadPersonDay)}）
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 rounded-xl bg-[#F7F8FA] p-3">
+              <div className="text-xs leading-[18px] text-[#777777]">实际收益</div>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#181818]">{summary.actualValue?.trim() || "-"}</p>
+            </div>
+            <div className="mt-3 rounded-xl bg-[#F7F8FA] p-3">
+              <div className="text-xs leading-[18px] text-[#777777]">其他成本</div>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#181818]">{project.otherCost?.trim() || "-"}</p>
+            </div>
+            {/* 跟踪过程：标题 + 右侧横线 */}
+            <div className="mt-4 flex items-center gap-3">
+              <span className="shrink-0 text-sm font-semibold leading-[22px] text-[#181818]">跟踪过程</span>
+              <div className="h-px flex-1 bg-[#F0F0F0]" />
+            </div>
+            <div className="mt-3 flex flex-col gap-4">
+              {project.valueTracks.length ? (
+                project.valueTracks.map((track) => (
+                  <div key={track.id} className="rounded-xl bg-[#FAFAFA] p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium leading-[22px] text-[#181818]">{track.periodLabel}</span>
+                        <ListStatusTag
+                          label={VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
+                          className={VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? "bg-[#F5F5F5] text-[#777777]"}
+                        />
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-xs leading-[18px] text-[#777777]">{formatDateTimeLabel(track.trackedAt)}</span>
+                        {canManageValueTracking ? (
+                          <button
+                            type="button"
+                            onClick={() => onEditValueTrack(track)}
+                            title="编辑跟踪记录"
+                            aria-label={`编辑${track.periodLabel}`}
+                            className="flex h-[26px] w-[26px] items-center justify-center rounded bg-white hover:bg-[#E8F2FF]"
+                          >
+                            <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {track.periodStartAt && track.checkpointAt ? (
+                      <div className="mt-1 text-xs leading-[18px] text-[#777777]">
+                        跟踪周期 {formatDateTimeLabel(track.periodStartAt)} ~ {formatDateTimeLabel(track.checkpointAt)}
+                      </div>
+                    ) : null}
+                    <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
+                      {track.trackingResult?.trim() || "待填写跟踪结果"}
+                    </p>
+                    {track.followUpOptimization?.trim() ? (
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
+                        <span className="text-[#4B4B4B]">后续优化：</span>
+                        {track.followUpOptimization}
+                      </p>
+                    ) : null}
+                    {track.actualValue?.trim() || valueJudgementLabel(track.valueJudgement) !== "-" ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs leading-[18px] text-[#777777]">
+                        {track.actualValue?.trim() ? <span>实际收益：{track.actualValue}</span> : null}
+                        {valueJudgementLabel(track.valueJudgement) !== "-" ? <span>价值判断：{valueJudgementLabel(track.valueJudgement)}</span> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <p className="py-6 text-center text-sm text-[#777777]">暂无跟踪记录</p>
+              )}
+            </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4064,6 +4911,7 @@ function ProjectTreeTable({
   onCreateTask,
   onCreateValueTrack,
   onBackfill,
+  onViewDetail,
   onEditProject,
   onDeleteProject,
   onEditTask,
@@ -4084,6 +4932,7 @@ function ProjectTreeTable({
   onCreateTask: (projectId: string) => void;
   onCreateValueTrack: (projectId: string) => void;
   onBackfill: (project: ProjectWorkspaceItem) => void;
+  onViewDetail: (project: ProjectWorkspaceItem) => void;
   onEditProject: (project: ProjectWorkspaceItem) => void;
   onDeleteProject: (project: ProjectWorkspaceItem) => void;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
@@ -4223,6 +5072,7 @@ function ProjectTreeTable({
                     }}
                     onEdit={() => onEditProject(project)}
                     onDelete={() => onDeleteProject(project)}
+                    onViewDetail={() => onViewDetail(project)}
                     onBackfill={
                       canBackfill && project.needsDevelopment === true && project.status === "COMPLETED"
                         ? () => onBackfill(project)
@@ -4671,18 +5521,18 @@ function ValueListTable({
   projects,
   canManage,
   canCreateTrack,
+  onViewDetail,
   onEdit,
   onCreateTrack,
   onEditTrack,
-  onDeleteTrack,
 }: {
   projects: ProjectWorkspaceItem[];
   canManage: boolean;
   canCreateTrack: boolean;
+  onViewDetail: (project: ProjectWorkspaceItem) => void;
   onEdit: (project: ProjectWorkspaceItem) => void;
   onCreateTrack: (project: ProjectWorkspaceItem) => void;
   onEditTrack: (track: ProjectWorkspaceValueTrackItem) => void;
-  onDeleteTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const { sort, toggleSort } = useListSort();
   const sortedProjects = useMemo(() => {
@@ -4825,17 +5675,6 @@ function ValueListTable({
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.launchedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingRight ? goalStickyActionShadow : ""}`}>
-                {canCreateTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
-                  <button
-                    type="button"
-                    onClick={() => onCreateTrack(project)}
-                    className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-                    aria-label={`新增跟踪${project.title}`}
-                  >
-                    <img src="/icons/plus-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
-                    <img src="/icons/plus-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
-                  </button>
-                ) : null}
                 {canManage ? (
                   <button
                     type="button"
@@ -4845,6 +5684,26 @@ function ValueListTable({
                   >
                     <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
                     <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => onViewDetail(project)}
+                  title="查看详情"
+                  aria-label={`查看${project.title}的价值跟踪详情`}
+                  className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+                >
+                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+                </button>
+                {canCreateTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
+                  <button
+                    type="button"
+                    onClick={() => onCreateTrack(project)}
+                    className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+                    aria-label={`新增跟踪${project.title}`}
+                  >
+                    <img src="/icons/plus-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
+                    <img src="/icons/plus-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
                   </button>
                 ) : null}
               </div>
@@ -4860,11 +5719,6 @@ function ValueListTable({
                             ? `${track.periodLabel}（${formatDateOnlyLabel(track.periodStartAt)} ~ ${formatDateOnlyLabel(track.checkpointAt)}）`
                             : track.periodLabel}
                         </span>
-                        {track.taskState !== "COMPLETED" ? (
-                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
-                            {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
-                          </span>
-                        ) : null}
                       </div>
                       <div></div>
                       <div className="text-[#4B4B4B]">{formatCompletionPercent(track.firstVersionCompletionPercent)}</div>
@@ -4878,7 +5732,12 @@ function ValueListTable({
                       >{emptyMetricText(track.actualValue)}</div>
                       <div></div>
                       <div className="text-[#4B4B4B]">{track.valueJudgement ?? "-"}</div>
-                      <div></div>
+                      {/* 跟踪记录状态与父行「项目状态」同列展示 */}
+                      <div>
+                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${VALUE_TRACK_TASK_STATE_CLASS[track.taskState] ?? ""}`}>
+                          {VALUE_TRACK_TASK_STATE_LABELS[track.taskState] ?? track.taskState}
+                        </span>
+                      </div>
                       <div className="text-xs text-[#999999]" title="填报时间">{formatTrackedAtLabel(track.trackedAt)}</div>
                       <div className="sticky right-0 z-10 flex items-center justify-end gap-3 self-stretch bg-white pr-4">
                         {canManage ? (
@@ -4892,16 +5751,6 @@ function ValueListTable({
                               <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
                               <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
                             </button>
-                            {!track.isFinal ? (
-                              <button
-                                type="button"
-                                onClick={() => onDeleteTrack(track)}
-                                className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#FFECE8]"
-                                aria-label={`删除${track.periodLabel}`}
-                              >
-                                <img src="/icons/delete-outlined.png" alt="" width={16} height={16} className="h-4 w-4" />
-                              </button>
-                            ) : null}
                           </>
                         ) : null}
                       </div>
@@ -4924,12 +5773,14 @@ function TaskListTable({
   tasks,
   canManage,
   canEditTerminalProjectWork,
+  onViewDetail,
   onEdit,
   onDelete,
 }: {
   tasks: ProjectWorkspaceTaskItem[];
   canManage: boolean;
   canEditTerminalProjectWork: boolean;
+  onViewDetail: (task: ProjectWorkspaceTaskItem) => void;
   onEdit: (task: ProjectWorkspaceTaskItem) => void;
   onDelete: (task: ProjectWorkspaceTaskItem) => void;
 }) {
@@ -5063,6 +5914,15 @@ function TaskListTable({
                     </button>
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={() => onViewDetail(task)}
+                  title="查看详情"
+                  aria-label={`查看${task.title}的详情`}
+                  className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+                >
+                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+                </button>
               </div>
             </div>
           );
@@ -5160,14 +6020,17 @@ function QuarterlyWorkShell({
   onBackfill,
   onEditGoal,
   onDeleteGoal,
+  onViewProjectDetail,
   onEditProject,
   onDeleteProject,
+  onViewTaskDetail,
   onEditTask,
   onDeleteTask,
+  onViewValueDetail,
   onEditValueTrack,
-  onDeleteValueTrack,
   onEditValueOverview,
   onOpenOperationLogs,
+  onViewTrack,
 }: {
   data: Props["data"];
   canCreateGoal: boolean;
@@ -5186,12 +6049,15 @@ function QuarterlyWorkShell({
   onBackfill: (project: ProjectWorkspaceItem) => void;
   onEditGoal: (item: Props["data"]["productGoalColumns"][number]["items"][number]) => void;
   onDeleteGoal: (item: Props["data"]["productGoalColumns"][number]["items"][number]) => void;
+  onViewProjectDetail: (item: ProjectWorkspaceItem) => void;
   onEditProject: (item: ProjectWorkspaceItem) => void;
   onDeleteProject: (item: ProjectWorkspaceItem) => void;
+  onViewTaskDetail: (item: ProjectWorkspaceTaskItem) => void;
   onEditTask: (item: ProjectWorkspaceTaskItem) => void;
   onDeleteTask: (item: ProjectWorkspaceTaskItem) => void;
+  onViewValueDetail: (item: ProjectWorkspaceItem) => void;
   onEditValueTrack: (item: ProjectWorkspaceValueTrackItem) => void;
-  onDeleteValueTrack: (item: ProjectWorkspaceValueTrackItem) => void;
+  onViewTrack: (item: ProjectWorkspaceValueTrackItem) => void;
   onEditValueOverview: (item: ProjectWorkspaceItem) => void;
   onOpenOperationLogs: () => void;
 }) {
@@ -5810,6 +6676,7 @@ function QuarterlyWorkShell({
                       canManageTask={(task) => canManageProductTask && workAllowsEdit(task.status, data.permissions.canEditTerminalProjectWork)}
                       onEditTask={onEditTask}
                       onDeleteTask={onDeleteTask}
+                      onViewTask={onViewTaskDetail}
                     />
                   </div>
                 </div>
@@ -5818,6 +6685,7 @@ function QuarterlyWorkShell({
                   tasks={visibleTasks}
                   canManage={canManageProductTask}
                   canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
+                  onViewDetail={onViewTaskDetail}
                   onEdit={onEditTask}
                   onDelete={onDeleteTask}
                 />
@@ -5846,8 +6714,9 @@ function QuarterlyWorkShell({
                         canManageProjectAndValueTracking={canManageProjectAndValueTracking}
                         onCreateValueTrack={() => onCreateValueTrack(project.id)}
                         onEditValueTrack={onEditValueTrack}
-                        onDeleteValueTrack={onDeleteValueTrack}
                         onEditValueOverview={() => onEditValueOverview(project)}
+                        onViewDetail={() => onViewValueDetail(project)}
+                        onViewTrack={onViewTrack}
                       />
                     ))}
                   </div>
@@ -5857,10 +6726,10 @@ function QuarterlyWorkShell({
                   projects={visibleValueProjects}
                   canManage={canManageProjectAndValueTracking}
                   canCreateTrack={canCreateValueTrack}
+                  onViewDetail={onViewValueDetail}
                   onEdit={onEditValueOverview}
                   onCreateTrack={(project) => onCreateValueTrack(project.id)}
                   onEditTrack={onEditValueTrack}
-                  onDeleteTrack={onDeleteValueTrack}
                 />
               )
             ) : (
@@ -5889,13 +6758,15 @@ function QuarterlyWorkShell({
                     canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
                     onCreateTask={() => onCreateTask(project.id)}
                     onCreateValueTrack={() => onCreateValueTrack(project.id)}
+                    onViewDetail={() => onViewProjectDetail(project)}
                     onEditProject={() => onEditProject(project)}
                     onDeleteProject={() => onDeleteProject(project)}
                     onEditTask={onEditTask}
                     onDeleteTask={onDeleteTask}
                     onEditValueTrack={onEditValueTrack}
-                    onDeleteValueTrack={onDeleteValueTrack}
                     onEditValueOverview={() => onEditValueOverview(project)}
+                    onViewTaskDetail={onViewTaskDetail}
+                    onViewTrack={onViewTrack}
                   />
                 ))}
                 </div>
@@ -5917,6 +6788,7 @@ function QuarterlyWorkShell({
                 onCreateTask={onCreateTask}
                 onCreateValueTrack={onCreateValueTrack}
                 onBackfill={onBackfill}
+                onViewDetail={onViewProjectDetail}
                 onEditProject={onEditProject}
                 onDeleteProject={onDeleteProject}
                 onEditTask={onEditTask}
@@ -5955,11 +6827,25 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [editDialog, setEditDialog] = useState<EditDialogState>(null);
   const [backfillDialog, setBackfillDialog] = useState<{ project: ProjectWorkspaceItem } | null>(null);
   const [projectDialog, setProjectDialog] = useState<ProjectDialogState>(null);
+  // 详情抽屉只存 id、从 data 实时派生：编辑弹窗保存后页面数据刷新，抽屉内容随之更新，且抽屉不被关闭
+  const [projectDetailDialogId, setProjectDetailDialogId] = useState<string | null>(null);
+  const [taskDetailDialogId, setTaskDetailDialogId] = useState<string | null>(null);
+  const [valueDetailDialogId, setValueDetailDialogId] = useState<string | null>(null);
+  const projectDetailDialog = projectDetailDialogId
+    ? data.projectWorkspaceItems.find((row) => row.id === projectDetailDialogId) ?? null
+    : null;
+  const taskDetailDialog = taskDetailDialogId
+    ? data.taskWorkspaceItems.find((row) => row.id === taskDetailDialogId)
+        ?? data.projectWorkspaceItems.flatMap((row) => row.tasks).find((task) => task.id === taskDetailDialogId)
+        ?? null
+    : null;
+  const valueDetailDialog = valueDetailDialogId
+    ? data.projectWorkspaceItems.find((row) => row.id === valueDetailDialogId) ?? null
+    : null;
   const [createProductGoalDialog, setCreateProductGoalDialog] = useState(false);
   const [createValueTrackDialog, setCreateValueTrackDialog] = useState(false);
   const [createValueTrackProjectId, setCreateValueTrackProjectId] = useState<string | null>(null);
   const [valueTrackDialog, setValueTrackDialog] = useState<ValueTrackDialogState>(null);
-  const [valueTrackDeleteDialog, setValueTrackDeleteDialog] = useState<ValueTrackDeleteState>(null);
   const [valueOverviewDialog, setValueOverviewDialog] = useState<ValueOverviewDialogState>(null);
   const [tabSearchInput, setTabSearchInput] = useState("");
   const [tabSearchQuery, setTabSearchQuery] = useState("");
@@ -6032,6 +6918,38 @@ export function QuarterlyWorkContent({ data }: Props) {
     }
     const nextQuery = params.toString();
     router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  };
+  /** 打开「编辑项目价值」弹窗：优先用列表已组装的总览项，否则按项目摘要现组（供列表与详情抽屉共用） */
+  const openValueOverviewDialog = (item: ProjectWorkspaceItem) => {
+    const overview = data.valueOverviewItems.find((row) => row.id === item.id);
+    if (overview) {
+      setValueOverviewDialog(overview);
+      return;
+    }
+    setValueOverviewDialog({
+      id: item.id,
+      title: item.title,
+      ownerId: item.ownerId,
+      owner: item.owner,
+      departmentOrgNodeId: item.departmentOrgNodeId,
+      teamOrgNodeId: item.teamOrgNodeId,
+      workloadPersonDay: item.valueTrackSummary.totalWorkloadPersonDay ?? item.workloadPersonDay,
+      otherCost: item.otherCost,
+      expectedOutcome: item.expectedOutcome,
+      actualValue: item.actualValue,
+      valueJudgement: item.valueJudgement,
+      valueTrackStatus: item.valueTrackStatus,
+      status: item.status,
+      launchedAt: item.launchedAt,
+      firstVersionWorkloadPersonDay: item.valueTrackSummary.firstVersionWorkloadPersonDay,
+      postLaunchIterationWorkloadPersonDay: item.valueTrackSummary.postLaunchIterationWorkloadPersonDay,
+      firstVersionCompletionPercent: item.valueTrackSummary.firstVersionCompletionPercent,
+      completionIsFinal: item.valueTrackSummary.completionIsFinal,
+      includedRequirementCount: item.valueTrackSummary.includedRequirementCount,
+      missingWorkloadRequirementCount: item.valueTrackSummary.missingWorkloadRequirementCount,
+      valueTrackOverdue: item.valueTrackSummary.overdue,
+      currentTrackingSequence: item.valueTrackSummary.currentSequence,
+    });
   };
   const visibleColumns = useMemo(
     () => data.columns.map((column) => ({
@@ -7136,6 +8054,9 @@ export function QuarterlyWorkContent({ data }: Props) {
           onCreateGoal={() => setCreateProductGoalDialog(true)}
           onCreateProject={(status) => setCreateProjectDialog(status)}
           onCreateTask={(projectId) => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId })}
+          onViewProjectDetail={(item) => setProjectDetailDialogId(item.id)}
+          onViewTaskDetail={(item) => setTaskDetailDialogId(item.id)}
+          onViewValueDetail={(item) => setValueDetailDialogId(item.id)}
           onCreateValueTrack={(projectId) => {
             setCreateValueTrackProjectId(projectId ?? null);
             setCreateValueTrackDialog(true);
@@ -7151,38 +8072,11 @@ export function QuarterlyWorkContent({ data }: Props) {
             track: item,
             project: data.projectWorkspaceItems.find((row) => row.id === item.projectId) ?? null,
           })}
-          onDeleteValueTrack={(item) => setValueTrackDeleteDialog(item)}
-          onEditValueOverview={(item) => {
-            const overview = data.valueOverviewItems.find((row) => row.id === item.id);
-            if (overview) {
-              setValueOverviewDialog(overview);
-              return;
-            }
-            setValueOverviewDialog({
-              id: item.id,
-              title: item.title,
-              ownerId: item.ownerId,
-              owner: item.owner,
-              departmentOrgNodeId: item.departmentOrgNodeId,
-              teamOrgNodeId: item.teamOrgNodeId,
-              workloadPersonDay: item.valueTrackSummary.totalWorkloadPersonDay ?? item.workloadPersonDay,
-              otherCost: item.otherCost,
-              expectedOutcome: item.expectedOutcome,
-              actualValue: item.actualValue,
-              valueJudgement: item.valueJudgement,
-              valueTrackStatus: item.valueTrackStatus,
-              status: item.status,
-              launchedAt: item.launchedAt,
-              firstVersionWorkloadPersonDay: item.valueTrackSummary.firstVersionWorkloadPersonDay,
-              postLaunchIterationWorkloadPersonDay: item.valueTrackSummary.postLaunchIterationWorkloadPersonDay,
-              firstVersionCompletionPercent: item.valueTrackSummary.firstVersionCompletionPercent,
-              completionIsFinal: item.valueTrackSummary.completionIsFinal,
-              includedRequirementCount: item.valueTrackSummary.includedRequirementCount,
-              missingWorkloadRequirementCount: item.valueTrackSummary.missingWorkloadRequirementCount,
-              valueTrackOverdue: item.valueTrackSummary.overdue,
-              currentTrackingSequence: item.valueTrackSummary.currentSequence,
-            });
-          }}
+          onViewTrack={(item) => setValueTrackDialog({
+            track: item,
+            project: data.projectWorkspaceItems.find((row) => row.id === item.projectId) ?? null,
+          })}
+          onEditValueOverview={openValueOverviewDialog}
           onOpenOperationLogs={() => setOperationLogDialog({ targetTitle: "全部操作日志" })}
         />
       )}
@@ -7259,6 +8153,70 @@ export function QuarterlyWorkContent({ data }: Props) {
         ) : null}
       </Dialog>
 
+      {projectDetailDialog ? (
+        <ProjectDetailDrawer
+          project={projectDetailDialog}
+          canEditProject={
+            canManageProjectAndValueTracking
+            && (projectAllowsNewRequirement(projectDetailDialog.status)
+              || projectAllowsEditTerminal(projectDetailDialog.status, data.permissions.canEditTerminalProjectWork))
+          }
+          canCreateTask={canCreateTask && projectAllowsNewRequirement(projectDetailDialog.status)}
+          canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
+          canManageValueTracking={canManageProjectAndValueTracking}
+          onClose={() => setProjectDetailDialogId(null)}
+          onEditProject={() => {
+            const item = projectDetailDialog;
+            setProjectDialog({ item, title: projectTitleByStatus[item.status] });
+          }}
+          onCreateTask={() => {
+            setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId: projectDetailDialog.id });
+          }}
+          onEditTask={(task) => {
+            setEditDialog({ item: task, title: columnTitleByStatus[task.status] });
+          }}
+          onEditValueOverview={() => {
+            openValueOverviewDialog(projectDetailDialog);
+          }}
+          onEditValueTrack={(track) => {
+            setValueTrackDialog({
+              track,
+              project: data.projectWorkspaceItems.find((row) => row.id === track.projectId) ?? null,
+            });
+          }}
+          onViewTask={(task) => setTaskDetailDialogId(task.id)}
+        />
+      ) : null}
+
+      {taskDetailDialog ? (
+        <RequirementDetailDrawer
+          task={taskDetailDialog}
+          canEdit={canManageProductTask && workAllowsEdit(taskDetailDialog.status, data.permissions.canEditTerminalProjectWork)}
+          onClose={() => setTaskDetailDialogId(null)}
+          onEdit={() => {
+            const item = taskDetailDialog;
+            setEditDialog({ item, title: columnTitleByStatus[item.status] });
+          }}
+        />
+      ) : null}
+
+      {valueDetailDialog ? (
+        <ValueTrackDetailDrawer
+          project={valueDetailDialog}
+          canManageValueTracking={canManageProjectAndValueTracking}
+          onClose={() => setValueDetailDialogId(null)}
+          onEditValueOverview={() => {
+            openValueOverviewDialog(valueDetailDialog);
+          }}
+          onEditValueTrack={(track) => {
+            setValueTrackDialog({
+              track,
+              project: data.projectWorkspaceItems.find((row) => row.id === track.projectId) ?? null,
+            });
+          }}
+        />
+      ) : null}
+
       {operationLogDialog ? (
         <OperationLogDialog
           logs={operationLogDialog.targetId
@@ -7320,15 +8278,6 @@ export function QuarterlyWorkContent({ data }: Props) {
             track={valueTrackDialog.track}
             project={valueTrackDialog.project}
             onClose={() => setValueTrackDialog(null)}
-          />
-        ) : null}
-      </Dialog>
-
-      <Dialog open={!!valueTrackDeleteDialog} onClose={() => setValueTrackDeleteDialog(null)} title="删除价值跟踪">
-        {valueTrackDeleteDialog ? (
-          <ValueTrackDeleteForm
-            item={valueTrackDeleteDialog}
-            onClose={() => setValueTrackDeleteDialog(null)}
           />
         ) : null}
       </Dialog>
