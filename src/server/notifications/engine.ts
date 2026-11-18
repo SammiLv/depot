@@ -1,4 +1,4 @@
-import type { NotificationScenario, NotificationType, NotificationDeliveryChannel, Prisma } from "@prisma/client";
+import type { NotificationScenario, NotificationType, NotificationDeliveryChannel, NotificationGroupBot, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { sendDingTalkMessage } from "@/server/dingtalk/message-client";
 import { sendGroupRobotMessage } from "@/server/dingtalk/group-robot-client";
@@ -7,6 +7,12 @@ import { buildKpiTestEventPayload } from "@/server/notifications/kpi-test-payloa
 import { buildQuarterlyWorkTestEventPayload } from "@/server/notifications/quarterly-work-test-payload";
 import { resolveRecipientUserIds } from "@/server/notifications/recipient-resolvers";
 import { buildEventKey, renderTemplate } from "@/server/notifications/template-render";
+import {
+  buildGroupDeliveryEventKey,
+  mergeGroupMentions,
+  selectOrgRoutedGroupBotId,
+  type GroupMentionUser,
+} from "@/server/notifications/group-routing";
 import type {
   ChannelConfig,
   ConditionConfig,
@@ -42,6 +48,7 @@ function asChannelConfig(value: Prisma.JsonValue): ChannelConfig {
     contentTemplate: config.contentTemplate,
     messageUrlTemplate: config.messageUrlTemplate,
     groupBotId: config.groupBotId,
+    groupRoutingMode: config.groupRoutingMode === "RECIPIENT_ORG" ? "RECIPIENT_ORG" : "FIXED",
   };
 }
 
@@ -190,6 +197,8 @@ async function deliverForUser(input: {
   const notificationType = (input.channelConfig.notificationType ?? "KPI_TODO") as NotificationType;
 
   for (const channel of input.channelConfig.channels) {
+    // 群渠道统一在 deliverGroupNotifications 中按目标群聚合投递，避免逐人重复发群消息
+    if (channel === "DINGTALK_GROUP") continue;
     const channelEventKey = `${input.eventKey}:${input.userId}`;
     if (await alreadyDelivered(
       input.scenario.id,
@@ -260,88 +269,167 @@ async function deliverForUser(input: {
       continue;
     }
 
-    if (channel === "DINGTALK_GROUP") {
-      try {
-        if (!input.channelConfig.groupBotId) {
-          await writeDeliveryLog({
-            scenarioId: input.scenario.id,
-            eventKey: channelEventKey,
-            userId: input.userId,
-            channel: "DINGTALK_GROUP",
-            status: "SKIPPED",
-            error: "missing groupBotId",
-          });
-          continue;
-        }
+  }
+}
 
-        const groupBot = await prisma.notificationGroupBot.findUnique({
-          where: { id: input.channelConfig.groupBotId },
-        });
-        if (!groupBot) {
-          await writeDeliveryLog({
-            scenarioId: input.scenario.id,
-            eventKey: channelEventKey,
-            userId: input.userId,
-            channel: "DINGTALK_GROUP",
-            status: "SKIPPED",
-            error: "group bot not found",
-          });
-          continue;
-        }
+/** 群通知：自动路由以事件主体（如需求负责人）的组织确定目标群；同群接收人合并为一条并一起 @ */
+async function deliverGroupNotifications(input: {
+  scenario: NotificationScenario;
+  userIds: string[];
+  payload: NotificationEventPayload;
+  channelConfig: ChannelConfig;
+  recipientConfig: RecipientConfig;
+  eventKey: string;
+}) {
+  const botCache = new Map<string, NotificationGroupBot | null>();
+  const groups = new Map<string, {
+    groupBotId: string;
+    title: string;
+    content: string | null;
+    messageUrl?: string;
+    users: GroupMentionUser[];
+  }>();
 
-        const user = await prisma.user.findFirst({
-          where: { id: input.userId, deletedAt: null },
-          select: { dingtalkUserId: true, mobile: true, name: true },
-        });
-        if (!user?.dingtalkUserId && !user?.mobile) {
-          await writeDeliveryLog({
-            scenarioId: input.scenario.id,
-            eventKey: channelEventKey,
-            userId: input.userId,
-            channel: "DINGTALK_GROUP",
-            status: "SKIPPED",
-            error: "missing dingtalkUserId/mobile for @mention",
-          });
-          continue;
-        }
+  const loadBot = async (groupBotId: string) => {
+    if (!botCache.has(groupBotId)) {
+      botCache.set(groupBotId, await prisma.notificationGroupBot.findUnique({ where: { id: groupBotId } }));
+    }
+    return botCache.get(groupBotId) ?? null;
+  };
 
-        const mentionPrefix = user.mobile
-          ? `@${user.mobile} `
-          : user.dingtalkUserId
-            ? `@${user.dingtalkUserId} `
-            : user.name
-              ? `@${user.name} `
-              : "";
-        const bodyText = `${mentionPrefix}${content ?? title}`;
+  // 目标群只由事件主体决定；主管等其他接收人若在该群则合并 @，不再按主管部门另发一群
+  let routedGroupBotId = input.channelConfig.groupBotId;
+  const routingUserId = input.payload.subjectUserId ?? input.payload.userId;
+  if (input.channelConfig.groupRoutingMode === "RECIPIENT_ORG" && routingUserId) {
+    const routingUser = await prisma.user.findFirst({
+      where: { id: String(routingUserId), deletedAt: null },
+      select: { orgNodeId: true },
+    });
+    if (routingUser?.orgNodeId) {
+      const ancestors = await prisma.orgClosure.findMany({
+        where: { descendantId: routingUser.orgNodeId },
+        select: { ancestorId: true },
+        orderBy: { depth: "asc" },
+      });
+      const ancestorIds = ancestors.map((item) => item.ancestorId);
+      const bindings = ancestorIds.length
+        ? await prisma.notificationGroupBotOrgNode.findMany({
+            where: { orgNodeId: { in: ancestorIds } },
+            select: { orgNodeId: true, groupBotId: true },
+            orderBy: { createdAt: "asc" },
+          })
+        : [];
+      routedGroupBotId = selectOrgRoutedGroupBotId(ancestors, bindings) ?? input.channelConfig.groupBotId;
+    }
+  }
 
-        await sendGroupRobotMessage({
-          webhookUrl: groupBot.webhookUrl,
-          securityType: groupBot.securityType,
-          securityValue: groupBot.securityValue,
-          title,
-          text: bodyText,
-          messageUrl,
-          atUserIds: user.dingtalkUserId ? [user.dingtalkUserId] : undefined,
-          atMobiles: user.mobile ? [user.mobile] : undefined,
-        });
+  for (const userId of input.userIds) {
+    const user = await prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, name: true, orgNodeId: true, dingtalkUserId: true, mobile: true },
+    });
+    if (!user) continue;
 
-        await writeDeliveryLog({
-          scenarioId: input.scenario.id,
-          eventKey: channelEventKey,
-          userId: input.userId,
-          channel: "DINGTALK_GROUP",
-          status: "SENT",
-        });
-      } catch (error) {
-        await writeDeliveryLog({
-          scenarioId: input.scenario.id,
-          eventKey: channelEventKey,
-          userId: input.userId,
-          channel: "DINGTALK_GROUP",
-          status: "FAILED",
-          error: error instanceof Error ? error.message : "group robot delivery failed",
-        });
-      }
+    const groupBotId = routedGroupBotId;
+
+    if (!groupBotId) {
+      await writeDeliveryLog({
+        scenarioId: input.scenario.id,
+        eventKey: `${input.eventKey}:${userId}:group-unrouted`,
+        userId,
+        channel: "DINGTALK_GROUP",
+        status: "SKIPPED",
+        error: input.channelConfig.groupRoutingMode === "RECIPIENT_ORG"
+          ? "no group bot bound to event subject org and no fallback groupBotId"
+          : "missing groupBotId",
+      });
+      continue;
+    }
+
+    if (!user.dingtalkUserId && !user.mobile) {
+      await writeDeliveryLog({
+        scenarioId: input.scenario.id,
+        eventKey: `${input.eventKey}:${userId}:group`,
+        userId,
+        channel: "DINGTALK_GROUP",
+        status: "SKIPPED",
+        error: "missing dingtalkUserId/mobile for @mention",
+      });
+      continue;
+    }
+
+    // atRecipients 是群投递时才确定的占位符，标题与正文都支持；合并接收人后替换为实际 @ 列表
+    const templatePayload: NotificationEventPayload = { ...input.payload, atRecipients: "{{atRecipients}}" };
+    const renderedTitle = renderTemplate(input.channelConfig.titleTemplate, templatePayload) || input.scenario.name;
+    const title = input.payload.testRunId != null
+      ? `${renderedTitle}（测试 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })})`
+      : renderedTitle;
+    const content = renderTemplate(input.channelConfig.contentTemplate, templatePayload) || null;
+    const messageUrl = renderTemplate(input.channelConfig.messageUrlTemplate, input.payload) || undefined;
+    // 内容不同的接收人仍分开发送；同群同内容才合并 @，避免丢失个体化模板变量
+    const groupKey = JSON.stringify([groupBotId, title, content, messageUrl]);
+    const group = groups.get(groupKey) ?? { groupBotId, title, content, messageUrl, users: [] };
+    group.users.push(user);
+    groups.set(groupKey, group);
+  }
+
+  for (const group of groups.values()) {
+    const groupBot = await loadBot(group.groupBotId);
+    const groupUserIds = group.users.map((user) => user.id);
+    const channelEventKey = buildGroupDeliveryEventKey(input.eventKey, group.groupBotId, groupUserIds);
+    const logUserId = groupUserIds[0];
+    if (!groupBot) {
+      await writeDeliveryLog({
+        scenarioId: input.scenario.id,
+        eventKey: channelEventKey,
+        userId: logUserId,
+        channel: "DINGTALK_GROUP",
+        status: "SKIPPED",
+        error: "group bot not found",
+      });
+      continue;
+    }
+    if (await alreadyDelivered(input.scenario.id, channelEventKey, "DINGTALK_GROUP", input.recipientConfig.dedupeWindowHours)) {
+      continue;
+    }
+
+    try {
+      const mentions = mergeGroupMentions(group.users);
+      // 标题或正文显式使用 {{atRecipients}} 时只在该位置 @，不再额外拼到正文开头
+      const hasTitleMention = group.title.includes("{{atRecipients}}");
+      const hasContentMention = group.content?.includes("{{atRecipients}}") ?? false;
+      const title = group.title.replaceAll("{{atRecipients}}", mentions.mentionPrefix);
+      const content = hasContentMention
+        ? group.content!.replaceAll("{{atRecipients}}", mentions.mentionPrefix)
+        : hasTitleMention
+          ? group.content ?? ""
+          : `${mentions.mentionPrefix}${mentions.mentionPrefix ? " " : ""}${group.content ?? title}`;
+      await sendGroupRobotMessage({
+        webhookUrl: groupBot.webhookUrl,
+        securityType: groupBot.securityType,
+        securityValue: groupBot.securityValue,
+        title,
+        text: content,
+        messageUrl: group.messageUrl,
+        atUserIds: mentions.atUserIds,
+        atMobiles: mentions.atMobiles,
+      });
+      await writeDeliveryLog({
+        scenarioId: input.scenario.id,
+        eventKey: channelEventKey,
+        userId: logUserId,
+        channel: "DINGTALK_GROUP",
+        status: "SENT",
+      });
+    } catch (error) {
+      await writeDeliveryLog({
+        scenarioId: input.scenario.id,
+        eventKey: channelEventKey,
+        userId: logUserId,
+        channel: "DINGTALK_GROUP",
+        status: "FAILED",
+        error: error instanceof Error ? error.message : "group robot delivery failed",
+      });
     }
   }
 }
@@ -397,6 +485,17 @@ export async function processNotificationEvent(
       options?.scheduleSlot,
       options?.testRunId,
     ]);
+
+    if (channelConfig.channels.includes("DINGTALK_GROUP")) {
+      await deliverGroupNotifications({
+        scenario,
+        userIds,
+        payload: enriched,
+        channelConfig,
+        recipientConfig,
+        eventKey,
+      });
+    }
 
     for (const userId of userIds) {
       await deliverForUser({
@@ -541,6 +640,17 @@ export async function deliverTestNotification(input: {
     input.scenario.id,
     testRunId,
   ]);
+
+  if (channelConfig.channels.includes("DINGTALK_GROUP")) {
+    await deliverGroupNotifications({
+      scenario: input.scenario,
+      userIds: recipientUserIds,
+      payload,
+      channelConfig,
+      recipientConfig,
+      eventKey,
+    });
+  }
 
   for (const userId of recipientUserIds) {
     await deliverForUser({

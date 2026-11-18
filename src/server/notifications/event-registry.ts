@@ -103,6 +103,13 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     payloadFields: ["userId", "todoId", "title", "dueDate", "targetType", "targetId"],
     recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "EXPLICIT_USERS", "ROLE"],
   },
+  "quarterly_work.created": {
+    code: "quarterly_work.created",
+    label: "新增需求",
+    module: "产品管理",
+    payloadFields: ["title", "ownerId", "ownerName", "createdByName", "year", "quarter", "startDate", "endDate", "status", "projectTitle", "orgNodeId", "targetId", "atRecipients"],
+    recipientResolvers: ["SUBJECT_USER", "TEAM_LEADER_OF_SUBJECT", "DEPARTMENT_MANAGER", "EXPLICIT_USERS", "ROLE"],
+  },
   "quarterly_work.assigned": {
     code: "quarterly_work.assigned",
     label: "季度需求负责人变更",

@@ -904,8 +904,8 @@ function QuarterlyWorkForm({
           />
         </FieldCell>
       </FieldRow>
-      {/* 项目预期收益字段已从弹窗移除，仍以隐藏域随表单提交，保持服务端数据流不变 */}
-      <input type="hidden" name="expectedOutcome" value={selectedProject?.expectedOutcome ?? item?.expectedOutcome ?? ""} />
+      {/* 需求目标非必填：仅编辑时回显原值，不再自动带入项目预期收益 */}
+      <input type="hidden" name="expectedOutcome" value={item?.expectedOutcome ?? ""} />
       <FieldRow>
         <FieldCell label="需求周期" required className="flex-1">
           <input type="hidden" name="startDate" value={periodValue.start} />
@@ -1017,7 +1017,14 @@ function QuarterlyWorkForm({
   );
 
   return (
-    <form action={submitAction} className={stickyLayout ? stickyDialogFormClassName : undefined}>
+    <form
+      onSubmit={async (event) => {
+        event.preventDefault();
+        // 手动提交，避免 form action 在校验失败时也自动重置未受控字段（如需求名称）
+        await submitAction(new FormData(event.currentTarget));
+      }}
+      className={stickyLayout ? stickyDialogFormClassName : undefined}
+    >
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
       {mode === "edit" ? <input type="hidden" name="workId" value={item?.id ?? ""} /> : null}
       {stickyLayout ? (
@@ -3400,7 +3407,7 @@ function ProjectCard({
               <div className="relative flex h-6 shrink-0 items-center gap-2">
                 <ProjectCreateMenu
                   canCreateTask={canCreateTask}
-                  canCreateValueTrack={canCreateValueTrack && Boolean(project.launchedAt) && project.valueTrackSummary.trackCount < 2}
+                  canCreateValueTrack={canCreateValueTrack && projectAllowsNewRequirement(project.status) && Boolean(project.launchedAt) && project.valueTrackSummary.trackCount < 2}
                   onCreateTask={onCreateTask}
                   onCreateValueTrack={onCreateValueTrack}
                 />
@@ -5083,8 +5090,12 @@ function ProjectTreeTable({
                 <div className="flex items-center justify-end">
                   <ProjectListActionButtons
                     canCreate={
-                      (canCreateTask && projectAllowsNewRequirement(project.status))
-                      || canCreateValueTrack
+                      // 项目 tab 的新增入口受项目状态约束：已完成/已关闭不再显示加号
+                      projectAllowsNewRequirement(project.status) && (
+                        activePanel === "value"
+                          ? canCreateValueTrack && Boolean(project.launchedAt) && project.valueTrackSummary.trackCount < 2
+                          : canCreateTask
+                      )
                     }
                     canManage={canManageProjectAndValueTracking && (projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork))}
                     canEdit={canManageProjectAndValueTracking && (projectAllowsNewRequirement(project.status) || projectAllowsEditTerminal(project.status, canEditTerminalProjectWork))}
@@ -5095,9 +5106,7 @@ function ProjectTreeTable({
                       }
                       if (canCreateTask && projectAllowsNewRequirement(project.status)) {
                         onCreateTask(project.id);
-                        return;
                       }
-                      onCreateValueTrack(project.id);
                     }}
                     onEdit={() => onEditProject(project)}
                     onDelete={() => onDeleteProject(project)}
@@ -7093,7 +7102,8 @@ export function QuarterlyWorkContent({ data }: Props) {
       const item = data.taskWorkspaceItems.find((task) => task.id === workId)
         ?? data.columns.flatMap((column) => column.items).find((task) => task.id === workId);
       if (item) {
-        setEditDialog({ item, title: columnTitleByStatus[item.status] });
+        // 通知链接进入需求详情，而不是直接进入编辑；编辑仍可从详情抽屉内发起
+        setTaskDetailDialogId(item.id);
       }
       return;
     }
@@ -7101,12 +7111,12 @@ export function QuarterlyWorkContent({ data }: Props) {
     if (projectId && panel === "project") {
       const workspaceItem = data.projectWorkspaceItems.find((project) => project.id === projectId);
       if (workspaceItem) {
-        setProjectDialog({ item: workspaceItem, title: projectTitleByStatus[workspaceItem.status] });
+        setProjectDetailDialogId(workspaceItem.id);
         return;
       }
       const boardItem = data.projectColumns.flatMap((column) => column.items).find((project) => project.id === projectId);
       if (boardItem) {
-        setProjectDialog({ item: boardItem, title: projectTitleByStatus[boardItem.status] });
+        setProjectDetailDialogId(boardItem.id);
       }
       return;
     }
@@ -7114,7 +7124,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     if (projectId && panel === "value") {
       const overview = data.valueOverviewItems.find((item) => item.id === projectId);
       if (overview) {
-        setValueOverviewDialog(overview);
+        setValueDetailDialogId(overview.id);
       }
     }
   }, [data]);

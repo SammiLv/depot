@@ -26,7 +26,10 @@ export type RecipientConfig = {
 
 export type ChannelConfig = {
   channels: Array<"IN_APP" | "DINGTALK" | "DINGTALK_PERSONAL" | "DINGTALK_GROUP">;
+  /** 固定群，或自动路由时找不到组织绑定的兜底群 */
   groupBotId?: string;
+  /** FIXED=固定群（默认，兼容旧配置）；RECIPIENT_ORG=按事件主体的业务组→部门路由，同群合并其他接收人 */
+  groupRoutingMode?: "FIXED" | "RECIPIENT_ORG";
   notificationType?: NotificationType;
   dingtalkNotifyType?: number;
   titleTemplate: string;

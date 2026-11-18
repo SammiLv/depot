@@ -13,6 +13,7 @@ import {
   requireManageNotificationScenario,
 } from "@/server/notifications/permission";
 import { runScheduleScenarioScan } from "@/server/notifications/scheduler";
+import { resolveAuthorizedOrgNodeIds } from "@/server/permissions/permission-resolver";
 import { summarizeDeliveryLogs } from "@/server/notifications/test-result";
 import { computeNextRunAt, formatScheduleNextRunHint, parseScheduleConfig, previewScheduleNextRun, scheduleScanUsesDaysBefore } from "@/server/notifications/schedule-utils";
 import type {
@@ -98,12 +99,14 @@ function normalizeChannelConfig(raw: ChannelConfig): ChannelConfig {
     ? raw.channels.filter((c) => c === "IN_APP" || c === "DINGTALK" || c === "DINGTALK_PERSONAL" || c === "DINGTALK_GROUP")
     : [];
   if (!channels.length) throw new Error("至少选择一个通知渠道");
-  if (channels.includes("DINGTALK_GROUP") && !raw.groupBotId?.trim()) {
-    throw new Error("已勾选群消息通知，请选择群机器人");
+  const groupRoutingMode = raw.groupRoutingMode === "RECIPIENT_ORG" ? "RECIPIENT_ORG" : "FIXED";
+  if (channels.includes("DINGTALK_GROUP") && groupRoutingMode === "FIXED" && !raw.groupBotId?.trim()) {
+    throw new Error("固定群模式下请选择群机器人");
   }
   return {
     channels,
     groupBotId: raw.groupBotId?.trim() || undefined,
+    groupRoutingMode,
     notificationType: raw.notificationType ?? "KPI_TODO",
     dingtalkNotifyType: raw.dingtalkNotifyType ?? 5,
     titleTemplate: raw.titleTemplate.trim(),
@@ -358,9 +361,24 @@ export async function saveNotificationGroupBot(formData: FormData) {
   const webhookUrl = requiredString(formData.get("webhookUrl"), "Webhook 地址");
   const securityType = normalizeGroupBotSecurityType(requiredString(formData.get("securityType"), "安全设置"));
   const securityValue = requiredString(formData.get("securityValue"), "安全设置值");
+  const orgNodeIds = [...new Set(formData.getAll("orgNodeIds").map(String).filter(Boolean))];
 
   if (!webhookUrl.startsWith("https://oapi.dingtalk.com/robot/send")) {
     throw new Error("Webhook 地址格式不正确");
+  }
+
+  if (orgNodeIds.length) {
+    const [orgNodes, authorizedOrgNodeIds] = await Promise.all([
+      prisma.orgNode.findMany({
+        where: { id: { in: orgNodeIds }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
+        select: { id: true },
+      }),
+      resolveAuthorizedOrgNodeIds(currentUser, "NOTIFICATION", "MANAGE_NOTIFICATION_SCENARIO"),
+    ]);
+    if (orgNodes.length !== orgNodeIds.length) throw new Error("适用组织只能选择在用的部门或业务组");
+    if (authorizedOrgNodeIds && orgNodeIds.some((orgNodeId) => !authorizedOrgNodeIds.includes(orgNodeId))) {
+      throw new Error("适用组织超出当前账号的通知配置权限范围");
+    }
   }
 
   if (id) {
@@ -368,6 +386,7 @@ export async function saveNotificationGroupBot(formData: FormData) {
   }
 
   await prisma.$transaction(async (tx) => {
+    let groupBotId = id;
     if (id) {
       await tx.notificationGroupBot.update({
         where: { id },
@@ -385,7 +404,7 @@ export async function saveNotificationGroupBot(formData: FormData) {
         objectType: "NotificationGroupBot",
         objectId: id,
         objectName: name,
-        operationNote: `安全设置类型：${securityType}`,
+        operationNote: `安全设置类型：${securityType}；适用组织数：${orgNodeIds.length}`,
       });
     } else {
       const bot = await tx.notificationGroupBot.create({
@@ -398,14 +417,25 @@ export async function saveNotificationGroupBot(formData: FormData) {
           updatedById: currentUser.id,
         },
       });
+      groupBotId = bot.id;
       await writeNotificationConfigAudit(tx, currentUser, {
         actionCode: AUDIT_ACTION_CODES.NOTIFICATION_BOT_CREATE,
         actionName: "新建群机器人",
         objectType: "NotificationGroupBot",
         objectId: bot.id,
         objectName: name,
-        operationNote: `安全设置类型：${securityType}`,
+        operationNote: `安全设置类型：${securityType}；适用组织数：${orgNodeIds.length}`,
       });
+    }
+
+    // 固定群不依赖绑定；绑定仅用于自动路由，空绑定表示不参与自动路由
+    if (groupBotId) {
+      await tx.notificationGroupBotOrgNode.deleteMany({ where: { groupBotId } });
+      if (orgNodeIds.length) {
+        await tx.notificationGroupBotOrgNode.createMany({
+          data: orgNodeIds.map((orgNodeId) => ({ groupBotId, orgNodeId })),
+        });
+      }
     }
   });
 

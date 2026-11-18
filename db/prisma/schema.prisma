@@ -490,6 +490,7 @@ model OrgNode {
   parentId       String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+  notificationGroupBots NotificationGroupBotOrgNode[]
 
   @@index([nodeType])
   @@index([parentId])
@@ -2392,6 +2393,21 @@ model NotificationGroupBot {
   updatedById   String?
   createdAt     DateTime                     @default(now())
   updatedAt     DateTime                     @updatedAt
+  orgNodes      NotificationGroupBotOrgNode[]
+}
+
+/** 群机器人适用的组织范围；自动路由时按接收人组织向上匹配最近绑定 */
+model NotificationGroupBotOrgNode {
+  id         String   @id @default(cuid())
+  groupBotId String
+  orgNodeId  String
+  createdAt  DateTime @default(now())
+  groupBot   NotificationGroupBot @relation(fields: [groupBotId], references: [id], onDelete: Cascade)
+  orgNode    OrgNode @relation(fields: [orgNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([groupBotId, orgNodeId])
+  @@index([groupBotId])
+  @@index([orgNodeId])
 }
 
 model TodoItem {

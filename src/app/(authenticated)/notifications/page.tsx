@@ -55,6 +55,7 @@ export default async function NotifsPage() {
     canManage
       ? prisma.notificationGroupBot.findMany({
           orderBy: { name: "asc" },
+          include: { orgNodes: { select: { orgNodeId: true } } },
         })
       : Promise.resolve([]),
   ]);
@@ -93,6 +94,15 @@ export default async function NotifsPage() {
     if (!createdById) return null;
     return resolveDepartmentOrgNodeId(userOrgNodeIdById.get(createdById));
   }
+
+  const groupBotOrgOptions = [
+    ...orgFilter.departments.map((department) => ({ id: department.id, name: department.name })),
+    ...orgFilter.teams.map((team) => ({
+      id: team.id,
+      name: `${orgFilter.departments.find((department) => department.id === team.departmentOrgNodeId)?.name ?? "未分部门"} / ${team.name}`,
+    })),
+  ];
+  const groupBotOrgNameById = new Map(groupBotOrgOptions.map((org) => [org.id, org.name]));
 
   return (
     <NotificationsContent
@@ -160,7 +170,10 @@ export default async function NotifsPage() {
         updatedAt: bot.updatedAt.toISOString(),
         canManageRecord: groupBotManageFlags.get(bot.id) ?? false,
         creatorDepartmentOrgNodeId: resolveCreatorDepartmentOrgNodeId(bot.createdById),
+        orgNodeIds: bot.orgNodes.map((binding) => binding.orgNodeId),
+        orgNodeNames: bot.orgNodes.map((binding) => groupBotOrgNameById.get(binding.orgNodeId) ?? binding.orgNodeId),
       }))}
+      groupBotOrgOptions={groupBotOrgOptions}
       eventOptions={listNotificationEvents().map((event) => ({
         code: event.code,
         label: event.label,

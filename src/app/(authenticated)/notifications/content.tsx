@@ -118,6 +118,8 @@ type GroupBotRow = {
   updatedAt: string;
   canManageRecord: boolean;
   creatorDepartmentOrgNodeId: string | null;
+  orgNodeIds: string[];
+  orgNodeNames: string[];
 };
 
 function formatDateTime(value: string) {
@@ -134,6 +136,7 @@ function formatDateTime(value: string) {
 type ChannelConfigState = {
   channels: Array<"IN_APP" | "DINGTALK" | "DINGTALK_PERSONAL" | "DINGTALK_GROUP">;
   groupBotId: string;
+  groupRoutingMode: "FIXED" | "RECIPIENT_ORG";
   notificationType: string;
   dingtalkNotifyType: number;
   titleTemplate: string;
@@ -413,6 +416,7 @@ function defaultChannelConfig(): ChannelConfigState {
   return {
     channels: ["IN_APP", "DINGTALK"],
     groupBotId: "",
+    groupRoutingMode: "FIXED",
     notificationType: "KPI_TODO",
     dingtalkNotifyType: 5,
     titleTemplate: "{{year}}年Q{{quarter}} KPI 提醒",
@@ -445,6 +449,7 @@ function parseChannelConfig(value: unknown): ChannelConfigState {
   return {
     channels: Array.isArray(raw.channels) && raw.channels.length ? raw.channels : defaults.channels,
     groupBotId: raw.groupBotId ?? "",
+    groupRoutingMode: raw.groupRoutingMode === "RECIPIENT_ORG" ? "RECIPIENT_ORG" : "FIXED",
     notificationType: raw.notificationType ?? defaults.notificationType,
     dingtalkNotifyType: raw.dingtalkNotifyType ?? 5,
     titleTemplate: raw.titleTemplate ?? defaults.titleTemplate,
@@ -530,12 +535,15 @@ const securityValueLabels: Record<GroupBotRow["securityType"], string> = {
 
 function GroupBotForm({
   bot,
+  orgOptions,
   onClose,
 }: {
   bot?: GroupBotRow;
+  orgOptions: Array<{ id: string; name: string }>;
   onClose: () => void;
 }) {
   const [securityType, setSecurityType] = useState<GroupBotRow["securityType"]>(bot?.securityType ?? "KEYWORD");
+  const [orgNodeIds, setOrgNodeIds] = useState<string[]>(bot?.orgNodeIds ?? []);
 
   return (
     <form
@@ -546,6 +554,9 @@ function GroupBotForm({
       className="flex min-h-0 flex-1 flex-col"
     >
       {bot ? <input type="hidden" name="id" value={bot.id} /> : null}
+      {orgNodeIds.map((orgNodeId) => (
+        <input key={orgNodeId} type="hidden" name="orgNodeIds" value={orgNodeId} />
+      ))}
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">群名称 *</label>
@@ -589,6 +600,28 @@ function GroupBotForm({
             placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
             className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">适用组织（用于自动路由）</label>
+          <p className="mb-2 text-xs text-muted-foreground">
+            可绑定多个部门或业务组；接收人优先匹配所在业务组，未配置时向上匹配部门。留空表示不参与自动路由，不影响固定群使用。
+          </p>
+          <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border border-border px-3 py-2 text-sm">
+            {orgOptions.length ? orgOptions.map((org) => (
+              <label key={org.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={orgNodeIds.includes(org.id)}
+                  onChange={(event) => setOrgNodeIds((prev) => event.target.checked
+                    ? [...prev, org.id]
+                    : prev.filter((id) => id !== org.id))}
+                />
+                {org.name}
+              </label>
+            )) : (
+              <span className="text-xs text-muted-foreground">暂无可配置的部门或业务组</span>
+            )}
+          </div>
         </div>
       </div>
       <div className="flex shrink-0 justify-end gap-2 border-t border-border px-6 py-4">
@@ -666,6 +699,7 @@ function ConfigSubTabs({
 
 function ScenarioForm({
   scenario,
+  defaultModule,
   eventOptions,
   moduleOptions,
   recipientRuleLabels,
@@ -676,6 +710,8 @@ function ScenarioForm({
   onSaved,
 }: {
   scenario?: ScenarioRow;
+  /** 新增场景时继承当前列表的模块筛选 */
+  defaultModule?: string;
   eventOptions: EventOption[];
   moduleOptions: string[];
   recipientRuleLabels: Record<string, string>;
@@ -685,27 +721,43 @@ function ScenarioForm({
   onClose: () => void;
   onSaved?: (message: string) => void;
 }) {
+  const initialModule = scenario?.module
+    ?? defaultModule
+    ?? eventOptions.find((event) => event.code === (scenario?.triggerEvent ?? eventOptions[0]?.code))?.module
+    ?? moduleOptions[0]
+    ?? "KPI管理";
   const [triggerType, setTriggerType] = useState<"EVENT" | "SCHEDULE">(scenario?.triggerType ?? "EVENT");
-  const [triggerEvent, setTriggerEvent] = useState(scenario?.triggerEvent ?? eventOptions[0]?.code ?? "kpi.initialized");
-  const [module, setModule] = useState(
-    scenario?.module ?? eventOptions.find((event) => event.code === (scenario?.triggerEvent ?? eventOptions[0]?.code))?.module ?? moduleOptions[0] ?? "KPI管理",
+  const [triggerEvent, setTriggerEvent] = useState(
+    scenario?.triggerEvent
+      ?? eventOptions.find((event) => event.module === initialModule)?.code
+      ?? eventOptions[0]?.code
+      ?? "kpi.initialized",
   );
+  const [module, setModule] = useState(initialModule);
   const [rules, setRules] = useState<RecipientRule[]>(parseRecipientConfig(scenario?.recipientConfig));
   const [channelConfig, setChannelConfig] = useState(parseChannelConfig(scenario?.channelConfig));
-  const [scheduleConfig, setScheduleConfig] = useState(parseScheduleConfig(scenario?.scheduleConfig));
+  const [scheduleConfig, setScheduleConfig] = useState(() => {
+    const config = parseScheduleConfig(scenario?.scheduleConfig);
+    // 新增定时场景同样继承模块筛选，避免扫描类型与模块不一致
+    if (!scenario && defaultModule) {
+      const scan = scanOptions.find((option) => option.module === defaultModule);
+      if (scan) config.scanType = scan.value as ScheduleScanType;
+    }
+    return config;
+  });
   const [isActive, setIsActive] = useState(scenario?.isActive ?? true);
 
-  const selectedEvent = eventOptions.find((event) => event.code === triggerEvent) ?? eventOptions[0];
+  const selectedEvent = eventOptions.find((event) => event.code === triggerEvent);
   const availableResolvers = selectedEvent?.recipientResolvers
     ?? Object.keys(recipientRuleLabels);
 
   const eventSelectOptions = useMemo(
-    () => eventOptions.map((event) => ({
+    () => eventOptions.filter((event) => event.module === module).map((event) => ({
       value: event.code,
       label: formatEventLabel(event),
       keywords: event.code,
     })),
-    [eventOptions],
+    [eventOptions, module],
   );
 
   useEffect(() => {
@@ -769,7 +821,25 @@ function ScenarioForm({
           <label className="block text-sm font-medium mb-1">所属模块</label>
           <select
             value={module}
-            onChange={(event) => setModule(event.target.value)}
+            onChange={(event) => {
+              const nextModule = event.target.value;
+              setModule(nextModule);
+              if (triggerType === "EVENT") {
+                // 模块切换后同步切换为该模块的首个事件，避免仍显示旧模块事件
+                const nextEvent = eventOptions.find((item) => item.module === nextModule);
+                setTriggerEvent(nextEvent?.code ?? "");
+              } else {
+                const nextScan = scanOptions.find((item) => item.module === nextModule);
+                if (nextScan) {
+                  const scanType = nextScan.value as ScheduleScanType;
+                  setScheduleConfig((prev) => ({
+                    ...prev,
+                    scanType,
+                    daysBefore: scheduleScanUsesDaysBefore(scanType) ? prev.daysBefore || 7 : 0,
+                  }));
+                }
+              }
+            }}
             className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
           >
             {moduleOptions.map((option) => (
@@ -790,7 +860,25 @@ function ScenarioForm({
           <label className="block text-sm font-medium mb-1">触发方式</label>
           <select
             value={triggerType}
-            onChange={(event) => setTriggerType(event.target.value as "EVENT" | "SCHEDULE")}
+            onChange={(event) => {
+              const nextType = event.target.value as "EVENT" | "SCHEDULE";
+              setTriggerType(nextType);
+              // 切换触发方式时保留当前模块，并选中该模块下对应的首个事件/扫描类型
+              if (nextType === "EVENT") {
+                const nextEvent = eventOptions.find((item) => item.module === module);
+                setTriggerEvent(nextEvent?.code ?? "");
+              } else {
+                const nextScan = scanOptions.find((item) => item.module === module);
+                if (nextScan) {
+                  const scanType = nextScan.value as ScheduleScanType;
+                  setScheduleConfig((prev) => ({
+                    ...prev,
+                    scanType,
+                    daysBefore: scheduleScanUsesDaysBefore(scanType) ? prev.daysBefore || 7 : 0,
+                  }));
+                }
+              }
+            }}
             className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
           >
             <option value="EVENT">业务事件</option>
@@ -832,7 +920,7 @@ function ScenarioForm({
                 }}
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               >
-                {scanOptions.map((option) => (
+                {scanOptions.filter((option) => option.module === module).map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
@@ -1017,28 +1105,51 @@ function ScenarioForm({
           ))}
         </div>
         {channelConfig.channels.includes("DINGTALK_GROUP") ? (
-          <div>
-            <label className="block text-sm font-medium mb-1">目标群 *</label>
-            {groupBots.length ? (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">目标群路由方式</label>
               <select
-                value={channelConfig.groupBotId}
+                value={channelConfig.groupRoutingMode}
                 onChange={(event) => setChannelConfig((prev) => ({
                   ...prev,
-                  groupBotId: event.target.value,
+                  groupRoutingMode: event.target.value as "FIXED" | "RECIPIENT_ORG",
                 }))}
-                required
                 className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
               >
-                <option value="">请选择群</option>
-                {groupBots.map((bot) => (
-                  <option key={bot.id} value={bot.id}>{bot.name}</option>
-                ))}
+                <option value="FIXED">固定群</option>
+                <option value="RECIPIENT_ORG">按事件主体所在组织自动路由</option>
               </select>
-            ) : (
+            </div>
+            {channelConfig.groupRoutingMode === "RECIPIENT_ORG" ? (
               <p className="text-xs text-muted-foreground">
-                尚未配置群机器人，请先点击「群消息通知配置」添加
+                按需求/项目负责人所在业务组或部门确定目标群；主管等其他接收人若在该群可合并 @，不再另发部门群。仅提醒主管本人时，请使用钉钉本人会话或工作通知。
               </p>
-            )}
+            ) : null}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                {channelConfig.groupRoutingMode === "RECIPIENT_ORG" ? "兜底群（可选）" : "目标群 *"}
+              </label>
+              {groupBots.length ? (
+                <select
+                  value={channelConfig.groupBotId}
+                  onChange={(event) => setChannelConfig((prev) => ({
+                    ...prev,
+                    groupBotId: event.target.value,
+                  }))}
+                  required={channelConfig.groupRoutingMode === "FIXED"}
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm"
+                >
+                  <option value="">{channelConfig.groupRoutingMode === "RECIPIENT_ORG" ? "无匹配时不发送" : "请选择群"}</option>
+                  {groupBots.map((bot) => (
+                    <option key={bot.id} value={bot.id}>{bot.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  尚未配置群机器人，请先在「群机器人配置」中添加并绑定适用组织
+                </p>
+              )}
+            </div>
           </div>
         ) : null}
         <div>
@@ -1086,6 +1197,7 @@ export function NotificationsContent({
   scenarios,
   users,
   groupBots,
+  groupBotOrgOptions,
   eventOptions,
   moduleOptions,
   recipientRuleLabels,
@@ -1099,6 +1211,7 @@ export function NotificationsContent({
   scenarios: ScenarioRow[];
   users: Array<{ id: string; name: string; roleType: string }>;
   groupBots: GroupBotRow[];
+  groupBotOrgOptions: Array<{ id: string; name: string }>;
   eventOptions: EventOption[];
   moduleOptions: string[];
   recipientRuleLabels: Record<string, string>;
@@ -1490,7 +1603,7 @@ export function NotificationsContent({
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                         {scenarioSearch.trim() || scenarioModuleFilter !== "all" || configDepartmentFilter !== "all" ? "没有匹配的场景" : "暂无场景，点击上方「新增场景」"}
                       </td>
                     </tr>
@@ -1519,6 +1632,7 @@ export function NotificationsContent({
                 <thead className={tableHeadClass}>
                   <tr>
                     <th className="text-left font-medium px-4 py-3">群名称</th>
+                    <th className="text-left font-medium px-4 py-3">适用组织（自动路由）</th>
                     <th className="text-left font-medium px-4 py-3">安全设置</th>
                     <th className="text-left font-medium px-4 py-3">安全值</th>
                     <th className="text-left font-medium px-4 py-3">Webhook 地址</th>
@@ -1533,6 +1647,9 @@ export function NotificationsContent({
                   {filteredGroupBots.length ? filteredGroupBots.map((bot) => (
                     <tr key={bot.id} className="hover:bg-muted/20 transition">
                       <td className="px-4 py-3 font-medium">{bot.name}</td>
+                      <td className="px-4 py-3 text-muted-foreground max-w-[240px]" title={bot.orgNodeNames.join("、")}>
+                        <div className="line-clamp-2">{bot.orgNodeNames.length ? bot.orgNodeNames.join("、") : "未绑定（仅固定群可用）"}</div>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{securityTypeLabels[bot.securityType]}</td>
                       <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate" title={bot.securityValue}>
                         {bot.securityValue}
@@ -1571,7 +1688,7 @@ export function NotificationsContent({
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                         {configDepartmentFilter !== "all" ? "没有匹配的群机器人配置" : "暂无群机器人配置，点击上方「新增群机器人」"}
                       </td>
                     </tr>
@@ -1593,6 +1710,7 @@ export function NotificationsContent({
         {dialog ? (
           <ScenarioForm
             scenario={dialog.scenario}
+            defaultModule={scenarioModuleFilter === "all" ? undefined : scenarioModuleFilter}
             eventOptions={eventOptions}
             moduleOptions={moduleOptions}
             recipientRuleLabels={recipientRuleLabels}
@@ -1614,6 +1732,7 @@ export function NotificationsContent({
           <GroupBotForm
             key={groupBotDialog.bot?.id ?? "create"}
             bot={groupBotDialog.bot}
+            orgOptions={groupBotOrgOptions}
             onClose={() => setGroupBotDialog(null)}
           />
         ) : null}

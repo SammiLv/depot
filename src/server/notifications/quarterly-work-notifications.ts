@@ -44,8 +44,50 @@ async function buildOwnerPayload(ownerId: string) {
     userId: ownerId,
     subjectUserId: ownerId,
     userName: owner?.name ?? "",
+    orgNodeId: owner?.orgNodeId ?? "",
     ...department,
   };
+}
+
+/** 新增需求独立事件：不与负责人变更共用，便于单独配置群通知 */
+export async function emitQuarterlyWorkCreated(workId: string, createdById?: string) {
+  const work = await prisma.quarterlyWork.findFirst({
+    where: { id: workId, deletedAt: null },
+    select: {
+      id: true,
+      title: true,
+      ownerId: true,
+      orgNodeId: true,
+      year: true,
+      quarter: true,
+      startDate: true,
+      endDate: true,
+      status: true,
+      createdAt: true,
+      project: { select: { id: true, title: true } },
+    },
+  });
+  if (!work) return;
+  const creator = await loadUser(createdById);
+
+  await emitNotificationEvent("quarterly_work.created", {
+    ...(await buildOwnerPayload(work.ownerId)),
+    orgNodeId: work.orgNodeId ?? "",
+    createdById: createdById ?? "",
+    createdByName: creator?.name ?? "",
+    title: work.title,
+    year: work.year,
+    quarter: work.quarter,
+    startDate: work.startDate?.toISOString() ?? "",
+    endDate: work.endDate?.toISOString() ?? "",
+    status: workStatusLabel(work.status),
+    projectId: work.project.id,
+    projectTitle: work.project.title,
+    targetType: "QuarterlyWork",
+    targetId: work.id,
+    // 使用需求创建时间作为稳定幂等标识，重复 emit 不会因重新取当前时间而绕过群消息去重
+    eventAt: work.createdAt.toISOString(),
+  } satisfies NotificationEventPayload);
 }
 
 export async function emitQuarterlyWorkAssigned(workId: string) {

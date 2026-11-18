@@ -17,6 +17,7 @@ import {
   emitProjectLaunched,
   emitProjectValueChanged,
   emitQuarterlyWorkAssigned,
+  emitQuarterlyWorkCreated,
   emitQuarterlyWorkStatusChanged,
 } from "@/server/notifications/quarterly-work-notifications";
 import {
@@ -595,7 +596,7 @@ async function ensureProjectForWork(params: {
   projectId: string | null;
   title: string;
   description: string | null;
-  expectedOutcome: string;
+  expectedOutcome: string | null;
   owner: Awaited<ReturnType<typeof findEditableOwner>>;
   workStatus: WorkStatus;
   needsDevelopment: boolean;
@@ -672,7 +673,7 @@ export async function createQuarterlyWork(formData: FormData) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
   }
   const description = (formData.get("description") as string | null)?.trim() || null;
-  const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
+  const expectedOutcome = (formData.get("expectedOutcome") as string | null)?.trim() || null;
   const projectId = parseProjectId(formData.get("projectId"));
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const year = period.year;
@@ -720,6 +721,7 @@ export async function createQuarterlyWork(formData: FormData) {
   await syncProjectWorkloadFromTasks(project.id);
   await recalcProjectWorkloadSnapshot(project.id);
   await emitQuarterlyWorkAssigned(work.id);
+  await emitQuarterlyWorkCreated(work.id, currentUser.id);
 
   await writeOperationLog(prisma, {
     targetType: "QUARTERLY_WORK",
@@ -762,7 +764,7 @@ export async function updateQuarterlyWork(formData: FormData) {
     throw new Error("需求状态为已完成时，完成时间为必填项");
   }
   const description = (formData.get("description") as string | null)?.trim() || null;
-  const expectedOutcome = requiredString(formData.get("expectedOutcome"), "项目预期收益");
+  const expectedOutcome = (formData.get("expectedOutcome") as string | null)?.trim() || null;
   const projectId = parseProjectId(formData.get("projectId"));
   const departmentOrgNodeId = parseDepartmentOrgNodeId(formData.get("departmentOrgNodeId"));
   const { departmentOrgNodeId: scopeDepartmentOrgNodeId, scopedOrgNodeIds } = await getProjectManagementDepartmentScope(currentUser);
@@ -1010,7 +1012,7 @@ export async function backfillQuarterlyWork(formData: FormData) {
       title,
       description,
       taskDescription,
-      expectedOutcome: expectedOutcome || project.expectedOutcome,
+      expectedOutcome,
       status,
       taskResult,
       executionSummary,

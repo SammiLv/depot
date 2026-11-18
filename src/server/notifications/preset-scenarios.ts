@@ -85,11 +85,12 @@ const projectValueTrackPendingSchedule = {
 };
 
 const quarterlyWorkMessageUrls = {
-  task: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}&panel=task&workId={{targetId}}",
-  project: "{{appUrl}}/quarterly-work?panel=project&projectId={{targetId}}",
-  projectWithPeriod: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}&panel=project&projectId={{targetId}}",
-  value: "{{appUrl}}/quarterly-work?panel=value&projectId={{targetId}}",
-  valueWithPeriod: "{{appUrl}}/quarterly-work?year={{year}}&quarter={{quarter}}&panel=value&projectId={{targetId}}",
+  // 通知直接进入语义化详情路由，不使用额外短码或跳转
+  task: "{{appUrl}}/quarterly-work/requirement/{{targetId}}",
+  project: "{{appUrl}}/quarterly-work/project/{{targetId}}",
+  projectWithPeriod: "{{appUrl}}/quarterly-work/project/{{targetId}}",
+  value: "{{appUrl}}/quarterly-work/value/{{targetId}}",
+  valueWithPeriod: "{{appUrl}}/quarterly-work/value/{{targetId}}",
 } as const;
 
 const PRESET_SCENARIOS = [
@@ -320,6 +321,25 @@ const PRESET_SCENARIOS = [
     },
     isActive: true,
     sortOrder: 110,
+  },
+  {
+    name: "新增需求群通知",
+    description: "新增需求时发送到负责人所在业务组/部门群，并 @需求负责人",
+    module: resolveEventModule("quarterly_work.created"),
+    triggerType: "EVENT" as const,
+    triggerEvent: "quarterly_work.created",
+    recipientConfig: { rules: [{ type: "SUBJECT_USER" }], dedupeWindowHours: 0 },
+    channelConfig: {
+      channels: ["DINGTALK_GROUP"],
+      groupRoutingMode: "RECIPIENT_ORG",
+      notificationType: "GOAL_UPDATE",
+      dingtalkNotifyType: 5,
+      titleTemplate: "{{atRecipients}}【产品管理 | 指派提醒】",
+      contentTemplate: "需求：{{title}}",
+      messageUrlTemplate: quarterlyWorkMessageUrls.task,
+    },
+    isActive: true,
+    sortOrder: 111,
   },
   {
     name: "项目上线提醒价值跟踪",
