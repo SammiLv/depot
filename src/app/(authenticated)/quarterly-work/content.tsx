@@ -4651,7 +4651,7 @@ function RequirementDetailDrawer({
                 <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求描述</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
-                {task.description?.trim() || "暂无需求描述"}
+                {task.taskDescription?.trim() || "暂无需求描述"}
               </p>
             </div>
             {/* 需求目标卡 */}
@@ -4661,7 +4661,7 @@ function RequirementDetailDrawer({
                 <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求目标</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
-                {task.expectedOutcome?.trim() || "暂无需求目标"}
+                {task.description?.trim() || task.expectedOutcome?.trim() || "暂无需求目标"}
               </p>
             </div>
 
