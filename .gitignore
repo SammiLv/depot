@@ -79,3 +79,6 @@ logs/
 
 # 本地 AI 工具 skills（如 Codex .agents 目录），不入库
 .agents/
+
+# 本地设计稿与生成物（如 Logo 方案），不入库
+output/
