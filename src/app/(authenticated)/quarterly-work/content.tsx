@@ -3835,17 +3835,6 @@ function ProjectTreeChildRow({
       </div>
       <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(completedAt)}</div>
       <div className="flex items-center justify-end gap-3">
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-            aria-label={`编辑${title}`}
-          >
-            <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
-            <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
-          </button>
-        ) : null}
         {onView ? (
           <button
             type="button"
@@ -3855,6 +3844,17 @@ function ProjectTreeChildRow({
             className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
           >
             <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+          </button>
+        ) : null}
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+            aria-label={`编辑${title}`}
+          >
+            <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
+            <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
           </button>
         ) : null}
         {canDelete && onDelete ? (
@@ -4098,6 +4098,15 @@ function ProjectListActionButtons({
           <ScrollText className="h-4 w-4 text-[#FF7D00]" />
         </button>
       ) : null}
+      <button
+        type="button"
+        onClick={onViewDetail}
+        title="查看详情"
+        aria-label="查看详情"
+        className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+      >
+        <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+      </button>
       {editAllowed ? (
           <button
             type="button"
@@ -4109,15 +4118,6 @@ function ProjectListActionButtons({
             <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
           </button>
       ) : null}
-      <button
-        type="button"
-        onClick={onViewDetail}
-        title="查看详情"
-        aria-label="查看详情"
-        className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-      >
-        <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
-      </button>
       {canManage ? (
           <button
             type="button"
@@ -5739,15 +5739,15 @@ function ValueListTable({
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.launchedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingRight ? goalStickyActionShadow : ""}`}>
-                {canManage ? (
+                {canCreateTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
                   <button
                     type="button"
-                    onClick={() => onEdit(project)}
+                    onClick={() => onCreateTrack(project)}
                     className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-                    aria-label={`编辑${project.title}`}
+                    aria-label={`新增跟踪${project.title}`}
                   >
-                    <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
-                    <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
+                    <img src="/icons/plus-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
+                    <img src="/icons/plus-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
                   </button>
                 ) : null}
                 <button
@@ -5759,15 +5759,15 @@ function ValueListTable({
                 >
                   <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
                 </button>
-                {canCreateTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
+                {canManage ? (
                   <button
                     type="button"
-                    onClick={() => onCreateTrack(project)}
+                    onClick={() => onEdit(project)}
                     className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-                    aria-label={`新增跟踪${project.title}`}
+                    aria-label={`编辑${project.title}`}
                   >
-                    <img src="/icons/plus-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
-                    <img src="/icons/plus-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
+                    <img src="/icons/edit-outlined.png" alt="" width={16} height={16} className="h-4 w-4 group-hover:hidden" />
+                    <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
                   </button>
                 ) : null}
               </div>
@@ -5957,6 +5957,15 @@ function TaskListTable({
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.completedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`}>
+                <button
+                  type="button"
+                  onClick={() => onViewDetail(task)}
+                  title="查看详情"
+                  aria-label={`查看${task.title}的详情`}
+                  className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+                >
+                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+                </button>
                 {canManage && workAllowsEdit(task.status, canEditTerminalProjectWork) ? (
                   <>
                     <button
@@ -5978,15 +5987,6 @@ function TaskListTable({
                     </button>
                   </>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => onViewDetail(task)}
-                  title="查看详情"
-                  aria-label={`查看${task.title}的详情`}
-                  className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-                >
-                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
-                </button>
               </div>
             </div>
           );
