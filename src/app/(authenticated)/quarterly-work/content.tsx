@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
+import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Popover, Select as RjSelect, Textarea as RjTextarea, Tooltip } from "@rjmart/ui";
 import { Badge, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -2763,105 +2763,59 @@ function taskSubtitle(task: Pick<ProjectWorkspaceTaskItem, "taskDescription" | "
   return goal ? `目标：${goal}` : null;
 }
 
-/** 需求卡片描述：固定最多 3 行；超出时悬停，在页面上层展示全文（不被卡片裁剪） */
-function ClampedTaskDescription({ text }: { text: string }) {
-  const contentRef = useRef<HTMLParagraphElement>(null);
-  const closeTimerRef = useRef<number | null>(null);
+/** 文字被截断后才为 true。overflowing 放进依赖，是因为外层 Tooltip 开关会换掉这个节点 */
+function useTextOverflow<T extends HTMLElement>(text: string) {
+  const ref = useRef<T>(null);
   const [overflowing, setOverflowing] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [box, setBox] = useState<{
-    left: number;
-    width: number;
-    maxHeight: number;
-    placement: "bottom" | "top";
-    top: number;
-    bottom: number;
-  } | null>(null);
-
   useEffect(() => {
-    const element = contentRef.current;
+    const element = ref.current;
     if (!element) return;
     const check = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
     const observer = new ResizeObserver(check);
     observer.observe(element);
     check();
     return () => observer.disconnect();
-  }, [text]);
+  }, [text, overflowing]);
+  return { ref, overflowing };
+}
 
-  useEffect(() => () => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-  }, []);
-
-  const updateBox = useCallback(() => {
-    const element = contentRef.current;
-    if (!element) return;
-    const rect = element.getBoundingClientRect();
-    const gap = 4;
-    const spaceBelow = window.innerHeight - rect.bottom - gap - 8;
-    const spaceAbove = rect.top - gap - 8;
-    const placement = spaceBelow >= 120 || spaceBelow >= spaceAbove ? "bottom" : "top";
-    const available = placement === "bottom" ? spaceBelow : spaceAbove;
-    setBox({
-      left: rect.left,
-      width: rect.width,
-      maxHeight: Math.max(80, Math.min(240, available)),
-      placement,
-      top: rect.bottom + gap,
-      bottom: window.innerHeight - rect.top + gap,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    updateBox();
-    const onMove = () => updateBox();
-    window.addEventListener("scroll", onMove, true);
-    window.addEventListener("resize", onMove);
-    return () => {
-      window.removeEventListener("scroll", onMove, true);
-      window.removeEventListener("resize", onMove);
-    };
-  }, [open, updateBox]);
-
-  const show = () => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    if (!overflowing) return;
-    setOpen(true);
-  };
-  const hide = () => {
-    closeTimerRef.current = window.setTimeout(() => setOpen(false), 80);
-  };
-
-  const panel = open && box ? createPortal(
-    <div
-      onMouseEnter={show}
-      onMouseLeave={hide}
-      style={{
-        position: "fixed",
-        left: box.left,
-        width: box.width,
-        maxHeight: box.maxHeight,
-        zIndex: 20,
-        top: box.placement === "bottom" ? box.top : undefined,
-        bottom: box.placement === "top" ? box.bottom : undefined,
-      }}
-      className="overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-sm leading-[22px] text-[#777777] shadow-lg ring-1 ring-black/5 [overflow-wrap:anywhere]"
-    >
-      <LinkifiedText text={text} />
-    </div>,
-    document.body,
-  ) : null;
-
+/** 列表纯文字：超出时用组件库 Tooltip（深色、带箭头） */
+function OverflowTooltip({ text, className, children }: { text: string; className: string; children: ReactNode }) {
+  const { ref, overflowing } = useTextOverflow<HTMLDivElement>(text);
   return (
-    <div className="min-w-0" onMouseEnter={show} onMouseLeave={hide}>
+    <Tooltip
+      content={<span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
+      disabled={!text || !overflowing}
+    >
+      <div ref={ref} className={className}>{children}</div>
+    </Tooltip>
+  );
+}
+
+/** 卡片描述：超出时用组件库 Popover，浮层里的链接可以点 */
+function ClampedTaskDescription({ text }: { text: string }) {
+  const { ref, overflowing } = useTextOverflow<HTMLParagraphElement>(text);
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      trigger="hover"
+      position="bottom"
+      width="100%"
+      open={open && overflowing}
+      onOpenChange={(next) => setOpen(overflowing && next)}
+      content={(
+        <div className="max-h-60 overflow-y-auto whitespace-pre-wrap text-sm leading-[22px] [overflow-wrap:anywhere]">
+          <LinkifiedText text={text} />
+        </div>
+      )}
+    >
       <p
-        ref={contentRef}
+        ref={ref}
         className="line-clamp-3 whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]"
       >
         <LinkifiedText text={text} />
       </p>
-      {panel}
-    </div>
+    </Popover>
   );
 }
 
@@ -6099,10 +6053,12 @@ function TaskListTable({
                   <span className="text-sm leading-[22px] text-[#4B4B4B]">-</span>
                 )}
               </div>
-              <div
+              <OverflowTooltip
+                text={(task.expectedOutcome || task.description || "").trim()}
                 className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
-                title={task.expectedOutcome || task.description || undefined}
-              >{emptyMetricText(task.expectedOutcome || task.description)}</div>
+              >
+                {emptyMetricText(task.expectedOutcome || task.description)}
+              </OverflowTooltip>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{task.owner}</div>
               <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
               <div>
