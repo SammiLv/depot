@@ -1020,7 +1020,7 @@ export async function backfillQuarterlyWork(formData: FormData) {
   const taskResult = parseTaskResult(formData.get("taskResult"), status);
   const executionSummary = parseExecutionSummary(formData.get("executionSummary"));
   const taskDescription = (formData.get("taskDescription") as string | null)?.trim() || null;
-  const description = requiredString(formData.get("description"), "需求目标");
+  const description = (formData.get("description") as string | null)?.trim() || null;
   const expectedOutcome = (formData.get("expectedOutcome") as string | null)?.trim() || null;
 
   // 项目校验：保留数据范围校验，但绕过终态限制（补录专用路径）
