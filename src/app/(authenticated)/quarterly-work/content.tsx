@@ -2708,6 +2708,13 @@ function EmptyProjectSection({
   );
 }
 
+function taskSubtitle(task: Pick<ProjectWorkspaceTaskItem, "taskDescription" | "description" | "expectedOutcome">) {
+  const taskDescription = task.taskDescription?.trim();
+  if (taskDescription) return `描述：${taskDescription}`;
+  const goal = task.description?.trim() || task.expectedOutcome?.trim();
+  return goal ? `目标：${goal}` : null;
+}
+
 function ProjectTaskCard({
   task,
   canEdit,
@@ -2725,7 +2732,7 @@ function ProjectTaskCard({
 }) {
   const completed = task.status === "COMPLETED";
   const tone = getTaskCardTone(task);
-  const description = task.taskDescription || task.description || task.expectedOutcome;
+  const description = taskSubtitle(task);
   const periodClass = tone === "red" ? "text-[#F53F3F]" : tone === "orange" ? "text-[#FF7D00]" : "text-[#181818]";
   const remain = task.remainingWeeksLabel;
   const remainOverdue = Boolean(remain?.startsWith("逾期"));
@@ -2769,7 +2776,7 @@ function ProjectTaskCard({
         ) : null}
       </div>
       {description ? (
-        <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777]">
+        <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]">
           {description}
         </p>
       ) : null}
@@ -3775,6 +3782,7 @@ function ProjectTreeChildRow({
   completedAt,
   canEdit,
   onEdit,
+  onView,
   canDelete,
   onDelete,
 }: {
@@ -3795,6 +3803,7 @@ function ProjectTreeChildRow({
   completedAt?: Date | string | null;
   canEdit: boolean;
   onEdit: () => void;
+  onView?: () => void;
   canDelete?: boolean;
   onDelete?: () => void;
 }) {
@@ -3837,6 +3846,17 @@ function ProjectTreeChildRow({
             <img src="/icons/edit-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
           </button>
         ) : null}
+        {onView ? (
+          <button
+            type="button"
+            onClick={onView}
+            title="查看详情"
+            aria-label={`查看${title}的详情`}
+            className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
+          >
+            <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
+          </button>
+        ) : null}
         {canDelete && onDelete ? (
           <button
             type="button"
@@ -3865,6 +3885,7 @@ function ProjectExpandedPanel({
   onCreateValueTrack,
   onEditTask,
   onDeleteTask,
+  onViewTask,
   onEditValueTrack,
 }: {
   project: ProjectWorkspaceItem;
@@ -3879,6 +3900,7 @@ function ProjectExpandedPanel({
   onCreateValueTrack: () => void;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
   onDeleteTask: (task: ProjectWorkspaceTaskItem) => void;
+  onViewTask: (task: ProjectWorkspaceTaskItem) => void;
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const showingTasks = activePanel !== "value";
@@ -3921,7 +3943,7 @@ function ProjectExpandedPanel({
                 <ProjectTreeChildRow
                   key={task.id}
                   title={task.title}
-                  description={task.taskDescription || task.description || task.expectedOutcome}
+                  description={taskSubtitle(task)}
                   statusLabel={columnTitleByStatus[task.status]}
                   statusClassName={taskListStatusTagClass(task)}
                   statusExtra={task.developmentSource === DEVELOPMENT_SOURCE_INTERNAL ? (
@@ -3935,6 +3957,7 @@ function ProjectExpandedPanel({
                   completedAt={task.completedAt}
                   canEdit={canManageProductTask && workAllowsEdit(task.status, canEditTerminalProjectWork)}
                   onEdit={() => onEditTask(task)}
+                  onView={() => onViewTask(task)}
                   canDelete={canManageProductTask && workAllowsEdit(task.status, canEditTerminalProjectWork)}
                   onDelete={() => onDeleteTask(task)}
                 />
@@ -4370,7 +4393,7 @@ function ProjectDetailDrawer({
                           ) : null}
                         </div>
                         <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
-                          {task.description?.trim() || task.expectedOutcome?.trim() || "-"}
+                          {taskSubtitle(task) ?? "-"}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
                           <span className="flex items-center gap-1">
@@ -4952,6 +4975,7 @@ function ProjectTreeTable({
   onDeleteProject,
   onEditTask,
   onDeleteTask,
+  onViewTask,
   onEditValueTrack,
 }: {
   projects: ProjectWorkspaceItem[];
@@ -4973,6 +4997,7 @@ function ProjectTreeTable({
   onDeleteProject: (project: ProjectWorkspaceItem) => void;
   onEditTask: (task: ProjectWorkspaceTaskItem) => void;
   onDeleteTask: (task: ProjectWorkspaceTaskItem) => void;
+  onViewTask: (task: ProjectWorkspaceTaskItem) => void;
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const { sort, toggleSort } = useListSort();
@@ -5133,6 +5158,7 @@ function ProjectTreeTable({
                   onCreateValueTrack={() => onCreateValueTrack(project.id)}
                   onEditTask={onEditTask}
                   onDeleteTask={onDeleteTask}
+                  onViewTask={onViewTask}
                   onEditValueTrack={onEditValueTrack}
                 />
               </ProjectTreeCollapse>
@@ -6831,6 +6857,7 @@ function QuarterlyWorkShell({
                 onDeleteProject={onDeleteProject}
                 onEditTask={onEditTask}
                 onDeleteTask={onDeleteTask}
+                onViewTask={onViewTaskDetail}
                 onEditValueTrack={onEditValueTrack}
               />
               </div>
