@@ -636,8 +636,9 @@ async function resolveQuarterlyWorkDeepLinkOptions(options?: QuarterlyWorkQueryO
     if (work) {
       resolved = {
         ...resolved,
-        selectedYear: work.year,
-        selectedQuarter: work.quarter,
+        // 地址栏已带年份/季度时尊重用户选择，只在通知链接初次打开（未带参数）时对齐到这条需求
+        selectedYear: resolved.selectedYear ?? work.year,
+        selectedQuarter: resolved.selectedQuarter ?? work.quarter,
         projectId: projectId ?? work.projectId,
         panel: resolved.panel ?? "task",
       };

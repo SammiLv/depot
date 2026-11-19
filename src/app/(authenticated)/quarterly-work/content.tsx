@@ -6105,6 +6105,7 @@ function QuarterlyWorkShell({
   canBackfillProjectRequirement,
   onUpdateFilters,
   onUpdateStatusFilters,
+  onReleaseDetail,
   onCreateGoal,
   onCreateProject,
   onCreateTask,
@@ -6134,6 +6135,8 @@ function QuarterlyWorkShell({
   canBackfillProjectRequirement: boolean;
   onUpdateFilters: (updates: Record<string, string | number | null>) => void;
   onUpdateStatusFilters: (statuses: readonly string[]) => void;
+  /** 通知详情路由下切换目标/项目/需求/价值跟踪：回到完整列表 */
+  onReleaseDetail?: (panel: WorkspaceEntityTab) => void;
   onCreateGoal: () => void;
   onCreateProject: (status: ProjectStatus) => void;
   onCreateTask: (projectId?: string) => void;
@@ -6431,6 +6434,10 @@ function QuarterlyWorkShell({
             items={workspaceEntityTabs}
             onChange={(value) => {
               const nextTab = value as WorkspaceEntityTab;
+              if (onReleaseDetail) {
+                onReleaseDetail(nextTab);
+                return;
+              }
               setEntityTab(nextTab);
               if (nextTab === "task") {
                 setTaskStatusFilter([]);
@@ -7007,11 +7014,32 @@ export function QuarterlyWorkContent({ data }: Props) {
       setTeamTab("all");
     }
   };
+  // 通知详情路由会把列表锁在这一条需求/项目上；用户继续浏览时回到普通列表地址
+  const detailPanel = pathname.startsWith("/quarterly-work/requirement/")
+    ? "task"
+    : pathname.startsWith("/quarterly-work/project/")
+      ? "project"
+      : pathname.startsWith("/quarterly-work/value/")
+        ? "value"
+        : null;
+  const pushWorkspaceUrl = (params: URLSearchParams) => {
+    const base = detailPanel ? "/quarterly-work" : pathname;
+    if (detailPanel && !params.has("panel")) params.set("panel", detailPanel);
+    const nextQuery = params.toString();
+    router.push(nextQuery ? `${base}?${nextQuery}` : base);
+  };
+  const leaveDetailRoute = () => {
+    if (!detailPanel) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (!params.has("panel")) params.set("panel", detailPanel);
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `/quarterly-work?${nextQuery}` : "/quarterly-work");
+  };
   const updatePeriodFilters = (nextYear: number, nextQuarter: string | number) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("year", String(nextYear));
     params.set("quarter", String(nextQuarter));
-    router.push(`${pathname}?${params.toString()}`);
+    pushWorkspaceUrl(params);
   };
   const updateWorkspaceFilters = (updates: Record<string, string | number | null>) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -7022,8 +7050,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         params.set(key, String(value));
       }
     }
-    const nextQuery = params.toString();
-    router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+    pushWorkspaceUrl(params);
   };
   /** 项目状态多选：写多个 status 参数；空数组表示全部 */
   const updateStatusFilters = (nextStatuses: readonly string[]) => {
@@ -7032,8 +7059,7 @@ export function QuarterlyWorkContent({ data }: Props) {
     for (const status of nextStatuses) {
       params.append("status", status);
     }
-    const nextQuery = params.toString();
-    router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+    pushWorkspaceUrl(params);
   };
   /** 打开「编辑项目价值」弹窗：优先用列表已组装的总览项，否则按项目摘要现组（供列表与详情抽屉共用） */
   const openValueOverviewDialog = (item: ProjectWorkspaceItem) => {
@@ -8170,6 +8196,12 @@ export function QuarterlyWorkContent({ data }: Props) {
           canBackfillProjectRequirement={data.permissions.canBackfillProjectRequirement}
           onUpdateFilters={updateWorkspaceFilters}
           onUpdateStatusFilters={updateStatusFilters}
+          onReleaseDetail={detailPanel ? (nextTab) => {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set("panel", nextTab);
+            if (nextTab === "task" || nextTab === "value") params.delete("status");
+            pushWorkspaceUrl(params);
+          } : undefined}
           onCreateGoal={() => setCreateProductGoalDialog(true)}
           onCreateProject={(status) => setCreateProjectDialog(status)}
           onCreateTask={(projectId) => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId })}
@@ -8283,7 +8315,10 @@ export function QuarterlyWorkContent({ data }: Props) {
           canCreateTask={canCreateTask && projectAllowsNewRequirement(projectDetailDialog.status)}
           canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
           canManageValueTracking={canManageProjectAndValueTracking}
-          onClose={() => setProjectDetailDialogId(null)}
+          onClose={() => {
+            setProjectDetailDialogId(null);
+            if (pathname.startsWith("/quarterly-work/project/")) leaveDetailRoute();
+          }}
           onEditProject={() => {
             const item = projectDetailDialog;
             setProjectDialog({ item, title: projectTitleByStatus[item.status] });
@@ -8311,7 +8346,10 @@ export function QuarterlyWorkContent({ data }: Props) {
         <RequirementDetailDrawer
           task={taskDetailDialog}
           canEdit={canManageProductTask && workAllowsEdit(taskDetailDialog.status, data.permissions.canEditTerminalProjectWork)}
-          onClose={() => setTaskDetailDialogId(null)}
+          onClose={() => {
+            setTaskDetailDialogId(null);
+            if (pathname.startsWith("/quarterly-work/requirement/")) leaveDetailRoute();
+          }}
           onEdit={() => {
             const item = taskDetailDialog;
             setEditDialog({ item, title: columnTitleByStatus[item.status] });
@@ -8323,7 +8361,10 @@ export function QuarterlyWorkContent({ data }: Props) {
         <ValueTrackDetailDrawer
           project={valueDetailDialog}
           canManageValueTracking={canManageProjectAndValueTracking}
-          onClose={() => setValueDetailDialogId(null)}
+          onClose={() => {
+            setValueDetailDialogId(null);
+            if (pathname.startsWith("/quarterly-work/value/")) leaveDetailRoute();
+          }}
           onEditValueOverview={() => {
             openValueOverviewDialog(valueDetailDialog);
           }}
