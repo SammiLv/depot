@@ -6475,7 +6475,7 @@ function QuarterlyWorkShell({
               />
             </form>
             {isProjectHome ? (
-              <div className="mt-2">
+              <div className="mt-2 flex items-center gap-2">
                 <WorkspaceFilterSelect
                   width={96}
                   plain
@@ -6489,6 +6489,23 @@ function QuarterlyWorkShell({
                     label: goal.isAll ? "全部目标" : goal.title,
                   }))}
                 />
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={data.workspaceFilters.needsDevOnly}
+                  onClick={() => onUpdateFilters({ needsDev: data.workspaceFilters.needsDevOnly ? null : 1 })}
+                  className="group inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-[#4B4B4B]"
+                >
+                  {data.workspaceFilters.needsDevOnly ? (
+                    <img src="/icons/radio-checked.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
+                  ) : (
+                    <>
+                      <img src="/icons/radio-default.png" alt="" width={14} height={14} className="h-3.5 w-3.5 group-hover:hidden" />
+                      <img src="/icons/radio-hover.png" alt="" width={14} height={14} className="hidden h-3.5 w-3.5 group-hover:block" />
+                    </>
+                  )}
+                  仅看需开发
+                </button>
               </div>
             ) : isTaskHome ? (
               <div className="mt-2 flex items-center gap-2">

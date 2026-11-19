@@ -52,6 +52,7 @@ type QuarterlyWorkQueryOptions = {
   projectId?: string | null;
   workId?: string | null;
   query?: string | null;
+  needsDevOnly?: boolean;
 };
 
 type OrgNodeSummary = {
@@ -1265,6 +1266,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       : rawOwnerId.trim() || null;
   const selectedProjectId = options?.projectId?.trim() || null;
   const selectedWorkId = options?.workId?.trim() || null;
+  const projectNeedsDevOnly = options?.needsDevOnly === true;
   const workspacePanel = normalizeWorkspacePanel(options?.panel ?? undefined);
 
   const toProjectWorkspaceTaskItem = (work: (typeof activeWorks)[number]): ProjectWorkspaceTaskItem => ({
@@ -1357,6 +1359,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       return false;
     }
     if (selectedGoalId && !item.productGoalIds.includes(selectedGoalId)) {
+      return false;
+    }
+    if (projectNeedsDevOnly && item.needsDevelopment !== true) {
       return false;
     }
     if (!ignoreStatus && workspaceStatuses.length > 0 && !workspaceStatuses.includes(item.statusFilterKey)) {
@@ -1607,6 +1612,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       projectId: selectedProjectId,
       workId: selectedWorkId,
       query: workspaceSearchQuery,
+      needsDevOnly: projectNeedsDevOnly,
     },
     productGoalOptions: productGoals.map((goal) => ({
       id: goal.id,

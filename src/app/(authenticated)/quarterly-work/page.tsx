@@ -57,6 +57,7 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
     projectId: readParam(params?.projectId) ?? null,
     workId: readParam(params?.workId) ?? null,
     query: readParam(params?.q) ?? null,
+    needsDevOnly: readParam(params?.needsDev) === "1",
   });
   return <QuarterlyWorkContent data={data} />;
 }
