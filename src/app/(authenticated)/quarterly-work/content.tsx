@@ -3389,6 +3389,7 @@ function ProjectCard({
   canEditTerminalProjectWork,
   onCreateTask,
   onCreateValueTrack,
+  onBackfill,
   onViewDetail,
   onEditProject,
   onDeleteProject,
@@ -3407,6 +3408,7 @@ function ProjectCard({
   canEditTerminalProjectWork: boolean;
   onCreateTask: () => void;
   onCreateValueTrack: () => void;
+  onBackfill?: () => void;
   onViewDetail: () => void;
   onEditProject: () => void;
   onDeleteProject: () => void;
@@ -3433,6 +3435,17 @@ function ProjectCard({
                   onCreateTask={onCreateTask}
                   onCreateValueTrack={onCreateValueTrack}
                 />
+                {onBackfill ? (
+                  <button
+                    type="button"
+                    aria-label="补录需求"
+                    title="补录需求"
+                    onClick={onBackfill}
+                    className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-[#FAFAFA] hover:bg-[#FFF7E8]"
+                  >
+                    <ScrollText className="h-4 w-4 text-[#FF7D00]" />
+                  </button>
+                ) : null}
                 {/* 查看详情：所有用户可见，放在编辑左侧 */}
                 <button
                   type="button"
@@ -6854,6 +6867,11 @@ function QuarterlyWorkShell({
                     canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
                     onCreateTask={() => onCreateTask(project.id)}
                     onCreateValueTrack={() => onCreateValueTrack(project.id)}
+                    onBackfill={
+                      canBackfillProjectRequirement && project.needsDevelopment === true && project.status === "COMPLETED"
+                        ? () => onBackfill(project)
+                        : undefined
+                    }
                     onViewDetail={() => onViewProjectDetail(project)}
                     onEditProject={() => onEditProject(project)}
                     onDeleteProject={() => onDeleteProject(project)}
