@@ -719,7 +719,7 @@ export async function createQuarterlyWork(formData: FormData) {
 
   await syncProjectStatusFromWork(project.id, status);
   await syncProjectWorkloadFromTasks(project.id);
-  await recalcProjectWorkloadSnapshot(project.id);
+  await recalcProjectWorkloadSnapshot(project.id, undefined, { autoMarkNonDevelopment: false });
   await emitQuarterlyWorkAssigned(work.id);
   await emitQuarterlyWorkCreated(work.id, currentUser.id);
 
@@ -868,11 +868,16 @@ export async function updateQuarterlyWork(formData: FormData) {
   if (previousProjectId !== project.id) {
     await syncProjectStatusFromWork(previousProjectId, status);
   }
+  // 仅当本次编辑让某项目失去一个开发需求时，才允许把该项目自动标记为非开发
+  const wasActiveDevWork = existingWork.needsDevelopment === true && existingWork.status !== "CLOSED";
+  const removedDevWorkFromProject = wasActiveDevWork && (!needsDevelopment || status === "CLOSED");
   await syncProjectWorkloadFromTasks(project.id);
-  await recalcProjectWorkloadSnapshot(project.id);
+  await recalcProjectWorkloadSnapshot(project.id, undefined, {
+    autoMarkNonDevelopment: previousProjectId === project.id && removedDevWorkFromProject,
+  });
   if (previousProjectId !== project.id) {
     await syncProjectWorkloadFromTasks(previousProjectId);
-    await recalcProjectWorkloadSnapshot(previousProjectId);
+    await recalcProjectWorkloadSnapshot(previousProjectId, undefined, { autoMarkNonDevelopment: wasActiveDevWork });
   }
 
   const userNameById = await resolveUserNames([existingWork.ownerId, owner.id]);
@@ -1027,7 +1032,7 @@ export async function backfillQuarterlyWork(formData: FormData) {
     select: { id: true },
   });
 
-  await recalcProjectWorkloadSnapshot(project.id);
+  await recalcProjectWorkloadSnapshot(project.id, undefined, { autoMarkNonDevelopment: false });
 
   await writeOperationLog(prisma, {
     targetType: "QUARTERLY_WORK",
@@ -1114,7 +1119,7 @@ export async function updateProjectStatus(formData: FormData) {
   });
 
   // 上线时间/状态变更后重算首版完成度快照
-  await recalcProjectWorkloadSnapshot(project.id);
+  await recalcProjectWorkloadSnapshot(project.id, undefined, { autoMarkNonDevelopment: false });
 
   if (becameLaunched) {
     await emitProjectLaunched(project.id);
@@ -1211,7 +1216,7 @@ export async function createProject(formData: FormData) {
     return project;
   });
 
-  await recalcProjectWorkloadSnapshot(created.id);
+  await recalcProjectWorkloadSnapshot(created.id, undefined, { autoMarkNonDevelopment: false });
   await emitProjectAssigned(created.id);
   if (created.status === "LAUNCHED") {
     await emitProjectLaunched(created.id);
@@ -1738,7 +1743,7 @@ export async function deleteQuarterlyWork(formData: FormData) {
       id: workId,
       ...getProjectManagementScopeWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
     },
-    select: { id: true, title: true, projectId: true, status: true },
+    select: { id: true, title: true, projectId: true, status: true, needsDevelopment: true },
   });
 
   if (!work) throw new Error("需求不存在或无权限删除");
@@ -1754,7 +1759,9 @@ export async function deleteQuarterlyWork(formData: FormData) {
     data: { deletedAt: new Date() },
   });
   await syncProjectWorkloadFromTasks(work.projectId);
-  await recalcProjectWorkloadSnapshot(work.projectId);
+  await recalcProjectWorkloadSnapshot(work.projectId, undefined, {
+    autoMarkNonDevelopment: work.needsDevelopment === true && work.status !== "CLOSED",
+  });
 
   await writeOperationLog(prisma, {
     targetType: "QUARTERLY_WORK",
@@ -2046,7 +2053,7 @@ export async function updateProject(formData: FormData) {
   });
 
   // 上线时间变更后重算首版完成度快照
-  await recalcProjectWorkloadSnapshot(project.id);
+  await recalcProjectWorkloadSnapshot(project.id, undefined, { autoMarkNonDevelopment: false });
 
   if (project.ownerId !== owner.id) {
     await emitProjectAssigned(project.id);

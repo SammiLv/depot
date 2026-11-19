@@ -16,6 +16,7 @@ import { toBusinessDate } from "@/server/quarterly-work/value-tracking-period";
 export async function recalcProjectWorkloadSnapshot(
   projectId: string,
   client: Pick<typeof prisma, "project" | "quarterlyWork"> = prisma,
+  options: { autoMarkNonDevelopment?: boolean } = {},
 ) {
   const project = await client.project.findUnique({
     where: { id: projectId },
@@ -41,9 +42,11 @@ export async function recalcProjectWorkloadSnapshot(
     }
   }
 
-  // 仅在没有开发需求且未上线时，自动将项目标记为非开发（如最后一个开发需求被删/关）；
-  // 不在此处把 needsDevelopment 改回 true，避免覆盖用户在编辑项目时的明确选择。
-  const shouldAutoMarkNonDevelopment = requirements.length === 0 && !project.launchedAt;
+  // 仅在需求变更触发、且没有开发需求且未上线时，自动将项目标记为非开发（如最后一个开发需求被删/关）；
+  // 项目新建/编辑/改状态触发时 autoMarkNonDevelopment=false，不覆盖用户对「是否开发项目」的明确选择。
+  const shouldAutoMarkNonDevelopment = (options.autoMarkNonDevelopment ?? true)
+    && requirements.length === 0
+    && !project.launchedAt;
 
   // 人天保留 1 位小数，避免 Float 求和长尾
   const round1 = (value: number) => Math.round(value * 10) / 10;
