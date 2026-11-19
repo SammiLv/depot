@@ -1116,6 +1116,8 @@ function ProjectEditForm({
     target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [projectStatus]);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
+  const showCompletedLaunchedAt = projectStatus === "COMPLETED" && editNeedsDev === "true";
+  const launchedAtRequiredForCompleted = showCompletedLaunchedAt && item.needsDevelopment !== true;
   // 级联完成提醒：项目置为终态时，其下所有未完成需求会被同时置为同状态，完成时间记为当前时间
   const cascadesCompletion = (projectStatus === "COMPLETED" || projectStatus === "CLOSED") && projectStatus !== item.status;
   const hasTasks = item.workCount > 0;
@@ -1175,6 +1177,10 @@ function ProjectEditForm({
       }
       if (editNeedsDev === "false" && nonDevProjectBlockedMessage) {
         setErrorMessage(nonDevProjectBlockedMessage);
+        return;
+      }
+      if (launchedAtRequiredForCompleted && !String(formData.get("launchedAt") ?? "").trim()) {
+        setErrorMessage("已完成项目改为开发项目时，请填写上线时间");
         return;
       }
       validateSelectedProductGoalIds(formData);
@@ -1344,6 +1350,15 @@ function ProjectEditForm({
         ) : (
           <input type="hidden" name="workloadPersonDay" value={workloadPersonDay} />
         )}
+        {showCompletedLaunchedAt ? (
+          <FieldRow>
+            <FieldCell label="上线时间" required={launchedAtRequiredForCompleted} className="flex-1">
+              <FormDatePicker name="launchedAt" defaultDate={item.launchedAt} />
+              <p className="mt-1 text-xs text-muted-foreground">作为首版完成度分界；填写后不能再改为非开发项目</p>
+            </FieldCell>
+            <div className="flex-1" />
+          </FieldRow>
+        ) : null}
         {projectStatus === "CLOSED" ? (
           <FieldCell label="关闭原因" required>
             <RjTextarea

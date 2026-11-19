@@ -628,6 +628,36 @@ async function ensureProjectForWork(params: {
   });
 }
 
+/** 未完成/未关闭的非开发项目下出现有效的需开发需求时，项目自动改为开发项目并记录项目操作日志 */
+async function promoteProjectToDevelopmentForWork(params: {
+  projectId: string;
+  workTitle: string;
+  workNeedsDevelopment: boolean;
+  workStatus: WorkStatus;
+  operatorId: string;
+}) {
+  if (!params.workNeedsDevelopment || params.workStatus === "CLOSED") return;
+  const project = await prisma.project.findUnique({
+    where: { id: params.projectId },
+    select: { id: true, title: true, status: true, needsDevelopment: true },
+  });
+  if (!project || project.needsDevelopment === true) return;
+  if (project.status === "COMPLETED" || project.status === "CLOSED") return;
+
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { needsDevelopment: true },
+  });
+  await writeOperationLog(prisma, {
+    targetType: "PROJECT",
+    targetId: project.id,
+    targetTitle: project.title,
+    action: OPERATION_LOG_ACTION_UPDATE,
+    operatorId: params.operatorId,
+    remark: `是否开发项目从『否』改为『是』（需求「${params.workTitle}」需要开发，自动调整）`,
+  });
+}
+
 async function syncProjectStatusFromWork(projectId: string, status: WorkStatus) {
   if (status !== "IN_PROGRESS") return;
 
@@ -718,6 +748,13 @@ export async function createQuarterlyWork(formData: FormData) {
   });
 
   await syncProjectStatusFromWork(project.id, status);
+  await promoteProjectToDevelopmentForWork({
+    projectId: project.id,
+    workTitle: title,
+    workNeedsDevelopment: needsDevelopment,
+    workStatus: status,
+    operatorId: currentUser.id,
+  });
   await syncProjectWorkloadFromTasks(project.id);
   await recalcProjectWorkloadSnapshot(project.id, undefined, { autoMarkNonDevelopment: false });
   await emitQuarterlyWorkAssigned(work.id);
@@ -868,6 +905,13 @@ export async function updateQuarterlyWork(formData: FormData) {
   if (previousProjectId !== project.id) {
     await syncProjectStatusFromWork(previousProjectId, status);
   }
+  await promoteProjectToDevelopmentForWork({
+    projectId: project.id,
+    workTitle: title,
+    workNeedsDevelopment: needsDevelopment,
+    workStatus: status,
+    operatorId: currentUser.id,
+  });
   // 仅当本次编辑让某项目失去一个开发需求时，才允许把该项目自动标记为非开发
   const wasActiveDevWork = existingWork.needsDevelopment === true && existingWork.status !== "CLOSED";
   const removedDevWorkFromProject = wasActiveDevWork && (!needsDevelopment || status === "CLOSED");
@@ -1960,13 +2004,23 @@ export async function updateProject(formData: FormData) {
   // 终态项目可被授予「项目需求编辑&删除」权限的用户再编辑：status 保持已完成时不重复触发完成动作
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
   const valueTrackInit = getValueTrackInitForLaunchedStatus(status, project.status);
-  const nextLaunchedAt = status === "LAUNCHED"
+  // 已完成的开发项目也可录入上线时间（作为首版完成度分界）
+  const acceptsLaunchedAtInput = status === "LAUNCHED" || (status === "COMPLETED" && needsDevelopment);
+  const nextLaunchedAt = acceptsLaunchedAtInput
     ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt)
     : getProjectLaunchedAtByStatus(status, project.launchedAt);
   // 需求级联完成时间与项目完成时间保持一致
   const nextCompletedAt = resolveProjectCompletedAtByStatus(status, formData.get("completedAt"), project.completedAt);
   if (status === "LAUNCHED" && !nextLaunchedAt) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
+  }
+  const switchingCompletedToDevelopment = status === "COMPLETED" && needsDevelopment && project.needsDevelopment !== true;
+  if (switchingCompletedToDevelopment && !nextLaunchedAt) {
+    throw new Error("已完成项目改为开发项目时，上线时间为必填项");
+  }
+  if (status === "COMPLETED" && nextLaunchedAt && nextCompletedAt
+    && toBusinessDate(nextLaunchedAt).getTime() > toBusinessDate(nextCompletedAt).getTime()) {
+    throw new Error("上线时间不能晚于完成时间");
   }
 
   // 上线时间是首版完成度的核心分界点，修改受保护：
