@@ -2723,6 +2723,39 @@ function EmptyProjectSection({
   );
 }
 
+const URL_IN_TEXT = /https?:\/\/[^\s<>"']+/g;
+
+/** 把正文里的 http(s) 链接渲染成可新窗口打开的链接，其余文字保持原样 */
+function LinkifiedText({ text }: { text: string }) {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(URL_IN_TEXT)) {
+    const start = match.index ?? 0;
+    const raw = match[0];
+    const trailing = raw.match(/[.,;:!?，。；：！？)）」】》]+$/u)?.[0] ?? "";
+    const url = trailing ? raw.slice(0, -trailing.length) : raw;
+    if (url.length <= "https://".length) continue;
+    if (start > lastIndex) nodes.push(text.slice(lastIndex, start));
+    nodes.push(
+      <a
+        key={start}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(event) => event.stopPropagation()}
+        className="text-[#3069F9] underline [overflow-wrap:anywhere]"
+      >
+        {url}
+      </a>,
+    );
+    if (trailing) nodes.push(trailing);
+    lastIndex = start + raw.length;
+  }
+  if (lastIndex === 0) return <>{text}</>;
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return <>{nodes}</>;
+}
+
 function taskSubtitle(task: Pick<ProjectWorkspaceTaskItem, "taskDescription" | "description" | "expectedOutcome">) {
   const taskDescription = task.taskDescription?.trim();
   if (taskDescription) return `描述：${taskDescription}`;
@@ -2792,7 +2825,7 @@ function ProjectTaskCard({
       </div>
       {description ? (
         <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]">
-          {description}
+          <LinkifiedText text={description} />
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -3840,10 +3873,10 @@ function ProjectTreeChildRow({
       <div className={`min-w-0 ${indent ? "col-span-2 pl-[60px]" : ""}`}>
         <div className="text-sm font-medium leading-[22px] text-[#181818]">{title}</div>
         {description ? (
-          <p className={descriptionClassName}>{description}</p>
+          <p className={descriptionClassName}><LinkifiedText text={description} /></p>
         ) : null}
         {extraDescription ? (
-          <p className={descriptionClassName}>{extraDescription}</p>
+          <p className={descriptionClassName}><LinkifiedText text={extraDescription} /></p>
         ) : null}
       </div>
       {meta ? <div className="min-w-0">{meta}</div> : null}
@@ -4421,7 +4454,10 @@ function ProjectDetailDrawer({
                           ) : null}
                         </div>
                         <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#777777]">
-                          {taskSubtitle(task) ?? "-"}
+                          {(() => {
+                            const subtitle = taskSubtitle(task);
+                            return subtitle ? <LinkifiedText text={subtitle} /> : "-";
+                          })()}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
                           <span className="flex items-center gap-1">
@@ -4702,7 +4738,7 @@ function RequirementDetailDrawer({
                 <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求描述</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
-                {task.taskDescription?.trim() || "暂无需求描述"}
+                {task.taskDescription?.trim() ? <LinkifiedText text={task.taskDescription.trim()} /> : "暂无需求描述"}
               </p>
             </div>
             {/* 需求目标卡 */}
@@ -4712,7 +4748,10 @@ function RequirementDetailDrawer({
                 <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求目标</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]">
-                {task.description?.trim() || task.expectedOutcome?.trim() || "暂无需求目标"}
+                {(() => {
+                  const goal = task.description?.trim() || task.expectedOutcome?.trim();
+                  return goal ? <LinkifiedText text={goal} /> : "暂无需求目标";
+                })()}
               </p>
             </div>
 
