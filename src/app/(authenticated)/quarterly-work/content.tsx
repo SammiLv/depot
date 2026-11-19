@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Popover, Select as RjSelect, Textarea as RjTextarea, Tooltip } from "@rjmart/ui";
+import { DatePicker as RjDatePicker, DateRangePicker as RjDateRangePicker, Input as RjInput, Popover, Select as RjSelect, Textarea as RjTextarea } from "@rjmart/ui";
 import { Badge, Card, Progress } from "@/components/ui-kit";
 import { createProductGoal, createProject, createQuarterlyWork, createValueTrack, backfillQuarterlyWork, deleteProductGoal, deleteProject, deleteQuarterlyWork, deleteValueTrack, submitValueTrack, updateProductGoal, updateProject, updateProjectValue, updateQuarterlyWork } from "@/server/quarterly-work/actions";
 import type { getQuarterlyWorkData } from "@/server/quarterly-work/quarterly-work-query";
@@ -2763,9 +2763,9 @@ function taskSubtitle(task: Pick<ProjectWorkspaceTaskItem, "taskDescription" | "
   return goal ? `目标：${goal}` : null;
 }
 
-/** 文字被截断后才为 true。overflowing 放进依赖，是因为外层 Tooltip 开关会换掉这个节点 */
-function useTextOverflow<T extends HTMLElement>(text: string) {
-  const ref = useRef<T>(null);
+/** 文字被截断后才为 true。overflowing 放进依赖，是因为浮层开关会换掉这个节点 */
+function useTextOverflow(text: string) {
+  const ref = useRef<HTMLSpanElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   useEffect(() => {
     const element = ref.current;
@@ -2779,42 +2779,24 @@ function useTextOverflow<T extends HTMLElement>(text: string) {
   return { ref, overflowing };
 }
 
-/** 列表纯文字：超出时用组件库 Tooltip（深色、带箭头） */
-function OverflowTooltip({ text, className, children }: { text: string; className: string; children: ReactNode }) {
-  const { ref, overflowing } = useTextOverflow<HTMLDivElement>(text);
-  return (
-    <Tooltip
-      content={<span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
-      disabled={!text || !overflowing}
-    >
-      <div ref={ref} className={className}>{children}</div>
-    </Tooltip>
-  );
-}
-
-/** 卡片描述：超出时用组件库 Popover，浮层里的链接可以点 */
-function ClampedTaskDescription({ text }: { text: string }) {
-  const { ref, overflowing } = useTextOverflow<HTMLParagraphElement>(text);
+/** 被截断的说明文字：悬停用组件库 Popover 展示全文，链接可点 */
+function HoverCopy({ text, className, children }: { text: string; className?: string; children: ReactNode }) {
+  const { ref, overflowing } = useTextOverflow(text);
   const [open, setOpen] = useState(false);
+  const canOpen = Boolean(text.trim()) && overflowing;
   return (
     <Popover
       trigger="hover"
-      position="bottom"
-      width="100%"
-      open={open && overflowing}
-      onOpenChange={(next) => setOpen(overflowing && next)}
+      position="top"
+      open={canOpen && open}
+      onOpenChange={(next) => setOpen(canOpen && next)}
       content={(
         <div className="max-h-60 overflow-y-auto whitespace-pre-wrap text-sm leading-[22px] [overflow-wrap:anywhere]">
           <LinkifiedText text={text} />
         </div>
       )}
     >
-      <p
-        ref={ref}
-        className="line-clamp-3 whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]"
-      >
-        <LinkifiedText text={text} />
-      </p>
+      <span ref={ref} className={className}>{children}</span>
     </Popover>
   );
 }
@@ -2879,7 +2861,11 @@ function ProjectTaskCard({
           </div>
         ) : null}
       </div>
-      {description ? <ClampedTaskDescription text={description} /> : null}
+      {description ? (
+        <HoverCopy text={description} className="line-clamp-3 whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]">
+          <LinkifiedText text={description} />
+        </HoverCopy>
+      ) : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <div className="flex items-center gap-1 whitespace-nowrap">
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#0655FE] text-[8px] font-semibold leading-[10px] text-white">
@@ -3568,9 +3554,12 @@ function ProjectCard({
                 ) : null}
               </div>
             </div>
-            <p className="line-clamp-2 text-xs leading-[18px] text-[#777777]">
-              {project.description || project.expectedOutcome || "暂无项目说明"}
-            </p>
+            <HoverCopy
+              text={(project.description || project.expectedOutcome || "").trim()}
+              className="line-clamp-2 text-xs leading-[18px] text-[#777777]"
+            >
+              <LinkifiedText text={project.description || project.expectedOutcome || "暂无项目说明"} />
+            </HoverCopy>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -3925,10 +3914,14 @@ function ProjectTreeChildRow({
       <div className={`min-w-0 ${indent ? "col-span-2 pl-[60px]" : ""}`}>
         <div className="text-sm font-medium leading-[22px] text-[#181818]">{title}</div>
         {description ? (
-          <p className={descriptionClassName}><LinkifiedText text={description} /></p>
+          <HoverCopy text={description} className={descriptionClassName}>
+            <LinkifiedText text={description} />
+          </HoverCopy>
         ) : null}
         {extraDescription ? (
-          <p className={descriptionClassName}><LinkifiedText text={extraDescription} /></p>
+          <HoverCopy text={extraDescription} className={descriptionClassName}>
+            <LinkifiedText text={extraDescription} />
+          </HoverCopy>
         ) : null}
       </div>
       {meta ? <div className="min-w-0">{meta}</div> : null}
@@ -5198,9 +5191,12 @@ function ProjectTreeTable({
                     </span>
                     <span className="min-w-0">
                       <span className="block text-base font-medium leading-6 text-[#181818]">{project.title}</span>
-                      <span className="mt-0.5 line-clamp-2 text-xs leading-[18px] text-[#777777]">
+                      <HoverCopy
+                        text={(project.description || project.expectedOutcome || "").trim()}
+                        className="mt-0.5 line-clamp-2 text-xs leading-[18px] text-[#777777]"
+                      >
                         {project.description || project.expectedOutcome || "暂无项目说明"}
-                      </span>
+                      </HoverCopy>
                     </span>
                   </button>
                 </div>
@@ -5832,14 +5828,18 @@ function ValueListTable({
                   ? `${formatWorkload(summary.firstVersionWorkloadPersonDay)}/${formatWorkload(summary.postLaunchIterationWorkloadPersonDay)}/${formatWorkload(summary.totalWorkloadPersonDay)}`
                   : "-"}
               </div>
-              <div
+              <HoverCopy
+                text={(project.expectedOutcome ?? "").trim()}
                 className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
-                title={project.expectedOutcome ?? undefined}
-              >{emptyMetricText(project.expectedOutcome)}</div>
-              <div
+              >
+                <LinkifiedText text={emptyMetricText(project.expectedOutcome)} />
+              </HoverCopy>
+              <HoverCopy
+                text={(project.valueTrackSummary.actualValue ?? "").trim()}
                 className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
-                title={project.valueTrackSummary.actualValue?.trim() ? project.valueTrackSummary.actualValue : undefined}
-              >{emptyMetricText(project.valueTrackSummary.actualValue)}</div>
+              >
+                <LinkifiedText text={emptyMetricText(project.valueTrackSummary.actualValue)} />
+              </HoverCopy>
               <div className="flex flex-wrap items-center gap-1">
                 <ListStatusTag label={project.valueTrackSummary.status} className={valueTrackListStatusTagClass(project.valueTrackSummary.status)} />
                 {summary.overdue ? (
@@ -5909,10 +5909,12 @@ function ValueListTable({
                         {formatWorkload(track.firstVersionWorkloadPersonDay)}/{formatWorkload(track.postLaunchIterationWorkloadPersonDay)}/{formatWorkload(track.totalWorkloadPersonDay)}
                       </div>
                       <div></div>
-                      <div
+                      <HoverCopy
+                        text={(track.actualValue ?? "").trim()}
                         className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
-                        title={track.actualValue?.trim() ? track.actualValue : undefined}
-                      >{emptyMetricText(track.actualValue)}</div>
+                      >
+                        <LinkifiedText text={emptyMetricText(track.actualValue)} />
+                      </HoverCopy>
                       <div></div>
                       <div className="text-[#4B4B4B]">{track.valueJudgement ?? "-"}</div>
                       {/* 跟踪记录状态与父行「项目状态」同列展示 */}
@@ -6053,12 +6055,14 @@ function TaskListTable({
                   <span className="text-sm leading-[22px] text-[#4B4B4B]">-</span>
                 )}
               </div>
-              <OverflowTooltip
+              <HoverCopy
                 text={(task.expectedOutcome || task.description || "").trim()}
                 className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
               >
-                {emptyMetricText(task.expectedOutcome || task.description)}
-              </OverflowTooltip>
+                {(task.expectedOutcome || task.description || "").trim()
+                  ? <LinkifiedText text={(task.expectedOutcome || task.description || "").trim()} />
+                  : "-"}
+              </HoverCopy>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{task.owner}</div>
               <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
               <div>
