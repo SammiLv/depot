@@ -2763,6 +2763,108 @@ function taskSubtitle(task: Pick<ProjectWorkspaceTaskItem, "taskDescription" | "
   return goal ? `目标：${goal}` : null;
 }
 
+/** 需求卡片描述：固定最多 3 行；超出时悬停，在页面上层展示全文（不被卡片裁剪） */
+function ClampedTaskDescription({ text }: { text: string }) {
+  const contentRef = useRef<HTMLParagraphElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [box, setBox] = useState<{
+    left: number;
+    width: number;
+    maxHeight: number;
+    placement: "bottom" | "top";
+    top: number;
+    bottom: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element) return;
+    const check = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    check();
+    return () => observer.disconnect();
+  }, [text]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
+
+  const updateBox = useCallback(() => {
+    const element = contentRef.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const gap = 4;
+    const spaceBelow = window.innerHeight - rect.bottom - gap - 8;
+    const spaceAbove = rect.top - gap - 8;
+    const placement = spaceBelow >= 120 || spaceBelow >= spaceAbove ? "bottom" : "top";
+    const available = placement === "bottom" ? spaceBelow : spaceAbove;
+    setBox({
+      left: rect.left,
+      width: rect.width,
+      maxHeight: Math.max(80, Math.min(240, available)),
+      placement,
+      top: rect.bottom + gap,
+      bottom: window.innerHeight - rect.top + gap,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateBox();
+    const onMove = () => updateBox();
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open, updateBox]);
+
+  const show = () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    if (!overflowing) return;
+    setOpen(true);
+  };
+  const hide = () => {
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 80);
+  };
+
+  const panel = open && box ? createPortal(
+    <div
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      style={{
+        position: "fixed",
+        left: box.left,
+        width: box.width,
+        maxHeight: box.maxHeight,
+        zIndex: 20,
+        top: box.placement === "bottom" ? box.top : undefined,
+        bottom: box.placement === "top" ? box.bottom : undefined,
+      }}
+      className="overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-sm leading-[22px] text-[#777777] shadow-lg ring-1 ring-black/5 [overflow-wrap:anywhere]"
+    >
+      <LinkifiedText text={text} />
+    </div>,
+    document.body,
+  ) : null;
+
+  return (
+    <div className="min-w-0" onMouseEnter={show} onMouseLeave={hide}>
+      <p
+        ref={contentRef}
+        className="line-clamp-3 whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]"
+      >
+        <LinkifiedText text={text} />
+      </p>
+      {panel}
+    </div>
+  );
+}
+
 function ProjectTaskCard({
   task,
   canEdit,
@@ -2823,11 +2925,7 @@ function ProjectTaskCard({
           </div>
         ) : null}
       </div>
-      {description ? (
-        <p className="whitespace-pre-wrap text-sm leading-[22px] text-[#777777] [overflow-wrap:anywhere]">
-          <LinkifiedText text={description} />
-        </p>
-      ) : null}
+      {description ? <ClampedTaskDescription text={description} /> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <div className="flex items-center gap-1 whitespace-nowrap">
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#0655FE] text-[8px] font-semibold leading-[10px] text-white">
