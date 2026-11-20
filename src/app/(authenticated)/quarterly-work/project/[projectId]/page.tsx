@@ -10,6 +10,6 @@ export default async function ProjectDetailPage({
   const { projectId } = await params;
   const query = await searchParams;
   return QuarterlyWorkPage({
-    searchParams: Promise.resolve({ ...query, panel: "project", projectId }),
+    searchParams: Promise.resolve({ ...query, panel: "project", detailProjectId: projectId }),
   });
 }

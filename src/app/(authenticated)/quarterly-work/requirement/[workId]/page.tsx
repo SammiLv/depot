@@ -10,6 +10,6 @@ export default async function RequirementDetailPage({
   const { workId } = await params;
   const query = await searchParams;
   return QuarterlyWorkPage({
-    searchParams: Promise.resolve({ ...query, panel: "task", workId }),
+    searchParams: Promise.resolve({ ...query, panel: "task", detailWorkId: workId }),
   });
 }

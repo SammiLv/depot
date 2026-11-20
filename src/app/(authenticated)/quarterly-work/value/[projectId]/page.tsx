@@ -10,6 +10,6 @@ export default async function ValueTrackDetailPage({
   const { projectId } = await params;
   const query = await searchParams;
   return QuarterlyWorkPage({
-    searchParams: Promise.resolve({ ...query, panel: "value", projectId }),
+    searchParams: Promise.resolve({ ...query, panel: "value", detailProjectId: projectId }),
   });
 }

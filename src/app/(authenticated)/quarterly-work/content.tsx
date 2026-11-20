@@ -7068,7 +7068,7 @@ export function QuarterlyWorkContent({ data }: Props) {
   const [valueOverviewDialog, setValueOverviewDialog] = useState<ValueOverviewDialogState>(null);
   const [tabSearchInput, setTabSearchInput] = useState("");
   const [tabSearchQuery, setTabSearchQuery] = useState("");
-  const deepLinkHandledRef = useRef(false);
+  const legacyLinkNormalizedRef = useRef(false);
   const valueTrackLogSectionRef = useRef<HTMLDivElement | null>(null);
   const [productGoalDialog, setProductGoalDialog] = useState<ProductGoalDialogState>(null);
   const [productGoalDeleteDialog, setProductGoalDeleteDialog] = useState<ProductGoalDeleteState>(null);
@@ -7111,7 +7111,7 @@ export function QuarterlyWorkContent({ data }: Props) {
       setTeamTab("all");
     }
   };
-  // 通知详情路由会把列表锁在这一条需求/项目上；用户继续浏览时回到普通列表地址
+  // 处于详情地址时继续筛选/切换 tab：回到普通列表地址（抽屉由 pathname 驱动自动关闭）
   const detailPanel = pathname.startsWith("/quarterly-work/requirement/")
     ? "task"
     : pathname.startsWith("/quarterly-work/project/")
@@ -7124,13 +7124,6 @@ export function QuarterlyWorkContent({ data }: Props) {
     if (detailPanel && !params.has("panel")) params.set("panel", detailPanel);
     const nextQuery = params.toString();
     router.push(nextQuery ? `${base}?${nextQuery}` : base);
-  };
-  const leaveDetailRoute = () => {
-    if (!detailPanel) return;
-    const params = new URLSearchParams(searchParams.toString());
-    if (!params.has("panel")) params.set("panel", detailPanel);
-    const nextQuery = params.toString();
-    router.replace(nextQuery ? `/quarterly-work?${nextQuery}` : "/quarterly-work");
   };
   const updatePeriodFilters = (nextYear: number, nextQuarter: string | number) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -7291,43 +7284,77 @@ export function QuarterlyWorkContent({ data }: Props) {
       valueTrackLogSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
+  // 详情抽屉与地址栏同步：语义化链接可分享，关闭抽屉回列表无需刷新（本版 Next 与 window.history 集成，pathname 同步、不刷新页面）
+  const pushDetailUrl = (url: string) => {
+    window.history.pushState({ depotDetail: true }, "", url);
+  };
+  const openProjectDetail = (id: string) => {
+    setProjectDetailDialogId(id);
+    pushDetailUrl(`/quarterly-work/project/${id}`);
+  };
+  const openTaskDetail = (id: string) => {
+    setTaskDetailDialogId(id);
+    pushDetailUrl(`/quarterly-work/requirement/${id}`);
+  };
+  const openValueDetail = (id: string) => {
+    setValueDetailDialogId(id);
+    pushDetailUrl(`/quarterly-work/value/${id}`);
+  };
+  // pushState 打开的抽屉（带 depotDetail 标记）→ 回退到列表地址；直接链接进入 → 替换回列表地址
+  const closeDetailDialog = (close: () => void) => {
+    if (window.history.state?.depotDetail) {
+      window.history.back();
+      return;
+    }
+    window.history.replaceState(null, "", "/quarterly-work");
+    close();
+  };
+  // 旧通知链接（?panel=task&workId=X / ?panel=project|value&projectId=Y）挂载时规范化为语义化详情链接
   useEffect(() => {
-    if (deepLinkHandledRef.current) return;
-
-    const { workId, projectId, panel } = data.workspaceFilters;
-    if (!workId && !(projectId && panel)) return;
-    deepLinkHandledRef.current = true;
-
+    if (legacyLinkNormalizedRef.current) return;
+    legacyLinkNormalizedRef.current = true;
+    if (pathname !== "/quarterly-work") return;
+    const { workId, detailProjectId, panel } = data.workspaceFilters;
     if (workId) {
-      const item = data.taskWorkspaceItems.find((task) => task.id === workId)
-        ?? data.columns.flatMap((column) => column.items).find((task) => task.id === workId);
-      if (item) {
-        // 通知链接进入需求详情，而不是直接进入编辑；编辑仍可从详情抽屉内发起
-        setTaskDetailDialogId(item.id);
-      }
+      window.history.replaceState(null, "", `/quarterly-work/requirement/${workId}`);
       return;
     }
-
-    if (projectId && panel === "project") {
-      const workspaceItem = data.projectWorkspaceItems.find((project) => project.id === projectId);
-      if (workspaceItem) {
-        setProjectDetailDialogId(workspaceItem.id);
-        return;
-      }
-      const boardItem = data.projectColumns.flatMap((column) => column.items).find((project) => project.id === projectId);
-      if (boardItem) {
-        setProjectDetailDialogId(boardItem.id);
-      }
+    if (detailProjectId && panel === "project") {
+      window.history.replaceState(null, "", `/quarterly-work/project/${detailProjectId}`);
       return;
     }
-
-    if (projectId && panel === "value") {
-      const overview = data.valueOverviewItems.find((item) => item.id === projectId);
-      if (overview) {
-        setValueDetailDialogId(overview.id);
-      }
+    if (detailProjectId && panel === "value") {
+      window.history.replaceState(null, "", `/quarterly-work/value/${detailProjectId}`);
     }
-  }, [data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // pathname 驱动抽屉开关：直接访问/回退/前进都由地址栏决定抽屉状态
+  useEffect(() => {
+    const match = pathname.match(/^\/quarterly-work\/(requirement|project|value)\/([^/]+)$/);
+    if (!match) {
+      setTaskDetailDialogId(null);
+      setProjectDetailDialogId(null);
+      setValueDetailDialogId(null);
+      return;
+    }
+    const kind = match[1];
+    const id = decodeURIComponent(match[2]);
+    if (kind === "requirement") {
+      // 需求抽屉可叠加在项目抽屉上（项目抽屉内点需求卡片），保留项目抽屉状态
+      setTaskDetailDialogId(id);
+      setValueDetailDialogId(null);
+      return;
+    }
+    if (kind === "project") {
+      setTaskDetailDialogId(null);
+      setProjectDetailDialogId(id);
+      setValueDetailDialogId(null);
+      return;
+    }
+    setTaskDetailDialogId(null);
+    setProjectDetailDialogId(null);
+    setValueDetailDialogId(id);
+  }, [pathname]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setTabSearchInput("");
@@ -8302,9 +8329,9 @@ export function QuarterlyWorkContent({ data }: Props) {
           onCreateGoal={() => setCreateProductGoalDialog(true)}
           onCreateProject={(status) => setCreateProjectDialog(status)}
           onCreateTask={(projectId) => setCreateDialog({ status: "NOT_STARTED", title: "未启动", projectId })}
-          onViewProjectDetail={(item) => setProjectDetailDialogId(item.id)}
-          onViewTaskDetail={(item) => setTaskDetailDialogId(item.id)}
-          onViewValueDetail={(item) => setValueDetailDialogId(item.id)}
+          onViewProjectDetail={(item) => openProjectDetail(item.id)}
+          onViewTaskDetail={(item) => openTaskDetail(item.id)}
+          onViewValueDetail={(item) => openValueDetail(item.id)}
           onCreateValueTrack={(projectId) => {
             setCreateValueTrackProjectId(projectId ?? null);
             setCreateValueTrackDialog(true);
@@ -8412,10 +8439,7 @@ export function QuarterlyWorkContent({ data }: Props) {
           canCreateTask={canCreateTask && projectAllowsNewRequirement(projectDetailDialog.status)}
           canEditTerminalProjectWork={data.permissions.canEditTerminalProjectWork}
           canManageValueTracking={canManageProjectAndValueTracking}
-          onClose={() => {
-            setProjectDetailDialogId(null);
-            if (pathname.startsWith("/quarterly-work/project/")) leaveDetailRoute();
-          }}
+          onClose={() => closeDetailDialog(() => setProjectDetailDialogId(null))}
           onEditProject={() => {
             const item = projectDetailDialog;
             setProjectDialog({ item, title: projectTitleByStatus[item.status] });
@@ -8435,7 +8459,7 @@ export function QuarterlyWorkContent({ data }: Props) {
               project: data.projectWorkspaceItems.find((row) => row.id === track.projectId) ?? null,
             });
           }}
-          onViewTask={(task) => setTaskDetailDialogId(task.id)}
+          onViewTask={(task) => openTaskDetail(task.id)}
         />
       ) : null}
 
@@ -8443,10 +8467,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         <RequirementDetailDrawer
           task={taskDetailDialog}
           canEdit={canManageProductTask && workAllowsEdit(taskDetailDialog.status, data.permissions.canEditTerminalProjectWork)}
-          onClose={() => {
-            setTaskDetailDialogId(null);
-            if (pathname.startsWith("/quarterly-work/requirement/")) leaveDetailRoute();
-          }}
+          onClose={() => closeDetailDialog(() => setTaskDetailDialogId(null))}
           onEdit={() => {
             const item = taskDetailDialog;
             setEditDialog({ item, title: columnTitleByStatus[item.status] });
@@ -8458,10 +8479,7 @@ export function QuarterlyWorkContent({ data }: Props) {
         <ValueTrackDetailDrawer
           project={valueDetailDialog}
           canManageValueTracking={canManageProjectAndValueTracking}
-          onClose={() => {
-            setValueDetailDialogId(null);
-            if (pathname.startsWith("/quarterly-work/value/")) leaveDetailRoute();
-          }}
+          onClose={() => closeDetailDialog(() => setValueDetailDialogId(null))}
           onEditValueOverview={() => {
             openValueOverviewDialog(valueDetailDialog);
           }}

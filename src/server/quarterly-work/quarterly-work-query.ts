@@ -50,7 +50,10 @@ type QuarterlyWorkQueryOptions = {
   teamId?: string | "all" | null;
   ownerId?: string | null;
   projectId?: string | null;
+  /** 需求详情定位（打开详情抽屉，不参与列表过滤） */
   workId?: string | null;
+  /** 项目/价值跟踪详情定位（打开详情抽屉，不参与列表过滤；projectId 仅作列表过滤器） */
+  detailProjectId?: string | null;
   query?: string | null;
   needsDevOnly?: boolean;
 };
@@ -626,26 +629,26 @@ async function resolveQuarterlyWorkDeepLinkOptions(options?: QuarterlyWorkQueryO
 
   let resolved = { ...options };
   const workId = options.workId?.trim() || null;
-  const projectId = options.projectId?.trim() || null;
+  const detailProjectId = options.detailProjectId?.trim() || null;
 
   if (workId) {
     const work = await prisma.quarterlyWork.findFirst({
       where: { id: workId, deletedAt: null },
-      select: { year: true, quarter: true, projectId: true },
+      select: { year: true, quarter: true },
     });
     if (work) {
+      // 详情定位只解析所在周期，不注入 projectId 过滤，避免列表被锁定为单条
       resolved = {
         ...resolved,
-        // 地址栏已带年份/季度时尊重用户选择，只在通知链接初次打开（未带参数）时对齐到这条需求
+        // 地址栏已带年份/季度时尊重用户选择，只在通知链接初次打开（未带参数）时对齐到这条需求；不注入 projectId，避免列表被锁定为单条
         selectedYear: resolved.selectedYear ?? work.year,
         selectedQuarter: resolved.selectedQuarter ?? work.quarter,
-        projectId: projectId ?? work.projectId,
         panel: resolved.panel ?? "task",
       };
     }
-  } else if (projectId && !options.selectedYear) {
+  } else if (detailProjectId && !options.selectedYear) {
     const project = await prisma.project.findFirst({
-      where: { id: projectId, deletedAt: null },
+      where: { id: detailProjectId, deletedAt: null },
       select: { endQuarter: true, startQuarter: true },
     });
     const parsed = parseQuarterCode(project?.endQuarter ?? project?.startQuarter ?? null);
@@ -1612,6 +1615,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       ownerId: selectedOwnerId,
       projectId: selectedProjectId,
       workId: selectedWorkId,
+      // 详情定位目标（仅用于客户端规范化旧链接；不过滤列表）
+      detailProjectId: options?.detailProjectId?.trim() || null,
       query: workspaceSearchQuery,
       needsDevOnly: projectNeedsDevOnly,
     },

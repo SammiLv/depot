@@ -42,6 +42,12 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
   const selectedQuarter = selectedQuarterRaw === "all" ? "all" : parseIntParam(params?.quarter);
   const viewRaw = readParam(params?.view);
   const projectPanelRaw = readParam(params?.projectPanel);
+  const panelParam = parsePanelParam(params?.panel);
+  const workIdRaw = readParam(params?.workId);
+  const projectIdRaw = readParam(params?.projectId);
+  // 旧通知链接的 panel+projectId 组合是详情定位而非列表过滤；projectId 单独出现仍是项目过滤器
+  const legacyDetailProjectId =
+    projectIdRaw && (panelParam === "project" || panelParam === "value") ? projectIdRaw : undefined;
   const data = await getQuarterlyWorkData(currentUser, {
     selectedYear,
     selectedQuarter,
@@ -49,13 +55,14 @@ export default async function QuarterlyWorkPage({ searchParams }: PageProps) {
     // card 也要显式透传：否则服务端回退角色默认（管理员/主管默认列表），导致切换卡片不生效
     view: viewRaw === "list" ? "list" : viewRaw === "card" ? "card" : undefined,
     projectPanel: projectPanelRaw === "value" ? "value" : undefined,
-    panel: parsePanelParam(params?.panel),
+    panel: panelParam,
     status: parseStatusesParam(params?.status),
     orgNodeId: readParam(params?.orgNodeId) ?? null,
     teamId: readParam(params?.teamId) ?? null,
     ownerId: readParam(params?.ownerId) ?? null,
-    projectId: readParam(params?.projectId) ?? null,
-    workId: readParam(params?.workId) ?? null,
+    projectId: legacyDetailProjectId ? null : (projectIdRaw ?? null),
+    workId: readParam(params?.detailWorkId) ?? workIdRaw ?? null,
+    detailProjectId: readParam(params?.detailProjectId) ?? legacyDetailProjectId ?? null,
     query: readParam(params?.q) ?? null,
     needsDevOnly: readParam(params?.needsDev) === "1",
   });
