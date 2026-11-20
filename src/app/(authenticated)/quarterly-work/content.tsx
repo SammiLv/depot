@@ -1512,11 +1512,17 @@ function ProjectCreateForm({
         setErrorMessage("");
         validateQuarterRange(formData);
         validateSelectedProductGoalIds(formData);
+        const status = String(formData.get("status") ?? "");
+        const needsDevelopment = String(formData.get("needsDevelopment") ?? "");
+        if (status === "COMPLETED" && needsDevelopment === "true") {
+          setErrorMessage("开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成");
+          return;
+        }
         await runServerAction(() => createProject(formData));
         router.refresh();
         onClose();
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "创建项目失败");
+        setErrorMessage(getServerActionErrorMessage(error, "创建项目失败，请检查后重试"));
       }
     }}>
       <input type="hidden" name="departmentOrgNodeId" value={departmentOrgNodeId} />
@@ -1604,6 +1610,9 @@ function ProjectCreateForm({
             <input type="hidden" name="needsDevelopment" value={createNeedsDev} />
           </FieldCell>
         </FieldRow>
+        {createProjectStatus === "COMPLETED" && createNeedsDev === "true" ? (
+          <p className="text-xs text-[#F53F3F]">开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成</p>
+        ) : null}
         {createProjectStatus === "COMPLETED" || createProjectStatus === "LAUNCHED" ? (
           <div ref={createProjectStatus === "LAUNCHED" ? launchedAtRowRef : completedAtRowRef}>
             <FieldRow>
