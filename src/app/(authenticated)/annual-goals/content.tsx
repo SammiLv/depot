@@ -1695,17 +1695,12 @@ export function AnnualGoalsContent({ data }: Props) {
   return (
     <>
       <Card className="mb-6 !p-0 overflow-hidden">
-        <div className="px-5 pt-5">
-          <h1 className="text-3xl font-semibold tracking-tight">指标管理</h1>
-          <p className="mt-2 text-sm text-muted-foreground">查看部门指标承接、拆解与执行进展</p>
-        </div>
-
         {(data.scopeDepartments.length > 0 || activeItem) ? (
           <>
             {data.scopeDepartments.length > 0 && (
               <>
                 {data.showDepartmentNavigation && data.scopeDepartments.length > 0 && (
-                  <div className="px-5 pt-3 flex flex-wrap items-end gap-8 text-sm shrink-0">
+                  <div className="px-5 pt-5 flex flex-wrap items-end gap-8 text-sm shrink-0">
                     {data.scopeDepartments.map((department) => (
                       <button
                         key={department.orgNodeId}
@@ -1724,7 +1719,7 @@ export function AnnualGoalsContent({ data }: Props) {
                 )}
 
                 {filteredScopeItems.length > 0 && (
-                  <div className="px-5 pt-3 pb-2 flex flex-wrap items-center gap-2">
+                  <div className={`px-5 pb-2 flex flex-wrap items-center gap-2 ${data.showDepartmentNavigation ? "pt-3" : "pt-5"}`}>
                     {filteredScopeItems.map((item) => (
                       <button
                         key={getScopeItemKey(item)}

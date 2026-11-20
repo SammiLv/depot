@@ -47,16 +47,6 @@ export function AuditCenterContent({ searchParams, users }: AuditCenterContentPr
 
   return (
     <div className="flex h-full flex-col gap-4 p-6">
-      {/* 页面标题 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">日志中心</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            查询全平台操作日志和业务记录
-          </p>
-        </div>
-      </div>
-
       {/* Tab 导航 */}
       <div className="flex gap-2 border-b border-border">
         {tabs.map((tab) => (

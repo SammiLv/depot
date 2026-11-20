@@ -18,10 +18,10 @@ const menu: Array<{
   { to: "/dashboard", label: "工作台", iconSrc: "/icons/nav-dashboard.png", iconActiveSrc: "/icons/nav-dashboard-active.png", description: "查看年度指标、待办、KPI 与近期动态。" },
   { to: "/annual-goals", label: "指标管理", iconSrc: "/icons/nav-goals.png", iconActiveSrc: "/icons/nav-goals-active.png", description: "管理年度指标目标与完成情况。" },
   { to: "/quarterly-work", label: "产品管理", iconSrc: "/icons/nav-product.png", iconActiveSrc: "/icons/nav-product-active.png", description: "以产品目标为核心管理关联项目、项目需求与上线后价值跟踪。" },
-  { to: "/kpi", label: "KPI 管理", iconSrc: "/icons/nav-kpi.png", iconActiveSrc: "/icons/nav-kpi-active.png", description: "管理季度 KPI 评分与进度。" },
+  { to: "/kpi", label: "KPI 管理", iconSrc: "/icons/nav-kpi.png", iconActiveSrc: "/icons/nav-kpi-active.png", description: "按模板规则批量维护季度 KPI 单据，并进入自评、组长评分、主管评分流程" },
   { to: "/talent", label: "人才发展", iconSrc: "/icons/nav-talent.png", iconActiveSrc: "/icons/nav-talent-active.png", description: "管理人才盘点、评估与发展。" },
   { to: "/statistics", label: "数据统计", iconSrc: "/icons/nav-statistics.png", iconActiveSrc: "/icons/nav-statistics-active.png", description: "数据统计模块，建设中。" },
-  { to: "/notifications", label: "通知中心", iconSrc: "/icons/nav-notifications.png", iconActiveSrc: "/icons/nav-notifications-active.png", description: "查看系统通知与消息。" },
+  { to: "/notifications", label: "通知中心", iconSrc: "/icons/nav-notifications.png", iconActiveSrc: "/icons/nav-notifications-active.png", description: "系统消息、审批结果、预警与提醒；可配置通知场景" },
   { to: "/organization", label: "组织架构", iconSrc: "/icons/nav-org.png", iconActiveSrc: "/icons/nav-org-active.png", description: "管理组织架构、人员与权限。" },
   { to: "/logs", label: "日志中心", iconSrc: "/icons/nav-logs.png?v=2", iconActiveSrc: "/icons/nav-logs-active.png?v=2", description: "查询全平台操作日志和业务记录。" },
 ];
