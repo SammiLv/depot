@@ -2008,11 +2008,6 @@ export function OrgContent({
 
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-5 pt-5">
-          <h1 className="text-3xl font-semibold tracking-tight">组织与权限</h1>
-          <p className="mt-2 text-sm text-muted-foreground">部门、小组、成员、角色与页面权限管理</p>
-        </div>
-
-        <div className="px-5 pt-4">
           <div className="flex flex-wrap gap-10">
             {scopeOptions.map((option) => {
               const active = selectedScope.scopeType === option.scopeType && selectedScope.departmentOrgNodeId === option.departmentOrgNodeId;

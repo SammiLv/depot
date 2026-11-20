@@ -6460,7 +6460,7 @@ function QuarterlyWorkShell({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-semibold leading-[36px] tracking-tight text-[#181818]">产品管理</h1>
-            <p className="mt-2 text-sm leading-[22px] text-[#777777]">以产品目标为核心管理年度目标、关联项目、项目需求与上线后价值跟踪，每周更新进展，延期自动预警。</p>
+            <p className="mt-2 text-sm leading-[22px] text-[#777777]">以产品目标为核心管理年度目标、关联项目、项目需求与上线后价值跟踪，每周更新进展，延期自动预警</p>
           </div>
           <Button variant="ghost" size="sm" className="h-6 shrink-0 rounded px-2 text-sm text-[#181818]" onClick={onOpenOperationLogs}>
             <img src="/icons/operation-log.png" alt="" width={14} height={14} className="h-3.5 w-3.5" />
