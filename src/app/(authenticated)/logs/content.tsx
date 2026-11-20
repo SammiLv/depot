@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Card } from "@/components/ui-kit";
 import { AuditLogTable } from "./audit-log-table";
 import { AuditFilters } from "./audit-filters";
@@ -46,17 +45,17 @@ export function AuditCenterContent({ searchParams, users }: AuditCenterContentPr
   };
 
   return (
-    <div className="flex h-full flex-col gap-4 p-6">
-      {/* Tab 导航 */}
-      <div className="flex gap-2 border-b border-border">
+    <Card className="mb-4 !p-0 overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 px-5 pb-4 pt-5">
         {tabs.map((tab) => (
           <button
             key={tab.value}
+            type="button"
             onClick={() => setView(tab.value)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
+            className={`rounded-lg px-3 py-1.5 text-sm transition ${
               currentView === tab.value
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-primary text-primary-foreground"
+                : "bg-card text-muted-foreground hover:bg-muted"
             }`}
           >
             {tab.label}
@@ -64,15 +63,14 @@ export function AuditCenterContent({ searchParams, users }: AuditCenterContentPr
         ))}
       </div>
 
-      {/* 内容区域 */}
-      <Card>
+      <div className="px-5 pb-5">
         <AuditFilters
           view={currentView}
           users={users}
           initialFilters={searchParams}
         />
         <AuditLogTable view={currentView} searchParams={searchParams} />
-      </Card>
-    </div>
+      </div>
+    </Card>
   );
 }

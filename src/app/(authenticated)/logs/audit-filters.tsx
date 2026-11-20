@@ -45,7 +45,7 @@ export function AuditFilters({ view, users = [], initialFilters = {} }: AuditFil
   };
 
   return (
-    <div className="mb-4 space-y-4 rounded-lg border border-border bg-muted/50 p-4">
+    <div className="mb-4 space-y-4">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         {/* 开始时间 */}
         <div className="space-y-2">
