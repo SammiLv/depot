@@ -46,24 +46,28 @@ export function AuditCenterContent({ searchParams, users }: AuditCenterContentPr
 
   return (
     <Card className="mb-4 !p-0 overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 px-5 pb-4 pt-5">
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            onClick={() => setView(tab.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm transition ${
-              currentView === tab.value
-                ? "bg-primary text-primary-foreground"
-                : "bg-card text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="px-5 pt-5">
+        <div className="flex flex-wrap gap-10">
+          {tabs.map((tab) => {
+            const active = currentView === tab.value;
+            return (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setView(tab.value)}
+                className="relative pb-3"
+              >
+                <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                  {tab.label}
+                </span>
+                {active ? <span className="absolute bottom-0 left-0 h-0.5 w-10 bg-primary" /> : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="px-5 pb-5">
+      <div className="px-5 pb-5 pt-4">
         <AuditFilters
           view={currentView}
           users={users}
