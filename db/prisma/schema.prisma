@@ -475,6 +475,11 @@ model User {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
   deletedAt            DateTime?
+  // 离职时间：isActive=false + resignedAt 有值且 deletedAt 为空 = 离职（区别于软删除）
+  resignedAt           DateTime?
+  // 离职前的原业务组（名称单独存，原组被并入删除后仍可展示；名下单据的原业务组从负责人这里取）
+  originalOrgNodeId    String?
+  originalOrgName      String?
 
   personalKpis         PersonalKpi[] @relation("PersonalKpis")
 
@@ -488,6 +493,8 @@ model OrgNode {
   name           String
   nodeType       OrgNodeType
   parentId       String?
+  // 部门下的系统小组「离职人员」：不可改名/并入/删除，不参与钉钉按名称匹配
+  isResignedPool Boolean     @default(false)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   notificationGroupBots NotificationGroupBotOrgNode[]

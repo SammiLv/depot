@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/prisma";
 import { buildKpiWhereByPermission, buildUserWhereByPermission, resolvePermissionCoverage, resolvePermissionScope } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 import { findNearestDepartmentOrgNodeIdsForOrgNodes, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { sortResignedPoolTeamsLast } from "@/server/organization/org-node-order";
 import type { KpiScoreDirection, KpiStatus, OrgNodeType, OrgPermissionAbilityKey, RoleType } from "@prisma/client";
 import {
   buildKpiCompletedProgressStages,
@@ -49,7 +50,7 @@ type ResolvedScopeNodes = {
   departmentOrgNodeIdByTeamOrgNodeId: Map<string, string>;
   accessibleDepartmentOrgNodeIds: string[];
   departments: Array<{ id: string; name: string }>;
-  teamOptions: Array<{ id: string; name: string; departmentOrgNodeId: string | null }>;
+  teamOptions: Array<{ id: string; name: string; departmentOrgNodeId: string | null; isResignedPool?: boolean }>;
   defaultDepartmentOrgNodeId: string;
 };
 
@@ -117,6 +118,7 @@ type KpiPageData = {
     id: string;
     name: string;
     departmentOrgNodeId: string | null;
+    isResignedPool?: boolean;
   }>;
   departmentOptions: Array<{
     id: string;
@@ -210,7 +212,7 @@ async function buildViewScopeOrgNodeIds(
   }
 
   const scopedOrgNodes = await prisma.orgNode.findMany({
-    select: { id: true, parentId: true, nodeType: true, name: true },
+    select: { id: true, parentId: true, nodeType: true, name: true, isResignedPool: true },
   });
   const relationships = buildOrgNodeRelationships(scopedOrgNodes);
 
@@ -291,6 +293,7 @@ type OrgNodeSummary = {
   name: string;
   nodeType: OrgNodeType;
   parentId: string | null;
+  isResignedPool?: boolean;
 };
 
 type OrgNodeRelationships = {
@@ -507,14 +510,18 @@ function resolveScopeNodes(currentUser: DataScopeInput, viewScope: ViewScopeSumm
     .filter((orgNode) => orgNode.nodeType === "DEPARTMENT" && accessibleDepartmentOrgNodeIds.includes(orgNode.id))
     .sort(compareNames)
     .map((orgNode) => ({ id: orgNode.id, name: orgNode.name }));
-  const teamOptions = scopedOrgNodes
-    .filter((orgNode) => orgNode.nodeType === "TEAM" && visibleTeamOrgNodeIds.includes(orgNode.id))
-    .sort(compareNames)
-    .map((orgNode) => ({
-      id: orgNode.id,
-      name: orgNode.name,
-      departmentOrgNodeId: relationships.nearestDepartmentOrgNodeIdByNodeId.get(orgNode.id) ?? null,
-    }));
+  // 「离职人员」组排在其他业务组右侧（最后）
+  const teamOptions = sortResignedPoolTeamsLast(
+    scopedOrgNodes
+      .filter((orgNode) => orgNode.nodeType === "TEAM" && visibleTeamOrgNodeIds.includes(orgNode.id))
+      .sort(compareNames)
+      .map((orgNode) => ({
+        id: orgNode.id,
+        name: orgNode.name,
+        departmentOrgNodeId: relationships.nearestDepartmentOrgNodeIdByNodeId.get(orgNode.id) ?? null,
+        isResignedPool: orgNode.isResignedPool,
+      })),
+  );
 
   return {
     scopedOrgNodes,
@@ -1042,7 +1049,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   }));
 
   const allScopedOrgNodes = await prisma.orgNode.findMany({
-    select: { id: true, name: true, nodeType: true, parentId: true },
+    select: { id: true, name: true, nodeType: true, parentId: true, isResignedPool: true },
   });
   const scopedOrgNodes = allScopedOrgNodes;
   const scopeNodes = resolveScopeNodes(currentUser, viewScope, scopedOrgNodes);
@@ -1162,15 +1169,17 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   }
 
   // users 与 templateUsersForMatching 相互独立,并行拉取。
+  // users 含离职人员（deletedAt 不过滤离职）：KPI 单据的负责人姓名展示与搜索需要；
+  // 初始化 KPI 等候选场景在 memberOptions 处按 isActive 过滤。
   const [users, templateUsersForMatching] = await Promise.all([
     prisma.user.findMany({
       where: {
         ...(rowUserWhere
           ? { OR: [rowUserWhere, { id: { in: kpis.map((kpi) => kpi.userId) } }] }
           : { id: { in: kpis.map((kpi) => kpi.userId) } }),
-        isActive: true,
+        deletedAt: null,
       },
-      select: { id: true, name: true, orgNodeId: true, roleType: true },
+      select: { id: true, name: true, orgNodeId: true, roleType: true, isActive: true },
       orderBy: { name: "asc" },
     }),
     canAccessTemplateList
@@ -1486,7 +1495,7 @@ export async function getKpiData(currentUser: DataScopeInput, periodOptions: Kpi
   const teamNameById = new Map(teamOptions.map((team) => [team.id, team.name] as const));
   const memberNameById = new Map(users.map((user) => [user.id, user.name] as const));
 
-  const memberOptions = users.map((user) => ({
+  const memberOptions = users.filter((user) => user.isActive).map((user) => ({
     id: user.id,
     name: user.name,
     orgNodeId: user.orgNodeId,

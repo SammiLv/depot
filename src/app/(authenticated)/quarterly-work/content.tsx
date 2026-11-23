@@ -311,7 +311,9 @@ function resolveMemberOptionsForForm(
   teamDepartmentMap: Map<string, string>,
   currentOwnerId?: string | null,
 ) {
-  const filtered = allMembers.filter((member) => memberBelongsToDepartment(member, departmentTab, teamDepartmentMap));
+  // 新建/编辑的负责人候选只含在职人员；当前负责人即使是离职人员也保留显示（下方逻辑兜底）
+  const filtered = allMembers.filter((member) =>
+    !member.isResigned && memberBelongsToDepartment(member, departmentTab, teamDepartmentMap));
   if (currentOwnerId && !filtered.some((member) => member.id === currentOwnerId)) {
     const current = allMembers.find((member) => member.id === currentOwnerId);
     if (current) {

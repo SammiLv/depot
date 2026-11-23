@@ -23,10 +23,11 @@ export async function loadTalentOverviewReviewDetails(user: Awaited<ReturnType<t
     getTalentReviewCycles(user),
   ]);
 
+  // 只含在职人员：人才决策地图与人才画像不纳入离职人员（人才盘点 tab 的周期快照不受影响）
   const profileVisibleUserIds = profileCoverage.hasPermission
     ? new Set(
         (await prisma.user.findMany({
-          where: await buildUserWhereByPermission(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile),
+          where: { ...(await buildUserWhereByPermission(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile)), isActive: true },
           select: { id: true },
         })).map((row) => row.id),
       )

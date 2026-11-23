@@ -16,6 +16,12 @@ export async function GET(request: Request) {
   try {
     const userInfo = await getDingTalkUserInfo(token);
     const user = await findOrCreateDingTalkUser(userInfo);
+
+    // 离职/已删除账号不放行（findOrCreateDingTalkUser 也不会复活这类账号）
+    if (!user.isActive || user.deletedAt || user.resignedAt) {
+      return NextResponse.redirect(new URL("/login?error=account_resigned", origin));
+    }
+
     await setUserSession(user.id);
     await rememberLoginMethod("dingtalk");
 

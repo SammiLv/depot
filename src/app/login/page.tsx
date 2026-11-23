@@ -50,7 +50,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <div className="w-full max-w-[480px] bg-card rounded-2xl border border-border/60 p-10" style={{ boxShadow: "var(--shadow-card)" }}>
           {error && (
             <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {decodeURIComponent(error)}
+              {error === "account_resigned" ? "该账号已离职或已停用，无法登录。如有疑问请联系部门主管。" : decodeURIComponent(error)}
             </div>
           )}
           {success && (

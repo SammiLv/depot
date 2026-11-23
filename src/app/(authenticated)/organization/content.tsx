@@ -6,7 +6,7 @@ import { Badge, Card, PageHeader } from "@/components/ui-kit";
 import { avatarColor } from "@/lib/avatar-color";
 import { runServerAction } from "@/lib/run-server-action";
 import { Plus, Users, X, Check, RefreshCw, Wand2, ChevronRight, ChevronDown, Building2, FolderTree, Search } from "lucide-react";
-import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyNotificationPermissionToAllDepartments, applyProductManagementPermissionToAllDepartments, applyTalentPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveNotificationRolePermissions, saveProductManagementRolePermissions, saveTalentRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyNotificationPermissionChangesToAllDepartments, saveAndApplyProductManagementPermissionChangesToAllDepartments, saveAndApplyTalentPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments, saveAndApplyNotificationPermissionsToAllDepartments, saveAndApplyProductManagementPermissionsToAllDepartments, saveAndApplyTalentPermissionsToAllDepartments } from "@/server/organization/actions";
+import { applyAnnualGoalPermissionToAllDepartments, applyKpiPermissionToAllDepartments, applyNotificationPermissionToAllDepartments, applyProductManagementPermissionToAllDepartments, applyTalentPermissionToAllDepartments, applyRoleMenuPermissionToAllDepartments, createDepartment, createKpiUserPermissionGrant, createUser, updateUser, deleteKpiUserPermissionGrant, deleteUser, createTeam, updateTeam, deleteTeam, setDepartmentManager, saveAnnualGoalRolePermissions, saveKpiRolePermissions, saveNotificationRolePermissions, saveProductManagementRolePermissions, saveTalentRolePermissions, saveRoleMenuPermissions, updateFromDingTalk, saveKpiApprovalPolicy, toggleKpiApprovalPolicy, deleteKpiApprovalPolicy, saveAndApplyRoleMenuPermissionChangesToAllDepartments, saveAndApplyAnnualGoalPermissionChangesToAllDepartments, saveAndApplyKpiPermissionChangesToAllDepartments, saveAndApplyNotificationPermissionChangesToAllDepartments, saveAndApplyProductManagementPermissionChangesToAllDepartments, saveAndApplyTalentPermissionChangesToAllDepartments, saveAndApplyRoleMenuPermissionsToAllDepartments, saveAndApplyAnnualGoalPermissionsToAllDepartments, saveAndApplyKpiPermissionsToAllDepartments, saveAndApplyNotificationPermissionsToAllDepartments, saveAndApplyProductManagementPermissionsToAllDepartments, saveAndApplyTalentPermissionsToAllDepartments, resignUser, getResignPreview, mergeTeam, getTeamMergePreview } from "@/server/organization/actions";
 import {
   buildKpiApprovalOrgTreeIndex,
   getKpiApprovalOrgNodeIdsAtDepth,
@@ -34,6 +34,8 @@ type OrgUser = {
   teamOrgNodeId: string | null;
   title: string | null;
   isActive: boolean;
+  /** 离职：树上置灰展示、不可操作，候选下拉排除 */
+  isResigned?: boolean;
 };
 
 type OrgTeam = {
@@ -44,6 +46,8 @@ type OrgTeam = {
   name: string;
   leaderId: string | null;
   description: string | null;
+  /** 「离职人员」系统组：不可编辑/并入/删除 */
+  isResignedPool?: boolean;
 };
 
 type TeamParentOption = {
@@ -51,6 +55,7 @@ type TeamParentOption = {
   name: string;
   nodeType: "DEPARTMENT" | "TEAM";
   departmentOrgNodeId: string;
+  isResignedPool?: boolean;
 };
 
 type OrgDepartment = {
@@ -627,7 +632,7 @@ function UserForm({
   const action = isEdit ? updateUser : createUser;
   const initialDepartmentOrgNodeId = user?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "";
   const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(initialDepartmentOrgNodeId);
-  const availableTeams = teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId);
+  const availableTeams = teams.filter((team) => team.departmentOrgNodeId === selectedDepartmentOrgNodeId && !team.isResignedPool);
 
   useEffect(() => {
     setSelectedDepartmentOrgNodeId(user?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "");
@@ -744,7 +749,7 @@ function TeamForm({
   const action = isEdit ? updateTeam : createTeam;
   const initialDepartmentOrgNodeId = team?.departmentOrgNodeId ?? departmentOrgNodeId ?? departments[0]?.orgNodeId ?? "";
   const [selectedDepartmentOrgNodeId, setSelectedDepartmentOrgNodeId] = useState(initialDepartmentOrgNodeId);
-  const availableParentOptions = teamParentOptions.filter((option) => option.departmentOrgNodeId === selectedDepartmentOrgNodeId && option.orgNodeId !== team?.orgNodeId);
+  const availableParentOptions = teamParentOptions.filter((option) => option.departmentOrgNodeId === selectedDepartmentOrgNodeId && option.orgNodeId !== team?.orgNodeId && !option.isResignedPool);
   const [selectedParentOrgNodeId, setSelectedParentOrgNodeId] = useState(team?.parentOrgNodeId ?? availableParentOptions[0]?.orgNodeId ?? selectedDepartmentOrgNodeId);
   const availableUsers = users.filter((user) => user.isActive && user.departmentOrgNodeId === selectedDepartmentOrgNodeId);
 
@@ -849,6 +854,144 @@ function DeleteConfirm({ message, action, onClose }: { message: string; action: 
           className="!bg-destructive hover:!bg-destructive/90"
         >
           {pending ? "删除中…" : "确认删除"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ResignUserForm({ user, onClose }: { user: OrgUser; onClose: () => void }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ pendingStepCount: number; successorOptions: Array<{ id: string; name: string }> } | null>(null);
+  const [successorId, setSuccessorId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getResignPreview(user.id)
+      .then((result) => { if (!cancelled) setPreview(result); })
+      .catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : "加载失败"); });
+    return () => { cancelled = true; };
+  }, [user.id]);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        确定 {user.name} 离职吗？TA 将进入本部门「离职人员」组，职级与角色保留，不能再登录；
+        名下的项目、需求、产品目标、个人 KPI 会改挂「离职人员」组，原业务组会记录下来。
+      </p>
+      {preview === null && !error ? <p className="text-xs text-muted-foreground">正在检查待交接的 KPI…</p> : null}
+      {preview && preview.pendingStepCount > 0 ? (
+        <div>
+          <label className="block text-sm font-medium mb-1">KPI 接收人（{preview.pendingStepCount} 条待审批步骤）</label>
+          <select
+            value={successorId}
+            onChange={(event) => setSuccessorId(event.target.value)}
+            className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring"
+          >
+            <option value="">暂不指定（步骤保留在离职人员名下）</option>
+            {preview.successorOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.name}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted-foreground">接收人只接管 KPI 审批步骤，不会变成单据负责人。</p>
+        </div>
+      ) : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      <div className="flex justify-end gap-3">
+        <Button variant="outlined" disabled={pending} onClick={onClose}>取消</Button>
+        <Button
+          variant="solid"
+          disabled={pending || preview === null}
+          onClick={async () => {
+            setPending(true);
+            setError(null);
+            try {
+              const fd = new FormData();
+              fd.set("id", user.id);
+              if (successorId) fd.set("kpiSuccessorId", successorId);
+              await runServerAction(() => resignUser(fd));
+              onClose();
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : "操作失败，请稍后重试");
+            } finally {
+              setPending(false);
+            }
+          }}
+          className="!bg-warning hover:!bg-warning/90"
+        >
+          {pending ? "处理中…" : "确认离职"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MergeTeamForm({ team, onClose }: { team: OrgTeam; onClose: () => void }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof getTeamMergePreview>> | null>(null);
+  const [targetTeamId, setTargetTeamId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getTeamMergePreview(team.orgNodeId)
+      .then((result) => { if (!cancelled) setPreview(result); })
+      .catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : "加载失败"); });
+    return () => { cancelled = true; };
+  }, [team.orgNodeId]);
+
+  return (
+    <div className="space-y-4">
+      {preview === null && !error ? <p className="text-xs text-muted-foreground">正在统计挂靠数据…</p> : null}
+      {preview ? (
+        <p className="text-sm text-muted-foreground">
+          将「{preview.teamName}」并入目标小组：在职成员 {preview.activeMemberCount} 人（组长转为组员）连同名下
+          项目 {preview.projectCount} 个、需求 {preview.quarterlyWorkCount} 条、产品目标 {preview.productGoalCount} 个、
+          个人 KPI {preview.kpiCount} 份、年度指标承接 {preview.assignmentCount} 项一起改挂目标组，随后删除原小组。
+        </p>
+      ) : null}
+      {preview?.hasGroupBotBinding ? (
+        <p className="text-sm text-destructive">该小组已绑定钉钉群机器人，请先在通知配置中改绑后再并入。</p>
+      ) : null}
+      {preview && !preview.hasGroupBotBinding ? (
+        <div>
+          <label className="block text-sm font-medium mb-1">目标小组</label>
+          <select
+            value={targetTeamId}
+            onChange={(event) => setTargetTeamId(event.target.value)}
+            className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-ring"
+          >
+            <option value="">请选择同部门的业务小组</option>
+            {preview.targetOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      <div className="flex justify-end gap-3">
+        <Button variant="outlined" disabled={pending} onClick={onClose}>取消</Button>
+        <Button
+          variant="solid"
+          disabled={pending || !preview || preview.hasGroupBotBinding || !targetTeamId}
+          onClick={async () => {
+            setPending(true);
+            setError(null);
+            try {
+              const fd = new FormData();
+              fd.set("sourceTeamId", team.orgNodeId);
+              fd.set("targetTeamId", targetTeamId);
+              await runServerAction(() => mergeTeam(fd));
+              onClose();
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : "操作失败，请稍后重试");
+            } finally {
+              setPending(false);
+            }
+          }}
+        >
+          {pending ? "并入中…" : "确认并入"}
         </Button>
       </div>
     </div>
@@ -1208,6 +1351,18 @@ function buildInitialExpandedState(root: OrganizationEntityNode | null) {
   return nextState;
 }
 
+/** 收集树中全部实体节点（部门/小组）id，用于刷新后裁剪已消失的展开状态 */
+function collectEntityNodeIds(root: OrganizationEntityNode | null, into: Set<string> = new Set()) {
+  if (!root) return into;
+  into.add(root.id);
+  for (const child of root.children) {
+    if (child.nodeType !== "PERSON") {
+      collectEntityNodeIds(child, into);
+    }
+  }
+  return into;
+}
+
 function flattenHierarchyRows(root: OrganizationEntityNode | null, expandedState?: Record<string, boolean>) {
   const rows: Array<{ node: OrganizationHierarchyNode; depth: number }> = [];
   if (!root) return rows;
@@ -1235,8 +1390,10 @@ function OrganizationListRow({
   currentUserRoleType,
   onEditTeam,
   onDeleteTeam,
+  onMergeTeam,
   onEditUser,
   onDeleteUser,
+  onResignUser,
 }: {
   node: OrganizationHierarchyNode;
   depth: number;
@@ -1247,8 +1404,10 @@ function OrganizationListRow({
   currentUserRoleType: RoleType;
   onEditTeam: (team: OrgTeam) => void;
   onDeleteTeam: (team: OrgTeam) => void;
+  onMergeTeam: (team: OrgTeam) => void;
   onEditUser: (user: OrgUser) => void;
   onDeleteUser: (user: OrgUser) => void;
+  onResignUser: (user: OrgUser) => void;
 }) {
   const isPerson = node.nodeType === "PERSON";
   const canManagePerson = isPerson && canManageUsers && node.roleType !== "ADMIN" && !(currentUserRoleType === "DEPARTMENT_MANAGER" && !["TEAM_LEADER", "MEMBER"].includes(node.roleType));
@@ -1277,26 +1436,40 @@ function OrganizationListRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-semibold">{node.name}</span>
-          {isPerson ? <Badge tone={roleBadgeTone(node.roleType)}>{getRoleLabel(node.roleType)}</Badge> : <Badge tone={entityNode?.nodeType === "DEPARTMENT" ? "primary" : "info"}>{entityNode?.directMemberCount ?? 0} 人</Badge>}
+          <span className={`truncate text-sm font-semibold ${isPerson && node.isResigned ? "text-muted-foreground" : ""}`}>{node.name}</span>
+          {isPerson ? (
+            <>
+              <Badge tone={roleBadgeTone(node.roleType)}>{getRoleLabel(node.roleType)}</Badge>
+              {node.isResigned ? <Badge tone="default">离职</Badge> : null}
+            </>
+          ) : (
+            <>
+              <Badge tone={entityNode?.nodeType === "DEPARTMENT" ? "primary" : "info"}>{entityNode?.directMemberCount ?? 0} 人</Badge>
+              {entityNode?.isResignedPool ? <Badge tone="default">系统</Badge> : null}
+            </>
+          )}
         </div>
         {isPerson ? (
           <div className="mt-1 text-xs text-muted-foreground">{node.title ?? "未设置职务"}</div>
         ) : null}
       </div>
-      {entityNode?.nodeType === "TEAM" && entityNode.team && canManageTeams ? (
+      {entityNode?.nodeType === "TEAM" && entityNode.team && canManageTeams && !entityNode.isResignedPool ? (
         <div className="flex shrink-0 items-center gap-2 text-xs">
           <button type="button" onClick={() => onEditTeam(entityNode.team!)} className="text-primary hover:underline">编辑</button>
           {isLeafTeam ? (
-            <button type="button" onClick={() => onDeleteTeam(entityNode.team!)} className="text-destructive hover:underline">删除</button>
+            <>
+              <button type="button" onClick={() => onMergeTeam(entityNode.team!)} className="text-primary hover:underline">并入</button>
+              <button type="button" onClick={() => onDeleteTeam(entityNode.team!)} className="text-destructive hover:underline">删除</button>
+            </>
           ) : (
             <span className="text-muted-foreground">请先处理下级小组</span>
           )}
         </div>
       ) : null}
-      {isPerson && canManagePerson ? (
+      {isPerson && canManagePerson && !node.isResigned ? (
         <div className="flex shrink-0 items-center gap-2 text-xs">
           <button type="button" onClick={() => onEditUser(node as unknown as OrgUser)} className="text-primary hover:underline">编辑</button>
+          <button type="button" onClick={() => onResignUser(node as unknown as OrgUser)} className="text-warning hover:underline">离职</button>
           <button type="button" onClick={() => onDeleteUser(node as unknown as OrgUser)} className="text-destructive hover:underline">删除</button>
         </div>
       ) : null}
@@ -1396,8 +1569,8 @@ function KpiApprovalPolicyForm({
     || node.departmentOrgNodeId === scope.departmentOrgNodeId);
   const orgNodeById = new Map(approvalOrgNodes.map((node) => [node.id, node]));
   const rootOrgNodeId = approvalStepOrgNodes.find((node) => node.nodeType === "ROOT")?.id ?? null;
-  const selectableUsers = users.filter((user) => scope.scopeType === "SYSTEM"
-    || user.departmentOrgNodeId === scope.departmentOrgNodeId);
+  const selectableUsers = users.filter((user) => user.isActive && (scope.scopeType === "SYSTEM"
+    || user.departmentOrgNodeId === scope.departmentOrgNodeId));
   const [scopeOrgNodeIds, setScopeOrgNodeIds] = useState<string[]>(() => {
     if (scope.scopeType === "SYSTEM") return [];
     if (policy?.scopeOrgNodeIds.length) return policy.scopeOrgNodeIds;
@@ -1756,8 +1929,25 @@ export function OrgContent({
     setDraftTalentCells(initialTalentCells);
   }, [initialTalentPermissionKeyString]);
 
+  // 数据刷新（编辑保存等触发的 revalidate）保留用户已展开/收起状态与浏览位置；
+  // 只为新出现的节点补默认值、清理已消失的节点；切换部门范围时才整体重置
+  const prevDepartmentScopeRef = useRef(selectedDepartmentOrgNodeId);
   useEffect(() => {
-    setExpandedTreeNodes(buildInitialExpandedState(organizationHierarchyRoot));
+    const initial = buildInitialExpandedState(organizationHierarchyRoot);
+    if (prevDepartmentScopeRef.current !== selectedDepartmentOrgNodeId) {
+      prevDepartmentScopeRef.current = selectedDepartmentOrgNodeId;
+      setExpandedTreeNodes(initial);
+      return;
+    }
+    const validIds = collectEntityNodeIds(organizationHierarchyRoot);
+    setExpandedTreeNodes((current) => {
+      const next: Record<string, boolean> = {};
+      for (const id of validIds) {
+        if (id in current) next[id] = current[id];
+        else if (id in initial) next[id] = initial[id];
+      }
+      return next;
+    });
   }, [organizationHierarchyRoot, selectedDepartmentOrgNodeId]);
 
   const organizationListRows = flattenHierarchyRows(organizationHierarchyRoot, expandedTreeNodes);
@@ -1998,7 +2188,7 @@ export function OrgContent({
 
   // Dialog states
   const [dialog, setDialog] = useState<{
-    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "applyAllDepartments" | "permissionMatrixSync" | "kpiUserPermission" | "deleteKpiUserPermissionGrant" | "kpiApprovalPolicy" | "deleteKpiApprovalPolicy";
+    type: "department" | "user" | "team" | "deleteUser" | "deleteTeam" | "resignUser" | "mergeTeam" | "applyAllDepartments" | "permissionMatrixSync" | "kpiUserPermission" | "deleteKpiUserPermissionGrant" | "kpiApprovalPolicy" | "deleteKpiApprovalPolicy";
     data?: OrgUser | OrgTeam | ApplyAllDialogData | PermissionMatrixSyncDialogData | KpiUserPermissionGrant | KpiApprovalPolicy;
   } | null>(null);
 
@@ -2960,7 +3150,7 @@ export function OrgContent({
                       <input type="hidden" name="departmentOrgNodeId" value={department.orgNodeId} />
                       <select name="managerId" defaultValue={department.managerId ?? ""} className="min-w-0 flex-1 h-9 px-2 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-ring">
                         <option value="">选择主管</option>
-                        {users.filter((u) => u.roleType !== "ADMIN").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        {users.filter((u) => u.isActive && u.roleType !== "ADMIN").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                       </select>
                       <Button type="submit" variant="outlined" className="h-9 px-3 text-xs">保存</Button>
                     </form>
@@ -3006,8 +3196,10 @@ export function OrgContent({
                       currentUserRoleType={currentUser.roleType}
                       onEditTeam={(team) => setDialog({ type: "team", data: team })}
                       onDeleteTeam={(team) => setDialog({ type: "deleteTeam", data: team })}
+                      onMergeTeam={(team) => setDialog({ type: "mergeTeam", data: team })}
                       onEditUser={(user) => setDialog({ type: "user", data: user })}
                       onDeleteUser={(user) => setDialog({ type: "deleteUser", data: user })}
+                      onResignUser={(user) => setDialog({ type: "resignUser", data: user })}
                     />
                   ))
                 ) : (
@@ -3138,7 +3330,7 @@ export function OrgContent({
 
       <Dialog open={dialog?.type === "deleteUser"} onClose={() => setDialog(null)} title="删除成员">
         <DeleteConfirm
-          message={`确定要删除成员 "${(dialog?.data as OrgUser)?.name}" 吗？此操作将软删除该用户。`}
+          message={`确定要删除成员 "${(dialog?.data as OrgUser)?.name}" 吗？「删除」仅用于误加或测试账号，有业务记录会被拒绝；有在职历史请使用「离职」。`}
           action={async () => {
             const fd = new FormData();
             fd.set("id", (dialog?.data as OrgUser).id);
@@ -3148,9 +3340,15 @@ export function OrgContent({
         />
       </Dialog>
 
+      <Dialog open={dialog?.type === "resignUser"} onClose={() => setDialog(null)} title="成员离职">
+        {dialog?.type === "resignUser" ? (
+          <ResignUserForm user={dialog.data as OrgUser} onClose={() => setDialog(null)} />
+        ) : null}
+      </Dialog>
+
       <Dialog open={dialog?.type === "deleteTeam"} onClose={() => setDialog(null)} title="删除小组">
         <DeleteConfirm
-          message={`确定要删除小组 "${(dialog?.data as OrgTeam)?.name}" 吗？该组成员将被取消分配。`}
+          message={`确定要删除小组 "${(dialog?.data as OrgTeam)?.name}" 吗？小组仍有成员或挂靠时会被拒绝，请先使用「并入」。`}
           action={async () => {
             const fd = new FormData();
             fd.set("id", (dialog?.data as OrgTeam).orgNodeId);
@@ -3158,6 +3356,12 @@ export function OrgContent({
           }}
           onClose={() => setDialog(null)}
         />
+      </Dialog>
+
+      <Dialog open={dialog?.type === "mergeTeam"} onClose={() => setDialog(null)} title="并入其他小组">
+        {dialog?.type === "mergeTeam" ? (
+          <MergeTeamForm team={dialog.data as OrgTeam} onClose={() => setDialog(null)} />
+        ) : null}
       </Dialog>
     </>
   );

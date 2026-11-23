@@ -7,6 +7,8 @@ import { requireCurrentUser } from "@/server/auth/current-user";
 import { syncDingTalkOrganization } from "@/server/dingtalk/organization";
 import { type PermissionScopeInput } from "@/server/organization/annual-goal-permissions";
 import { findNearestDepartmentOrgNodeId, isOrgNodeInSubtree } from "@/server/organization/org-tree-utils";
+import { applyUserOrgChange } from "@/server/organization/user-org-change";
+import { ensureResignedPoolNode } from "@/server/organization/resigned-pool";
 import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 import {
   annualGoalMatrixPermissionAbilityKeys,
@@ -166,7 +168,7 @@ async function rebuildOrgClosures(tx: Prisma.TransactionClient) {
 async function assertOrgNodeType(orgNodeId: string, nodeType: OrgNodeType) {
   const orgNode = await prisma.orgNode.findUnique({
     where: { id: orgNodeId },
-    select: { id: true, parentId: true, nodeType: true, name: true },
+    select: { id: true, parentId: true, nodeType: true, name: true, isResignedPool: true },
   });
   if (!orgNode || orgNode.nodeType !== nodeType) {
     throw new Error(nodeType === "DEPARTMENT" ? "部门不存在" : "小组不存在");
@@ -510,6 +512,17 @@ export async function updateUser(formData: FormData) {
   };
 
   // 执行更新
+  const newOrgNodeId = teamOrgNodeId ?? departmentOrgNodeId;
+  const orgChanged = newOrgNodeId !== target.orgNodeId;
+  const orgNodeNames = orgChanged
+    ? await prisma.orgNode.findMany({
+        where: { id: { in: [target.orgNodeId ?? "", newOrgNodeId] } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const orgNameOf = (nodeId: string | null) =>
+    nodeId ? (orgNodeNames.find((node) => node.id === nodeId)?.name ?? "未知") : "未分配";
+
   await prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id },
@@ -519,9 +532,29 @@ export async function updateUser(formData: FormData) {
         mobile: mobile?.trim() || null,
         roleType: requestedRole,
         title: title?.trim() || null,
-        orgNodeId: teamOrgNodeId ?? departmentOrgNodeId,
       },
     });
+
+    // 调组跟随：人 + 名下项目/需求/产品目标一起改挂新组（applyUserOrgChange 内部自行更新 orgNodeId）
+    if (orgChanged) {
+      const moveResult = await applyUserOrgChange(tx, { userId: id, newOrgNodeId });
+      await writeAuditEvent(tx, {
+        actorId: currentUser.id,
+        actorType: "USER",
+        actorName: currentUser.name,
+        module: AUDIT_MODULES.ORGANIZATION,
+        actionCode: AUDIT_ACTION_CODES.ORG_MEMBER_MOVE,
+        actionName: "成员调组",
+        isSuccess: true,
+        objectType: "User",
+        objectId: id,
+        objectName: target.name,
+        beforeData: { orgNodeId: target.orgNodeId, orgName: orgNameOf(target.orgNodeId) },
+        afterData: { orgNodeId: newOrgNodeId, orgName: orgNameOf(newOrgNodeId), ...moveResult },
+        changedFields: ["orgNodeId"],
+        operationNote: `${orgNameOf(target.orgNodeId)} → ${orgNameOf(newOrgNodeId)}；随组改挂：项目 ${moveResult.projectCount} 个、需求 ${moveResult.quarterlyWorkCount} 条、产品目标 ${moveResult.productGoalCount} 个`,
+      });
+    }
 
     // 记录变更后的数据
     const afterData = {
@@ -584,6 +617,33 @@ export async function updateUser(formData: FormData) {
   revalidateOrganization();
 }
 
+/** 删除守卫：作为审批人出现在未删除 KPI 上的审批步骤数（不限步骤状态）。两步查询：步骤表与 KPI 无 relation */
+async function countApprovalStepsAsApprover(userId: string) {
+  const kpis = await prisma.personalKpi.findMany({ where: { deletedAt: null }, select: { id: true } });
+  if (kpis.length === 0) return 0;
+  return prisma.personalKpiApprovalStep.count({
+    where: { approverId: userId, personalKpiId: { in: kpis.map((kpi) => kpi.id) } },
+  });
+}
+
+/** 离职交接口径：未完成 KPI（状态非 COMPLETED）上 PENDING/WAITING 且审批人为该用户的步骤 id */
+async function findPendingApprovalStepIdsForUser(userId: string): Promise<string[]> {
+  const openKpis = await prisma.personalKpi.findMany({
+    where: { deletedAt: null, status: { not: "COMPLETED" } },
+    select: { id: true },
+  });
+  if (openKpis.length === 0) return [];
+  const steps = await prisma.personalKpiApprovalStep.findMany({
+    where: {
+      approverId: userId,
+      status: { in: ["PENDING", "WAITING"] },
+      personalKpiId: { in: openKpis.map((kpi) => kpi.id) },
+    },
+    select: { id: true },
+  });
+  return steps.map((step) => step.id);
+}
+
 export async function deleteUser(formData: FormData) {
   const currentUser = await requireOrgManager();
   const id = formData.get("id") as string;
@@ -596,6 +656,32 @@ export async function deleteUser(formData: FormData) {
     if (!managerEditableRoles.includes(target.roleType)) {
       throw new Error("无权删除该用户");
     }
+  }
+
+  // 有业务记录则拒绝删除：「删除」仅用于误加/测试账号，有在职历史请走「离职」
+  const [
+    projectCount, workCount, goalCount, kpiCount, approvalStepCount,
+    metricCount, metricSourceCount, assignmentCount, participantCount, decisionResultCount,
+  ] = await Promise.all([
+    prisma.project.count({ where: { ownerId: id, deletedAt: null } }),
+    prisma.quarterlyWork.count({ where: { ownerId: id, deletedAt: null } }),
+    prisma.productGoal.count({ where: { ownerId: id, deletedAt: null } }),
+    // 个人 KPI 含全部历史（已拍板：有 KPI 记录就不允许删除）
+    prisma.personalKpi.count({ where: { userId: id } }),
+    countApprovalStepsAsApprover(id),
+    prisma.annualGoalMetric.count({ where: { responsibleUserId: id, deletedAt: null } }),
+    prisma.annualGoalMetricSource.count({ where: { responsibleUserId: id, deletedAt: null } }),
+    prisma.annualGoalMetricAssignment.count({ where: { responsibleUserId: id, deletedAt: null } }),
+    prisma.talentReviewParticipant.count({ where: { userId: id } }),
+    prisma.talentDecisionEmployeeResult.count({ where: { userId: id } }),
+  ]);
+  const talentRecordCount = participantCount + decisionResultCount;
+  const totalRecords = projectCount + workCount + goalCount + kpiCount + approvalStepCount
+    + metricCount + metricSourceCount + assignmentCount + talentRecordCount;
+  if (totalRecords > 0) {
+    throw new Error(
+      `无法删除：该成员名下存在业务记录（项目 ${projectCount} 个、需求 ${workCount} 条、产品目标 ${goalCount} 个、个人 KPI ${kpiCount} 份、待审批步骤 ${approvalStepCount} 条、年度指标/承接 ${metricCount + metricSourceCount + assignmentCount} 项、人才记录 ${talentRecordCount} 条）。「删除」仅用于误加或测试账号，有在职历史请使用「离职」。`,
+    );
   }
 
   await prisma.$transaction(async (tx) => {
@@ -616,6 +702,165 @@ export async function deleteUser(formData: FormData) {
       beforeData: { isActive: target.isActive },
       afterData: { isActive: false },
       operationNote: `原角色: ${target.roleType}`,
+    });
+  });
+
+  revalidateOrganization();
+}
+
+// ── 离职 ──
+
+/** 离职确认框预取：待交接 KPI 审批步骤数 + 可选接收人（同部门在职人员） */
+export async function getResignPreview(userId: string) {
+  const currentUser = await requireOrgManager();
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target || !target.isActive || target.deletedAt || target.resignedAt) {
+    throw new Error("用户不存在或已离职");
+  }
+  if (currentUser.roleType === "DEPARTMENT_MANAGER") {
+    await assertDepartmentManagerScope(currentUser, target.orgNodeId);
+    if (!managerEditableRoles.includes(target.roleType)) {
+      throw new Error("无权操作该用户");
+    }
+  }
+
+  const pendingStepIds = await findPendingApprovalStepIdsForUser(userId);
+  if (pendingStepIds.length === 0) {
+    return { pendingStepCount: 0, successorOptions: [] as Array<{ id: string; name: string }> };
+  }
+
+  const departmentOrgNodeId = await findDepartmentOrgNodeId(target.orgNodeId);
+  const descendantIds = departmentOrgNodeId
+    ? await prisma.orgClosure.findMany({
+        where: { ancestorId: departmentOrgNodeId },
+        select: { descendantId: true },
+      })
+    : [];
+  const successorOptions = descendantIds.length === 0
+    ? []
+    : await prisma.user.findMany({
+        where: {
+          orgNodeId: { in: descendantIds.map((row) => row.descendantId) },
+          isActive: true,
+          deletedAt: null,
+          resignedAt: null,
+          id: { not: userId },
+        },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+
+  return { pendingStepCount: pendingStepIds.length, successorOptions };
+}
+
+/**
+ * 离职：进入本部门「离职人员」系统组，roleType/职级/title 保留，不能登录。
+ * 名下单据改挂离职人员组（原业务组记在 User.originalOrgNodeId/originalOrgName）；
+ * 未完成 KPI 的待审批步骤可指定接收人（只接步骤，不接单据负责人）。
+ */
+export async function resignUser(formData: FormData) {
+  const currentUser = await requireOrgManager();
+  const id = formData.get("id") as string;
+  const kpiSuccessorId = (formData.get("kpiSuccessorId") as string) || null;
+  if (!id) throw new Error("缺少用户 ID");
+
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target || !target.isActive || target.deletedAt || target.resignedAt) {
+    throw new Error("用户不存在或已离职");
+  }
+  if (target.roleType === "ADMIN") throw new Error("系统管理员不能走离职入口");
+  if (currentUser.roleType === "DEPARTMENT_MANAGER") {
+    await assertDepartmentManagerScope(currentUser, target.orgNodeId);
+    if (!managerEditableRoles.includes(target.roleType)) {
+      throw new Error("无权操作该用户");
+    }
+  }
+
+  const departmentOrgNodeId = await findDepartmentOrgNodeId(target.orgNodeId);
+  if (!departmentOrgNodeId) throw new Error("用户缺少部门信息");
+
+  const pendingStepIds = await findPendingApprovalStepIdsForUser(id);
+
+  let successor: { id: string; name: string } | null = null;
+  if (kpiSuccessorId) {
+    if (pendingStepIds.length === 0) throw new Error("该成员没有需要交接的 KPI 审批步骤");
+    if (kpiSuccessorId === id) throw new Error("KPI 接收人不能是本人");
+    const successorUser = await prisma.user.findUnique({ where: { id: kpiSuccessorId } });
+    if (!successorUser || !successorUser.isActive || successorUser.deletedAt || successorUser.resignedAt) {
+      throw new Error("KPI 接收人必须是在职人员");
+    }
+    const successorDepartmentId = await findDepartmentOrgNodeId(successorUser.orgNodeId);
+    if (successorDepartmentId !== departmentOrgNodeId) {
+      throw new Error("KPI 接收人必须是同部门在职人员");
+    }
+    successor = { id: successorUser.id, name: successorUser.name };
+  }
+
+  // 原业务组只记一次：已记过的不覆盖（如先调组后离职的场景）
+  const originalOrgNodeId = target.originalOrgNodeId ?? target.orgNodeId;
+  const originalOrgName = target.originalOrgName
+    ?? (target.orgNodeId
+      ? (await prisma.orgNode.findUnique({ where: { id: target.orgNodeId }, select: { name: true } }))?.name ?? null
+      : null);
+
+  await prisma.$transaction(async (tx) => {
+    const pool = await ensureResignedPoolNode(tx, departmentOrgNodeId);
+
+    // 名下单据跟着人走：项目/需求/产品目标 + 个人 KPI 改挂离职人员组（年度指标承接留在原组）
+    const [project, quarterlyWork, productGoal, kpi] = await Promise.all([
+      tx.project.updateMany({
+        where: { ownerId: id, deletedAt: null, orgNodeId: { not: pool.id } },
+        data: { orgNodeId: pool.id },
+      }),
+      tx.quarterlyWork.updateMany({
+        where: { ownerId: id, deletedAt: null, orgNodeId: { not: pool.id } },
+        data: { orgNodeId: pool.id },
+      }),
+      tx.productGoal.updateMany({
+        where: { ownerId: id, deletedAt: null, orgNodeId: { not: pool.id } },
+        data: { orgNodeId: pool.id },
+      }),
+      tx.personalKpi.updateMany({
+        where: { userId: id, deletedAt: null, orgNodeId: { not: pool.id } },
+        data: { orgNodeId: pool.id },
+      }),
+    ]);
+
+    if (successor && pendingStepIds.length > 0) {
+      await tx.personalKpiApprovalStep.updateMany({
+        where: { id: { in: pendingStepIds } },
+        data: { approverId: successor.id },
+      });
+    }
+
+    await tx.user.update({
+      where: { id },
+      data: {
+        isActive: false,
+        resignedAt: new Date(),
+        orgNodeId: pool.id,
+        originalOrgNodeId,
+        originalOrgName,
+      },
+    });
+
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ORGANIZATION,
+      actionCode: AUDIT_ACTION_CODES.ORG_MEMBER_RESIGN,
+      actionName: "成员离职",
+      isSuccess: true,
+      objectType: "User",
+      objectId: id,
+      objectName: target.name,
+      beforeData: { roleType: target.roleType, orgNodeId: target.orgNodeId, orgName: originalOrgName },
+      afterData: { isActive: false, resignedAt: true, orgNodeId: pool.id },
+      operationNote:
+        `原角色 ${target.roleType}，原小组「${originalOrgName ?? "未分配"}」；`
+        + `改挂离职人员组：项目 ${project.count} 个、需求 ${quarterlyWork.count} 条、产品目标 ${productGoal.count} 个、个人 KPI ${kpi.count} 份`
+        + (successor ? `；KPI 审批步骤 ${pendingStepIds.length} 条交接给 ${successor.name}` : ""),
     });
   });
 
@@ -689,6 +934,7 @@ export async function updateTeam(formData: FormData) {
 
   const teamNode = await findTeamNode(id);
   if (!teamNode) throw new Error("小组不存在");
+  if (teamNode.isResignedPool) throw new Error("「离职人员」组是系统小组，不能修改");
   await assertDepartmentManagerScope(currentUser, teamNode.id);
 
   let nextParentOrgNodeId = teamNode.parentId;
@@ -766,10 +1012,8 @@ export async function deleteTeam(formData: FormData) {
 
   const teamNode = await findTeamNode(id);
   if (!teamNode) throw new Error("小组不存在");
+  if (teamNode.isResignedPool) throw new Error("「离职人员」组是系统小组，不能删除");
   await assertDepartmentManagerScope(currentUser, teamNode.id);
-
-  const departmentOrgNodeId = await findDepartmentOrgNodeId(teamNode.id);
-  if (!departmentOrgNodeId) throw new Error("小组未绑定部门");
 
   const childTeamCount = await prisma.orgNode.count({
     where: { parentId: teamNode.id, nodeType: "TEAM" },
@@ -778,11 +1022,27 @@ export async function deleteTeam(formData: FormData) {
     throw new Error("请先处理下级小组后再删除当前小组");
   }
 
+  // 有成员或任何挂靠时拒绝删除，提示先并入其他小组（不再把成员挪到部门节点）
+  const [memberCount, projectCount, workCount, goalCount, kpiCount, assignmentCount, groupBotCount] =
+    await Promise.all([
+      prisma.user.count({ where: { orgNodeId: teamNode.id, deletedAt: null } }),
+      prisma.project.count({ where: { orgNodeId: teamNode.id, deletedAt: null } }),
+      prisma.quarterlyWork.count({ where: { orgNodeId: teamNode.id, deletedAt: null } }),
+      prisma.productGoal.count({ where: { orgNodeId: teamNode.id, deletedAt: null } }),
+      prisma.personalKpi.count({ where: { orgNodeId: teamNode.id, deletedAt: null } }),
+      prisma.annualGoalMetricAssignment.count({ where: { teamOrgNodeId: teamNode.id, deletedAt: null } }),
+      prisma.notificationGroupBotOrgNode.count({ where: { orgNodeId: teamNode.id } }),
+    ]);
+  if (groupBotCount > 0) {
+    throw new Error("该小组已绑定钉钉群机器人，请先在通知配置中改绑后再删除");
+  }
+  if (memberCount + projectCount + workCount + goalCount + kpiCount + assignmentCount > 0) {
+    throw new Error(
+      `小组仍有成员或挂靠（成员 ${memberCount} 人、项目 ${projectCount} 个、需求 ${workCount} 条、产品目标 ${goalCount} 个、个人 KPI ${kpiCount} 份、年度指标承接 ${assignmentCount} 项），请先使用「并入其他小组」`,
+    );
+  }
+
   await prisma.$transaction(async (tx) => {
-    await tx.user.updateMany({
-      where: { orgNodeId: teamNode.id },
-      data: { orgNodeId: departmentOrgNodeId },
-    });
     await tx.orgClosure.deleteMany({ where: { OR: [{ ancestorId: teamNode.id }, { descendantId: teamNode.id }] } });
     await tx.orgNode.delete({ where: { id: teamNode.id } });
     await rebuildOrgClosures(tx);
@@ -804,7 +1064,230 @@ export async function deleteTeam(formData: FormData) {
         parentId: teamNode.parentId,
         nodeType: teamNode.nodeType,
       },
-      operationNote: `已将小组成员移至部门`,
+    });
+  });
+
+  revalidateOrganization();
+}
+
+// ── 整组并入 ──
+
+/** 并入确认框预取：在职人数、各类挂靠数量、机器人绑定、可并入的目标组 */
+export async function getTeamMergePreview(sourceTeamId: string) {
+  const currentUser = await requireOrgManager();
+  const teamNode = await findTeamNode(sourceTeamId);
+  if (!teamNode) throw new Error("小组不存在");
+  await assertDepartmentManagerScope(currentUser, teamNode.id);
+
+  const [activeMemberCount, projectCount, quarterlyWorkCount, productGoalCount, kpiCount, assignmentCount, groupBotCount] =
+    await Promise.all([
+      prisma.user.count({ where: { orgNodeId: sourceTeamId, isActive: true, deletedAt: null } }),
+      prisma.project.count({ where: { orgNodeId: sourceTeamId, deletedAt: null } }),
+      prisma.quarterlyWork.count({ where: { orgNodeId: sourceTeamId, deletedAt: null } }),
+      prisma.productGoal.count({ where: { orgNodeId: sourceTeamId, deletedAt: null } }),
+      prisma.personalKpi.count({ where: { orgNodeId: sourceTeamId, deletedAt: null } }),
+      prisma.annualGoalMetricAssignment.count({ where: { teamOrgNodeId: sourceTeamId, deletedAt: null } }),
+      prisma.notificationGroupBotOrgNode.count({ where: { orgNodeId: sourceTeamId } }),
+    ]);
+
+  const departmentOrgNodeId = await findDepartmentOrgNodeId(sourceTeamId);
+  const targetOptions = departmentOrgNodeId
+    ? await prisma.orgNode.findMany({
+        where: { parentId: departmentOrgNodeId, nodeType: "TEAM", isResignedPool: false, id: { not: sourceTeamId } },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
+
+  return {
+    teamName: teamNode.name,
+    activeMemberCount,
+    projectCount,
+    quarterlyWorkCount,
+    productGoalCount,
+    kpiCount,
+    assignmentCount,
+    hasGroupBotBinding: groupBotCount > 0,
+    targetOptions,
+  };
+}
+
+/**
+ * 整组并入：在职成员（组长先降为组员）连同名下单据进入目标组；指标承接、个人 KPI、
+ * 审批策略固定节点改挂目标组；权限授予停用；确认源组干净后删除节点。
+ */
+export async function mergeTeam(formData: FormData) {
+  const currentUser = await requireOrgManager();
+  const sourceTeamId = formData.get("sourceTeamId") as string;
+  const targetTeamId = formData.get("targetTeamId") as string;
+  if (!sourceTeamId || !targetTeamId) throw new Error("缺少必要参数");
+  if (sourceTeamId === targetTeamId) throw new Error("不能并入自己");
+
+  const sourceNode = await findTeamNode(sourceTeamId);
+  const targetNode = await findTeamNode(targetTeamId);
+  if (!sourceNode || !targetNode) throw new Error("小组不存在");
+  if (sourceNode.isResignedPool) throw new Error("「离职人员」组不能并入其他小组");
+  if (targetNode.isResignedPool) throw new Error("不能并入「离职人员」组");
+  await assertDepartmentManagerScope(currentUser, sourceNode.id);
+
+  const sourceDepartmentId = await findDepartmentOrgNodeId(sourceNode.id);
+  const targetDepartmentId = await findDepartmentOrgNodeId(targetNode.id);
+  if (!sourceDepartmentId || sourceDepartmentId !== targetDepartmentId) {
+    throw new Error("只能并入同部门的业务小组");
+  }
+
+  const childTeamCount = await prisma.orgNode.count({
+    where: { parentId: sourceNode.id, nodeType: "TEAM" },
+  });
+  if (childTeamCount > 0) throw new Error("请先处理下级小组后再并入");
+
+  const groupBotCount = await prisma.notificationGroupBotOrgNode.count({
+    where: { orgNodeId: sourceNode.id },
+  });
+  if (groupBotCount > 0) {
+    throw new Error("该小组已绑定钉钉群机器人，请先在通知配置中改绑后再并入");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // 1. 在职成员：组长先降为组员（不把原组长带到目标组当组长），再逐个调组跟随
+    const activeMembers = await tx.user.findMany({
+      where: { orgNodeId: sourceNode.id, isActive: true, deletedAt: null },
+      select: { id: true, name: true, roleType: true },
+    });
+    const demotedLeaderNames: string[] = [];
+    const moved = { projectCount: 0, quarterlyWorkCount: 0, productGoalCount: 0 };
+    for (const member of activeMembers) {
+      if (member.roleType === "TEAM_LEADER") {
+        await tx.user.update({ where: { id: member.id }, data: { roleType: "MEMBER" } });
+        demotedLeaderNames.push(member.name);
+      }
+      const result = await applyUserOrgChange(tx, { userId: member.id, newOrgNodeId: targetNode.id });
+      moved.projectCount += result.projectCount;
+      moved.quarterlyWorkCount += result.quarterlyWorkCount;
+      moved.productGoalCount += result.productGoalCount;
+    }
+
+    // 2. 兜底：仍挂在源组、负责人在职的单据改挂目标组；负责人在离职人员组的单据留在那里不并走
+    const activeUserIds = new Set(
+      (await tx.user.findMany({ where: { isActive: true, deletedAt: null }, select: { id: true } })).map((user) => user.id),
+    );
+    const fallbackWhere = { orgNodeId: sourceNode.id, deletedAt: null } as const;
+    const [fallbackProject, fallbackWork, fallbackGoal] = await Promise.all([
+      tx.project.updateMany({ where: { ...fallbackWhere, ownerId: { in: [...activeUserIds] } }, data: { orgNodeId: targetNode.id } }),
+      tx.quarterlyWork.updateMany({ where: { ...fallbackWhere, ownerId: { in: [...activeUserIds] } }, data: { orgNodeId: targetNode.id } }),
+      tx.productGoal.updateMany({ where: { ...fallbackWhere, ownerId: { in: [...activeUserIds] } }, data: { orgNodeId: targetNode.id } }),
+    ]);
+    moved.projectCount += fallbackProject.count;
+    moved.quarterlyWorkCount += fallbackWork.count;
+    moved.productGoalCount += fallbackGoal.count;
+
+    // 3. 个人 KPI 随组改挂（已拍板口径；审批链走快照字段不受影响）
+    const kpiMoved = await tx.personalKpi.updateMany({
+      where: { orgNodeId: sourceNode.id, deletedAt: null },
+      data: { orgNodeId: targetNode.id },
+    });
+
+    // 4. 年度指标承接改挂目标组（责任人不变）
+    const assignmentMoved = await tx.annualGoalMetricAssignment.updateMany({
+      where: { teamOrgNodeId: sourceNode.id, deletedAt: null },
+      data: { teamOrgNodeId: targetNode.id },
+    });
+
+    // 5. 审批策略固定节点改指向目标组
+    await tx.kpiApprovalPolicyStep.updateMany({
+      where: { approvalOrgNodeId: sourceNode.id },
+      data: { approvalOrgNodeId: targetNode.id },
+    });
+    // 关联表有 @@unique：目标已存在则删源行，否则改指向
+    const stepOrgRows = await tx.kpiApprovalPolicyStepOrgNode.findMany({
+      where: { orgNodeId: sourceNode.id },
+      select: { id: true, policyStepId: true },
+    });
+    for (const row of stepOrgRows) {
+      const duplicate = await tx.kpiApprovalPolicyStepOrgNode.findUnique({
+        where: { policyStepId_orgNodeId: { policyStepId: row.policyStepId, orgNodeId: targetNode.id } },
+        select: { id: true },
+      });
+      if (duplicate) {
+        await tx.kpiApprovalPolicyStepOrgNode.delete({ where: { id: row.id } });
+      } else {
+        await tx.kpiApprovalPolicyStepOrgNode.update({ where: { id: row.id }, data: { orgNodeId: targetNode.id } });
+      }
+    }
+    const scopeRows = await tx.kpiApprovalPolicyScope.findMany({
+      where: { orgNodeId: sourceNode.id },
+      select: { id: true, policyId: true },
+    });
+    for (const row of scopeRows) {
+      const duplicate = await tx.kpiApprovalPolicyScope.findUnique({
+        where: { policyId_orgNodeId: { policyId: row.policyId, orgNodeId: targetNode.id } },
+        select: { id: true },
+      });
+      if (duplicate) {
+        await tx.kpiApprovalPolicyScope.delete({ where: { id: row.id } });
+      } else {
+        await tx.kpiApprovalPolicyScope.update({ where: { id: row.id }, data: { orgNodeId: targetNode.id } });
+      }
+    }
+    // 注意：进行中的审批步骤（PersonalKpiApprovalStep）快照字段不改，避免审批链中途变化
+
+    // 6. 挂在源组节点上的权限授予停用（目标组使用自己的矩阵，不复制）
+    await tx.orgPermissionGrant.updateMany({
+      where: { orgNodeId: sourceNode.id, isActive: true },
+      data: { isActive: false },
+    });
+
+    // 7. 兜底：已软删用户残留的 orgNodeId 一并挪走，保证源组干净
+    await tx.user.updateMany({
+      where: { orgNodeId: sourceNode.id },
+      data: { orgNodeId: targetNode.id },
+    });
+
+    // 8. 清零断言：源组不再有任何挂靠，否则整体回滚
+    const [
+      remainingUsers, remainingProjects, remainingWorks,
+      remainingGoals, remainingKpis, remainingAssignments,
+    ] = await Promise.all([
+      tx.user.count({ where: { orgNodeId: sourceNode.id } }),
+      tx.project.count({ where: { orgNodeId: sourceNode.id } }),
+      tx.quarterlyWork.count({ where: { orgNodeId: sourceNode.id } }),
+      tx.productGoal.count({ where: { orgNodeId: sourceNode.id } }),
+      tx.personalKpi.count({ where: { orgNodeId: sourceNode.id } }),
+      tx.annualGoalMetricAssignment.count({ where: { teamOrgNodeId: sourceNode.id } }),
+    ]);
+    const remainingTotal = remainingUsers + remainingProjects + remainingWorks
+      + remainingGoals + remainingKpis + remainingAssignments;
+    if (remainingTotal > 0) {
+      throw new Error(
+        `并入后仍有数据挂在原小组（成员 ${remainingUsers}、项目 ${remainingProjects}、需求 ${remainingWorks}、产品目标 ${remainingGoals}、KPI ${remainingKpis}、指标承接 ${remainingAssignments}），操作已回滚，请联系管理员处理`,
+      );
+    }
+
+    // 9. 删除节点并重建闭包
+    await tx.orgClosure.deleteMany({
+      where: { OR: [{ ancestorId: sourceNode.id }, { descendantId: sourceNode.id }] },
+    });
+    await tx.orgNode.delete({ where: { id: sourceNode.id } });
+    await rebuildOrgClosures(tx);
+
+    // 10. 审计
+    await writeAuditEvent(tx, {
+      actorId: currentUser.id,
+      actorType: "USER",
+      actorName: currentUser.name,
+      module: AUDIT_MODULES.ORGANIZATION,
+      actionCode: AUDIT_ACTION_CODES.ORG_TEAM_MERGE,
+      actionName: "整组并入",
+      isSuccess: true,
+      objectType: "Team",
+      objectId: sourceNode.id,
+      objectName: sourceNode.name,
+      beforeData: { name: sourceNode.name, parentId: sourceNode.parentId, memberCount: activeMembers.length },
+      afterData: { mergedInto: targetNode.name, targetTeamId: targetNode.id },
+      operationNote:
+        `「${sourceNode.name}」并入「${targetNode.name}」：成员 ${activeMembers.length} 人`
+        + (demotedLeaderNames.length > 0 ? `（组长 ${demotedLeaderNames.join("、")} 已转为组员）` : "")
+        + `；项目 ${moved.projectCount} 个、需求 ${moved.quarterlyWorkCount} 条、产品目标 ${moved.productGoalCount} 个、个人 KPI ${kpiMoved.count} 份、指标承接 ${assignmentMoved.count} 项`,
     });
   });
 

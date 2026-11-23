@@ -1,6 +1,7 @@
 import type { RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { sortResignedPoolTeamsLast } from "@/server/organization/org-node-order";
 import { resolvePermissionCoverage } from "@/server/permissions/permission-resolver";
 import { kpiAbilityKeys, orgPermissionModuleKeys } from "@/server/permissions/permission-constants";
 
@@ -38,9 +39,9 @@ export async function getBusinessAssessmentPageData(
   const [teams, configUsers] = await Promise.all([
     prisma.orgNode.findMany({
       where: { id: { in: coveredOrgNodeIds }, nodeType: "TEAM" },
-      select: { id: true, name: true, parentId: true },
+      select: { id: true, name: true, parentId: true, isResignedPool: true },
       orderBy: { name: "asc" },
-    }),
+    }).then((rows) => sortResignedPoolTeamsLast(rows)),
     prisma.user.findMany({
       where: { orgNodeId: { in: coveredOrgNodeIds }, roleType: { in: ["TEAM_LEADER", "MEMBER"] }, isActive: true, deletedAt: null },
       select: { id: true, name: true, orgNodeId: true },

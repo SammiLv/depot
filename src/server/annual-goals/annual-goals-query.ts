@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/prisma";
 import { getDescendantOrgNodeIds, findNearestDepartmentOrgNodeId } from "@/server/organization/org-tree-utils";
+import { sortResignedPoolTeamsLast } from "@/server/organization/org-node-order";
 import {
   getAnnualGoalAssignmentPermissions,
   getAnnualGoalPlanPermissions,
@@ -445,18 +446,22 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
         ? { id: { in: scopedOrgNodeIdsForQuery }, nodeType: { in: ["DEPARTMENT", "TEAM"] } }
         : { id: "__no_org_node__" },
     orderBy: [{ nodeType: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, nodeType: true, parentId: true },
+    select: { id: true, name: true, nodeType: true, parentId: true, isResignedPool: true },
   });
   const { orgNodeById, departmentOrgNodeIdByTeamOrgNodeId, departmentNameByOrgNodeId } = buildDepartmentAndTeamMaps(orgNodes);
-  const teams = orgNodes
-    .filter((node) => node.nodeType === "TEAM")
-    .map((node) => ({
-      orgNodeId: node.id,
-      name: node.name,
-      departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null,
-    }))
-    .filter((team): team is { orgNodeId: string; name: string; departmentOrgNodeId: string } => Boolean(team.departmentOrgNodeId))
-    .sort((a, b) => compareTeamNames(a.name, b.name));
+  // 「离职人员」组排最后
+  const teams = sortResignedPoolTeamsLast(
+    orgNodes
+      .filter((node) => node.nodeType === "TEAM")
+      .map((node) => ({
+        orgNodeId: node.id,
+        name: node.name,
+        departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null,
+        isResignedPool: node.isResignedPool,
+      }))
+      .filter((team): team is { orgNodeId: string; name: string; departmentOrgNodeId: string; isResignedPool: boolean } => Boolean(team.departmentOrgNodeId))
+      .sort((a, b) => compareTeamNames(a.name, b.name)),
+  );
   const visibleDepartmentOrgNodeIds = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
     .map((node) => node.id);
@@ -530,10 +535,10 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     ...quarterTargets.flatMap((target) => [target.createdById, target.updatedById].filter((userId): userId is string => Boolean(userId))),
     ...assignments.flatMap((assignment) => [assignment.createdById, assignment.updatedById, assignment.responsibleUserId].filter((userId): userId is string => Boolean(userId))),
   ]));
+  // 含离职人员：责任人/创建人姓名展示需要；候选下拉（memberOptionsBy*）按 isActive 过滤
   const scopedUsers = scopedUsersOrgNodeIds.length || creatorUpdaterUserIds.length
     ? await prisma.user.findMany({
         where: {
-          isActive: true,
           deletedAt: null,
           OR: [
             ...(scopedUsersOrgNodeIds.length ? [{ orgNodeId: { in: scopedUsersOrgNodeIds } }] : []),
@@ -541,7 +546,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
           ],
         },
         orderBy: [{ orgNodeId: "asc" }, { name: "asc" }],
-        select: { id: true, name: true, title: true, orgNodeId: true },
+        select: { id: true, name: true, title: true, orgNodeId: true, isActive: true },
       })
     : [];
   const userById = new Map(scopedUsers.map((user) => [user.id, user]));
@@ -549,7 +554,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     scopedDepartmentOrgNodeIds.map((departmentOrgNodeId) => [
       departmentOrgNodeId,
       scopedUsers
-        .filter((user) => getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId) === departmentOrgNodeId)
+        .filter((user) => user.isActive && getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId) === departmentOrgNodeId)
         .map((user) => mapMemberOption(user, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );
@@ -557,7 +562,7 @@ export async function getAnnualGoalsData(currentUser: DataScopeInput, options?: 
     scopedTeamOrgNodeIds.map((teamOrgNodeId) => [
       teamOrgNodeId,
       scopedUsers
-        .filter((user) => getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById) === teamOrgNodeId)
+        .filter((user) => user.isActive && getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById) === teamOrgNodeId)
         .map((user) => mapMemberOption(user, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId)),
     ])
   );

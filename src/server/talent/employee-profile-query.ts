@@ -4,6 +4,7 @@ import { buildUserWhereByPermission, resolvePermissionCoverage } from "@/server/
 import { orgPermissionModuleKeys, talentAbilityKeys } from "@/server/permissions/permission-constants";
 import { getContractExpiryStatus, getRemainingPromotionOpportunityCount, serializeProfileBoolean } from "./employee-profile";
 import { groupSuccessPromotionsByUserId, hasSuccessfulPromotionInCurrentContract } from "./formal-promotion-in-contract";
+import { computeReviewCFacts, type ReviewPeriodGrade } from "./review-c-facts";
 
 type TalentViewer = { id: string; roleType: RoleType; orgNodeId: string | null };
 
@@ -14,9 +15,10 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
     resolvePermissionCoverage(viewer, orgPermissionModuleKeys.talent, talentAbilityKeys.viewSensitive),
   ]);
 
+  // 人才档案包含所有人员（含离职）：这是查询全员信息的唯一入口
   const users = await prisma.user.findMany({
-    where: { ...(userWhere as Prisma.UserWhereInput), isActive: true, deletedAt: null },
-    select: { id: true, name: true, title: true, roleType: true, orgNodeId: true, joinedAt: true, contractRenewAt: true },
+    where: { ...(userWhere as Prisma.UserWhereInput), deletedAt: null },
+    select: { id: true, name: true, title: true, roleType: true, orgNodeId: true, joinedAt: true, contractRenewAt: true, resignedAt: true },
     orderBy: [{ orgNodeId: "asc" }, { name: "asc" }],
   });
   const userIds = users.map((item) => item.id);
@@ -40,6 +42,29 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
   const successPromotionsByUserId = groupSuccessPromotionsByUserId(successPromotions);
   const profileByUserId = new Map(profiles.map((item) => [item.userId, item]));
   const orgNameById = new Map(orgNodes.map((item) => [item.id, item.name]));
+
+  // 「人才决策事实」三项从盘点历史自动计算（只取已确认结果），不再依赖档案手工维护
+  const reviewParticipants = userIds.length
+    ? await prisma.talentReviewParticipant.findMany({
+        where: { userId: { in: userIds } },
+        select: { id: true, userId: true, periodYear: true, periodHalfYear: true },
+      })
+    : [];
+  const reviewResults = reviewParticipants.length
+    ? await prisma.talentReviewResult.findMany({
+        where: { participantId: { in: reviewParticipants.map((row) => row.id) }, confirmedAt: { not: null } },
+        select: { participantId: true, gradeCode: true },
+      })
+    : [];
+  const gradeByParticipantId = new Map(reviewResults.map((row) => [row.participantId, row.gradeCode]));
+  const reviewGradesByUserId = new Map<string, ReviewPeriodGrade[]>();
+  for (const participant of reviewParticipants) {
+    const grade = gradeByParticipantId.get(participant.id);
+    if (!grade) continue;
+    const list = reviewGradesByUserId.get(participant.userId) ?? [];
+    list.push({ year: participant.periodYear, half: participant.periodHalfYear, grade });
+    reviewGradesByUserId.set(participant.userId, list);
+  }
   const latestContractTermByUserId = new Map<string, (typeof confirmedContractTerms)[number]>();
   const referenceDate = new Date();
   for (const term of confirmedContractTerms) {
@@ -66,10 +91,16 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
         contractStartAt,
         currentContractEndAt,
       );
+      const reviewCFacts = computeReviewCFacts(
+        reviewGradesByUserId.get(user.id) ?? [],
+        contractStartAt,
+        currentContractEndAt,
+      );
       return {
         id: user.id,
         hasProfile: Boolean(profile),
         name: user.name,
+        isResigned: Boolean(user.resignedAt),
         organization: user.orgNodeId ? orgNameById.get(user.orgNodeId) ?? "未分配组织" : "未分配组织",
         systemRole: user.roleType,
         originalTitle: user.title,
@@ -77,7 +108,8 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
         currentContractStartAt: profile?.currentContractStartAt?.toISOString().slice(0, 10) ?? matchingContractTerm?.startDate.toISOString().slice(0, 10) ?? "",
         currentContractEndAt: currentContractEndAt?.toISOString().slice(0, 10) ?? "",
         contractExpiryStatus: getContractExpiryStatus(currentContractEndAt, referenceDate),
-        remainingPromotionOpportunityCount: promotedInCurrentContract
+        // 离职人员不做晋升机会统计
+        remainingPromotionOpportunityCount: user.resignedAt || promotedInCurrentContract
           ? null
           : getRemainingPromotionOpportunityCount(currentContractEndAt, referenceDate),
         currentContractSequence: profile?.currentContractSequence ?? null,
@@ -85,9 +117,9 @@ export async function getEmployeeProfileManagementData(viewer: TalentViewer) {
         jobLevelId: profile?.jobLevelId ?? "",
         startingSalary: sensitiveCoverage.hasPermission || user.id === viewer.id ? profile?.startingSalary ?? null : null,
         currentSalary: sensitiveCoverage.hasPermission || user.id === viewer.id ? profile?.currentSalary ?? null : null,
-        hasTwoCReviewsInCurrentContract: serializeProfileBoolean(profile?.hasTwoCReviewsInCurrentContract),
-        hasConsecutiveTwoCReviewsInCurrentContract: serializeProfileBoolean(profile?.hasConsecutiveTwoCReviewsInCurrentContract),
-        isLatestPreRenewalReviewC: serializeProfileBoolean(profile?.isLatestPreRenewalReviewC),
+        hasTwoCReviewsInCurrentContract: serializeProfileBoolean(reviewCFacts.hasTwoC),
+        hasConsecutiveTwoCReviewsInCurrentContract: serializeProfileBoolean(reviewCFacts.consecutiveTwoC),
+        isLatestPreRenewalReviewC: serializeProfileBoolean(reviewCFacts.preRenewalC),
         hasFormalPromotionInCurrentContract: promotedInCurrentContract
           ? "YES"
           : serializeProfileBoolean(profile?.hasFormalPromotionInCurrentContract),

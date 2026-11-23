@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma, RoleType } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
+import { applyUserOrgChange } from "@/server/organization/user-org-change";
+import { writeAuditEvent, AUDIT_MODULES, AUDIT_ACTION_CODES } from "@/server/audit";
 
 const DINGTALK_OPENAPI_BASE = "https://gateway.rjmart.cn/base/dt/dtcloud/openapi";
 const ROOT_ORG_NODE_ID = "org_root";
@@ -319,6 +321,8 @@ async function upsertTeamNode(
   const existing = await tx.orgNode.findFirst({
     where: {
       nodeType: "TEAM",
+      // 「离职人员」系统组不参与钉钉按名称匹配，避免被同名部门顶掉
+      isResignedPool: false,
       OR: [
         { dingtalkDeptId: dingTalkDepartment.deptId },
         { parentId: parentDepartmentNodeId, name: dingTalkDepartment.name },
@@ -551,6 +555,12 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
         }
       }
 
+      // 离职/已删除用户跳过：不改所在组、不改角色、不重新启用，避免被钉钉拉回业务组或复活
+      if (existing && (existing.resignedAt || existing.deletedAt)) {
+        syncedUserIds.push(existing.id);
+        continue;
+      }
+
       if (!isInitialSync) {
         if (existing) {
           const unchanged = existing.dingtalkUserId === user.userId
@@ -587,17 +597,44 @@ export async function syncDingTalkOrganization(currentDingTalkUserId: string | n
 
         // 基础信息与组织归属以钉钉为准（钉钉里调组要跟过来）；
         // 系统角色（roleType）不在同步中变更——例如王俊秀钉钉岗位是产品经理、系统里是组长，组长角色绝不能被同步重置
-        const changed: { name?: string; avatarUrl?: string | null; mobile?: string | null; email?: string | null; title?: string | null; orgNodeId?: string } = {};
+        const changed: { name?: string; avatarUrl?: string | null; mobile?: string | null; email?: string | null; title?: string | null } = {};
         if (existing.name !== name) changed.name = name;
         if (existing.avatarUrl !== (user.avatar ?? null)) changed.avatarUrl = user.avatar ?? null;
         if (existing.mobile !== (user.mobile ?? null)) changed.mobile = user.mobile ?? null;
         if (existing.email !== (user.email ?? null)) changed.email = user.email ?? null;
         if (existing.title !== title) changed.title = title;
-        if (existing.orgNodeId !== orgNodeId) changed.orgNodeId = orgNodeId;
         if (Object.keys(changed).length > 0) {
           await tx.user.update({
             where: { id: existing.id },
             data: changed,
+          });
+        }
+
+        // 调组跟随：所在组变化时，名下项目/需求/产品目标一起改挂新组
+        if (existing.orgNodeId !== orgNodeId) {
+          const oldOrgNodeId = existing.orgNodeId;
+          const moveResult = await applyUserOrgChange(tx, { userId: existing.id, newOrgNodeId: orgNodeId });
+          const orgNodeNames = await tx.orgNode.findMany({
+            where: { id: { in: [oldOrgNodeId ?? "", orgNodeId] } },
+            select: { id: true, name: true },
+          });
+          const orgNameOf = (nodeId: string | null) =>
+            nodeId ? (orgNodeNames.find((node) => node.id === nodeId)?.name ?? "未知") : "未分配";
+          await writeAuditEvent(tx, {
+            actorId: null,
+            actorType: "SYSTEM",
+            actorName: "钉钉同步",
+            module: AUDIT_MODULES.ORGANIZATION,
+            actionCode: AUDIT_ACTION_CODES.ORG_MEMBER_MOVE,
+            actionName: "成员调组（钉钉同步）",
+            isSuccess: true,
+            objectType: "User",
+            objectId: existing.id,
+            objectName: name,
+            beforeData: { orgNodeId: oldOrgNodeId, orgName: orgNameOf(oldOrgNodeId) },
+            afterData: { orgNodeId, orgName: orgNameOf(orgNodeId), ...moveResult },
+            changedFields: ["orgNodeId"],
+            operationNote: `${orgNameOf(oldOrgNodeId)} → ${orgNameOf(orgNodeId)}；随组改挂：项目 ${moveResult.projectCount} 个、需求 ${moveResult.quarterlyWorkCount} 条、产品目标 ${moveResult.productGoalCount} 个`,
           });
         }
         syncedUserIds.push(existing.id);

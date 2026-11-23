@@ -29,6 +29,7 @@ type OrgTeamPayload = {
   name: string;
   leaderId: string | null;
   description: string | null;
+  isResignedPool: boolean;
 };
 
 type KpiUserPermissionGrantView = {
@@ -53,6 +54,8 @@ export type OrganizationPersonNode = {
   departmentOrgNodeId: string | null;
   teamOrgNodeId: string | null;
   isActive: boolean;
+  /** 离职（isActive=false 且 resignedAt 有值）：树上置灰展示、不可操作 */
+  isResigned: boolean;
 };
 
 export type OrganizationEntityNode = {
@@ -66,6 +69,8 @@ export type OrganizationEntityNode = {
   directMemberCount: number;
   children: OrganizationHierarchyNode[];
   team: OrgTeamPayload | null;
+  /** 「离职人员」系统组：不可改名/并入/删除 */
+  isResignedPool?: boolean;
 };
 
 export type OrganizationHierarchyNode = OrganizationEntityNode | OrganizationPersonNode;
@@ -93,7 +98,8 @@ export default async function OrgPage({
 
   const [users, orgNodes, menus, annualGoalPermissionGrants, kpiPermissionGrants, kpiUserPermissionGrantRows, notificationPermissionGrants, productManagementPermissionGrants, talentPermissionGrants] = await Promise.all([
     prisma.user.findMany({
-      where: { ...(await getUserWhereByScope(currentUser)), isActive: true },
+      // 含离职人员（resignedAt 有值）：树上置灰展示、历史单据负责人姓名正常显示；候选下拉在前端按 isResigned 过滤
+      where: { ...(await getUserWhereByScope(currentUser)), deletedAt: null },
       orderBy: [{ roleType: "asc" }, { name: "asc" }],
       select: {
         id: true,
@@ -104,6 +110,7 @@ export default async function OrgPage({
         title: true,
         isActive: true,
         orgNodeId: true,
+        resignedAt: true,
       },
     }),
     prisma.orgNode.findMany({
@@ -111,7 +118,7 @@ export default async function OrgPage({
         ? { nodeType: { in: ["DEPARTMENT", "TEAM"] } }
         : { id: { in: scopedOrgNodeIds }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
       orderBy: [{ nodeType: "asc" }, { name: "asc" }],
-      select: { id: true, name: true, nodeType: true, parentId: true },
+      select: { id: true, name: true, nodeType: true, parentId: true, isResignedPool: true },
     }),
     prisma.menuPermission.findMany({
       where: { isEnabled: true },
@@ -174,7 +181,7 @@ export default async function OrgPage({
   const departments = orgNodes
     .filter((node) => node.nodeType === "DEPARTMENT")
     .map((node) => {
-      const manager = users.find((user) => user.roleType === "DEPARTMENT_MANAGER" && user.orgNodeId === node.id) ?? null;
+      const manager = users.find((user) => user.isActive && user.roleType === "DEPARTMENT_MANAGER" && user.orgNodeId === node.id) ?? null;
       return {
         orgNodeId: node.id,
         name: node.name,
@@ -186,7 +193,7 @@ export default async function OrgPage({
   const teams = orgNodes
     .filter((node) => node.nodeType === "TEAM")
     .map((node) => {
-      const leader = users.find((user) => user.roleType === "TEAM_LEADER" && user.orgNodeId === node.id) ?? null;
+      const leader = users.find((user) => user.isActive && user.roleType === "TEAM_LEADER" && user.orgNodeId === node.id) ?? null;
       const departmentOrgNodeId = nearestDepartmentOrgNodeIdByNodeId.get(node.id) ?? null;
       const parentNode = node.parentId ? orgNodeById.get(node.parentId) ?? null : null;
       return departmentOrgNodeId && parentNode ? {
@@ -197,9 +204,10 @@ export default async function OrgPage({
         name: node.name,
         leaderId: leader?.id ?? null,
         description: null,
+        isResignedPool: node.isResignedPool,
       } : null;
     })
-    .filter((team): team is { orgNodeId: string; departmentOrgNodeId: string; parentOrgNodeId: string; parentName: string; name: string; leaderId: string | null; description: null } => Boolean(team));
+    .filter((team): team is { orgNodeId: string; departmentOrgNodeId: string; parentOrgNodeId: string; parentName: string; name: string; leaderId: string | null; description: null; isResignedPool: boolean } => Boolean(team));
 
   const mappedUsers = users.map((user) => {
     const orgNode = user.orgNodeId ? orgNodeById.get(user.orgNodeId) ?? null : null;
@@ -215,12 +223,14 @@ export default async function OrgPage({
       teamOrgNodeId,
       title: user.title,
       isActive: user.isActive,
+      isResigned: Boolean(user.resignedAt),
     };
   });
 
   const teamData = teams.map((team) => {
-    const teamUsers = mappedUsers.filter((user) => user.teamOrgNodeId === team.orgNodeId && user.isActive);
-    const leader = teamUsers.find((user) => user.roleType === "TEAM_LEADER") ?? null;
+    // 人数含离职成员（离职人员组的主体就是离职成员）；组长只认在职
+    const teamUsers = mappedUsers.filter((user) => user.teamOrgNodeId === team.orgNodeId);
+    const leader = teamUsers.find((user) => user.isActive && user.roleType === "TEAM_LEADER") ?? null;
     return { teamOrgNodeId: team.orgNodeId, count: teamUsers.length, leaderName: leader?.name };
   });
 
@@ -236,6 +246,7 @@ export default async function OrgPage({
       name: team.name,
       nodeType: "TEAM" as const,
       departmentOrgNodeId: team.departmentOrgNodeId,
+      isResignedPool: team.isResignedPool,
     })),
   ];
 
@@ -644,8 +655,12 @@ export default async function OrgPage({
     list.push(team);
     childrenByParentOrgNodeId.set(team.parentOrgNodeId, list);
   }
+  // 「离职人员」组在组织树上永远排最下面
   for (const list of childrenByParentOrgNodeId.values()) {
-    list.sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
+    list.sort((left, right) => {
+      const poolDiff = Number(left.isResignedPool) - Number(right.isResignedPool);
+      return poolDiff !== 0 ? poolDiff : left.name.localeCompare(right.name, "zh-Hans-CN");
+    });
   }
 
   for (const user of mappedUsers) {
@@ -680,6 +695,7 @@ export default async function OrgPage({
       departmentOrgNodeId: user.departmentOrgNodeId,
       teamOrgNodeId: user.teamOrgNodeId,
       isActive: user.isActive,
+      isResigned: user.isResigned,
     };
   }
 
@@ -716,6 +732,7 @@ export default async function OrgPage({
         : mappedUsers.filter((user) => user.departmentOrgNodeId === departmentOrgNodeId).length,
       children: [...childTeamNodes, ...personNodes],
       team: node.nodeType === "TEAM" ? (teamByOrgNodeId.get(node.id) ?? null) : null,
+      isResignedPool: node.nodeType === "TEAM" ? (teamByOrgNodeId.get(node.id)?.isResignedPool ?? false) : false,
     };
   }
 

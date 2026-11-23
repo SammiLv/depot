@@ -309,6 +309,7 @@ function scoreTone(score: number) {
 
 export default function TalentPageContent({
   reviewWorkspace,
+  overviewDetail: overviewDetailProp,
   operationWorkspace,
   latestKpiByUserId,
   latestAssessmentByUserId,
@@ -316,6 +317,8 @@ export default function TalentPageContent({
   profileExtrasByUserId,
 }: {
   reviewWorkspace: ReviewWorkspaceData;
+  /** 总览专用周期明细（只含在职参与者）；为空时回退 reviewWorkspace 快照 */
+  overviewDetail?: ReviewWorkspaceData["details"][number] | null;
   operationWorkspace: TalentOperationWorkspaceData;
   latestKpiByUserId: Record<string, { userId: string; year: number; quarter: number; finalScore: number | null; finalRatingName: string | null }>;
   latestAssessmentByUserId: Record<string, { userId: string; cycleId: string; earnedScore: number; maxScore: number; isOverallPassed: boolean; cycle: { year: number; quarter: number } | null }>;
@@ -343,7 +346,7 @@ export default function TalentPageContent({
   const [historyInitialCategory, setHistoryInitialCategory] = useState<"profiles" | "promotion" | "contract" | "salary" | "reward">("profiles");
   const [activeConfig, setActiveConfig] = useState<ConfigKey | null>(null);
   const overviewCycle = reviewWorkspace.cycles.cycles[0];
-  const overviewDetail = reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
+  const overviewDetail = overviewDetailProp ?? reviewWorkspace.details.find((item) => item.cycleId === overviewCycle?.id);
   const overviewTemplateId = overviewCycle?.templateVersionId ?? reviewWorkspace.config.templates.find((item) => item.status === "ACTIVE")?.id;
   const configuredNineBoxRules = overviewDetail?.nineBoxRules ?? reviewWorkspace.config.nineBoxRules.filter((item) => item.templateVersionId === overviewTemplateId);
   const configuredNineBoxByCode = new Map(configuredNineBoxRules.map((item) => [item.code, item]));

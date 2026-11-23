@@ -43,6 +43,16 @@ export default async function TalentPage() {
     .map((detail) => ({ ...detail, cycleId: detail.cycle.id, cycleStatus: detail.cycle.status }));
 
   const participantUserIds = [...new Set(details.flatMap((detail) => detail.participants.map((participant) => participant.userId)))].filter(Boolean);
+  // 总览（决策地图/人才画像/合同到期/晋升机会提醒）不纳入离职人员；人才盘点 tab 的周期快照保留 frozen 参与者
+  const participantUserRows = participantUserIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: participantUserIds } },
+        select: { id: true, isActive: true, deletedAt: true, resignedAt: true },
+      })
+    : [];
+  const activeParticipantUserIds = participantUserRows
+    .filter((row) => row.isActive && !row.deletedAt && !row.resignedAt)
+    .map((row) => row.id);
   const now = new Date();
   const ninetyDaysLater = getContractExpiryWindowEnd(now);
   const yearStart = new Date(now.getFullYear(), 0, 1);
@@ -52,12 +62,12 @@ export default async function TalentPage() {
 
   const [latestKpis, latestAssessmentSummaries, assessmentCycles, contractsExpiringSoonProfiles, recentPromotionRecords, currentQuarterRewardRecords, employeeProfilesForPromotion, successPromotionsInContractScope] = await Promise.all([
     prisma.personalKpi.findMany({
-      where: { userId: { in: participantUserIds }, status: "COMPLETED", deletedAt: null },
+      where: { userId: { in: activeParticipantUserIds }, status: "COMPLETED", deletedAt: null },
       orderBy: [{ year: "desc" }, { quarter: "desc" }],
       select: { userId: true, year: true, quarter: true, finalScore: true, finalRatingName: true },
     }),
     prisma.businessAssessmentSummary.findMany({
-      where: { userId: { in: participantUserIds } },
+      where: { userId: { in: activeParticipantUserIds } },
       select: { id: true, userId: true, cycleId: true, earnedScore: true, maxScore: true, isOverallPassed: true },
     }),
     prisma.businessAssessmentCycle.findMany({
@@ -66,7 +76,7 @@ export default async function TalentPage() {
     }),
     prisma.employeeTalentProfile.findMany({
       where: {
-        userId: { in: participantUserIds },
+        userId: { in: activeParticipantUserIds },
         deletedAt: null,
         currentContractEndAt: { lte: ninetyDaysLater },
       },
@@ -74,7 +84,7 @@ export default async function TalentPage() {
     }),
     prisma.promotionRecord.findMany({
       where: {
-        userId: { in: participantUserIds },
+        userId: { in: activeParticipantUserIds },
         deletedAt: null,
         outcome: "SUCCESS",
         resultStatus: "CONFIRMED",
@@ -84,7 +94,7 @@ export default async function TalentPage() {
     }),
     prisma.rewardRecord.findMany({
       where: {
-        userId: { in: participantUserIds },
+        userId: { in: activeParticipantUserIds },
         deletedAt: null,
         resultStatus: "CONFIRMED",
         effectiveDate: { gte: quarterStart, lte: quarterEnd },
@@ -92,12 +102,12 @@ export default async function TalentPage() {
       select: { userId: true },
     }),
     prisma.employeeTalentProfile.findMany({
-      where: { userId: { in: participantUserIds }, deletedAt: null },
+      where: { userId: { in: activeParticipantUserIds }, deletedAt: null },
       select: { userId: true, currentContractStartAt: true, currentContractEndAt: true, hasFormalPromotionInCurrentContract: true },
     }),
-    participantUserIds.length
+    activeParticipantUserIds.length
       ? prisma.promotionRecord.findMany({
-          where: { userId: { in: participantUserIds }, deletedAt: null, resultStatus: "CONFIRMED", outcome: "SUCCESS" },
+          where: { userId: { in: activeParticipantUserIds }, deletedAt: null, resultStatus: "CONFIRMED", outcome: "SUCCESS" },
           select: { userId: true, effectiveDate: true, outcome: true, resultStatus: true },
         })
       : Promise.resolve([]),
@@ -129,11 +139,11 @@ export default async function TalentPage() {
   const reviewTotalScore = reviewDimensions.reduce((sum, dimension) => sum + (dimension.maxScore ?? 0), 0) || 30;
 
   const profileExtrasByUserId: Record<string, Awaited<ReturnType<typeof getProfileOverviewExtras>>> = {};
-  if (participantUserIds.length > 0) {
+  if (activeParticipantUserIds.length > 0) {
     const extrasList = await Promise.all(
-      participantUserIds.map((userId) => getProfileOverviewExtras(userId, { kpiTotalScore, reviewTotalScore }).catch(() => null)),
+      activeParticipantUserIds.map((userId) => getProfileOverviewExtras(userId, { kpiTotalScore, reviewTotalScore }).catch(() => null)),
     );
-    participantUserIds.forEach((userId, index) => {
+    activeParticipantUserIds.forEach((userId, index) => {
       const extras = extrasList[index];
       if (extras) profileExtrasByUserId[userId] = extras;
     });
@@ -243,9 +253,24 @@ export default async function TalentPage() {
 
   const reviewWorkspace = JSON.parse(JSON.stringify({ config, cycles, details })) as ReviewWorkspaceData;
   const operationWorkspace = JSON.parse(JSON.stringify({ assessment, incident, decision, history, employeeProfiles, career, competency, decisionRules })) as TalentOperationWorkspaceData;
+  // 总览（决策地图/人才画像）专用：只含在职参与者的周期明细；人才盘点 tab 仍用 reviewWorkspace 的完整快照
+  const overviewDetailRaw = details.find((detail) => detail.cycleId === overviewCycle?.id) ?? null;
+  const overviewDetail = overviewDetailRaw
+    ? (() => {
+        const participants = overviewDetailRaw.participants.filter((participant) => activeParticipantUserIds.includes(participant.userId));
+        const participantIds = new Set(participants.map((participant) => participant.id));
+        return JSON.parse(JSON.stringify({
+          ...overviewDetailRaw,
+          participants,
+          results: overviewDetailRaw.results.filter((result) => participantIds.has(result.participantId)),
+          dimensionResults: overviewDetailRaw.dimensionResults.filter((result) => participantIds.has(result.participantId)),
+        })) as ReviewWorkspaceData["details"][number];
+      })()
+    : null;
   return (
     <TalentPageContent
       reviewWorkspace={reviewWorkspace}
+      overviewDetail={overviewDetail}
       operationWorkspace={operationWorkspace}
       latestKpiByUserId={latestKpiByUserId}
       latestAssessmentByUserId={latestAssessmentByUserId}

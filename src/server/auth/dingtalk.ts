@@ -101,6 +101,20 @@ export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
   const avatarUrl = await getDingTalkUserAvatar(info.userId);
 
   if (existingUser) {
+    // 离职/已删除用户只刷新资料字段，不复活（不碰 isActive/deletedAt）；
+    // 登录是否放行由 getCurrentUser 的 isActive+deletedAt 过滤兜底
+    if (existingUser.resignedAt || existingUser.deletedAt) {
+      return prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          dingtalkUserId: info.userId,
+          name: info.name,
+          mobile: info.mobile,
+          email: info.email,
+          ...(avatarUrl ? { avatarUrl } : {}),
+        },
+      });
+    }
     return prisma.user.update({
       where: { id: existingUser.id },
       data: {

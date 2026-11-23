@@ -27,10 +27,11 @@ export async function getTalentOverviewPageData(user: Awaited<ReturnType<typeof 
     getOverviewKpiRatingBands(user),
   ]);
 
+  // 只含在职人员：合同到期/晋升机会等提醒不纳入离职人员
   const profileVisibleUserIds = profileCoverage.hasPermission
     ? new Set(
         (await prisma.user.findMany({
-          where: await buildUserWhereByPermission(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile),
+          where: { ...(await buildUserWhereByPermission(user, orgPermissionModuleKeys.talent, talentAbilityKeys.viewProfile)), isActive: true },
           select: { id: true },
         })).map((row) => row.id),
       )

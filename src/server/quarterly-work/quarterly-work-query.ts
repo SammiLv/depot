@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/prisma";
 import { findNearestDepartmentOrgNodeId, getDescendantOrgNodeIds } from "@/server/organization/org-tree-utils";
+import { sortResignedMembersLast, sortResignedPoolTeamsLast } from "@/server/organization/org-node-order";
 import {
   canBackfillProjectRequirement,
   canEditTerminalProjectWork,
@@ -605,16 +606,20 @@ function getProjectManagementScopeWhere(currentUser: DataScopeInput, departmentO
   return { ownerId: currentUser.id, deletedAt: null };
 }
 
+/**
+ * 人员目录查询条件：含离职人员（resignedAt 有值、isActive=false），只排除已删除。
+ * 用于 ownerMap（历史单据负责人姓名显示）与筛选下拉；新建/编辑的负责人候选由前端按 isResigned 过滤。
+ */
 function getProjectManagementUserWhere(currentUser: DataScopeInput, departmentOrgNodeId: string | null, scopedOrgNodeIds: string[] | null) {
   if (currentUser.roleType === "ADMIN") {
     return { deletedAt: null };
   }
 
   if (departmentOrgNodeId) {
-    return { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] }, isActive: true, deletedAt: null };
+    return { orgNodeId: { in: scopedOrgNodeIds ?? [departmentOrgNodeId] }, deletedAt: null };
   }
 
-  return { id: currentUser.id, isActive: true, deletedAt: null };
+  return { id: currentUser.id, deletedAt: null };
 }
 
 function normalizeWorkspacePanel(value: string | undefined): WorkspacePanel | null {
@@ -682,12 +687,12 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         ? { nodeType: { in: ["DEPARTMENT", "TEAM"] } }
         : { id: { in: scopedOrgNodeIds }, nodeType: { in: ["DEPARTMENT", "TEAM"] } },
       orderBy: [{ nodeType: "asc" }, { name: "asc" }],
-      select: { id: true, name: true, nodeType: true, parentId: true },
+      select: { id: true, name: true, nodeType: true, parentId: true, isResignedPool: true },
     }),
     prisma.user.findMany({
       where: getProjectManagementUserWhere(currentUser, departmentOrgNodeId, scopedOrgNodeIds),
       orderBy: [{ orgNodeId: "asc" }, { name: "asc" }],
-      select: { id: true, name: true, orgNodeId: true },
+      select: { id: true, name: true, orgNodeId: true, isActive: true, resignedAt: true },
     }),
     prisma.project.findMany({
       where: ownerWhere,
@@ -748,8 +753,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       orgNodeId: node.id,
       name: node.name,
       departmentOrgNodeId: departmentOrgNodeIdByTeamOrgNodeId.get(node.id) ?? null,
+      isResignedPool: node.isResignedPool,
     }))
-    .filter((team): team is { orgNodeId: string; name: string; departmentOrgNodeId: string } => Boolean(team.departmentOrgNodeId));
+    .filter((team): team is { orgNodeId: string; name: string; departmentOrgNodeId: string; isResignedPool: boolean } => Boolean(team.departmentOrgNodeId));
 
   const now = new Date();
   const fallbackYear = now.getFullYear();
@@ -1579,12 +1585,15 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       name: department.name,
     })),
     defaultDepartmentOrgNodeId,
-    teamOptions: [...teams].sort(compareNames).map((team) => ({
+    // 「离职人员」组排最后
+    teamOptions: sortResignedPoolTeamsLast([...teams].sort(compareNames)).map((team) => ({
       id: team.orgNodeId,
       name: team.name,
       departmentOrgNodeId: team.departmentOrgNodeId,
+      isResignedPool: team.isResignedPool,
     })),
-    memberOptions: users.map((user) => {
+    // 在职在前、离职在后（筛选下拉可见离职人员；表单候选由前端过滤 isResigned）
+    memberOptions: sortResignedMembersLast(users.map((user) => {
       const teamOrgNodeId = getTeamOrgNodeIdForRecord(user.orgNodeId, orgNodeById);
       const departmentOrgNodeId = getDepartmentOrgNodeIdForRecord(user.orgNodeId, orgNodeById, departmentOrgNodeIdByTeamOrgNodeId);
       return {
@@ -1593,8 +1602,9 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
         teamOrgNodeId,
         teamName: teamOrgNodeId ? teamNameMap.get(teamOrgNodeId) ?? null : null,
         departmentOrgNodeId,
+        isResigned: Boolean(user.resignedAt),
       };
-    }),
+    })),
     valueOverviewItems: projects
       .filter(isInValueTrackingScope)
       .sort((left, right) => (right.launchedAt?.getTime() ?? 0) - (left.launchedAt?.getTime() ?? 0))

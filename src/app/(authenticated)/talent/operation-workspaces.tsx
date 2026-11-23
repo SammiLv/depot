@@ -386,7 +386,7 @@ function TalentProfileTable({ data, onView, onEdit, onDelete }: {
 
   return <Card className="!p-0 overflow-hidden">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-      <div><h3 className="font-semibold">人才档案列表</h3><p className="mt-1 text-xs text-muted-foreground">共 {data.employees.length} 位在职员工，岗位名称实时读取组织架构。</p></div>
+      <div><h3 className="font-semibold">人才档案列表</h3><p className="mt-1 text-xs text-muted-foreground">共 {data.employees.length} 位员工（含离职），岗位名称实时读取组织架构。</p></div>
       <label className="relative w-full sm:w-72">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"/>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="查询姓名、组织、岗位或职级" className="h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm focus:border-primary focus:outline-none"/>
@@ -397,7 +397,7 @@ function TalentProfileTable({ data, onView, onEdit, onDelete }: {
     </div>
     <div className="divide-y divide-border">
       {employees.map((employee) => <div key={employee.id} className={`grid gap-y-3 px-4 py-4 text-sm lg:gap-x-2 ${columns}`}>
-        <div><div className="font-medium">{employee.name}</div><div className="mt-1 text-xs text-muted-foreground">{employee.organization}</div></div>
+        <div><div className="flex items-center gap-2 font-medium">{employee.name}{employee.isResigned ? <Badge tone="default">离职</Badge> : null}</div><div className="mt-1 text-xs text-muted-foreground">{employee.organization}</div></div>
         <div><div className="lg:hidden text-xs text-muted-foreground">岗位名称</div>{employee.originalTitle ?? "未配置岗位"}</div>
         <div><div className="lg:hidden text-xs text-muted-foreground">当前职级</div>{levelName.get(employee.jobLevelId) ?? "未配置"}</div>
         <div>
