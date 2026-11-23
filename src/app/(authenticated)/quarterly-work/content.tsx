@@ -18,7 +18,7 @@ import {
   isValueJudgement,
 } from "@/server/quarterly-work/value-track-constants";
 import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
-import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_INTERNAL, developmentSourceLabel } from "@/server/quarterly-work/development-source-constants";
+import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_HYBRID, DEVELOPMENT_SOURCE_INTERNAL, developmentSourceLabel } from "@/server/quarterly-work/development-source-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
 import { getServerActionErrorMessage } from "@/lib/server-action-error";
@@ -866,6 +866,7 @@ function QuarterlyWorkForm({
             options={[
               { label: "外部开发", value: DEVELOPMENT_SOURCE_EXTERNAL },
               { label: "内部自研", value: DEVELOPMENT_SOURCE_INTERNAL },
+              { label: "混合开发", value: DEVELOPMENT_SOURCE_HYBRID },
             ]}
             value={devSourceValue || null}
             onChange={(v) => setDevSourceValue(String(v ?? ""))}
@@ -4063,8 +4064,8 @@ function ProjectExpandedPanel({
                   description={taskSubtitle(task)}
                   statusLabel={columnTitleByStatus[task.status]}
                   statusClassName={taskListStatusTagClass(task)}
-                  statusExtra={task.developmentSource === DEVELOPMENT_SOURCE_INTERNAL ? (
-                    <span className="rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">内部自研</span>
+                  statusExtra={task.developmentSource ? (
+                    <span className="rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">{developmentSourceLabel(task.developmentSource)}</span>
                   ) : null}
                   owner={task.owner}
                   workload={task.workloadPersonDay}
@@ -6078,8 +6079,8 @@ function TaskListTable({
               <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
               <div>
                 <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
-                {task.developmentSource === DEVELOPMENT_SOURCE_INTERNAL ? (
-                  <span className="ml-1 rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">内部自研</span>
+                {task.developmentSource ? (
+                  <span className="ml-1 rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">{developmentSourceLabel(task.developmentSource)}</span>
                 ) : null}
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</div>
