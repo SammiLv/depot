@@ -1305,14 +1305,9 @@ export function NotificationsContent({
   return (
     <>
       <Card className="mb-6 !p-0 overflow-hidden">
-        <div className="px-5 pt-5">
-          <h1 className="text-3xl font-semibold tracking-tight">通知中心</h1>
-          <p className="mt-2 text-sm text-muted-foreground">系统消息、审批结果、预警与提醒；可配置通知场景</p>
-        </div>
-
         {canViewAll || canManage ? (
           <UnderlineTabs
-            className="mx-5 mt-3"
+            className="mx-5 mt-5"
             value={mainTab}
             onChange={setMainTab}
             tabs={[
@@ -1331,7 +1326,7 @@ export function NotificationsContent({
 
         {mainTab === "inbox" || mainTab === "all" ? (
           <div className="px-5 pb-5">
-            <div className="pt-3 pb-3 flex flex-wrap items-center gap-2">
+            <div className={`${canViewAll || canManage ? "pt-3" : "pt-5"} pb-3 flex flex-wrap items-center gap-2`}>
               {filterTabs.map((tab) => (
                 <button
                   key={tab.key}

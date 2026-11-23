@@ -549,57 +549,87 @@ const PRESET_SCENARIOS = [
   },
 ] as const;
 
+/**
+ * 内置场景的稳定标识。一经写入就跟这条记录走，不跟显示名称走。
+ * 目前与触发事件一一对应；改名、改文案都不会换标识。
+ */
+function presetIdentity(preset: { triggerEvent: string }) {
+  return preset.triggerEvent;
+}
+
+async function syncPresetMessageUrl(id: string, channelConfig: unknown, presetMessageUrl?: string) {
+  if (!presetMessageUrl) return;
+  const current = (channelConfig ?? {}) as Record<string, unknown>;
+  if (current.messageUrlTemplate === presetMessageUrl) return;
+
+  await prisma.notificationScenario.update({
+    where: { id },
+    data: {
+      channelConfig: {
+        ...current,
+        messageUrlTemplate: presetMessageUrl,
+      },
+    },
+  });
+}
+
 export async function ensurePresetNotificationScenarios() {
   for (const preset of PRESET_SCENARIOS) {
     const { previousNames, ...presetData } = preset as typeof preset & { previousNames?: string[] };
-    let existing = await prisma.notificationScenario.findFirst({
-      where: { name: preset.name },
-      select: { id: true, name: true, channelConfig: true },
+    const presetKey = presetIdentity(preset);
+
+    const bound = await prisma.notificationScenario.findUnique({
+      where: { presetKey },
+      select: { id: true, channelConfig: true },
     });
-
-    // 旧名（如「任务」时代命名）命中的行：改名并同步最新文案模板
-    if (!existing && previousNames?.length) {
-      existing = await prisma.notificationScenario.findFirst({
-        where: { name: { in: previousNames } },
-        select: { id: true, name: true, channelConfig: true },
-      });
-      if (existing) {
-        await prisma.notificationScenario.update({
-          where: { id: existing.id },
-          data: {
-            name: preset.name,
-            description: preset.description,
-            channelConfig: {
-              ...((existing.channelConfig ?? {}) as Record<string, unknown>),
-              titleTemplate: preset.channelConfig.titleTemplate,
-              contentTemplate: preset.channelConfig.contentTemplate,
-              messageUrlTemplate: preset.channelConfig.messageUrlTemplate,
-            },
-          },
-        });
-        continue;
-      }
-    }
-
-    if (!existing) {
-      await prisma.notificationScenario.create({ data: { ...presetData } });
+    if (bound) {
+      await syncPresetMessageUrl(bound.id, bound.channelConfig, preset.channelConfig.messageUrlTemplate);
       continue;
     }
 
-    const presetMessageUrl = preset.channelConfig.messageUrlTemplate;
-    if (!presetMessageUrl) continue;
+    const names = [preset.name, ...(previousNames ?? [])];
+    // 还没绑过标识时，认最早的那条：当前名、历史名，或系统补出来的同事件场景（createdById 为空）。
+    // 用户后来改过的名称留在原行上，不再按名称缺失补插一条。
+    const candidates = await prisma.notificationScenario.findMany({
+      where: {
+        presetKey: null,
+        OR: [
+          { name: { in: names } },
+          { triggerEvent: preset.triggerEvent, createdById: null },
+        ],
+      },
+      select: { id: true, name: true, channelConfig: true, createdAt: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    const adopted = candidates[0];
 
-    const channelConfig = (existing.channelConfig ?? {}) as Record<string, unknown>;
-    if (channelConfig.messageUrlTemplate === presetMessageUrl) continue;
+    if (!adopted) {
+      await prisma.notificationScenario.create({ data: { ...presetData, presetKey } });
+      continue;
+    }
 
+    const legacyName = previousNames?.includes(adopted.name) ?? false;
     await prisma.notificationScenario.update({
-      where: { id: existing.id },
+      where: { id: adopted.id },
       data: {
-        channelConfig: {
-          ...channelConfig,
-          messageUrlTemplate: presetMessageUrl,
-        },
+        presetKey,
+        ...(legacyName
+          ? {
+              name: preset.name,
+              description: preset.description,
+              channelConfig: {
+                ...((adopted.channelConfig ?? {}) as Record<string, unknown>),
+                titleTemplate: preset.channelConfig.titleTemplate,
+                contentTemplate: preset.channelConfig.contentTemplate,
+                messageUrlTemplate: preset.channelConfig.messageUrlTemplate,
+              },
+            }
+          : {}),
       },
     });
+
+    if (!legacyName) {
+      await syncPresetMessageUrl(adopted.id, adopted.channelConfig, preset.channelConfig.messageUrlTemplate);
+    }
   }
 }

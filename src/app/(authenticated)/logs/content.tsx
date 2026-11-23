@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Card } from "@/components/ui-kit";
 import { AuditLogTable } from "./audit-log-table";
 import { AuditFilters } from "./audit-filters";
@@ -46,43 +45,36 @@ export function AuditCenterContent({ searchParams, users }: AuditCenterContentPr
   };
 
   return (
-    <div className="flex h-full flex-col gap-4 p-6">
-      {/* 页面标题 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">日志中心</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            查询全平台操作日志和业务记录
-          </p>
+    <Card className="mb-4 !p-0 overflow-hidden">
+      <div className="px-5 pt-5">
+        <div className="flex flex-wrap gap-10">
+          {tabs.map((tab) => {
+            const active = currentView === tab.value;
+            return (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setView(tab.value)}
+                className="relative pb-3"
+              >
+                <span className={`text-sm font-medium transition ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                  {tab.label}
+                </span>
+                {active ? <span className="absolute bottom-0 left-0 h-0.5 w-10 bg-primary" /> : null}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Tab 导航 */}
-      <div className="flex gap-2 border-b border-border">
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setView(tab.value)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              currentView === tab.value
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 内容区域 */}
-      <Card>
+      <div className="px-5 pb-5 pt-4">
         <AuditFilters
           view={currentView}
           users={users}
           initialFilters={searchParams}
         />
         <AuditLogTable view={currentView} searchParams={searchParams} />
-      </Card>
-    </div>
+      </div>
+    </Card>
   );
 }

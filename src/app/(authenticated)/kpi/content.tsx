@@ -1630,13 +1630,8 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
         </div>
       ) : null}
       <Card className="mb-4 !p-0 overflow-hidden">
-        <div className="px-5 pt-5">
-          <h1 className="text-3xl font-semibold tracking-tight">KPI管理</h1>
-          <p className="mt-2 text-sm text-muted-foreground">按模板规则批量维护季度 KPI 单据，并进入自评、组长评分、主管评分流程</p>
-        </div>
-
         {showDepartmentTabs ? (
-          <div className="px-5 pt-3 flex flex-wrap items-end gap-8 text-sm shrink-0">
+          <div className="px-5 pt-5 flex flex-wrap items-end gap-8 text-sm shrink-0">
             {data.departmentOptions.map((department) => (
               <button
                 key={department.id}
@@ -1655,7 +1650,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
         ) : null}
 
         {teamTabs.length > 0 ? (
-          <div className="px-5 pt-3 pb-4 flex flex-wrap items-center gap-2">
+          <div className={`px-5 pb-4 flex flex-wrap items-center gap-2 ${showDepartmentTabs ? "pt-3" : "pt-5"}`}>
             {teamTabs.map((team) => (
               <button
                 key={team.id}
@@ -1669,7 +1664,7 @@ export function KpiContent({ data, selectedYear, selectedQuarter, activeSection,
           </div>
         ) : null}
 
-        <div className={`px-5 pb-4 flex flex-wrap items-center gap-4 ${teamTabs.length === 0 && !showDepartmentTabs ? "pt-3" : ""}`}>
+        <div className={`px-5 pb-4 flex flex-wrap items-center gap-4 ${teamTabs.length === 0 && !showDepartmentTabs ? "pt-5" : ""}`}>
           <div className="inline-flex rounded-lg bg-muted p-1">
             {KPI_SECTION_TABS.map((tab) => (
               <Link

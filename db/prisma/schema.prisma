@@ -2348,6 +2348,8 @@ model Notification {
 
 model NotificationScenario {
   id              String                  @id @default(cuid())
+  /// 内置场景的固定标识。改显示名称后仍指向同一行；用户自建场景为空。
+  presetKey       String?                 @unique
   name            String
   description     String?
   module          String                  @default("KPI管理")
