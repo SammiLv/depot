@@ -1181,17 +1181,57 @@ export async function mergeTeam(formData: FormData) {
     moved.quarterlyWorkCount += fallbackWork.count;
     moved.productGoalCount += fallbackGoal.count;
 
-    // 3. 个人 KPI 随组改挂（已拍板口径；审批链走快照字段不受影响）
-    const kpiMoved = await tx.personalKpi.updateMany({
+    // 3. 个人 KPI 随组改挂（含已软删，避免清零断言被残留挡住；审批链走快照字段不受影响）
+    const kpiActiveCount = await tx.personalKpi.count({
       where: { orgNodeId: sourceNode.id, deletedAt: null },
+    });
+    await tx.personalKpi.updateMany({
+      where: { orgNodeId: sourceNode.id },
       data: { orgNodeId: targetNode.id },
     });
 
-    // 4. 年度指标承接改挂目标组（责任人不变）
-    const assignmentMoved = await tx.annualGoalMetricAssignment.updateMany({
-      where: { teamOrgNodeId: sourceNode.id, deletedAt: null },
-      data: { teamOrgNodeId: targetNode.id },
+    // 4. 年度指标承接改挂目标组（责任人不变）。
+    // 同一指标或元指标目标组已经承接时，不能再挂一条未删除的记录（唯一约束 team+metric）。
+    // 这种重复项软删后改挂，保留目标组原有承接；已软删的记录只改挂，方便源组清零。
+    const sourceAssignments = await tx.annualGoalMetricAssignment.findMany({
+      where: { teamOrgNodeId: sourceNode.id },
+      select: { id: true, metricId: true, sourceMetricId: true, deletedAt: true },
     });
+    const targetAssignments = await tx.annualGoalMetricAssignment.findMany({
+      where: { teamOrgNodeId: targetNode.id, deletedAt: null },
+      select: { metricId: true, sourceMetricId: true },
+    });
+    const takenMetricIds = new Set(
+      targetAssignments.flatMap((row) => (row.metricId ? [row.metricId] : [])),
+    );
+    const takenSourceIds = new Set(
+      targetAssignments.flatMap((row) => (row.sourceMetricId ? [row.sourceMetricId] : [])),
+    );
+    let assignmentMovedCount = 0;
+    let assignmentRetiredCount = 0;
+    for (const row of sourceAssignments) {
+      const conflicts = row.deletedAt == null && (
+        (row.metricId != null && takenMetricIds.has(row.metricId))
+        || (row.sourceMetricId != null && takenSourceIds.has(row.sourceMetricId))
+      );
+      if (conflicts) {
+        await tx.annualGoalMetricAssignment.update({
+          where: { id: row.id },
+          data: { teamOrgNodeId: targetNode.id, deletedAt: new Date() },
+        });
+        assignmentRetiredCount += 1;
+        continue;
+      }
+      await tx.annualGoalMetricAssignment.update({
+        where: { id: row.id },
+        data: { teamOrgNodeId: targetNode.id },
+      });
+      if (row.deletedAt == null) {
+        if (row.metricId) takenMetricIds.add(row.metricId);
+        if (row.sourceMetricId) takenSourceIds.add(row.sourceMetricId);
+        assignmentMovedCount += 1;
+      }
+    }
 
     // 5. 审批策略固定节点改指向目标组
     await tx.kpiApprovalPolicyStep.updateMany({
@@ -1237,8 +1277,21 @@ export async function mergeTeam(formData: FormData) {
       data: { isActive: false },
     });
 
-    // 7. 兜底：已软删用户残留的 orgNodeId 一并挪走，保证源组干净
+    // 7. 兜底：已软删用户，以及仍挂在源组的单据（含软删）一并挪走，保证源组干净。
+    // 已经挂在离职人员组上的单据 orgNodeId 不是源组，不会被这里改走。
     await tx.user.updateMany({
+      where: { orgNodeId: sourceNode.id },
+      data: { orgNodeId: targetNode.id },
+    });
+    await tx.project.updateMany({
+      where: { orgNodeId: sourceNode.id },
+      data: { orgNodeId: targetNode.id },
+    });
+    await tx.quarterlyWork.updateMany({
+      where: { orgNodeId: sourceNode.id },
+      data: { orgNodeId: targetNode.id },
+    });
+    await tx.productGoal.updateMany({
       where: { orgNodeId: sourceNode.id },
       data: { orgNodeId: targetNode.id },
     });
@@ -1287,7 +1340,8 @@ export async function mergeTeam(formData: FormData) {
       operationNote:
         `「${sourceNode.name}」并入「${targetNode.name}」：成员 ${activeMembers.length} 人`
         + (demotedLeaderNames.length > 0 ? `（组长 ${demotedLeaderNames.join("、")} 已转为组员）` : "")
-        + `；项目 ${moved.projectCount} 个、需求 ${moved.quarterlyWorkCount} 条、产品目标 ${moved.productGoalCount} 个、个人 KPI ${kpiMoved.count} 份、指标承接 ${assignmentMoved.count} 项`,
+        + `；项目 ${moved.projectCount} 个、需求 ${moved.quarterlyWorkCount} 条、产品目标 ${moved.productGoalCount} 个、个人 KPI ${kpiActiveCount} 份、指标承接 ${assignmentMovedCount} 项`
+        + (assignmentRetiredCount > 0 ? `（${assignmentRetiredCount} 项目标组已承接同一指标，未重复挂入）` : ""),
     });
   });
 
