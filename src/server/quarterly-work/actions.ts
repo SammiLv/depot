@@ -125,6 +125,44 @@ async function assertDevProjectRequirementsBeforeCompletion(
   }
 }
 
+/** 开发项目标为已完成前，未完成需求必须先由用户完成或关闭，不能用项目完成时间回填。 */
+async function assertDevProjectRequirementsSettledBeforeCompletion(
+  projectId: string,
+  nextStatus: ProjectStatus,
+  needsDevelopment: boolean,
+) {
+  if (nextStatus !== "COMPLETED" || !needsDevelopment) return;
+  const openRequirements = await prisma.quarterlyWork.findMany({
+    where: {
+      projectId,
+      deletedAt: null,
+      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+    },
+    select: { title: true },
+    orderBy: { title: "asc" },
+    take: 9,
+  });
+  if (openRequirements.length === 0) return;
+  const listed = openRequirements.slice(0, 8).map((row) => `「${row.title}」`).join("、");
+  const suffix = openRequirements.length > 8 ? "等" : "";
+  throw new Error(`请先完成或关闭需求后再将项目标记为已完成：${listed}${suffix}`);
+}
+
+/** 保存为已上线时，至少要有一条已完成（含延期完成）的需求。关闭的需求不算。 */
+async function assertLaunchedProjectHasCompletedRequirement(projectId: string, nextStatus: ProjectStatus) {
+  if (nextStatus !== "LAUNCHED") return;
+  const completedCount = await prisma.quarterlyWork.count({
+    where: {
+      projectId,
+      deletedAt: null,
+      status: { in: ["COMPLETED", "DELAYED_COMPLETED"] },
+    },
+  });
+  if (completedCount === 0) {
+    throw new Error("项目保存为已上线前，须至少有一条已完成的需求");
+  }
+}
+
 function revalidateQuarterlyWork() {
   revalidatePath("/quarterly-work");
   revalidatePath("/dashboard");
@@ -1136,6 +1174,8 @@ export async function updateProjectStatus(formData: FormData) {
 
   assertProjectStatusTransition(project.status, status, project.needsDevelopment !== false);
   await assertDevProjectRequirementsBeforeCompletion(project, status);
+  await assertDevProjectRequirementsSettledBeforeCompletion(project.id, status, project.needsDevelopment === true);
+  await assertLaunchedProjectHasCompletedRequirement(project.id, status);
 
   const becameLaunched = status === "LAUNCHED" && project.status !== "LAUNCHED";
   const becameCompleted = status === "COMPLETED" && project.status !== "COMPLETED";
@@ -1170,8 +1210,10 @@ export async function updateProjectStatus(formData: FormData) {
       launchedAt: nextLaunchedAt,
     });
 
-    if ((status === "COMPLETED" || status === "CLOSED") && project.status !== status) {
-      await cascadeTerminalStatusToOpenRequirements(tx, project.id, status, nextCompletedAt);
+    const cascadeOpenRequirements = (status === "CLOSED" || (status === "COMPLETED" && project.needsDevelopment !== true))
+      && project.status !== status;
+    if (cascadeOpenRequirements) {
+      await cascadeTerminalStatusToOpenRequirements(tx, project.id, status === "CLOSED" ? "CLOSED" : "COMPLETED", nextCompletedAt);
     }
   });
 
@@ -1224,6 +1266,9 @@ export async function createProject(formData: FormData) {
   }
   if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
+  }
+  if (status === "LAUNCHED") {
+    throw new Error("项目保存为已上线前，须至少有一条已完成的需求");
   }
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("项目状态为已完成时，完成时间为必填项");
@@ -1994,6 +2039,8 @@ export async function updateProject(formData: FormData) {
   assertProjectStatusTransition(project.status, status, needsDevelopment);
   // 同一次保存可能同时切换「是否开发项目」，完成前校验以表单新值为准
   await assertDevProjectRequirementsBeforeCompletion({ ...project, needsDevelopment }, status);
+  await assertDevProjectRequirementsSettledBeforeCompletion(project.id, status, needsDevelopment);
+  await assertLaunchedProjectHasCompletedRequirement(project.id, status);
 
   const taskCount = await countProjectTasks(project.id);
   const resolvedWorkloadPersonDay = taskCount > 0
@@ -2106,8 +2153,10 @@ export async function updateProject(formData: FormData) {
       }
     }
 
-    if ((status === "COMPLETED" || status === "CLOSED") && project.status !== status) {
-      await cascadeTerminalStatusToOpenRequirements(tx, project.id, status, nextCompletedAt);
+    const cascadeOpenRequirements = (status === "CLOSED" || (status === "COMPLETED" && !needsDevelopment))
+      && project.status !== status;
+    if (cascadeOpenRequirements) {
+      await cascadeTerminalStatusToOpenRequirements(tx, project.id, status === "CLOSED" ? "CLOSED" : "COMPLETED", nextCompletedAt);
     }
   });
 

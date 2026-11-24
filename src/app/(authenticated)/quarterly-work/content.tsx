@@ -1121,8 +1121,15 @@ function ProjectEditForm({
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
   const showCompletedLaunchedAt = projectStatus === "COMPLETED" && editNeedsDev === "true";
   const launchedAtRequiredForCompleted = showCompletedLaunchedAt && item.needsDevelopment !== true;
-  // 级联完成提醒：项目置为终态时，其下所有未完成需求会被同时置为同状态，完成时间记为当前时间
-  const cascadesCompletion = (projectStatus === "COMPLETED" || projectStatus === "CLOSED") && projectStatus !== item.status;
+  // 非开发项目首次变为已完成/关闭时，才把尚未完成的需求一并改状态。开发项目不回填需求完成时间。
+  const cascadesCompletion = (projectStatus === "CLOSED" || (projectStatus === "COMPLETED" && editNeedsDev !== "true"))
+    && projectStatus !== item.status;
+  const devCompletionBlockedMessage = projectStatus === "COMPLETED" && editNeedsDev === "true" && item.openRequirementTitles.length > 0
+    ? `请先完成或关闭需求后再将项目标记为已完成：${item.openRequirementTitles.slice(0, 8).map((title) => `「${title}」`).join("、")}${item.openRequirementTitles.length > 8 ? "等" : ""}`
+    : null;
+  const launchBlockedMessage = projectStatus === "LAUNCHED" && !item.hasCompletedRequirement
+    ? "项目保存为已上线前，须至少有一条已完成的需求"
+    : null;
   const hasTasks = item.workCount > 0;
   const taskWorkloadSum = useMemo(() => {
     if (!hasTasks) return null;
@@ -1184,6 +1191,14 @@ function ProjectEditForm({
       }
       if (launchedAtRequiredForCompleted && !String(formData.get("launchedAt") ?? "").trim()) {
         setErrorMessage("已完成项目改为开发项目时，请填写上线时间");
+        return;
+      }
+      if (devCompletionBlockedMessage) {
+        setErrorMessage(devCompletionBlockedMessage);
+        return;
+      }
+      if (launchBlockedMessage) {
+        setErrorMessage(launchBlockedMessage);
         return;
       }
       validateSelectedProductGoalIds(formData);
@@ -1317,6 +1332,12 @@ function ProjectEditForm({
             <span>项目下所有未完成的需求都将被同时标记为「{projectStatus === "COMPLETED" ? "已完成" : "已关闭"}」，完成时间统一记为当前项目的完成时间。</span>
           </div>
         ) : null}
+        {devCompletionBlockedMessage ? (
+          <p className="text-xs text-[#F53F3F]">{devCompletionBlockedMessage}</p>
+        ) : null}
+        {launchBlockedMessage ? (
+          <p className="text-xs text-[#F53F3F]">{launchBlockedMessage}</p>
+        ) : null}
         {item.status === "COMPLETED" || item.status === "CLOSED" ? (
           <input type="hidden" name="status" value={item.status} />
         ) : null}
@@ -1395,7 +1416,7 @@ function ProjectEditForm({
 </StickyFormScroll>
       <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-          项目变更为已完成或关闭时，将同步更新其下尚未完成的需求状态；已经完成的需求保留原完成时间。
+          开发项目须先完成或关闭全部需求后才能标记为已完成，且不会改写需求的完成时间。非开发项目变更为已完成或关闭时，只更新尚未完成的需求。
         </div>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -1521,6 +1542,10 @@ function ProjectCreateForm({
           setErrorMessage("开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成");
           return;
         }
+        if (status === "LAUNCHED") {
+          setErrorMessage("项目保存为已上线前，须至少有一条已完成的需求");
+          return;
+        }
         await runServerAction(() => createProject(formData));
         router.refresh();
         onClose();
@@ -1615,6 +1640,9 @@ function ProjectCreateForm({
         </FieldRow>
         {createProjectStatus === "COMPLETED" && createNeedsDev === "true" ? (
           <p className="text-xs text-[#F53F3F]">开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成</p>
+        ) : null}
+        {createProjectStatus === "LAUNCHED" ? (
+          <p className="text-xs text-[#F53F3F]">项目保存为已上线前，须至少有一条已完成的需求</p>
         ) : null}
         {createProjectStatus === "COMPLETED" || createProjectStatus === "LAUNCHED" ? (
           <div ref={createProjectStatus === "LAUNCHED" ? launchedAtRowRef : completedAtRowRef}>
