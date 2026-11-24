@@ -34,7 +34,7 @@ import {
   resolveUserNames,
   writeOperationLog,
 } from "@/server/quarterly-work/operation-log";
-import type { ProjectStatus, WorkStatus } from "@prisma/client";
+import type { Prisma, ProjectStatus, WorkStatus } from "@prisma/client";
 import {
   VALUE_JUDGEMENTS,
   VALUE_TRACK_STATUS_PENDING_OBSERVATION,
@@ -386,6 +386,26 @@ function resolveProjectCompletedAtByStatus(
 
 function getProjectCompletedAtByStatus(status: ProjectStatus) {
   return status === "COMPLETED" ? startOfToday() : null;
+}
+
+/** 项目首次变为已完成/关闭时，只改尚未完成的需求，已有完成时间保持不动。 */
+async function cascadeTerminalStatusToOpenRequirements(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  status: "COMPLETED" | "CLOSED",
+  completedAt: Date | null,
+) {
+  await tx.quarterlyWork.updateMany({
+    where: {
+      projectId,
+      deletedAt: null,
+      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+    },
+    data: {
+      status,
+      completedAt: status === "COMPLETED" ? completedAt : null,
+    },
+  });
 }
 
 function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
@@ -1150,15 +1170,8 @@ export async function updateProjectStatus(formData: FormData) {
       launchedAt: nextLaunchedAt,
     });
 
-    if (status === "COMPLETED" || status === "CLOSED") {
-      await tx.quarterlyWork.updateMany({
-        where: { projectId: project.id, deletedAt: null },
-        data: {
-          status,
-          // 需求完成时间与项目完成时间保持一致（当前时间）
-          completedAt: status === "COMPLETED" ? nextCompletedAt : null,
-        },
-      });
+    if ((status === "COMPLETED" || status === "CLOSED") && project.status !== status) {
+      await cascadeTerminalStatusToOpenRequirements(tx, project.id, status, nextCompletedAt);
     }
   });
 
@@ -2009,7 +2022,6 @@ export async function updateProject(formData: FormData) {
   const nextLaunchedAt = acceptsLaunchedAtInput
     ? (parseLaunchedAtInput(formData.get("launchedAt")) ?? project.launchedAt)
     : getProjectLaunchedAtByStatus(status, project.launchedAt);
-  // 需求级联完成时间与项目完成时间保持一致
   const nextCompletedAt = resolveProjectCompletedAtByStatus(status, formData.get("completedAt"), project.completedAt);
   if (status === "LAUNCHED" && !nextLaunchedAt) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
@@ -2094,15 +2106,8 @@ export async function updateProject(formData: FormData) {
       }
     }
 
-    if (status === "COMPLETED" || status === "CLOSED") {
-      await tx.quarterlyWork.updateMany({
-        where: { projectId: project.id, deletedAt: null },
-        data: {
-          status,
-          // 需求完成时间与项目完成时间保持一致（用户填写的项目完成时间）
-          completedAt: status === "COMPLETED" ? nextCompletedAt : null,
-        },
-      });
+    if ((status === "COMPLETED" || status === "CLOSED") && project.status !== status) {
+      await cascadeTerminalStatusToOpenRequirements(tx, project.id, status, nextCompletedAt);
     }
   });
 

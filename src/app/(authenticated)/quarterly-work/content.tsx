@@ -1395,7 +1395,7 @@ function ProjectEditForm({
 </StickyFormScroll>
       <StickyFormFooter>
         <div className="rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-          项目变更为已完成或关闭时，将同步更新其下所有需求状态，且不再有价值跟踪等后续事项。
+          项目变更为已完成或关闭时，将同步更新其下尚未完成的需求状态；已经完成的需求保留原完成时间。
         </div>
         {errorMessage ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
