@@ -148,6 +148,13 @@ async function assertDevProjectRequirementsSettledBeforeCompletion(
   throw new Error(`请先完成或关闭需求后再将项目标记为已完成：${listed}${suffix}`);
 }
 
+/** 新建项目还没有需求，不能直接标为已上线。单独函数抛错，避免收窄后续 status 类型。 */
+function assertProjectNotCreatedAsLaunched(status: ProjectStatus) {
+  if (status === "LAUNCHED") {
+    throw new Error("项目保存为已上线前，须至少有一条已完成的需求");
+  }
+}
+
 /** 保存为已上线时，至少要有一条已完成（含延期完成）的需求。关闭的需求不算。 */
 async function assertLaunchedProjectHasCompletedRequirement(projectId: string, nextStatus: ProjectStatus) {
   if (nextStatus !== "LAUNCHED") return;
@@ -1267,9 +1274,7 @@ export async function createProject(formData: FormData) {
   if (status === "LAUNCHED" && !parseLaunchedAtInput(formData.get("launchedAt"))) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
   }
-  if (status === "LAUNCHED") {
-    throw new Error("项目保存为已上线前，须至少有一条已完成的需求");
-  }
+  assertProjectNotCreatedAsLaunched(status);
   if (status === "COMPLETED" && !parseDateTimeInput(formData.get("completedAt"))) {
     throw new Error("项目状态为已完成时，完成时间为必填项");
   }
