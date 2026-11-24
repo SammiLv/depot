@@ -240,7 +240,7 @@ function matchesValueOverviewColumn(
 const projectListGridClass =
   "grid-cols-[minmax(0,1.05fr)_minmax(0,0.78fr)_minmax(0,0.52fr)_minmax(0,0.58fr)_minmax(0,1.08fr)_minmax(0,0.46fr)_minmax(0,0.48fr)_minmax(0,0.56fr)_minmax(0,0.56fr)_minmax(88px,0.62fr)]";
 const projectTreeRowClass =
-  "grid grid-cols-[minmax(0,1fr)_88px_100px_80px_72px_160px_96px_100px] gap-6 px-4";
+  "grid grid-cols-[minmax(0,1fr)_88px_100px_80px_72px_160px_96px_96px_100px] gap-6 px-4";
 const goalListRowClass =
   "grid grid-cols-[minmax(160px,1.1fr)_72px_48px_minmax(160px,1.2fr)_minmax(180px,1.3fr)_72px_96px_96px_88px] gap-6";
 const goalStickyNameShadow =
@@ -3922,8 +3922,10 @@ function ProjectTreeChildRow({
   onDelete?: () => void;
 }) {
   return (
-    <div className={`${projectTreeRowClass} items-center border-b border-[#F2F3F5] bg-white py-3`}>
-      <div className={`min-w-0 ${indent ? "col-span-2 pl-[60px]" : ""}`}>
+    <div
+      className={`${projectTreeRowClass} items-center border-b border-[#F2F3F5] bg-white py-3 ${onView ? "cursor-pointer" : ""}`}
+      onClick={onView}
+    >      <div className={`min-w-0 ${indent ? "col-span-2 pl-[60px]" : ""}`}>
         <div className="text-sm font-medium leading-[22px] text-[#181818]">{title}</div>
         {description ? (
           <HoverCopy text={description} className={descriptionClassName}>
@@ -3952,18 +3954,7 @@ function ProjectTreeChildRow({
         ) : null}
       </div>
       <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(completedAt)}</div>
-      <div className="flex items-center justify-end gap-3">
-        {onView ? (
-          <button
-            type="button"
-            onClick={onView}
-            title="查看详情"
-            aria-label={`查看${title}的详情`}
-            className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-          >
-            <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
-          </button>
-        ) : null}
+      <div className="flex items-center justify-end gap-3" onClick={(event) => event.stopPropagation()}>
         {canEdit ? (
           <button
             type="button"
@@ -4176,7 +4167,6 @@ function ProjectListActionButtons({
   canEdit,
   onCreate,
   onBackfill,
-  onViewDetail,
   onEdit,
   onDelete,
 }: {
@@ -4186,12 +4176,11 @@ function ProjectListActionButtons({
   canEdit?: boolean;
   onCreate: () => void;
   onBackfill?: () => void;
-  onViewDetail: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const editAllowed = canEdit ?? canManage;
-  // 一行最多 4 个按钮（4×26+3×8=128px），超过自动换为两行
+  // 一行最多 4 个按钮（4×26+3×8=128px），超过自动换为两行；查看详情由整行点击承担，不再占操作栏
   return (
     <div className="flex max-w-[128px] flex-wrap items-center justify-end gap-2">
       {canCreate ? (
@@ -4216,15 +4205,6 @@ function ProjectListActionButtons({
           <ScrollText className="h-4 w-4 text-[#FF7D00]" />
         </button>
       ) : null}
-      <button
-        type="button"
-        onClick={onViewDetail}
-        title="查看详情"
-        aria-label="查看详情"
-        className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-      >
-        <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
-      </button>
       {editAllowed ? (
           <button
             type="button"
@@ -4336,6 +4316,9 @@ function ProjectDetailDrawer({
                   <span className="h-1 w-1 rounded-full bg-current" />
                   {projectTitleByStatus[project.status]}
                 </span>
+                <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-[3px] text-xs leading-[18px] ${project.needsDevelopment ? "bg-[#E8F2FF] text-[#3069F9]" : "bg-[#F5F5F5] text-[#777777]"}`}>
+                  {project.needsDevelopment ? "开发项目" : "非开发项目"}
+                </span>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {project.productGoals.length ? (
@@ -4360,7 +4343,7 @@ function ProjectDetailDrawer({
               </button>
             ) : null}
           </div>
-          {/* 摘要指标：第一行 负责人/项目周期/累计工作量，第二行 是否开发/上线时间/完成时间 */}
+          {/* 摘要指标：第一行 负责人/项目周期/累计工作量，第二行 创建时间/上线时间/完成时间 */}
           <div className="flex flex-col gap-3 pb-4 pl-10 pt-4">
             <div className="flex items-center">
               <div className="min-w-0 flex-1">
@@ -4391,8 +4374,8 @@ function ProjectDetailDrawer({
             </div>
             <div className="flex items-center">
               <div className="min-w-0 flex-1">
-                <div className="text-xs leading-[18px] text-[#777777]">是否开发项目</div>
-                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{project.needsDevelopment ? "是" : "否"}</div>
+                <div className="text-xs leading-[18px] text-[#777777]">创建时间</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(project.createdAt)}</div>
               </div>
               <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
               <div className="min-w-0 flex-1 pl-4">
@@ -4736,31 +4719,51 @@ function RequirementDetailDrawer({
               </button>
             ) : null}
           </div>
-          {/* 摘要指标：需求负责人 / 累计工作量 / 是否需要开发 */}
-          <div className="flex items-center pb-4 pl-10 pt-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs leading-[18px] text-[#777777]">需求负责人</div>
-              <div className="mt-1 flex items-center gap-2">
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#3069F9] text-[10px] font-semibold leading-[14px] text-white">
-                  {task.owner.slice(0, 1)}
-                </span>
-                <span className="truncate text-sm font-semibold leading-[22px] text-[#181818]">
-                  {task.owner}{task.teamName ? ` · ${task.teamName}` : ""}
-                </span>
+          {/* 摘要指标：第一行 需求负责人/累计工作量/是否需要开发，第二行 需求周期/创建时间/开发方 */}
+          <div className="flex flex-col gap-3 pb-4 pl-10 pt-4">
+            <div className="flex items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs leading-[18px] text-[#777777]">需求负责人</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#3069F9] text-[10px] font-semibold leading-[14px] text-white">
+                    {task.owner.slice(0, 1)}
+                  </span>
+                  <span className="truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                    {task.owner}{task.teamName ? ` · ${task.teamName}` : ""}
+                  </span>
+                </div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">累计工作量（人天）</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {formatWorkload(task.workloadPersonDay)}
+                </div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">是否需要开发</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {task.needsDevelopment ? "是" : "否"}
+                </div>
               </div>
             </div>
-            <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
-            <div className="min-w-0 flex-1 pl-4">
-              <div className="text-xs leading-[18px] text-[#777777]">累计工作量（人天）</div>
-              <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
-                {formatWorkload(task.workloadPersonDay)}
+            <div className="flex items-center">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs leading-[18px] text-[#777777]">需求周期</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{periodText}</div>
               </div>
-            </div>
-            <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
-            <div className="min-w-0 flex-1 pl-4">
-              <div className="text-xs leading-[18px] text-[#777777]">是否需要开发</div>
-              <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
-                {task.needsDevelopment ? "是" : "否"}
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">创建时间</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(task.createdAt)}</div>
+              </div>
+              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
+              <div className="min-w-0 flex-1 pl-4">
+                <div className="text-xs leading-[18px] text-[#777777]">开发方</div>
+                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
+                  {task.needsDevelopment ? developmentSourceLabel(task.developmentSource) : "-"}
+                </div>
               </div>
             </div>
           </div>
@@ -4769,25 +4772,6 @@ function RequirementDetailDrawer({
         {/* 滚动内容 */}
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="flex flex-col gap-4">
-            {/* 需求周期 / 开发方卡 */}
-            <div className="grid grid-cols-2 gap-4 rounded-2xl bg-white p-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <CalendarDays className="h-4 w-4 text-[#4B4B4B]" />
-                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求周期</span>
-                </div>
-                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">{periodText}</p>
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <Code2 className="h-4 w-4 text-[#4B4B4B]" />
-                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">开发方</span>
-                </div>
-                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">
-                  {task.needsDevelopment ? developmentSourceLabel(task.developmentSource) : "-"}
-                </p>
-              </div>
-            </div>
             {/* 需求描述卡 */}
             <div className="rounded-2xl bg-white p-4">
               <div className="flex items-center gap-2">
@@ -5125,6 +5109,24 @@ function ProjectTreeTable({
   onEditValueTrack: (track: ProjectWorkspaceValueTrackItem) => void;
 }) {
   const { sort, toggleSort } = useListSort();
+  // 横向滚动时第一列（名称）固定：pingLeft 控制左侧阴影（与目标/需求/价值跟踪列表同模式）
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [pingLeft, setPingLeft] = useState(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      setPingLeft(el.scrollLeft > 1);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [projects.length]);
   const sortedProjects = useMemo(() => {
     if (!sort) return projects;
     const compare = (a: ProjectWorkspaceItem, b: ProjectWorkspaceItem): number => {
@@ -5132,8 +5134,7 @@ function ProjectTreeTable({
         case "title":
           return compareSortStrings(a.title, b.title, sort.dir);
         case "goal":
-          return compareSortStrings(a.productGoals[0]?.title, b.productGoals[0]?.title, sort.dir);
-        case "owner":
+          return compareSortStrings(a.productGoals[0]?.title, b.productGoals[0]?.title, sort.dir);        case "owner":
           return compareSortStrings(a.owner, b.owner, sort.dir);
         case "workload":
           return compareSortNumbers(a.workloadPersonDay, b.workloadPersonDay, sort.dir);
@@ -5144,6 +5145,8 @@ function ProjectTreeTable({
           if (byStart !== 0) return byStart;
           return compareSortNumbers(quarterStartMonthIndex(a.endQuarter), quarterStartMonthIndex(b.endQuarter), sort.dir);
         }
+        case "launchedAt":
+          return compareSortDates(a.launchedAt, b.launchedAt, sort.dir);
         case "completedAt":
           return compareSortDates(a.completedAt, b.completedAt, sort.dir);
         default:
@@ -5153,27 +5156,34 @@ function ProjectTreeTable({
     return [...projects].sort(compare);
   }, [projects, sort]);
   return (
-    <div className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
-      <div className={`${projectTreeRowClass} sticky top-0 z-10 h-11 items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
-        <div><SortableHeader field="title" label="名称" sort={sort} onToggle={toggleSort} /></div>
+    <div ref={scrollRef} className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
+      <div className={`${projectTreeRowClass} sticky top-0 z-10 h-11 min-w-[1240px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
+        <div className={`sticky left-0 top-0 z-30 -ml-4 flex items-center overflow-visible bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}><SortableHeader field="title" label="名称" sort={sort} onToggle={toggleSort} /></div>
         <div className="whitespace-nowrap"><SortableHeader field="goal" label="所属目标" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="owner" label="负责人" sort={sort} onToggle={toggleSort} /></div>
         <div className="whitespace-nowrap"><SortableHeader field="workload" label="工作量(人天)" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="status" label="状态" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="period" label="周期" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="launchedAt" label="上线时间" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="completedAt" label="完成时间" sort={sort} onToggle={toggleSort} /></div>
         <div className="text-right">操作</div>
       </div>
-      <div>
+      <div className="min-w-[1240px]">
         {sortedProjects.map((project) => {
           const expanded = project.id === expandedProjectId;
           return (
             <div key={project.id}>
-              <div className={`${projectTreeRowClass} items-center border-b border-[#F0F0F0] py-3 transition-colors duration-300 ${expanded ? "bg-[#F7FAFF]" : "bg-white"}`}>
-                <div className="min-w-0">
+              <div
+                className={`${projectTreeRowClass} cursor-pointer items-center border-b border-[#F0F0F0] py-3 transition-colors duration-300 ${expanded ? "bg-[#F7FAFF]" : "bg-white"}`}
+                onClick={() => onViewDetail(project)}
+              >
+                <div className={`sticky left-0 z-10 -my-3 -ml-4 min-w-0 self-stretch overflow-visible py-3 pl-4 ${expanded ? "bg-[#F7FAFF]" : "bg-white"} ${pingLeft ? goalStickyNameShadow : ""}`}>
                   <button
                     type="button"
-                    onClick={() => onToggleExpand(project.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggleExpand(project.id);
+                    }}
                     className="flex max-w-full items-center gap-2 text-left"
                     aria-expanded={expanded}
                   >
@@ -5203,12 +5213,6 @@ function ProjectTreeTable({
                     </span>
                     <span className="min-w-0">
                       <span className="block text-base font-medium leading-6 text-[#181818]">{project.title}</span>
-                      <HoverCopy
-                        text={(project.description || project.expectedOutcome || "").trim()}
-                        className="mt-0.5 line-clamp-2 text-xs leading-[18px] text-[#777777]"
-                      >
-                        {project.description || project.expectedOutcome || "暂无项目说明"}
-                      </HoverCopy>
                     </span>
                   </button>
                 </div>
@@ -5227,6 +5231,11 @@ function ProjectTreeTable({
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.workloadPersonDay ?? "-"}</div>
                 <div>
                   <ListStatusTag label={projectTitleByStatus[project.status]} className={projectStatusTagClass[project.status]} />
+                  {project.needsDevelopment ? (
+                    <div className="mt-1">
+                      <span className="rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">开发项目</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
                   <span>{formatListQuarterRange(project.startQuarter, project.endQuarter)}</span>
@@ -5238,8 +5247,9 @@ function ProjectTreeTable({
                     </span>
                   ) : null}
                 </div>
+                <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.launchedAt)}</div>
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.completedAt)}</div>
-                <div className="flex items-center justify-end">
+                <div className="flex items-center justify-end" onClick={(event) => event.stopPropagation()}>
                   <ProjectListActionButtons
                     canCreate={
                       // 项目 tab 的新增入口受项目状态约束：已完成/已关闭不再显示加号
@@ -5262,7 +5272,6 @@ function ProjectTreeTable({
                     }}
                     onEdit={() => onEditProject(project)}
                     onDelete={() => onDeleteProject(project)}
-                    onViewDetail={() => onViewDetail(project)}
                     onBackfill={
                       canBackfill && project.needsDevelopment === true && project.status === "COMPLETED"
                         ? () => onBackfill(project)
@@ -5811,11 +5820,17 @@ function ValueListTable({
           const expanded = expandedProjectId === project.id;
           return (
             <div key={project.id} className="border-b border-[#F2F3F5]">
-            <div className={`${valueListRowClass} items-center py-3 transition-colors duration-300 ${expanded ? "bg-[#F7FAFF]" : "bg-white"}`}>
+            <div
+              className={`${valueListRowClass} cursor-pointer items-center py-3 transition-colors duration-300 ${expanded ? "bg-[#F7FAFF]" : "bg-white"}`}
+              onClick={() => onViewDetail(project)}
+            >
               <div className={`flex items-center gap-1 break-words text-sm font-medium leading-[22px] text-[#181818] ${goalStickyNameClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingLeft ? goalStickyNameShadow : ""}`}>
                 <button
                   type="button"
-                  onClick={() => setExpandedProjectId(expanded ? null : project.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setExpandedProjectId(expanded ? null : project.id);
+                  }}
                   className="flex h-4 w-4 shrink-0 items-center justify-center"
                   aria-expanded={expanded}
                   aria-label={expanded ? `收起${project.title}的跟踪快照` : `展开${project.title}的跟踪快照`}
@@ -5869,7 +5884,7 @@ function ValueListTable({
                 <ListStatusTag label={projectTitleByStatus[project.status]} className={projectStatusTagClass[project.status]} />
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(project.launchedAt)}</div>
-              <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingRight ? goalStickyActionShadow : ""}`}>
+              <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${expanded ? "!bg-[#F7FAFF]" : ""} ${pingRight ? goalStickyActionShadow : ""}`} onClick={(event) => event.stopPropagation()}>
                 {canCreateTrack && project.launchedAt && project.valueTrackSummary.trackCount < 2 ? (
                   <button
                     type="button"
@@ -5881,15 +5896,6 @@ function ValueListTable({
                     <img src="/icons/plus-outlined-blue.png" alt="" width={16} height={16} className="hidden h-4 w-4 group-hover:block" />
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => onViewDetail(project)}
-                  title="查看详情"
-                  aria-label={`查看${project.title}的价值跟踪详情`}
-                  className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-                >
-                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
-                </button>
                 {canManage ? (
                   <button
                     type="button"
@@ -6058,7 +6064,11 @@ function TaskListTable({
           const remain = task.remainingWeeksLabel;
           const remainOverdue = Boolean(remain?.startsWith("逾期"));
           return (
-            <div key={task.id} className={`${taskListRowClass} items-start border-b border-[#F2F3F5] bg-white py-3`}>
+            <div
+              key={task.id}
+              className={`${taskListRowClass} cursor-pointer items-start border-b border-[#F2F3F5] bg-white py-3`}
+              onClick={() => onViewDetail(task)}
+            >
               <div className={`break-words text-sm font-medium leading-[22px] text-[#181818] ${goalStickyNameClass} ${pingLeft ? goalStickyNameShadow : ""}`}>{task.title}</div>
               <div className="min-w-0">
                 {task.projectTitle ? (
@@ -6093,16 +6103,7 @@ function TaskListTable({
                 ) : null}
               </div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.completedAt)}</div>
-              <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`}>
-                <button
-                  type="button"
-                  onClick={() => onViewDetail(task)}
-                  title="查看详情"
-                  aria-label={`查看${task.title}的详情`}
-                  className="group flex h-[26px] w-[26px] items-center justify-center rounded hover:bg-[#E8F2FF]"
-                >
-                  <Eye className="h-4 w-4 text-[#4B4B4B] group-hover:text-[#3069F9]" />
-                </button>
+              <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`} onClick={(event) => event.stopPropagation()}>
                 {canManage && workAllowsEdit(task.status, canEditTerminalProjectWork) ? (
                   <>
                     <button

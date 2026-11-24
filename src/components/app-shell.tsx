@@ -170,16 +170,19 @@ export function AppShell({ children, user, allowedMenus }: { children: ReactNode
       </aside>
 
       {ownsPageHeader ? (
-        <main className="h-full min-h-0 overflow-hidden bg-[#F5F7F9] pl-[72px]">{children}</main>
+        // 整站最小内容宽度 1280px：窗口过窄时整页横向滚动，不压碎表格列
+        <main className="h-full min-h-0 overflow-x-auto overflow-y-hidden bg-[#F5F7F9] pl-[72px]">
+          <div className="h-full min-w-[1280px]">{children}</div>
+        </main>
       ) : (
-        <main className="flex h-full min-h-0 flex-col overflow-hidden bg-[#F5F7F9] pl-[72px]">
+        <main className="flex h-full min-h-0 flex-col overflow-x-auto overflow-y-hidden bg-[#F5F7F9] pl-[72px]">
           {hideShellHeader ? null : (
-            <header className="shrink-0 bg-white px-4 py-4">
+            <header className="shrink-0 min-w-[1280px] bg-white px-4 py-4">
               <h1 className="text-2xl font-semibold tracking-tight text-[#181818]">{current?.label ?? "工作台"}</h1>
               <p className="mt-2 text-sm text-[#777777]">{current?.description ?? ""}</p>
             </header>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+          <div className="min-h-0 min-w-[1280px] flex-1 overflow-y-auto p-4">{children}</div>
         </main>
       )}
     </div>
