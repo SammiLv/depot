@@ -138,6 +138,10 @@ type ProjectBoardItem = {
   valueJudgement: string | null;
   valueTrackStatus: string;
   workCount: number;
+  /** 未删除且尚未完成/关闭的需求名称，供项目完成前校验 */
+  openRequirementTitles: string[];
+  /** 是否已有状态为已完成或延期完成的需求 */
+  hasCompletedRequirement: boolean;
   activeQuarterCount: number;
   createdAt: Date;
   launchedAt: Date | null;
@@ -900,6 +904,11 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       valueJudgement: project.valueJudgement,
       valueTrackStatus: normalizeValueTrackStatus(project.valueTrackStatus),
       workCount: projectWorks.length,
+      openRequirementTitles: projectWorks
+        .filter((work) => work.status === "NOT_STARTED" || work.status === "IN_PROGRESS")
+        .map((work) => work.title)
+        .sort((left, right) => left.localeCompare(right, "zh-CN")),
+      hasCompletedRequirement: projectWorks.some((work) => work.status === "COMPLETED" || work.status === "DELAYED_COMPLETED"),
       activeQuarterCount: activeProjectWorks.length,
       createdAt: project.createdAt,
       launchedAt: project.launchedAt,
