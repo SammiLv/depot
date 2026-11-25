@@ -2032,21 +2032,17 @@ export async function updateProject(formData: FormData) {
     throw new Error("项目已上线，不能再改为非开发项目");
   }
   if (!needsDevelopment) {
-    const devRequirements = await prisma.quarterlyWork.findMany({
+    const devRequirementCount = await prisma.quarterlyWork.count({
       where: {
         projectId: project.id,
         deletedAt: null,
         needsDevelopment: true,
         status: { not: "CLOSED" },
       },
-      select: { title: true },
-      orderBy: { title: "asc" },
-      take: 8,
     });
-    if (devRequirements.length > 0) {
-      const listed = devRequirements.map((row) => `「${row.title}」`).join("、");
+    if (devRequirementCount > 0) {
       throw new Error(
-        `项目下仍有需开发的需求，不能改为非开发项目。请先将以下需求改为「否」或关闭：${listed}`,
+        `项目下仍有 ${devRequirementCount} 条需开发的需求，不能改为非开发项目。请先将这些需求改为「否」或关闭`,
       );
     }
   }
@@ -2088,9 +2084,11 @@ export async function updateProject(formData: FormData) {
   if (status === "LAUNCHED" && !nextLaunchedAt) {
     throw new Error("项目状态为已上线时，上线时间为必填项");
   }
-  const switchingCompletedToDevelopment = status === "COMPLETED" && needsDevelopment && project.needsDevelopment !== true;
-  if (switchingCompletedToDevelopment && !nextLaunchedAt) {
-    throw new Error("已完成项目改为开发项目时，上线时间为必填项");
+  // 已完成开发项目的上线时间是首版完成度分界：转为开发项目、或历史已完成但缺上线时间的开发项目，都必填
+  const completedDevNeedsLaunchedAt = status === "COMPLETED" && needsDevelopment
+    && (project.needsDevelopment !== true || !project.launchedAt);
+  if (completedDevNeedsLaunchedAt && !nextLaunchedAt) {
+    throw new Error("已完成的开发项目必须填写上线时间（作为首版完成度分界）");
   }
   if (status === "COMPLETED" && nextLaunchedAt && nextCompletedAt
     && toBusinessDate(nextLaunchedAt).getTime() > toBusinessDate(nextCompletedAt).getTime()) {

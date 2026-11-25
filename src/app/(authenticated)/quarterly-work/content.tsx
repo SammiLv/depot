@@ -1120,7 +1120,8 @@ function ProjectEditForm({
   }, [projectStatus]);
   const workloadRequired = projectStatus === "LAUNCHED" || projectStatus === "COMPLETED";
   const showCompletedLaunchedAt = projectStatus === "COMPLETED" && editNeedsDev === "true";
-  const launchedAtRequiredForCompleted = showCompletedLaunchedAt && item.needsDevelopment !== true;
+  // 上线时间必填：改为开发项目的已完成项目，或历史已完成但缺上线时间的开发项目
+  const launchedAtRequiredForCompleted = showCompletedLaunchedAt && (item.needsDevelopment !== true || !item.launchedAt);
   // 非开发项目首次变为已完成/关闭时，才把尚未完成的需求一并改状态。开发项目不回填需求完成时间。
   const cascadesCompletion = (projectStatus === "CLOSED" || (projectStatus === "COMPLETED" && editNeedsDev !== "true"))
     && projectStatus !== item.status;
@@ -1162,7 +1163,7 @@ function ProjectEditForm({
     return [...titles].sort((left, right) => left.localeCompare(right, "zh-CN"));
   }, [data.columns, data.taskWorkspaceItems, item.id]);
   const nonDevProjectBlockedMessage = activeDevRequirementTitles.length > 0
-    ? `项目下仍有需开发的需求，不能改为非开发项目。请先将以下需求改为「否」或关闭：${activeDevRequirementTitles.map((title) => `「${title}」`).join("、")}`
+    ? `项目下仍有 ${activeDevRequirementTitles.length} 条需开发的需求，不能改为非开发项目。请先将这些需求改为「否」或关闭。`
     : null;
   const [workloadPersonDay, setWorkloadPersonDay] = useState<string>(() => {
     if (hasTasks) {
@@ -3974,7 +3975,7 @@ function ProjectTreeChildRow({
       </div>
       {meta ? <div className="min-w-0">{meta}</div> : null}
       <div className="text-sm leading-[22px] text-[#4B4B4B]">{owner}</div>
-      <div className="text-sm leading-[22px] text-[#4B4B4B]">{workload ?? "-"}</div>
+      <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{workload ?? "-"}</div>
       <div>
         <ListStatusTag label={statusLabel} className={statusClassName} />
       </div>
@@ -4089,7 +4090,6 @@ function ProjectExpandedPanel({
                 <ProjectTreeChildRow
                   key={task.id}
                   title={task.title}
-                  description={taskSubtitle(task)}
                   statusLabel={columnTitleByStatus[task.status]}
                   statusClassName={taskListStatusTagClass(task)}
                   statusExtra={task.developmentSource ? (
@@ -6618,6 +6618,30 @@ function QuarterlyWorkShell({
             }}
           />
           <div className="flex items-center gap-6">
+            {(isProjectHome || isValueHome) ? (
+              // 固定宽度 + 左对齐：字段名称位置不动，只有数值变化
+              <span className="inline-block w-[210px] text-left text-sm leading-6 text-[#777777]">
+                当前页首版完成度：<span className="font-semibold text-[#181818]">{(() => {
+                  // 与价值跟踪列表同口径：只统计进入价值跟踪的项目（initialized），取可计算值的均值
+                  const source = isValueHome ? visibleValueProjects : data.projectWorkspaceItems;
+                  const percents = source
+                    .filter((project) => project.valueTrackSummary.initialized)
+                    .map((project) => project.valueTrackSummary.firstVersionCompletionPercent)
+                    .filter((percent): percent is number => percent !== null);
+                  if (percents.length === 0) return "-";
+                  const avg = Math.round((percents.reduce((sum, percent) => sum + percent, 0) / percents.length) * 10) / 10;
+                  return `${avg}%`;
+                })()}</span>
+              </span>
+            ) : null}
+            {(isProjectHome || isTaskHome) ? (
+              // 固定宽度 + 左对齐：字段名称位置不动，只有数值变化
+              <span className="inline-block w-[230px] text-left text-sm leading-6 text-[#777777]">
+                当前页工作量总计：<span className="font-semibold text-[#181818]">{formatWorkload(Math.round((isProjectHome
+                  ? data.projectWorkspaceItems.reduce((sum, project) => sum + (project.workloadPersonDay ?? 0), 0)
+                  : visibleTasks.reduce((sum, task) => sum + (task.workloadPersonDay ?? 0), 0)) * 10) / 10)} 人天</span>
+              </span>
+            ) : null}
             {isGoalHome || isProjectHome || isTaskHome || isValueHome ? null : (
               <WorkspaceStatusTabs
                 value={activeStatus}

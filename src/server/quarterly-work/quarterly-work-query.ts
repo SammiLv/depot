@@ -1311,7 +1311,8 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
       .sort((left, right) => {
         const leftEnd = left.endMonth ?? left.startMonth ?? 13;
         const rightEnd = right.endMonth ?? right.startMonth ?? 13;
-        return leftEnd - rightEnd || right.createdAt.getTime() - left.createdAt.getTime();
+        // 同结束月份内按创建时间正序：后建的排后面，新增需求自然落在底部
+        return leftEnd - rightEnd || left.createdAt.getTime() - right.createdAt.getTime();
       });
     const projectValueTracks = [...(allValueTrackItemsByProject.get(project.id) ?? [])]
       .sort((left, right) => (left.trackingSequence ?? 99) - (right.trackingSequence ?? 99));
