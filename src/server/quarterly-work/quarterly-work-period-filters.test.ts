@@ -93,6 +93,15 @@ test("year all view includes prior-year unfinished work and projects", () => {
     isProjectVisibleInPeriod(unfinishedProject2025, periodAll2026, now),
     true,
   );
+
+  const completedProject2025 = {
+    startQuarter: "2025-Q3",
+    endQuarter: "2025-Q4",
+    status: "COMPLETED",
+    completedAt: new Date(2025, 11, 31),
+  };
+  assert.equal(isProjectVisibleInYearAllView(completedProject2025, 2026), false);
+  assert.equal(isProjectVisibleInPeriod(completedProject2025, periodAll2026, now), false);
 });
 
 test("workPeriodIncludesQuarter intersects month range with calendar quarter", () => {

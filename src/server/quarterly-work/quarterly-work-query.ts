@@ -1129,12 +1129,6 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   const valueTrackItems = valueTracks
     .filter((track) => isValueTrackVisibleInPeriod(track, activePeriod))
     .map(mapValueTrackItem);
-  const valueTracksByProject = new Map<string, ValueTrackItem[]>();
-  for (const track of valueTrackItems) {
-    const list = valueTracksByProject.get(track.projectId) ?? [];
-    list.push(track);
-    valueTracksByProject.set(track.projectId, list);
-  }
 
   // 项目全周期跟踪任务（不按所选季度过滤），用于项目面板展示、最终确认/逾期/当前检查点判断
   const allValueTracksByProject = new Map<string, typeof valueTracks>();
@@ -1363,12 +1357,10 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     };
   };
 
-  // 项目/需求 tab 严格按周期匹配；价值跟踪范围（含逾期保护）不再外溢到项目 tab（方案 A）
+  // 项目 tab 只看项目自身周期（规划区间、完成日落在所选年/季、上一年度未完成的结转）。
+  // 名下需求或价值跟踪落在所选周期，不能把周期外的项目带进项目列表。
   const projectMatchesActivePeriod = (project: (typeof projects)[number]) => {
-    const hasActiveTasks = Boolean(activeWorksByProject.get(project.id)?.length);
-    const hasActiveValueTracks = Boolean(valueTracksByProject.get(project.id)?.length);
-    const projectPeriodMatched = isProjectVisibleInPeriod(project, activePeriod, now);
-    return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks;
+    return isProjectVisibleInPeriod(project, activePeriod, now);
   };
 
   const projectWorkspaceSourceItems = projects
