@@ -12,3 +12,11 @@ export function developmentSourceLabel(value: string | null | undefined) {
   if (value === DEVELOPMENT_SOURCE_HYBRID) return "混合开发";
   return "-";
 }
+
+/** 开发方标签底色：内部自研绿、外部开发蓝、混合开发橙 */
+export function developmentSourceTagClass(value: string | null | undefined) {
+  if (value === DEVELOPMENT_SOURCE_INTERNAL) return "bg-[#E8FFEA] text-[#00B42A]";
+  if (value === DEVELOPMENT_SOURCE_EXTERNAL) return "bg-[#E8F2FF] text-[#3069F9]";
+  if (value === DEVELOPMENT_SOURCE_HYBRID) return "bg-[#FFF7E8] text-[#FF7D00]";
+  return "bg-[#F5F5F5] text-[#777777]";
+}

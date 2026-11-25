@@ -82,8 +82,13 @@ function assertProjectStatusTransition(from: ProjectStatus, to: ProjectStatus, n
   if (!needsDevelopment && to === "LAUNCHED") {
     throw new Error("非开发项目没有「已上线」状态");
   }
-  if (from === "IN_PROGRESS" && needsDevelopment && to !== "LAUNCHED") {
-    throw new Error("开发项目从「进行中」的下一步必须是「已上线」");
+  // 开发项目从「进行中」的下一步只能是「已上线」或「关闭」（关闭用于中途终止的场景）
+  if (from === "IN_PROGRESS" && needsDevelopment && to !== "LAUNCHED" && to !== "CLOSED") {
+    throw new Error("开发项目从「进行中」只能变更为「已上线」或「关闭」");
+  }
+  // 开发项目必须先上线（经过首版校验），不能从「未启动」直接「已完成」
+  if (from === "NOT_STARTED" && needsDevelopment && to === "COMPLETED") {
+    throw new Error("开发项目须先上线后才能标记为已完成");
   }
   if (!PROJECT_STATUS_TRANSITIONS[from].includes(to)) {
     throw new Error(
@@ -455,9 +460,11 @@ async function cascadeTerminalStatusToOpenRequirements(
 
 function parseTaskResult(value: FormDataEntryValue | null, status: WorkStatus) {
   const text = (value as string | null)?.trim();
-  if (status === "COMPLETED" && (!text || !(TASK_RESULTS as readonly string[]).includes(text))) {
-    throw new Error("需求结果为必填项");
+  // 需求结果为非必填（2026-11-25 调整）；填了则必须是合法值
+  if (text && !(TASK_RESULTS as readonly string[]).includes(text)) {
+    throw new Error("需求结果不是有效值");
   }
+  void status;
   return text || null;
 }
 
@@ -491,18 +498,21 @@ type ValueTrackingTx = {
   };
 };
 
-/** 上线前校验：首版开发需求均已填写工作量 */
+/** 上线前校验：至少有一条已完成的首版开发需求，且其均已填写工作量 */
 async function assertFirstVersionWorkloadComplete(tx: ValueTrackingTx, projectId: string, launchedAt: Date) {
   const launchDay = toBusinessDate(launchedAt);
   const requirements = await tx.quarterlyWork.findMany({
     where: { projectId, deletedAt: null, needsDevelopment: true, status: { not: "CLOSED" } },
     select: { title: true, completedAt: true, workloadPersonDay: true },
   });
-  const missing = requirements.filter(
-    (requirement) =>
-      requirement.completedAt
-      && toBusinessDate(requirement.completedAt) <= launchDay
-      && (requirement.workloadPersonDay === null || requirement.workloadPersonDay === undefined),
+  const firstVersionCompleted = requirements.filter(
+    (requirement) => requirement.completedAt && toBusinessDate(requirement.completedAt) <= launchDay,
+  );
+  if (firstVersionCompleted.length === 0) {
+    throw new Error("开发项目上线前，至少需要一条已完成的开发需求（首版）");
+  }
+  const missing = firstVersionCompleted.filter(
+    (requirement) => requirement.workloadPersonDay === null || requirement.workloadPersonDay === undefined,
   );
   if (missing.length > 0) {
     throw new Error(

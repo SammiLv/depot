@@ -18,7 +18,7 @@ import {
   isValueJudgement,
 } from "@/server/quarterly-work/value-track-constants";
 import { TASK_RESULTS } from "@/server/quarterly-work/task-result-constants";
-import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_HYBRID, DEVELOPMENT_SOURCE_INTERNAL, developmentSourceLabel } from "@/server/quarterly-work/development-source-constants";
+import { DEVELOPMENT_SOURCE_EXTERNAL, DEVELOPMENT_SOURCE_HYBRID, DEVELOPMENT_SOURCE_INTERNAL, developmentSourceLabel, developmentSourceTagClass } from "@/server/quarterly-work/development-source-constants";
 import { OPERATION_LOG_TARGET_TYPE_LABELS, type OperationLogTargetType } from "@/server/quarterly-work/operation-log-constants";
 import { runServerAction } from "@/lib/run-server-action";
 import { getServerActionErrorMessage } from "@/lib/server-action-error";
@@ -239,8 +239,9 @@ function matchesValueOverviewColumn(
 }
 const projectListGridClass =
   "grid-cols-[minmax(0,1.05fr)_minmax(0,0.78fr)_minmax(0,0.52fr)_minmax(0,0.58fr)_minmax(0,1.08fr)_minmax(0,0.46fr)_minmax(0,0.48fr)_minmax(0,0.56fr)_minmax(0,0.56fr)_minmax(88px,0.62fr)]";
+// 项目列表与需求列表列宽对齐：名称列 minmax(140px,1.2fr)、所属目标/项目列 minmax(100px,0.8fr)，其余固定列一致
 const projectTreeRowClass =
-  "grid grid-cols-[minmax(0,1fr)_88px_100px_80px_72px_160px_96px_96px_100px] gap-6 px-4";
+  "grid grid-cols-[minmax(140px,1.2fr)_minmax(100px,0.8fr)_100px_80px_72px_88px_160px_96px_96px_100px] gap-6 px-4";
 const goalListRowClass =
   "grid grid-cols-[minmax(160px,1.1fr)_72px_48px_minmax(160px,1.2fr)_minmax(180px,1.3fr)_72px_96px_96px_88px] gap-6";
 const goalStickyNameShadow =
@@ -254,7 +255,7 @@ const goalStickyActionClass =
 const valueListRowClass =
   "grid grid-cols-[minmax(140px,1.2fr)_72px_88px_88px_minmax(140px,1.2fr)_minmax(100px,1fr)_72px_72px_72px_96px_96px] gap-6";
 const taskListRowClass =
-  "grid grid-cols-[minmax(140px,1.2fr)_minmax(100px,1fr)_minmax(140px,1.2fr)_72px_104px_72px_72px_160px_96px_88px] gap-6";
+  "grid grid-cols-[minmax(140px,1.2fr)_minmax(100px,0.8fr)_100px_80px_72px_88px_160px_96px_96px_100px] gap-6";
 
 function formatListQuarterRange(startQuarter: string | null | undefined, endQuarter: string | null | undefined) {
   if (startQuarter && endQuarter) {
@@ -748,7 +749,6 @@ function QuarterlyWorkForm({
     end: toDateInputValue(item?.endDate),
   });
   const workloadRequired = (mode === "backfill" || needsDevValue === "true") && workStatus === "COMPLETED";
-  const taskResultRequired = workStatus === "COMPLETED";
   const [errorMessage, setErrorMessage] = useState("");
   const ownerTeamOrgNodeIdByMemberId = useMemo(
     () => new Map(data.memberOptions.map((member) => [member.id, member.teamOrgNodeId ?? null])),
@@ -778,11 +778,6 @@ function QuarterlyWorkForm({
         setErrorMessage("需求状态为已完成时，完成时间为必填项");
         return;
       }
-      if (taskResultRequired && !taskResultValue) {
-        setErrorMessage("请选择需求结果");
-        return;
-      }
-
       const nextOwnerId = String(
         fd.get("ownerId")
           ?? item?.ownerId
@@ -948,7 +943,7 @@ function QuarterlyWorkForm({
               placeholder="选择时间"
               className="w-full"            />
           </FieldCell>
-          <FieldCell label="需求结果" required className="flex-1">
+          <FieldCell label="需求结果" className="flex-1">
             <input type="hidden" name="taskResult" value={taskResultValue} />
             <RjSelect
               options={TASK_RESULTS.map((option) => ({ value: option, label: option }))}
@@ -1095,6 +1090,11 @@ function ProjectEditForm({
   onClose: () => void;
 }) {
   const [errorMessage, setErrorMessage] = useState("");
+  // 保存失败时错误横幅滚动到可视区，避免长表单下用户看不到提示
+  const errorBannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (errorMessage) errorBannerRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [errorMessage]);
   // 级联完成二次确认：项目置为终态时先弹项目内确认框，确认后才真正提交
   const [pendingCascadeSubmit, setPendingCascadeSubmit] = useState<FormData | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>(item.status);
@@ -1128,7 +1128,7 @@ function ProjectEditForm({
     ? `请先完成或关闭需求后再将项目标记为已完成：${item.openRequirementTitles.slice(0, 8).map((title) => `「${title}」`).join("、")}${item.openRequirementTitles.length > 8 ? "等" : ""}`
     : null;
   const launchBlockedMessage = projectStatus === "LAUNCHED" && !item.hasCompletedRequirement
-    ? "项目保存为已上线前，须至少有一条已完成的需求"
+    ? "项目保存为已上线前，须至少有一条已完成的开发需求"
     : null;
   const hasTasks = item.workCount > 0;
   const taskWorkloadSum = useMemo(() => {
@@ -1292,8 +1292,10 @@ function ProjectEditForm({
                 .filter((option) => {
                   // 非开发项目没有「已上线」可选
                   if (option === "LAUNCHED" && editNeedsDev === "false") return false;
-                  // 开发项目从「进行中」的下一步必须是「已上线」
-                  if (item.status === "IN_PROGRESS" && editNeedsDev === "true" && option !== "IN_PROGRESS" && option !== "LAUNCHED") return false;
+                  // 开发项目从「进行中」只能变更为「已上线」或「关闭」
+                  if (item.status === "IN_PROGRESS" && editNeedsDev === "true" && option !== "IN_PROGRESS" && option !== "LAUNCHED" && option !== "CLOSED") return false;
+                  // 开发项目须先上线，「未启动」不能直达「已完成」
+                  if (item.status === "NOT_STARTED" && editNeedsDev === "true" && option === "COMPLETED") return false;
                   return true;
                 })
                 .map((option) => ({ value: option, label: projectTitleByStatus[option] }))}
@@ -1353,7 +1355,7 @@ function ProjectEditForm({
               <FieldCell label="工作量（人天）" required className="flex-1">
                 {hasTasks ? (
                   <>
-                    <div className="flex h-8 w-full items-center rounded-md border border-[#D9D9D9] bg-white px-3 text-sm text-foreground">
+                    <div className="flex h-8 w-full cursor-not-allowed items-center rounded-md border border-[#E8E8E8] bg-[#F5F5F5] px-3 text-sm text-[#777777]">
                       {workloadPersonDay || "—"}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">由下属需求工作量自动汇总，不可手动修改</p>
@@ -1419,7 +1421,7 @@ function ProjectEditForm({
           开发项目须先完成或关闭全部需求后才能标记为已完成，且不会改写需求的完成时间。非开发项目变更为已完成或关闭时，只更新尚未完成的需求。
         </div>
         {errorMessage ? (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <div ref={errorBannerRef} className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
@@ -1498,10 +1500,10 @@ function ProjectCreateForm({
     target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [createProjectStatus]);
   const createWorkloadRequired = createProjectStatus === "LAUNCHED" || createProjectStatus === "COMPLETED";
-  // 只有明确选择「是」开发项目时才可上线；未选择或「否」都不可选「已上线」
-  const createStatusOptions = createNeedsDev === "true"
-    ? editableProjectStatuses
-    : editableProjectStatuses.filter((status) => status !== "LAUNCHED");
+  // 只有明确选择「是」开发项目时才可上线；未选择或「否」都不可选「已上线」；开发项目不能直接「已完成」（须先上线）
+  const createStatusOptions = editableProjectStatuses
+    .filter((status) => createNeedsDev === "true" || status !== "LAUNCHED")
+    .filter((status) => createNeedsDev !== "true" || status !== "COMPLETED");
 
   const [startQuarter, setStartQuarter] = useState("");
   const [endQuarter, setEndQuarter] = useState("");
@@ -1631,6 +1633,10 @@ function ProjectCreateForm({
                 if (next === "false" && createProjectStatus === "LAUNCHED") {
                   setCreateProjectStatus("NOT_STARTED");
                 }
+                // 开发项目不能直接「已完成」，切换时清掉已选值
+                if (next === "true" && createProjectStatus === "COMPLETED") {
+                  setCreateProjectStatus("NOT_STARTED");
+                }
               }}
               placeholder="请选择"
               className="w-full"
@@ -1642,7 +1648,7 @@ function ProjectCreateForm({
           <p className="text-xs text-[#F53F3F]">开发项目不能直接创建为已完成，请先登记至少一条需开发需求后再标记完成</p>
         ) : null}
         {createProjectStatus === "LAUNCHED" ? (
-          <p className="text-xs text-[#F53F3F]">项目保存为已上线前，须至少有一条已完成的需求</p>
+          <p className="text-xs text-[#F53F3F]">项目保存为已上线前，须至少有一条已完成的开发需求</p>
         ) : null}
         {createProjectStatus === "COMPLETED" || createProjectStatus === "LAUNCHED" ? (
           <div ref={createProjectStatus === "LAUNCHED" ? launchedAtRowRef : completedAtRowRef}>
@@ -3971,8 +3977,9 @@ function ProjectTreeChildRow({
       <div className="text-sm leading-[22px] text-[#4B4B4B]">{workload ?? "-"}</div>
       <div>
         <ListStatusTag label={statusLabel} className={statusClassName} />
-        {statusExtra ? <span className="ml-1">{statusExtra}</span> : null}
       </div>
+      {/* 「是否开发项目」列：项目级字段，需求子行复用此列展示开发方 */}
+      <div className="text-sm leading-[22px] text-[#4B4B4B]">{statusExtra ?? "-"}</div>
       <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
         <span>{period}</span>
         {remainLabel && remainClassName ? (
@@ -3981,6 +3988,8 @@ function ProjectTreeChildRow({
           </span>
         ) : null}
       </div>
+      {/* 需求没有上线时间：占位保持与父级项目行的列对齐（项目列新增「上线时间」） */}
+      <div className="text-sm leading-[22px] text-[#4B4B4B]">-</div>
       <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(completedAt)}</div>
       <div className="flex items-center justify-end gap-3" onClick={(event) => event.stopPropagation()}>
         {canEdit ? (
@@ -4084,7 +4093,7 @@ function ProjectExpandedPanel({
                   statusLabel={columnTitleByStatus[task.status]}
                   statusClassName={taskListStatusTagClass(task)}
                   statusExtra={task.developmentSource ? (
-                    <span className="rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">{developmentSourceLabel(task.developmentSource)}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-xs leading-[18px] ${developmentSourceTagClass(task.developmentSource)}`}>{developmentSourceLabel(task.developmentSource)}</span>
                   ) : null}
                   owner={task.owner}
                   workload={task.workloadPersonDay}
@@ -4747,7 +4756,7 @@ function RequirementDetailDrawer({
               </button>
             ) : null}
           </div>
-          {/* 摘要指标：第一行 需求负责人/累计工作量/是否需要开发，第二行 需求周期/创建时间/开发方 */}
+          {/* 摘要指标：需求负责人 / 累计工作量 / 是否需要开发 */}
           <div className="flex flex-col gap-3 pb-4 pl-10 pt-4">
             <div className="flex items-center">
               <div className="min-w-0 flex-1">
@@ -4763,7 +4772,7 @@ function RequirementDetailDrawer({
               </div>
               <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
               <div className="min-w-0 flex-1 pl-4">
-                <div className="text-xs leading-[18px] text-[#777777]">累计工作量（人天）</div>
+                <div className="text-xs leading-[18px] text-[#777777]">工作量（人天）</div>
                 <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
                   {formatWorkload(task.workloadPersonDay)}
                 </div>
@@ -4776,30 +4785,45 @@ function RequirementDetailDrawer({
                 </div>
               </div>
             </div>
-            <div className="flex items-center">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs leading-[18px] text-[#777777]">需求周期</div>
-                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{periodText}</div>
-              </div>
-              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
-              <div className="min-w-0 flex-1 pl-4">
-                <div className="text-xs leading-[18px] text-[#777777]">创建时间</div>
-                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">{formatDateTimeLabel(task.createdAt)}</div>
-              </div>
-              <div className="h-6 w-px shrink-0 bg-[#F0F0F0]" />
-              <div className="min-w-0 flex-1 pl-4">
-                <div className="text-xs leading-[18px] text-[#777777]">开发方</div>
-                <div className="mt-1 truncate text-sm font-semibold leading-[22px] text-[#181818]">
-                  {task.needsDevelopment ? developmentSourceLabel(task.developmentSource) : "-"}
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
         {/* 滚动内容 */}
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="flex flex-col gap-4">
+            {/* 需求周期 / 开发方 / 创建时间 / 需求结果卡 */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-5 rounded-2xl bg-white p-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4 text-[#4B4B4B]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求周期</span>
+                </div>
+                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">{periodText}</p>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Code2 className="h-4 w-4 text-[#4B4B4B]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">开发方</span>
+                </div>
+                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">
+                  {task.needsDevelopment ? developmentSourceLabel(task.developmentSource) : "-"}
+                </p>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Clock3 className="h-4 w-4 text-[#4B4B4B]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">创建时间</span>
+                </div>
+                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.createdAt)}</p>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <CircleCheck className="h-4 w-4 text-[#4B4B4B]" />
+                  <span className="text-sm font-semibold leading-[22px] text-[#181818]">需求结果</span>
+                </div>
+                <p className="mt-2 text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</p>
+              </div>
+            </div>
             {/* 需求描述卡 */}
             <div className="rounded-2xl bg-white p-4">
               <div className="flex items-center gap-2">
@@ -5175,6 +5199,8 @@ function ProjectTreeTable({
         }
         case "launchedAt":
           return compareSortDates(a.launchedAt, b.launchedAt, sort.dir);
+        case "needsDev":
+          return compareSortNumbers(Number(a.needsDevelopment === true), Number(b.needsDevelopment === true), sort.dir);
         case "completedAt":
           return compareSortDates(a.completedAt, b.completedAt, sort.dir);
         default:
@@ -5185,18 +5211,19 @@ function ProjectTreeTable({
   }, [projects, sort]);
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
-      <div className={`${projectTreeRowClass} sticky top-0 z-10 h-11 min-w-[1240px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
-        <div className={`sticky left-0 top-0 z-30 -ml-4 flex items-center overflow-visible bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}><SortableHeader field="title" label="名称" sort={sort} onToggle={toggleSort} /></div>
+      <div className={`${projectTreeRowClass} sticky top-0 z-10 h-11 min-w-[1280px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
+        <div className={`sticky left-0 top-0 z-30 -ml-4 flex items-center overflow-visible bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}><SortableHeader field="title" label="项目名称" sort={sort} onToggle={toggleSort} /></div>
         <div className="whitespace-nowrap"><SortableHeader field="goal" label="所属目标" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="owner" label="负责人" sort={sort} onToggle={toggleSort} /></div>
-        <div className="whitespace-nowrap"><SortableHeader field="workload" label="工作量(人天)" sort={sort} onToggle={toggleSort} /></div>
-        <div><SortableHeader field="status" label="状态" sort={sort} onToggle={toggleSort} /></div>
+        <div className="whitespace-nowrap text-right"><SortableHeader field="workload" label="工作量(人天)" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="status" label="项目状态" sort={sort} onToggle={toggleSort} /></div>
+        <div className="whitespace-nowrap"><SortableHeader field="needsDev" label="是否需要开发" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="period" label="周期" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="launchedAt" label="上线时间" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="completedAt" label="完成时间" sort={sort} onToggle={toggleSort} /></div>
         <div className="text-right">操作</div>
       </div>
-      <div className="min-w-[1240px]">
+      <div className="min-w-[1280px]">
         {sortedProjects.map((project) => {
           const expanded = project.id === expandedProjectId;
           return (
@@ -5240,7 +5267,8 @@ function ProjectTreeTable({
                       />
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-base font-medium leading-6 text-[#181818]">{project.title}</span>
+                      {/* 去掉描述行后与目标列表同字号 */}
+                      <span className="block text-sm font-medium leading-[22px] text-[#181818]">{project.title}</span>
                     </span>
                   </button>
                 </div>
@@ -5256,14 +5284,16 @@ function ProjectTreeTable({
                   )}
                 </div>
                 <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.owner}</div>
-                <div className="text-sm leading-[22px] text-[#4B4B4B]">{project.workloadPersonDay ?? "-"}</div>
+                <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{project.workloadPersonDay ?? "-"}</div>
                 <div>
                   <ListStatusTag label={projectTitleByStatus[project.status]} className={projectStatusTagClass[project.status]} />
-                  {project.needsDevelopment ? (
-                    <div className="mt-1">
-                      <span className="rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">开发项目</span>
-                    </div>
-                  ) : null}
+                </div>
+                {/* 「是」用蓝色（同「进行中」），「否」同「未启动」样式 */}
+                <div>
+                  <ListStatusTag
+                    label={project.needsDevelopment ? "是" : "否"}
+                    className={projectStatusTagClass[project.needsDevelopment ? "IN_PROGRESS" : "NOT_STARTED"]}
+                  />
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
                   <span>{formatListQuarterRange(project.startQuarter, project.endQuarter)}</span>
@@ -6032,13 +6062,15 @@ function TaskListTable({
           return compareSortNumbers(a.workloadPersonDay, b.workloadPersonDay, sort.dir);
         case "status":
           return compareSortRanks(a.status, b.status, workStatusSortRank, sort.dir);
-        case "taskResult":
-          return compareSortRanks(a.taskResult, b.taskResult, taskResultSortRank, sort.dir);
+        case "devSource":
+          return compareSortStrings(a.needsDevelopment ? developmentSourceLabel(a.developmentSource) : "", b.needsDevelopment ? developmentSourceLabel(b.developmentSource) : "", sort.dir);
         case "period": {
           const byStart = compareSortDates(a.startDate, b.startDate, sort.dir);
           if (byStart !== 0) return byStart;
           return compareSortDates(a.endDate, b.endDate, sort.dir);
         }
+        case "createdAt":
+          return compareSortDates(a.createdAt, b.createdAt, sort.dir);
         case "completedAt":
           return compareSortDates(a.completedAt, b.completedAt, sort.dir);
         default:
@@ -6071,23 +6103,23 @@ function TaskListTable({
 
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-auto rounded-2xl bg-white">
-      <div className={`${taskListRowClass} sticky top-0 z-20 h-11 min-w-[1304px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
+      <div className={`${taskListRowClass} sticky top-0 z-20 h-11 min-w-[1280px] items-center border-b border-[#F0F0F0] bg-white text-sm leading-[22px] text-[#4B4B4B]`}>
         <div className={`sticky left-0 top-0 z-30 flex h-11 items-center overflow-visible border-b border-[#F0F0F0] bg-white pl-4 ${pingLeft ? goalStickyNameShadow : ""}`}>
-          <SortableHeader field="title" label="名称" sort={sort} onToggle={toggleSort} />
+          <SortableHeader field="title" label="需求名称" sort={sort} onToggle={toggleSort} />
         </div>
         <div><SortableHeader field="project" label="所属项目" sort={sort} onToggle={toggleSort} /></div>
-        <div><SortableHeader field="description" label="需求目标" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="owner" label="负责人" sort={sort} onToggle={toggleSort} /></div>
         <div className="whitespace-nowrap text-right">
           <SortableHeader field="workload" label="工作量(人天)" sort={sort} onToggle={toggleSort} />
         </div>
         <div><SortableHeader field="status" label="需求状态" sort={sort} onToggle={toggleSort} /></div>
-        <div><SortableHeader field="taskResult" label="需求结果" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="devSource" label="开发方" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="period" label="周期" sort={sort} onToggle={toggleSort} /></div>
+        <div><SortableHeader field="createdAt" label="创建时间" sort={sort} onToggle={toggleSort} /></div>
         <div><SortableHeader field="completedAt" label="完成时间" sort={sort} onToggle={toggleSort} /></div>
         <div className={`sticky right-0 top-0 z-30 flex h-11 items-center justify-end overflow-visible border-b border-[#F0F0F0] bg-white pr-4 text-right ${pingRight ? goalStickyActionShadow : ""}`}>操作</div>
       </div>
-      <div className="min-w-[1304px]">
+      <div className="min-w-[1280px]">
         {sortedTasks.map((task) => {
           const remain = task.remainingWeeksLabel;
           const remainOverdue = Boolean(remain?.startsWith("逾期"));
@@ -6105,23 +6137,18 @@ function TaskListTable({
                   <span className="text-sm leading-[22px] text-[#4B4B4B]">-</span>
                 )}
               </div>
-              <HoverCopy
-                text={(task.expectedOutcome || task.description || "").trim()}
-                className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-[22px] text-[#4B4B4B]"
-              >
-                {(task.expectedOutcome || task.description || "").trim()
-                  ? <LinkifiedText text={(task.expectedOutcome || task.description || "").trim()} />
-                  : "-"}
-              </HoverCopy>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{task.owner}</div>
               <div className="text-right text-sm leading-[22px] text-[#4B4B4B]">{task.workloadPersonDay ?? "-"}</div>
               <div>
                 <ListStatusTag label={columnTitleByStatus[task.status]} className={taskListStatusTagClass(task)} />
-                {task.developmentSource ? (
-                  <span className="ml-1 rounded bg-[#E8F2FF] px-1.5 py-0.5 text-xs leading-[18px] text-[#3069F9]">{developmentSourceLabel(task.developmentSource)}</span>
-                ) : null}
               </div>
-              <div className="text-sm leading-[22px] text-[#4B4B4B]">{emptyMetricText(task.taskResult)}</div>
+              <div>
+                {task.needsDevelopment && task.developmentSource ? (
+                  <span className={`rounded px-1.5 py-0.5 text-xs leading-[18px] ${developmentSourceTagClass(task.developmentSource)}`}>{developmentSourceLabel(task.developmentSource)}</span>
+                ) : (
+                  <span className="text-sm leading-[22px] text-[#4B4B4B]">-</span>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-sm leading-[22px] text-[#4B4B4B]">
                 <span>{task.periodLabel || formatTaskPeriodText(task)}</span>
                 {remain ? (
@@ -6130,6 +6157,7 @@ function TaskListTable({
                   </span>
                 ) : null}
               </div>
+              <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.createdAt)}</div>
               <div className="text-sm leading-[22px] text-[#4B4B4B]">{formatDateTimeLabel(task.completedAt)}</div>
               <div className={`flex items-center justify-end gap-3 ${goalStickyActionClass} ${pingRight ? goalStickyActionShadow : ""}`} onClick={(event) => event.stopPropagation()}>
                 {canManage && workAllowsEdit(task.status, canEditTerminalProjectWork) ? (
