@@ -92,7 +92,8 @@ test("任务显示状态按业务日期派生", () => {
   assert.equal(getValueTrackTaskState(task, new Date(2026, 8, 29)), "NOT_DUE");
   assert.equal(getValueTrackTaskState(task, new Date(2026, 8, 30)), "PENDING");
   assert.equal(getValueTrackTaskState(task, new Date(2026, 9, 7)), "PENDING");
-  assert.equal(getValueTrackTaskState(task, new Date(2026, 9, 8)), "OVERDUE");
+  // 过截止未填报：自动完成，不再挂逾期
+  assert.equal(getValueTrackTaskState(task, new Date(2026, 9, 8)), "AUTO_COMPLETED");
   assert.equal(getValueTrackTaskState({ ...task, completedAt: new Date(2026, 9, 20) }, new Date(2026, 9, 21)), "COMPLETED");
 });
 

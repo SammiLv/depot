@@ -2095,14 +2095,14 @@ const VALUE_TRACK_TASK_STATE_LABELS: Record<string, string> = {
   COMPLETED: "已完成",
   NOT_DUE: "未到期",
   PENDING: "待处理",
-  OVERDUE: "逾期",
+  AUTO_COMPLETED: "已完成（自动）",
 };
 
 const VALUE_TRACK_TASK_STATE_CLASS: Record<string, string> = {
   COMPLETED: "bg-[#E8FFEA] text-[#00B42A]",
   NOT_DUE: "bg-[#F5F5F5] text-[#777777]",
   PENDING: "bg-[#E8F2FF] text-[#3069F9]",
-  OVERDUE: "bg-[#FFECE8] text-[#F53F3F]",
+  AUTO_COMPLETED: "bg-[#E8FFEA] text-[#00B42A]",
 };
 
 function formatWorkload(value: number | null | undefined) {
@@ -2257,9 +2257,9 @@ function ValueTrackSubmitForm({
             提醒：该跟踪周期的截止填报检查点为 {formatDateTimeLabel(track.checkpointAt)}，当前尚未到期，可提前填报。
           </div>
         ) : null}
-        {track.taskState === "OVERDUE" ? (
-          <div className="rounded-lg border border-[#FFECE8] bg-[#FFF9F5] px-4 py-3 text-sm text-[#F53F3F]">
-            提醒：该跟踪任务已于 {formatDateTimeLabel(track.deadlineAt)} 截止，当前已逾期，请尽快填报。
+        {track.taskState === "AUTO_COMPLETED" ? (
+          <div className="rounded-lg border border-[#E8F2FF] bg-[#F5F9FF] px-4 py-3 text-sm text-[#3069F9]">
+            该跟踪任务已于 {formatDateTimeLabel(track.deadlineAt)} 截止且未填报，已自动完成；编辑保存后将转为手动完成。
           </div>
         ) : null}
       </StickyFormScroll>
@@ -6428,7 +6428,7 @@ function QuarterlyWorkShell({
     ];
   }, [data.projectOptions, data.projectWorkspaceItems, data.taskWorkspaceItems]);
   const valueCounts = useMemo(() => {
-    const scoped = data.projectWorkspaceItems.filter(
+    const scoped = data.valueWorkspaceItems.filter(
       (project) => project.valueTrackSummary.initialized
         && (!valueJudgementFilter || project.valueTrackSummary.judgement === valueJudgementFilter),
     );
@@ -6448,13 +6448,13 @@ function QuarterlyWorkShell({
   }, [data.projectWorkspaceItems, valueJudgementFilter]);
   const visibleValueProjects = useMemo(
     () =>
-      data.projectWorkspaceItems.filter((project) => {
+      data.valueWorkspaceItems.filter((project) => {
         if (!project.valueTrackSummary.initialized) return false;
         if (valueStatusFilter.length > 0 && !valueStatusFilter.includes(project.valueTrackSummary.status as ValueStatusKey)) return false;
         if (valueJudgementFilter && project.valueTrackSummary.judgement !== valueJudgementFilter) return false;
         return true;
       }),
-    [data.projectWorkspaceItems, valueJudgementFilter, valueStatusFilter],
+    [data.valueWorkspaceItems, valueJudgementFilter, valueStatusFilter],
   );
   const goalItems = useMemo(
     () => data.productGoalColumns.flatMap((column) => column.items),
@@ -7152,7 +7152,9 @@ export function QuarterlyWorkContent({ data }: Props) {
         ?? null
     : null;
   const valueDetailDialog = valueDetailDialogId
-    ? data.projectWorkspaceItems.find((row) => row.id === valueDetailDialogId) ?? null
+    ? data.valueWorkspaceItems.find((row) => row.id === valueDetailDialogId)
+        ?? data.projectWorkspaceItems.find((row) => row.id === valueDetailDialogId)
+        ?? null
     : null;
   const [createProductGoalDialog, setCreateProductGoalDialog] = useState(false);
   const [createValueTrackDialog, setCreateValueTrackDialog] = useState(false);

@@ -1197,8 +1197,13 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   };
 
   const isProjectValueTrackOverdue = (project: (typeof projects)[number]) => {
-    const hasFinalCompletion = (allValueTracksByProject.get(project.id) ?? []).some((track) => track.isFinal);
-    return isValueTrackingOverdue(project, hasFinalCompletion, now);
+    // 「保存即完成 + 过截止自动完成」：固定任务全部有着落（已填报或已过截止）即不再逾期
+    const fixedTracks = (allValueTracksByProject.get(project.id) ?? [])
+      .filter((track) => track.trackingSequence === 1 || track.trackingSequence === 2);
+    const allSettled = fixedTracks.length > 0 && fixedTracks.every((track) =>
+      Boolean(track.completedAt)
+      || (track.deadlineAt !== null && toBusinessDate(track.deadlineAt) < toBusinessDate(now)));
+    return isValueTrackingOverdue(project, allSettled, now);
   };
 
   // 价值跟踪范围：开发项目按规划周期纳入（未上线也可跟踪）；
@@ -1358,15 +1363,21 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     };
   };
 
+  // 项目/需求 tab 严格按周期匹配；价值跟踪范围（含逾期保护）不再外溢到项目 tab（方案 A）
   const projectMatchesActivePeriod = (project: (typeof projects)[number]) => {
     const hasActiveTasks = Boolean(activeWorksByProject.get(project.id)?.length);
     const hasActiveValueTracks = Boolean(valueTracksByProject.get(project.id)?.length);
     const projectPeriodMatched = isProjectVisibleInPeriod(project, activePeriod, now);
-    return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks || isInValueTrackingScope(project);
+    return projectPeriodMatched || hasActiveTasks || hasActiveValueTracks;
   };
 
   const projectWorkspaceSourceItems = projects
     .filter(projectMatchesActivePeriod)
+    .map(buildProjectWorkspaceItem);
+
+  // 价值跟踪 tab 独立数据源：按跟踪范围（窗口与所选周期相交或超期）纳入，不受项目周期限制
+  const valueWorkspaceSourceItems = projects
+    .filter(isInValueTrackingScope)
     .map(buildProjectWorkspaceItem);
 
   const matchesProjectWorkspaceFilters = (
@@ -1417,6 +1428,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
   };
 
   const projectWorkspaceItems = projectWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item));
+  const valueWorkspaceItems = valueWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item));
   const projectStatusScopeItems = projectWorkspaceSourceItems.filter((item) => matchesProjectWorkspaceFilters(item, { ignoreStatus: true }));
   const matchesTaskWorkspaceFilters = (task: ProjectWorkspaceTaskItem) => {
     const project = projectById.get(task.projectId);
@@ -1622,6 +1634,7 @@ export async function getQuarterlyWorkData(currentUser: DataScopeInput, options?
     valueTrackItems,
     goalNavigationItems,
     projectWorkspaceItems,
+    valueWorkspaceItems,
     taskWorkspaceItems,
     workspaceSummary,
     workspaceFilters: {

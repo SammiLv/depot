@@ -92,14 +92,14 @@ export function getValueTrackingSequence(launchedAt: Date, trackedAt: Date): Val
   return null;
 }
 
-export type ValueTrackTaskState = "COMPLETED" | "NOT_DUE" | "PENDING" | "OVERDUE";
+export type ValueTrackTaskState = "COMPLETED" | "NOT_DUE" | "PENDING" | "AUTO_COMPLETED";
 
 /**
  * 任务显示状态（派生，不落库）：
- * - 已完成：completedAt 非空；
+ * - 已完成：completedAt 非空（保存即完成）；
  * - 未到期：当前业务日期早于检查点；
  * - 待处理：检查点（含）至截止日期（含）；
- * - 逾期：晚于截止日期仍未完成。
+ * - 已完成（自动）：晚于截止日期仍未填报，自动完成（不再长期挂逾期）。
  */
 export function getValueTrackTaskState(
   task: { completedAt: Date | null; checkpointAt: Date | null; deadlineAt: Date | null },
@@ -110,7 +110,7 @@ export function getValueTrackTaskState(
   const today = toBusinessDate(now);
   if (today < toBusinessDate(task.checkpointAt)) return "NOT_DUE";
   if (today <= toBusinessDate(task.deadlineAt)) return "PENDING";
-  return "OVERDUE";
+  return "AUTO_COMPLETED";
 }
 
 /** 项目是否已超出最终填报截止日期且尚未完成最终确认（逾期待完成） */
