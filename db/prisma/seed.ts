@@ -380,9 +380,20 @@ async function syncLegacyOrgReferences(rootNodeId: string) {
 async function main() {
   await removePermissionMatrixIntegrationTestArtifacts(prisma);
 
-  const fullReset = process.env.SEED_FULL_RESET === "true";
+  // 支持两种触发方式：环境变量 SEED_FULL_RESET=true（POSIX）或命令行参数 --full（跨平台，Windows cmd 可用）
+  let fullReset = process.env.SEED_FULL_RESET === "true" || process.argv.includes("--full");
   if (!fullReset) {
-    console.info("[seed] 增量模式：不清理通知/指标/组织；按角色检测密码测试账号，三者齐全则不补建。全量重建请使用 npm run seed:full");
+    // 空库（全新克隆首次初始化）没有部门/小组（历史迁移只会插入 legacy 根节点），
+    // 增量模式无依托且年度指标 demo 会报错，自动转为全量初始化，
+    // 保证 `pnpm seed` 在任何起点都能跑通
+    const departmentCount = await prisma.orgNode.count({ where: { nodeType: "DEPARTMENT" } });
+    if (departmentCount === 0) {
+      console.info("[seed] 检测到空库（无部门节点），自动转为全量初始化");
+      fullReset = true;
+    }
+  }
+  if (!fullReset) {
+    console.info("[seed] 增量模式：不清理通知/指标/组织；按角色检测密码测试账号，三者齐全则不补建。全量重建请使用 pnpm run seed:full");
     await ensureOrgPermissionGrants();
     await ensureSeedPasswordTestAccountsIfMissing();
     await ensurePresetNotificationScenarios();
