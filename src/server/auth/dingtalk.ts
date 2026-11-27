@@ -15,7 +15,8 @@ type DingTalkUserInfoResponse = {
     unionId?: string;
     mobile?: string;
     email?: string;
-    deptList?: unknown[];
+    deptList?: Array<{ deptId?: string | number; deptName?: string; name?: string }>;
+    depts?: Array<{ deptId?: string | number; deptName?: string; name?: string }>;
   };
 };
 
@@ -24,7 +25,23 @@ type DingTalkUserInfo = {
   name: string;
   mobile: string | null;
   email: string | null;
+  /** 钉钉侧所属部门/组 ID 集合（deptList + depts 归一化），用于新用户部门白名单校验 */
+  deptIds: string[];
 };
+
+/** 从 deptList/depts 提取部门 ID（兼容 string/number，去重） */
+export function collectDeptIds(
+  deptList?: Array<{ deptId?: string | number; deptName?: string; name?: string }>,
+  depts?: Array<{ deptId?: string | number; deptName?: string; name?: string }>,
+): string[] {
+  const ids = new Set<string>();
+  for (const entry of [...(deptList ?? []), ...(depts ?? [])]) {
+    if (entry?.deptId !== undefined && entry.deptId !== null) {
+      ids.add(String(entry.deptId));
+    }
+  }
+  return [...ids];
+}
 
 function normalizeOrigin(origin: string) {
   return origin.trim().replace(/\/$/, "");
@@ -77,7 +94,32 @@ export async function getDingTalkUserInfo(token: string): Promise<DingTalkUserIn
     name: data.name,
     mobile: data.mobile ?? null,
     email: data.email ?? null,
+    deptIds: collectDeptIds(data.deptList, data.depts),
   };
+}
+
+/**
+ * 新用户（库里按钉钉 userId / 手机号 / 邮箱都找不到）才校验部门白名单：
+ * 其钉钉部门须与系统中已建档的组织节点（产品部/平台部及其下属组）有交集，
+ * 否则拒绝注册。白名单随钉钉同步自动扩展，无需手工维护。
+ * 存量用户不受此限制，照常登录。
+ *
+ * 新入职同事必然已在钉钉组织架构中，正常链路一定能查到部门；
+ * 查不到部门信息属于异常，不放行（fail-closed）。
+ */
+async function assertNewUserDepartmentAllowed(deptIds: string[]) {
+  if (deptIds.length === 0) {
+    throw new Error("未能从钉钉获取到你的部门信息，无法验证是否有使用权限。请联系系统管理员处理。");
+  }
+  const knownNodes = await prisma.orgNode.findMany({
+    where: { dingtalkDeptId: { not: null } },
+    select: { dingtalkDeptId: true },
+  });
+  const knownDeptIds = new Set(knownNodes.map((node) => node.dingtalkDeptId as string));
+  const allowed = deptIds.some((id) => knownDeptIds.has(id));
+  if (!allowed) {
+    throw new Error("该钉钉账号不属于系统已开通的部门（产品部/平台部），暂无使用权限。如需开通请联系系统管理员。");
+  }
 }
 
 export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
@@ -128,6 +170,9 @@ export async function findOrCreateDingTalkUser(info: DingTalkUserInfo) {
       },
     });
   }
+
+  // 走到这里说明是全新用户：先过部门白名单，不在产品部/平台部范围内拒绝注册
+  await assertNewUserDepartmentAllowed(info.deptIds);
 
   return prisma.user.create({
     data: {
